@@ -82,6 +82,8 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
@@ -102,6 +104,8 @@ class Azure(clouds.Cloud):
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
                 f'Customized multiple network interfaces are not supported on {cls._REPR}.'
             ),
+            clouds.CloudImplementationFeatures.LOCAL_DISK:
+                (f'Local disk is not supported on {cls._REPR}')
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -159,19 +163,27 @@ class Azure(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='azure')
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='azure')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
@@ -513,8 +525,11 @@ class Azure(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -530,8 +545,10 @@ class Azure(clouds.Cloud):
              cpus=resources.cpus,
              memory=resources.memory,
              use_spot=resources.use_spot,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='azure')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,

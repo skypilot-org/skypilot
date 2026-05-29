@@ -1,6 +1,8 @@
 """Unit tests for skylet log_lib."""
 
 from io import StringIO
+import subprocess
+import tempfile
 import unittest
 
 from sky.skylet import log_lib
@@ -98,6 +100,70 @@ class TestLogBuffer(unittest.TestCase):
 
         self.assertEqual(chunk, "Line 1\nLine 2\n")
         self.assertEqual(buffer._buffer.tell(), 0)
+
+
+class TestRunWithLogTimeout(unittest.TestCase):
+    """Test cases for run_with_log timeout functionality."""
+
+    def test_process_stream_timeout_exceeded(self):
+        """Test that timeout works with process_stream=True."""
+        with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+            log_path = f.name
+
+        # Command that sleeps longer than timeout
+        cmd = ['sleep', '10']
+        with self.assertRaises(subprocess.TimeoutExpired):
+            log_lib.run_with_log(
+                cmd,
+                log_path,
+                process_stream=True,
+                timeout=1,
+            )
+
+    def test_process_stream_timeout_not_exceeded(self):
+        """Test normal completion with process_stream=True and timeout set."""
+        with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+            log_path = f.name
+
+        # Command that completes quickly
+        cmd = ['echo', 'hello']
+        returncode = log_lib.run_with_log(
+            cmd,
+            log_path,
+            process_stream=True,
+            timeout=10,
+        )
+        self.assertEqual(returncode, 0)
+
+    def test_no_stream_timeout_exceeded(self):
+        """Test that timeout works with process_stream=False."""
+        with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+            log_path = f.name
+
+        # Command that sleeps longer than timeout
+        cmd = ['sleep', '10']
+        with self.assertRaises(subprocess.TimeoutExpired):
+            log_lib.run_with_log(
+                cmd,
+                log_path,
+                process_stream=False,
+                timeout=1,
+            )
+
+    def test_no_stream_timeout_not_exceeded(self):
+        """Test normal completion with process_stream=False and timeout set."""
+        with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+            log_path = f.name
+
+        # Command that completes quickly
+        cmd = ['echo', 'hello']
+        returncode = log_lib.run_with_log(
+            cmd,
+            log_path,
+            process_stream=False,
+            timeout=10,
+        )
+        self.assertEqual(returncode, 0)
 
 
 if __name__ == '__main__':

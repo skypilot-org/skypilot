@@ -155,9 +155,11 @@ class VolumeTable(abc.ABC):
                 last_attached_at).strftime('%Y-%m-%d %H:%M:%S')
         else:
             last_attached_at_str = '-'
-        size = row.get('size', '')
-        if size:
+        size = row.get('size')
+        if size is not None:
             size = f'{size}Gi'
+        else:
+            size = '-'
         usedby_str = '-'
         usedby_clusters = row.get('usedby_clusters')
         usedby_pods = row.get('usedby_pods')
@@ -204,15 +206,23 @@ class VolumeTable(abc.ABC):
 class PVCVolumeTable(VolumeTable):
     """The PVC volume table."""
 
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 show_all: bool = False):
+        # Check if any volume has an error before creating the table
+        self._has_errors = any(row.get('error_message') for row in volumes)
+        super().__init__(volumes, show_all)
+
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
+        #   (+ MESSAGE if any volume is not ready)
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
-        #   STORAGE_CLASS, ACCESS_MODE
+        #   STORAGE_CLASS, ACCESS_MODE, MESSAGE
 
         columns = _BASIC_COLUMNS + [
             'IS_EPHEMERAL',
@@ -222,7 +232,11 @@ class PVCVolumeTable(VolumeTable):
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
+                'MESSAGE',
             ]
+        elif self._has_errors:
+            # Show MESSAGE column even without show_all if there are issues
+            columns = columns + ['MESSAGE']
 
         table = log_utils.create_table(columns)
         return table
@@ -239,12 +253,46 @@ class PVCVolumeTable(VolumeTable):
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
+                # Add error message
+                error_msg = row.get('error_message', '')
+                table_row.append(error_msg if error_msg else '-')
+            elif self._has_errors:
+                # Show error message even without show_all if there are errors
+                error_msg = row.get('error_message', '')
+                # Truncate error message for display
+                if error_msg:
+                    error_msg = common_utils.truncate_long_string(
+                        error_msg, constants.ERROR_MESSAGE_TRUNC_LENGTH)
+                table_row.append(error_msg if error_msg else '-')
 
             self.table.add_row(table_row)
 
     def format(self) -> str:
         """Format the PVC volume table for display."""
         return 'Kubernetes PVCs:\n' + str(self.table)
+
+
+class HostPathVolumeTable(VolumeTable):
+    """The Kubernetes hostPath volume table."""
+
+    def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
+        """Create the hostPath volume table."""
+        columns = _BASIC_COLUMNS + ['HOST_PATH']
+        table = log_utils.create_table(columns)
+        return table
+
+    def _add_rows(self,
+                  volumes: List[responses.VolumeRecord],
+                  show_all: bool = False) -> None:
+        """Add rows to the hostPath volume table."""
+        for row in volumes:
+            table_row = self._get_row_base_columns(row, show_all)
+            table_row.append(row.get('config', {}).get('host_path', ''))
+            self.table.add_row(table_row)
+
+    def format(self) -> str:
+        """Format the hostPath volume table for display."""
+        return 'Kubernetes HostPath Volumes:\n' + str(self.table)
 
 
 class RunPodVolumeTable(VolumeTable):
@@ -313,6 +361,9 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         if volume_type == volume.VolumeType.PVC.value:
             pvc_table = PVCVolumeTable(volume_list, show_all)
             table_str += pvc_table.format()
+        elif volume_type == volume.VolumeType.HOSTPATH.value:
+            hostpath_table = HostPathVolumeTable(volume_list, show_all)
+            table_str += hostpath_table.format()
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()

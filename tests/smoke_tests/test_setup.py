@@ -8,7 +8,6 @@ from sky import skypilot_config
 
 
 # ---------- Test launching a cluster that has pyproject.toml in the workdir ----------
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
 @pytest.mark.parametrize('image_id', [
     'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-workdir-pyproject:latest',
     'docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-root-pyproject:latest',

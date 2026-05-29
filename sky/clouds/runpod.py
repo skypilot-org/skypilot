@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import catalog
 from sky import clouds
 from sky import skypilot_config
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -43,6 +44,8 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on '
              'RunPod.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _MAX_VOLUME_NAME_LEN_LIMIT = 30
@@ -150,20 +153,28 @@ class RunPod(clouds.Cloud):
         return 0.0
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
         """Returns the default instance type for RunPod."""
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='runpod')
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='runpod')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -212,6 +223,8 @@ class RunPod(clouds.Cloud):
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
+        gpu_count = list(acc_dict.values())[0] if acc_dict is not None else 1
+
         # default to root
         docker_username_for_runpod = (resources.docker_username_for_runpod
                                       if resources.docker_username_for_runpod
@@ -233,7 +246,7 @@ class RunPod(clouds.Cloud):
             'availability_zone': ','.join(zone_names),
             'image_id': image_id,
             'use_spot': use_spot,
-            'bid_per_gpu': str(hourly_cost),
+            'bid_per_gpu': str(hourly_cost / gpu_count),
             'docker_username_for_runpod': docker_username_for_runpod,
             'allowed_cuda_versions': allowed_cuda_versions,
         }
@@ -267,8 +280,11 @@ class RunPod(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -285,8 +301,10 @@ class RunPod(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='runpod')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
@@ -323,17 +341,47 @@ class RunPod(clouds.Cloud):
             # If that happens to be set to None, then ValueError is raised.
             return False, dependency_error_msg
 
+        hint_msg = (
+            'Credentials can be set up by running: \n'
+            '        $ pip install runpod \n'
+            '        $ runpod config\n'
+            '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+        )
+
         valid, error = cls._check_runpod_credentials()
         if not valid:
-            return False, (
-                f'{error} \n'  # First line is indented by 4 spaces
-                '    Credentials can be set up by running: \n'
-                f'        $ pip install runpod \n'
-                f'        $ runpod config\n'
-                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
-            )
+            return False, (f'{error} \n    {hint_msg}')
+
+        # Validate credentials by making an actual API call
+        valid, error = cls._validate_api_key()
+        if not valid:
+            return False, (f'{error} \n    {hint_msg}')
 
         return True, None
+
+    @classmethod
+    def _validate_api_key(cls) -> Tuple[bool, Optional[str]]:
+        """Validate RunPod API key by making an actual API call."""
+        # Import here to avoid circular imports and ensure runpod is configured
+        # pylint: disable=import-outside-toplevel
+        from sky.provision.runpod import utils as runpod_utils
+        try:
+            # Try to list instances to validate the API key works
+            runpod_utils.list_instances()
+            return True, None
+        except Exception as e:  # pylint: disable=broad-except
+            from sky.adaptors import runpod
+            error_msg = common_utils.format_exception(e, use_bracket=True)
+            if isinstance(e, runpod.runpod.error.QueryError):
+                error_msg_lower = str(e).lower()
+                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
+                if any(keyword in error_msg_lower for keyword in auth_keywords):
+                    return False, (
+                        'RunPod API key is invalid or lacks required '
+                        f'permissions. {error_msg}')
+                return False, (f'Failed to verify RunPod API key. {error_msg}')
+            return False, ('An unexpected error occurred during RunPod API '
+                           f'key validation. {error_msg}')
 
     @classmethod
     def _check_runpod_credentials(cls, profile: str = 'default'):

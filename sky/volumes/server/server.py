@@ -9,6 +9,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.utils import registry
 from sky.utils import volume as volume_utils
 from sky.volumes.server import core
@@ -19,19 +20,26 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def volume_list(request: fastapi.Request) -> None:
-    """Gets the volumes."""
-    auth_user = request.state.auth_user
-    auth_user_env_vars_kwargs = {
-        'env_vars': auth_user.to_env_vars()
-    } if auth_user else {}
-    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
+async def volume_list(
+    request: fastapi.Request,
+    refresh: bool = fastapi.Depends(role_filter.force_viewer_volume_refresh),
+) -> None:
+    """Gets the volumes.
+
+    Args:
+        refresh: If True, refresh volume state from cloud APIs before returning.
+            If False (default), return cached data from the database.
+            For viewer-role callers this is forced to False by
+            `role_filter.force_viewer_volume_refresh`.
+    """
+    request_body = payloads.VolumeListBody(refresh=refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,
         request_body=request_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -45,6 +53,7 @@ async def volume_delete(request: fastapi.Request,
         request_body=volume_delete_body,
         func=core.volume_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -121,4 +130,5 @@ async def volume_apply(request: fastapi.Request,
         request_body=volume_apply_body,
         func=core.volume_apply,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )

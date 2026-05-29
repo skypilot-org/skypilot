@@ -66,6 +66,11 @@ GPU_NAME_MAP = {
     'RTXA5000': 'NVIDIA RTX A5000',
     'RTXA6000': 'NVIDIA RTX A6000',
 
+    # NVIDIA RTX PRO (Blackwell)
+    'RTXPRO4500': 'NVIDIA RTX PRO 4500 Blackwell',
+    'RTXPRO6000': 'NVIDIA RTX PRO 6000 Blackwell Server Edition',
+    'RTXPRO6000-WK': 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
+
     # Tesla V100 variants
     'V100-16GB-FHHL': 'Tesla V100-FHHL-16GB',
     'V100-16GB-SXM2': 'Tesla V100-SXM2-16GB',
@@ -80,7 +85,11 @@ def _construct_docker_login_template_name(cluster_name: str) -> str:
 
 
 def retry(func):
-    """Decorator to retry a function."""
+    """Decorator to retry a function.
+
+    Only retries on transient errors. Does not retry on authorization errors
+    (Unauthorized, Forbidden) as these are not recoverable.
+    """
 
     def wrapper(*args, **kwargs):
         """Wrapper for retrying a function."""
@@ -89,6 +98,14 @@ def retry(func):
             try:
                 return func(*args, **kwargs)
             except runpod.runpod.error.QueryError as e:
+                error_msg = str(e).lower()
+                # Don't retry on authorization errors - these won't recover
+                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
+                if any(keyword in error_msg for keyword in auth_keywords):
+                    logger.error(f'RunPod authorization error (not retrying): '
+                                 f'{common_utils.format_exception(e)}')
+                    raise
+                cnt += 1
                 if cnt >= 3:
                     raise
                 logger.warning('Retrying for exception: '
@@ -182,6 +199,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
         info['status'] = instance['desiredStatus']
         info['name'] = instance['name']
+        info['vcpu_count'] = instance.get('vcpuCount')
         info['port2endpoint'] = {}
 
         # Sometimes when the cluster is in the process of being created,
@@ -243,12 +261,14 @@ def _create_template_for_docker_login(
     container_registry_auth_name = f'{cluster_name}-registry-auth'
     container_template_name = _construct_docker_login_template_name(
         cluster_name)
-    # The `name` argument is only for display purpose and the registry server
-    # will be splitted from the docker image name (Tested with AWS ECR).
-    # Here we only need the username and password to create the registry auth.
+    # Compute the fully-qualified image name (e.g. ghcr.io/org/image:tag)
+    # before creating the template. Passing image_name=None caused Python to
+    # serialize None as the literal string "None" in the GraphQL mutation
+    # (imageName: "None"), which the RunPod API now rejects as invalid.
     # TODO(tian): Now we create a template and a registry auth for each cluster.
     # Consider create one for each server and reuse them. Challenges including
     # calculate the reference count and delete them when no longer needed.
+    formatted_image = login_config.format_image(image_name)
     create_auth_resp = runpod.runpod.create_container_registry_auth(
         name=container_registry_auth_name,
         username=login_config.username,
@@ -257,10 +277,10 @@ def _create_template_for_docker_login(
     registry_auth_id = create_auth_resp['id']
     create_template_resp = runpod.runpod.create_template(
         name=container_template_name,
-        image_name=None,
+        image_name=formatted_image,
         registry_auth_id=registry_auth_id,
     )
-    return login_config.format_image(image_name), create_template_resp['id']
+    return formatted_image, create_template_resp['id']
 
 
 def launch(

@@ -128,6 +128,61 @@ def _extract_test_names_from_pipeline(pipeline_path):
     return test_names
 
 
+def _extract_steps_from_pipeline(pipeline_path):
+    """Extract all steps from a pipeline YAML file."""
+    with open(pipeline_path, 'r') as f:
+        pipeline = yaml.safe_load(f)
+
+    all_steps = []
+    for group in pipeline['steps']:
+        if 'steps' in group:
+            all_steps.extend(group['steps'])
+        else:
+            all_steps.append(group)
+    return all_steps
+
+
+def test_no_auto_retry_marker():
+    """Test that no_auto_retry marker works correctly.
+
+    This test uses the actual test_kubernetes_container_status_unknown_status_refresh
+    test which has the marker applied.
+    """
+    # Generate pipeline for the specific test
+    env = dict(os.environ)
+    env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:{env.get('PYTHONPATH', '')}"
+
+    subprocess.run([
+        'python', '.buildkite/generate_pipeline.py', '--args', '--kubernetes',
+        '--file_pattern', 'test_cluster_job'
+    ],
+                   env=env,
+                   check=True)
+
+    # Check the generated pipeline
+    pipeline_path = pathlib.Path('.buildkite/pipeline_smoke_tests_release.yaml')
+    steps = _extract_steps_from_pipeline(pipeline_path)
+
+    # Find steps for test_kubernetes_container_status_unknown_status_refresh
+    target_steps = [
+        s for s in steps
+        if 'test_kubernetes_container_status_unknown_status_refresh' in s.get(
+            'label', '')
+    ]
+
+    # Should have exactly 1 step
+    assert len(target_steps) == 1, \
+        f"Expected 1 step, got {len(target_steps)}"
+
+    # Verify no_auto_retry is applied
+    step = target_steps[0]
+    retry = step.get('retry', {})
+    assert retry.get('automatic') is False, \
+        f"no_auto_retry step should have automatic=False: {retry}"
+    assert retry.get('manual', {}).get('allowed') is True, \
+        f"no_auto_retry step should allow manual retry: {retry}"
+
+
 @pytest.mark.parametrize('args', [
     '',
     '--aws',

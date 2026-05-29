@@ -30,8 +30,8 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
             yield
 
     monkeypatch.setattr(state.migration_utils, 'db_lock', _tmp_db_lock)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE', engine)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE_ASYNC', async_engine)
+    monkeypatch.setattr(state._db_manager, '_engine', engine)
+    monkeypatch.setattr(state._db_manager, '_engine_async', async_engine)
 
     # Create schema via migrations
     state.create_table(engine)
@@ -67,10 +67,11 @@ def _insert_job_info(engine,
                      controller_logs_cleaned_at: Optional[float] = None):
     with orm.Session(engine) as session:
         # Insert row; let PK autoincrement.
-        if (state._SQLALCHEMY_ENGINE.dialect.name ==
-                state.db_utils.SQLAlchemyDialect.SQLITE.value):
+        engine = state._db_manager.get_engine()
+        if (engine.dialect.name == state.db_utils.SQLAlchemyDialect.SQLITE.value
+           ):
             insert_func = state.sqlite.insert
-        elif (state._SQLALCHEMY_ENGINE.dialect.name ==
+        elif (engine.dialect.name ==
               state.db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             insert_func = state.postgresql.insert
         else:
@@ -101,10 +102,10 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         pool_hash=None,
         user_hash='u',
     )
-
+    engine = state._db_manager.get_engine()
     # Qualifies: terminal + old + not cleaned
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -114,7 +115,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Not old enough
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         1,
         status=ManagedJobStatus.SUCCEEDED,
@@ -124,7 +125,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Already cleaned
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         2,
         status=ManagedJobStatus.FAILED,
@@ -134,7 +135,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Non-terminal
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         3,
         status=ManagedJobStatus.RUNNING,
@@ -144,7 +145,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Terminal and old, but local_log_file is None -> should not qualify
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         6,
         status=ManagedJobStatus.SUCCEEDED,
@@ -164,7 +165,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
 
     # Batch size respected: add two more qualifying tasks
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         4,
         status=ManagedJobStatus.CANCELLED,
@@ -173,7 +174,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         5,
         status=ManagedJobStatus.SUCCEEDED,
@@ -198,8 +199,9 @@ def test_set_task_logs_cleaned(_mock_managed_jobs_db_conn):
         pool_hash=None,
         user_hash='u',
     )
+    engine = state._db_manager.get_engine()
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -217,7 +219,7 @@ def test_set_task_logs_cleaned(_mock_managed_jobs_db_conn):
     state.set_task_logs_cleaned([(job_id, 0)], ts)
 
     # Verify updated
-    with orm.Session(state._SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         row = session.execute(
             state.sqlalchemy.select(state.spot_table.c.logs_cleaned_at).where(
                 state.sqlalchemy.and_(
@@ -236,10 +238,10 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     retention = 60
 
     # Job A: qualifies (max end_at old, controller logs not cleaned)
-    job_a = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    engine = state._db_manager.get_engine()
+    job_a = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_a,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -248,7 +250,7 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_a,
         1,
         status=ManagedJobStatus.FAILED,
@@ -259,10 +261,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     state.scheduler_set_done(job_a)
 
     # Job B: not old enough
-    job_b = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_b = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_b,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -273,10 +274,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     state.scheduler_set_done(job_b)
 
     # Job C: already cleaned controller logs
-    job_c = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=now - 10)
+    job_c = _insert_job_info(engine, controller_logs_cleaned_at=now - 10)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_c,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -287,10 +287,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     state.scheduler_set_done(job_c)
 
     # Job D: terminal but end_at is None -> does not qualify
-    job_d = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_d = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_d,
         0,
         status=ManagedJobStatus.CANCELLED,
@@ -305,10 +304,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     assert job_ids == {job_a}
 
     # Batch size respected: clone more qualifying jobs
-    job_e = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_e = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_e,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -317,10 +315,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
     state.scheduler_set_done(job_e)
-    job_f = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_f = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_f,
         0,
         status=ManagedJobStatus.FAILED,
@@ -337,15 +334,168 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
 def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
     now = time.time()
 
-    job_id = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                              controller_logs_cleaned_at=None)
+    engine = state._db_manager.get_engine()
+    job_id = _insert_job_info(engine, controller_logs_cleaned_at=None)
 
     state.set_controller_logs_cleaned([job_id], now)
 
-    with orm.Session(state._SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         row = session.execute(
             state.sqlalchemy.select(
                 state.job_info_table.c.controller_logs_cleaned_at).where(
                     state.job_info_table.c.spot_job_id == job_id)).fetchone()
         assert row is not None
         assert row[0] == now
+
+
+def test_get_active_file_mounts_blob_ids(_mock_managed_jobs_db_conn):
+    engine = _mock_managed_jobs_db_conn
+
+    # Non-terminal job holding a blob -> should be returned.
+    active_job = state.set_job_info_without_job_id(
+        name='active',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-active',
+    )
+    _insert_task(engine, active_job, 0, status=ManagedJobStatus.RUNNING)
+
+    # Terminal job -> should NOT be returned even though it has a blob.
+    terminal_job = state.set_job_info_without_job_id(
+        name='done',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-done',
+    )
+    _insert_task(engine, terminal_job, 0, status=ManagedJobStatus.SUCCEEDED)
+
+    # Non-terminal job without a blob -> should NOT be returned.
+    no_blob_job = state.set_job_info_without_job_id(
+        name='no-blob',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+    )
+    _insert_task(engine, no_blob_job, 0, status=ManagedJobStatus.PENDING)
+
+    # Queued (non-terminal) job -> should be returned.
+    queued_job = state.set_job_info_without_job_id(
+        name='queued',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-queued',
+    )
+    _insert_task(engine, queued_job, 0, status=ManagedJobStatus.PENDING)
+
+    # Recovering job -> should be returned (long-tail case that motivated
+    # this ref tracking).
+    recovering_job = state.set_job_info_without_job_id(
+        name='recovering',
+        workspace='ws',
+        entrypoint='entry',
+        pool=None,
+        pool_hash=None,
+        user_hash='u',
+        file_mounts_blob_id='blob-recovering',
+    )
+    _insert_task(engine, recovering_job, 0, status=ManagedJobStatus.RECOVERING)
+
+    blob_ids = state.get_active_file_mounts_blob_ids()
+    assert blob_ids == {'blob-active', 'blob-queued', 'blob-recovering'}
+
+
+def _new_pool_job(engine,
+                  *,
+                  pool: str,
+                  status: ManagedJobStatus,
+                  cluster_name=None) -> int:
+    """Create a managed job in `pool` with optional `current_cluster_name`."""
+    job_id = state.set_job_info_without_job_id(
+        name=f'job-{pool}',
+        workspace='ws',
+        entrypoint='entry',
+        pool=pool,
+        pool_hash=None,
+        user_hash='u',
+    )
+    _insert_task(engine, job_id, 0, status=status)
+    if cluster_name is not None:
+        state.set_current_cluster_name(job_id, cluster_name)
+    return job_id
+
+
+def test_get_nonterminal_job_ids_by_pool_grouped(_mock_managed_jobs_db_conn):
+    """Verify the batched grouped query matches the per-call helper."""
+    engine = state._db_manager.get_engine()
+
+    # Pool A: unassigned job, two replicas with one nonterminal job each,
+    # one job on a replica that is already SUCCEEDED (should be excluded).
+    unassigned_a = _new_pool_job(engine,
+                                 pool='pool-a',
+                                 status=ManagedJobStatus.PENDING)
+    r1_running_a = _new_pool_job(engine,
+                                 pool='pool-a',
+                                 status=ManagedJobStatus.RUNNING,
+                                 cluster_name='replica-1')
+    r1_recovering_a = _new_pool_job(engine,
+                                    pool='pool-a',
+                                    status=ManagedJobStatus.RECOVERING,
+                                    cluster_name='replica-1')
+    r2_running_a = _new_pool_job(engine,
+                                 pool='pool-a',
+                                 status=ManagedJobStatus.RUNNING,
+                                 cluster_name='replica-2')
+    _new_pool_job(engine,
+                  pool='pool-a',
+                  status=ManagedJobStatus.SUCCEEDED,
+                  cluster_name='replica-1')  # terminal -> filtered
+
+    # Pool B: separate pool to ensure the filter is scoped correctly.
+    _new_pool_job(engine, pool='pool-b', status=ManagedJobStatus.RUNNING)
+
+    grouped = state.get_nonterminal_job_ids_by_pool_grouped('pool-a')
+
+    assert set(grouped.keys()) == {None, 'replica-1', 'replica-2'}
+    assert grouped[None] == [unassigned_a]
+    assert grouped['replica-1'] == sorted([r1_running_a, r1_recovering_a])
+    assert grouped['replica-2'] == [r2_running_a]
+
+    # Grouped result must agree with the legacy per-call helper.
+    assert sorted(grouped['replica-1']) == sorted(
+        state.get_nonterminal_job_ids_by_pool('pool-a',
+                                              cluster_name='replica-1'))
+    assert sorted(grouped['replica-2']) == sorted(
+        state.get_nonterminal_job_ids_by_pool('pool-a',
+                                              cluster_name='replica-2'))
+    all_jobs_a = sorted(state.get_nonterminal_job_ids_by_pool('pool-a'))
+    flattened = sorted(j for ids in grouped.values() for j in ids)
+    assert flattened == all_jobs_a
+
+
+def test_get_nonterminal_job_ids_by_pool_grouped_empty(
+        _mock_managed_jobs_db_conn):
+    """No jobs in pool -> empty dict (not raise)."""
+    assert not state.get_nonterminal_job_ids_by_pool_grouped('nope')
+
+
+def test_get_nonterminal_job_ids_by_pool_grouped_all_terminal(
+        _mock_managed_jobs_db_conn):
+    """Pool with only finished jobs should also yield an empty grouping."""
+    engine = state._db_manager.get_engine()
+    _new_pool_job(engine,
+                  pool='pool-done',
+                  status=ManagedJobStatus.SUCCEEDED,
+                  cluster_name='replica-x')
+    _new_pool_job(engine, pool='pool-done', status=ManagedJobStatus.FAILED)
+    assert not state.get_nonterminal_job_ids_by_pool_grouped('pool-done')

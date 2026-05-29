@@ -140,7 +140,15 @@ For example, to launch VMs in Europe only (which can help with GDPR compliance),
       - region: europe-west6
       - region: europe-west8
       - region: europe-west9
-      # Or put in other clouds' Europe regions.
+      # Azure: 
+      - region: westeurope
+      - region: northeurope
+      - region: uksouth
+      - region: ukwest
+      - region: francecentral
+      - region: germanywestcentral
+      - region: norwayeast
+      - region: swedencentral
 
 See more details about the ``resources.any_of`` field :ref:`here <multiple-resources>`.
 
@@ -182,6 +190,7 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>``
 (the full name can be found in ``sky status``), and run the commands above.
 
+After fetching the latest catalogs, remember to run sky ``api stop`` and restart your SkyPilot API server. 
 
 (Advanced) How to edit or update the regions or pricing information used by SkyPilot?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

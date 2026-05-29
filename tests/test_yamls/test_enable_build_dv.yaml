@@ -1,0 +1,27 @@
+resources:
+  cpus: 0.1+
+  infra: kubernetes
+  image_id: docker:debian:12
+
+num_nodes: 1
+
+volumes:
+  /mnt/data1: docker-build-vol0
+
+run: |
+  set -ex
+  mkdir -p sky_workdir/dev
+  cat >> sky_workdir/dev/Dockerfile <<'EOF'
+  FROM alpine
+  RUN echo "test"
+  CMD ["echo", "hello from DinD"]
+  EOF
+  docker buildx ls
+  docker buildx build -t hello:test sky_workdir/dev
+  docker buildx du
+
+config:
+  kubernetes:
+    enable_docker:
+      mode: BUILD
+      cache_volume: docker-build-vol1

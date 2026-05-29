@@ -1,12 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
+  ENDPOINT,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
+import { trackJobAction } from '@/lib/analytics';
+import { applyEnhancements } from '@/plugins/dataEnhancement';
+
+// ============ Pagination Plugin Integration ============
+
+/**
+ * Check if the jobs pagination plugin is available.
+ * The plugin sets window.__skyJobsPaginationFetch when loaded.
+ * With requires_early_init=True, the plugin is guaranteed to be
+ * loaded before any API calls complete.
+ */
+function isJobsPaginationPluginAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.__skyJobsPaginationFetch === 'function'
+  );
+}
+
+/**
+ * Get the jobs pagination plugin fetch function
+ */
+function getJobsPaginationFetch() {
+  return typeof window !== 'undefined' ? window.__skyJobsPaginationFetch : null;
+}
 
 // Configuration
 const DEFAULT_TAIL_LINES = 5000;
@@ -31,7 +57,60 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'user_yaml',
+  'entrypoint',
+  'is_job_group',
+  'execution',
+  'is_primary_in_job_group',
+  'links',
+  'is_batch',
+  'batch_total_batches',
+  'batch_completed_batches',
+  'node_names',
+  'priority_class',
 ];
+
+/**
+ * Compute the job group status based on primary tasks.
+ * For job groups with primary/auxiliary tasks, the job status is determined
+ * only by the primary tasks. If all primary tasks succeed, the job is
+ * considered successful even if auxiliary tasks were cancelled.
+ *
+ * Uses is_primary_in_job_group per task:
+ * - null: Non-job-group task (counts for status)
+ * - true: Primary task in job group (counts for status)
+ * - false: Auxiliary task in job group (does not count for status)
+ *
+ * @param {Array} tasks - Array of task objects with status and is_primary_in_job_group fields
+ * @returns {string} - The computed job group status
+ */
+export function computeJobGroupStatus(tasks) {
+  if (!tasks || tasks.length === 0) {
+    return null;
+  }
+
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
+
+  // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
+  for (const task of tasksForStatus) {
+    if (task.status !== 'SUCCEEDED') {
+      return task.status;
+    }
+  }
+  return 'SUCCEEDED';
+}
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -39,6 +118,7 @@ export async function getManagedJobs(options = {}) {
       allUsers = true,
       skipFinished = false,
       allFields = false,
+      jobIdMatch,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -62,7 +142,10 @@ export async function getManagedJobs(options = {}) {
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
-    if (jobIDs !== undefined && jobIDs.length > 0) body.job_ids = jobIDs;
+    // Support both jobIdMatch (from filter UI) and jobIDs (direct usage)
+    const resolvedJobIDs = jobIdMatch ? [jobIdMatch] : jobIDs;
+    if (resolvedJobIDs !== undefined && resolvedJobIDs.length > 0)
+      body.job_ids = resolvedJobIDs;
     if (!allFields) {
       if (fields && fields.length > 0) {
         body.fields = fields;
@@ -214,16 +297,35 @@ export async function getManagedJobs(options = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
+        schedule_state: job.schedule_state,
         current_cluster_name: job.current_cluster_name,
+        cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
+        labels: job.labels || {}, // Include labels field
+        node_names: job.node_names, // Node names for dashboard display
+        // JobGroup fields
+        is_job_group: job.is_job_group,
+        execution: job.execution,
+        is_primary_in_job_group: job.is_primary_in_job_group,
+        // Batch progress
+        batch_total_batches: job.batch_total_batches,
+        batch_completed_batches: job.batch_completed_batches,
       };
     });
 
+    // Apply plugin data enhancements
+    // Pass raw backend data so enhancements can extract fields directly
+    const enhancedJobs = await applyEnhancements(jobData, 'jobs', {
+      dashboardCache,
+      rawData: managedJobs, // Raw backend response for field extraction
+    });
+
     return {
-      jobs: jobData,
+      jobs: enhancedJobs,
       total,
       totalNoFilter,
       controllerStopped: false,
@@ -423,6 +525,7 @@ export async function getPoolStatus() {
 }
 
 // Hook for individual job details that reuses the main jobs cache
+// Returns all tasks for a given job_id (supports multi-task jobs)
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -436,19 +539,19 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Always get all jobs data (cache handles freshness automatically)
+        // Fetch the specific job by ID with all fields for complete data
         const allJobsData = await dashboardCache.get(getManagedJobs, [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
-        // Filter for the specific job client-side
-        const job = allJobsData?.jobs?.find(
-          (j) => String(j.id) === String(jobId)
-        );
+        // Filter for ALL tasks matching this job_id (supports multi-task jobs)
+        const matchingJobs =
+          allJobsData?.jobs?.filter((j) => String(j.id) === String(jobId)) ||
+          [];
 
-        if (job) {
+        if (matchingJobs.length > 0) {
           setJobData({
-            jobs: [job],
+            jobs: matchingJobs,
             controllerStopped: allJobsData.controllerStopped || false,
           });
         } else {
@@ -474,6 +577,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
 export async function streamManagedJobLogs({
   jobId,
+  task = null,
   controller = false,
   signal,
   onNewLog,
@@ -514,6 +618,7 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
+        task: task,
       };
 
       const response = await apiClient.fetchImmediate(
@@ -721,30 +826,104 @@ export async function handleJobAction(action, jobId, cluster) {
 /**
  * Downloads managed job logs as a zip via the API server.
  * Flow:
- * 1) POST /jobs/download_logs to fetch logs from the remote cluster to API server
- * 2) POST /download to stream a zip back to the browser and trigger download
+ * 1) POST /jobs/download_logs - copy logs from cluster to API server tmp dir
+ * 2) POST /download - server zips and streams it back as a binary response
+ * 3) Save the response blob via `<a download>` (createObjectURL).
  */
+// Long-poll /jobs/download_logs by hand instead of using apiClient.fetch.
+// For multi-GB running jobs sync_down can take 5+ minutes — well past
+// the ~100s edge timeouts (Cloudflare 524 etc.) of a single GET.
+// Retry the polling GET when we hit a 5xx so the user-visible request
+// resumes waiting on the SAME server-side request_id until it
+// completes. (sync_down already passes follow=False, so the underlying
+// stream_logs reads to EOF and exits — it just takes a while.)
+async function downloadLogsWithRetry(body, maxAttempts = 30) {
+  // Step 1: dispatch the request and grab its server-side ID.
+  const baseUrl = window.location.origin;
+  const userInfo = await (async () => {
+    // Mirror what apiClient.fetch does — the env_vars path matters.
+    const r = await fetch(`${baseUrl}/internal/dashboard/users/role`).catch(
+      () => null
+    );
+    if (r && r.ok) return r.json();
+    return { id: 'local', name: 'local' };
+  })();
+  const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/download_logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...body,
+      env_vars: {
+        SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        SKYPILOT_USER_ID: userInfo.id,
+        SKYPILOT_USER: userInfo.name,
+      },
+    }),
+  });
+  if (!dispatch.ok) {
+    throw new Error(`download_logs dispatch failed: ${dispatch.status}`);
+  }
+  const requestId = dispatch.headers.get('X-Skypilot-Request-ID');
+  if (!requestId) {
+    throw new Error('download_logs dispatch missing X-Skypilot-Request-ID');
+  }
+
+  // Step 2: long-poll /api/get, retrying on edge-timeout responses.
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const r = await fetch(
+      `${baseUrl}${ENDPOINT}/api/get?request_id=${requestId}`
+    );
+    // 524 Cloudflare timeout / 502/503/504 transient — retry against
+    // the same request_id; the server's long-poll resumes waiting.
+    if (
+      r.status === 524 ||
+      r.status === 502 ||
+      r.status === 503 ||
+      r.status === 504
+    ) {
+      // Linear backoff capped at 5s. Cloudflare 524 self-paces at
+      // ~100s so most attempts gain nothing, but a server-side 502/503
+      // hiccup would otherwise hammer the API server back-to-back.
+      const backoffMs = Math.min(1000 * (attempt + 1), 5000);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      continue;
+    }
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`/api/get ${r.status}: ${text}`);
+    }
+    const data = await r.json();
+    return data.return_value ? JSON.parse(data.return_value) : [];
+  }
+  throw new Error('download_logs timed out after retries');
+}
+
+// Prepare a zip via sync_down + /download, read the response as a
+// blob, and save via createObjectURL. The wait scales with rsync time
+// on the worker, so multi-GB running logs can take a few minutes —
+// downloadLogsWithRetry tolerates Cloudflare 524 during that window.
 export async function downloadManagedJobLogs({
   jobId = null,
   name = null,
   controller = false,
 }) {
   try {
-    // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
-    const mapping = await apiClient.fetch('/jobs/download_logs', {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
+    const logType = controller ? 'controller-logs' : 'logs';
+    const filename = `managed-${namePart}-${logType}-${ts}.zip`;
+
+    const mapping = await downloadLogsWithRetry({
       job_id: jobId,
       name: name,
       controller: controller,
       refresh: false,
     });
-
     const folderPaths = Object.values(mapping || {});
     if (!folderPaths.length) {
       showToast('No logs found to download.', 'warning');
       return;
     }
-
-    // Step 2: request the zip and trigger browser download
     const resp = await apiClient.fetchImmediate('/download?relative=items', {
       folder_paths: folderPaths,
     });
@@ -755,15 +934,13 @@ export async function downloadManagedJobLogs({
     const blob = await resp.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const namePart = jobId ? `job-${jobId}` : name ? `job-${name}` : 'job';
-    const logType = controller ? 'controller-logs' : 'logs';
     a.href = url;
-    a.download = `managed-${namePart}-${logType}-${ts}.zip`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
+    trackJobAction('download_logs', { controller });
   } catch (error) {
     console.error('Error downloading managed job logs:', error);
     showToast(`Error downloading managed job logs: ${error.message}`, 'error');

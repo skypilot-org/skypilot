@@ -11,7 +11,7 @@ num_nodes: 2 # cluster size
 # Set to a git repository
 workdir:
   url: https://github.com/NovaSky-AI/SkyRL.git
-  ref: main
+  ref: skyrl_train-v0.4.0
 
 # Set secrets
 secrets:

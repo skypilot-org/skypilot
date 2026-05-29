@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useEffect,
   useRef,
   createContext,
@@ -7,6 +8,7 @@ import React, {
 } from 'react';
 import { useRouter } from 'next/router';
 import Shepherd from 'shepherd.js';
+import { getNonce } from '../utils/csp';
 import { useFirstVisit } from '@/hooks/useFirstVisit';
 
 const TourContext = createContext(null);
@@ -45,7 +47,7 @@ export function TourProvider({ children }) {
   const [tourJustStarted, setTourJustStarted] = useState(false);
   const tourNavigatingRef = useRef(false);
 
-  const startTour = () => {
+  const startTour = useCallback(() => {
     if (tourRef.current) {
       setIsTourActive(true);
       setTourJustStarted(true);
@@ -57,7 +59,7 @@ export function TourProvider({ children }) {
         setTourJustStarted(false);
       }, 1000);
     }
-  };
+  }, []);
 
   useEffect(() => {
     // Initialize the tour only once
@@ -197,6 +199,11 @@ export function TourProvider({ children }) {
       // Add global CSS styling for tour
       const globalStyle = document.createElement('style');
       globalStyle.id = 'shepherd-global-custom-style';
+      // Propagate CSP nonce so the dynamic <style> is not blocked.
+      const nonce = getNonce();
+      if (nonce) {
+        globalStyle.nonce = nonce;
+      }
       globalStyle.textContent = `
           .shepherd-element {
             /* Uniform 1px border using inner box-shadow so corners stay consistent */
@@ -1726,7 +1733,9 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
-  }, [isFirstVisit]);
+    // markTourCompleted/router/tourAutoStarted used in step callbacks, not as effect deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFirstVisit, startTour]);
 
   // Block navigation during tour
   useEffect(() => {

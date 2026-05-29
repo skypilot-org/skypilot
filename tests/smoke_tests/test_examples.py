@@ -23,6 +23,8 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
                                                                         str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -75,6 +77,8 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
 def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -196,6 +200,8 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     memory = '60+'
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'L4')
 

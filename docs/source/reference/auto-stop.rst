@@ -139,3 +139,13 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
+
+Running scripts before autostop
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To run a script on the cluster before autostop fires (for example, to commit
+code, sync W&B runs, or push checkpoints to persistent storage), use a task
+:ref:`lifecycle hook <lifecycle-hooks>` with ``events: [stop]`` (or
+``events: [down]`` if you use ``autostop: {down: true}`` / autodown, since
+the outcome is teardown). The same mechanism also covers preemption and
+``sky down`` events.

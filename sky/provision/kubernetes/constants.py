@@ -21,5 +21,8 @@ TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
 TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 
+# Default name of the primary workload container in SkyPilot Ray pods.
+RAY_NODE_CONTAINER_NAME = 'ray-node'
+
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']

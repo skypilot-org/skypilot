@@ -189,7 +189,19 @@ def status(
             'status': (sky.serve.ReplicaStatus) replica status,
             'version': (int) replica version,
             'launched_at': (int) timestamp of launched,
-            'handle': (ResourceHandle) handle of the replica cluster,
+            'handle': (Optional[ResourceHandle]) handle of the replica
+                cluster. New API servers (>=
+                MIN_LAZY_REPLICA_HANDLE_API_VERSION) strip this to ``None``
+                on the wire to keep payloads small; callers should read the
+                pre-computed string fields below instead. Old servers still
+                return a full handle.
+            'cloud': (Optional[str]) cloud name of the replica,
+            'region': (Optional[str]) region of the replica,
+            'infra': (Optional[str]) human-readable infra string,
+                e.g. ``'aws (us-east-1)'``,
+            'resources_str': (Optional[str]) simplified resource string,
+            'resources_str_full': (Optional[str]) full resource string with
+                accelerator details,
             'endpoint': (str) endpoint of the replica,
         }
 

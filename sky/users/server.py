@@ -30,7 +30,35 @@ logger = sky_logging.init_logger(__name__)
 USER_LOCK_PATH = os.path.expanduser('~/.sky/.{user_id}.lock')
 USER_LOCK_TIMEOUT_SECONDS = 20
 
+# Built-in user identities that the server seeds at startup. They must not
+# be deletable or have their role changed via the user-management API.
+_INTERNAL_USER_IDS = (
+    common.SERVER_ID,
+    constants.SKYPILOT_SYSTEM_USER_ID,
+    constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+)
+
 router = fastapi.APIRouter()
+
+
+def get_user_type(user: models.User) -> str:
+    """Get user type for a user for backward compatibility.
+
+    Args:
+        user: The user to get the type for.
+
+    Returns:
+        The user type string.
+    """
+    if user.is_service_account():
+        return models.UserType.SA.value
+    if user.id in _INTERNAL_USER_IDS:
+        return models.UserType.SYSTEM.value
+    if user.password is not None:
+        return models.UserType.BASIC.value
+    if user.name and '@' in user.name:
+        return models.UserType.SSO.value
+    return models.UserType.LEGACY.value
 
 
 # All handlers in user handler are sync to get fastAPI run it in a
@@ -54,11 +82,13 @@ def users() -> List[Dict[str, Any]]:
         if user.is_service_account():
             continue
 
+        user_type = user.user_type or get_user_type(user)
         all_users.append({
             'id': user.id,
             'name': user.name,
             'created_at': user.created_at,
-            'role': users_to_role.get(user.id, '')
+            'role': users_to_role.get(user.id, ''),
+            'user_type': user_type,
         })
     return all_users
 
@@ -105,7 +135,10 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
             raise fastapi.HTTPException(
                 status_code=400, detail=f'User {username!r} already exists')
         global_user_state.add_or_update_user(
-            models.User(id=user_hash, name=username, password=password_hash))
+            models.User(id=user_hash,
+                        name=username,
+                        password=password_hash,
+                        user_type=models.UserType.BASIC.value))
         permission.permission_service.update_role(user_hash, role)
 
 
@@ -142,13 +175,11 @@ def user_update(request: fastapi.Request,
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
     # Disallow updating the internal users.
-    if need_update_role and user_info.id in [
-            common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
-    ]:
+    if need_update_role and user_info.id in _INTERNAL_USER_IDS:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot update role for internal '
                                     f'API server user {user_info.name}')
-    if password and user_info.id == constants.SKYPILOT_SYSTEM_USER_ID:
+    if password and user_info.id in _INTERNAL_USER_IDS:
         raise fastapi.HTTPException(
             status_code=400,
             detail=f'Cannot update password for internal '
@@ -173,7 +204,7 @@ def _delete_user(user_id: str) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'User {user_id} does not exist')
     # Disallow deleting the internal users.
-    if user_info.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+    if user_info.id in _INTERNAL_USER_IDS:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Cannot delete internal '
                                     f'API server user {user_info.name}')
@@ -293,9 +324,12 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 
             with _user_lock(user_hash):
                 global_user_state.add_or_update_user(
-                    models.User(id=user_hash,
-                                name=username,
-                                password=password_hash))
+                    models.User(
+                        id=user_hash,
+                        name=username,
+                        password=password_hash,
+                        user_type=models.UserType.BASIC.value,
+                    ))
                 permission.permission_service.update_role(user_hash, role)
 
             success_count += 1
@@ -460,7 +494,8 @@ def create_service_account_token(
 
         # Create a user entry for the service account
         service_account_user = models.User(id=service_account_user_id,
-                                           name=token_name)
+                                           name=token_name,
+                                           user_type=models.UserType.SA.value)
         is_new_user = global_user_state.add_or_update_user(
             service_account_user, allow_duplicate_name=False)
 

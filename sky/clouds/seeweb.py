@@ -72,6 +72,8 @@ class Seeweb(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Custom multi-network not supported. '
              'Seeweb does not support custom multi-network.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -273,13 +275,21 @@ class Seeweb(clouds.Cloud):
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
     ) -> Optional[str]:
-        result = catalog.get_default_instance_type(cpus=cpus,
-                                                   memory=memory,
-                                                   disk_tier=disk_tier,
-                                                   clouds='seeweb')
+        del region, zone  # unused
+        result = catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='seeweb')
         return result
 
     def _get_feasible_launchable_resources(
@@ -314,8 +324,10 @@ class Seeweb(clouds.Cloud):
                     cpus=resources.cpus,
                     memory=resources.memory,
                     use_spot=resources.use_spot,
+                    local_disk=resources.local_disk,
                     region=resources.region,
                     zone=resources.zone,
+                    max_hourly_cost=resources.max_hourly_cost,
                     clouds='seeweb',
                 )
 
@@ -336,8 +348,11 @@ class Seeweb(clouds.Cloud):
                 default_instance_type = self.get_default_instance_type(
                     cpus=resources.cpus,
                     memory=resources.memory,
+                    local_disk=resources.local_disk,
                     region=resources.region,
                     zone=resources.zone,
+                    use_spot=resources.use_spot,
+                    max_hourly_cost=resources.max_hourly_cost,
                 )
 
                 if default_instance_type:

@@ -29,6 +29,8 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { getUsers } from '@/data/connectors/users';
+import { apiClient, getCurrentUserInfo } from '@/data/connectors/client';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -41,6 +43,10 @@ import {
   MonitorPlay,
   RefreshCcw,
   Download,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CheckIcon,
+  InfoIcon,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -49,18 +55,27 @@ import {
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
+import { BatchBadge } from '@/components/elements/BatchBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import {
+  useTableColumns,
+  usePluginComponents,
+  useMergedTableColumns,
+} from '@/plugins/PluginProvider';
+import {
   FilterDropdown,
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
   buildFilterUrl,
+  evaluateCondition,
 } from '@/components/shared/FilterSystem';
+import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -83,11 +98,89 @@ export const statusGroups = {
   ],
 };
 
+// Statuses shown as primary chips on the Statuses filter bar.
+// Ordered along the typical job lifecycle (STARTING → RUNNING →
+// SUCCEEDED) so the bar reads left-to-right as a progress story.
+// FAILED and other terminal variants live in the "More" dropdown to
+// keep the summary line calm.
+const PRIMARY_STATUSES = ['STARTING', 'RUNNING', 'SUCCEEDED'];
+const OTHER_STATUSES = [
+  'PENDING',
+  'SUBMITTED',
+  'RECOVERING',
+  'CANCELLING',
+  'CANCELLED',
+  'FAILED',
+  'FAILED_SETUP',
+  'FAILED_PRECHECKS',
+  'FAILED_NO_RESOURCE',
+  'FAILED_CONTROLLER',
+];
+
+// Status priority for aggregation (higher index = worse status)
+const STATUS_PRIORITY = {
+  SUCCEEDED: 0,
+  PENDING: 1,
+  SUBMITTED: 2,
+  STARTING: 3,
+  RUNNING: 4,
+  RECOVERING: 5,
+  CANCELLING: 6,
+  CANCELLED: 7,
+  FAILED_SETUP: 8,
+  FAILED_PRECHECKS: 9,
+  FAILED_NO_RESOURCE: 10,
+  FAILED: 11,
+  FAILED_CONTROLLER: 12,
+};
+
+// Helper function to aggregate status for a job group
+// Returns the "worst" status based on priority
+// For job groups with primary/auxiliary tasks, status is determined only by primary tasks
+// Uses is_primary_in_job_group per task: null (non-group), true (primary), false (auxiliary)
+export function getAggregatedStatus(tasks) {
+  if (!tasks || tasks.length === 0) return 'PENDING';
+  if (tasks.length === 1) return tasks[0].status;
+
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null/undefined for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
+
+  let worstStatus = 'SUCCEEDED';
+  let worstPriority = 0;
+
+  for (const task of tasksForStatus) {
+    const priority = STATUS_PRIORITY[task.status] ?? 0;
+    if (priority > worstPriority) {
+      worstPriority = priority;
+      worstStatus = task.status;
+    }
+  }
+
+  return worstStatus;
+}
+
 // Define filter options for the filter dropdown
+// Name is first so it's the default when users open the dropdown —
+// users typically search by job name, not ID.
 const PROPERTY_OPTIONS = [
   {
     label: 'Name',
     value: 'name',
+  },
+  {
+    label: 'ID',
+    value: 'id',
   },
   {
     label: 'User',
@@ -100,6 +193,10 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Pool',
     value: 'pool',
+  },
+  {
+    label: 'Labels',
+    value: 'labels',
   },
 ];
 
@@ -186,6 +283,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
@@ -260,14 +358,21 @@ export function ManagedJobs() {
     sharedUpdateURLParams(router, filters);
   };
 
+  // Track only the newly added filter (called from FilterDropdown callbacks)
+  const trackNewFilter = (property, value) => {
+    trackFilterUsed('job', { property, value });
+  };
+
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
+    propertyMap.set('id', 'ID');
     propertyMap.set('status', 'Status');
     propertyMap.set('name', 'Name');
     propertyMap.set('user', 'User');
     propertyMap.set('workspace', 'Workspace');
     propertyMap.set('pool', 'Pool');
+    propertyMap.set('labels', 'Labels');
 
     const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
     setFilters(urlFilters);
@@ -292,12 +397,13 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
-        <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={valueList}
             setFilters={setFilters}
             updateURLParams={updateURLParams}
+            onFilterAdd={trackNewFilter}
             placeholder="Filter jobs"
           />
         </div>
@@ -334,6 +440,29 @@ export function ManagedJobs() {
   );
 }
 
+function BatchProgressBar({ completed, total }) {
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+  return (
+    <NonCapitalizedTooltip
+      content={`Batch progress: ${completed}/${total} (${pct}%)`}
+      className="text-sm text-muted-foreground"
+    >
+      <div className="flex items-center gap-2">
+        <div className="w-20 bg-gray-200 rounded-full h-2">
+          <div
+            className={`${barColor} h-2 rounded-full transition-all`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="text-xs text-gray-600">
+          {completed}/{total}
+        </span>
+      </div>
+    </NonCapitalizedTooltip>
+  );
+}
+
 export function ManagedJobsTable({
   refreshInterval,
   setLoading,
@@ -346,12 +475,9 @@ export function ManagedJobsTable({
   preloadingComplete,
   lastFetchedTime,
 }) {
-  const [data, setData] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: 'ascending',
+    key: 'id',
+    direction: 'descending',
   });
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -359,14 +485,27 @@ export function ManagedJobsTable({
   const [pageSize, setPageSize] = useState(10);
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
+  const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
-  const [apiStatusCounts, setApiStatusCounts] = useState({});
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
+  // Default to scoping the table to the current user's jobs. Flips to
+  // 'all' when the user clicks the Everyone toggle, or implicitly when
+  // they pick a different user via the FilterDropdown (explicit user
+  // filter wins; see effectiveUserMatch in fetchData).
+  const [userScope, setUserScope] = useState('mine');
+  const [currentUser, setCurrentUser] = useState(null);
+  // True once the /users/role lookup has resolved (with a real user, with
+  // the 'local'/anonymous sentinel, or by erroring out). Used to gate the
+  // initial fetch so we never make the expensive unscoped Everyone request
+  // ahead of the Mine narrow.
+  const [userResolved, setUserResolved] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -376,6 +515,46 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Local state for jobs data (replacing useJobsData hook)
+  const [data, setData] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalNoFilter, setTotalNoFilter] = useState(0);
+  const [hookControllerStopped, setHookControllerStopped] = useState(false);
+
+  // Compute statuses based on UI state for filtering
+  const computedStatuses = React.useMemo(() => {
+    // If specific statuses are selected, use those
+    if (selectedStatuses.length > 0) {
+      return selectedStatuses;
+    }
+    // If not in "show all" mode but no specific statuses selected, show no jobs
+    if (!showAllMode) {
+      return [];
+    }
+    // Show all active jobs
+    if (activeTab === 'active') {
+      return statusGroups.active;
+    }
+    // Show all finished jobs
+    if (activeTab === 'finished') {
+      return statusGroups.finished;
+    }
+    // For activeTab === 'all' and showAllMode === true, show all jobs
+    return [];
+  }, [selectedStatuses, showAllMode, activeTab]);
+
+  // Convert sortConfig to API format
+  const sortBy = React.useMemo(
+    () => sortConfig.key || 'submitted_at',
+    [sortConfig.key]
+  );
+  const sortOrder = React.useMemo(() => {
+    if (sortConfig.key) {
+      return sortConfig.direction === 'ascending' ? 'asc' : 'desc';
+    }
+    return 'desc';
+  }, [sortConfig.key, sortConfig.direction]);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
@@ -417,6 +596,7 @@ export function ManagedJobsTable({
     });
   };
 
+  // Fetch data using jobsCacheManager directly
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
@@ -424,121 +604,127 @@ export function ManagedJobsTable({
       const version = requestSeqRef.current + 1;
       requestSeqRef.current = version;
       setLocalLoading(true);
-      setLoading(true); // Set parent loading state
+      setLoading(true); // Set parent loading state.
+
       try {
-        // Build server-side filter params from UI filters
+        // Build filter params from UI filters
         const getFilterValue = (prop) => {
           const f = (filters || []).find(
             (fi) => (fi.property || '').toLowerCase() === prop
           );
           return f && f.value ? String(f.value) : undefined;
         };
-        // Determine statuses parameter based on current state
-        let statusesParam = undefined;
 
-        // If specific statuses are selected, use those
-        if (selectedStatuses.length > 0) {
-          statusesParam = selectedStatuses;
-        } else if (!showAllMode) {
-          // If not in "show all" mode but no specific statuses selected, show no jobs
-          statusesParam = [];
-        } else if (activeTab === 'active') {
-          // Show all active jobs
-          statusesParam = statusGroups.active;
-        } else if (activeTab === 'finished') {
-          // Show all finished jobs
-          statusesParam = statusGroups.finished;
-        }
-        // For activeTab === 'all' and showAllMode === true, don't set statuses (show all jobs)
-
+        // Build params for jobsCacheManager
+        const jobIdFilter = getFilterValue('id');
+        // Explicit user picked via FilterDropdown wins over the Mine/Everyone
+        // toggle. Otherwise, scope to the current user when toggle is "mine".
+        // Send the username (not the id/hash): the server resolves
+        // `user_match` via `get_user_by_name_match` which does a LIKE on the
+        // `name` column. Passing the hash on multi-user tenants where id and
+        // name differ would silently return zero results.
+        const explicitUserMatch = getFilterValue('user');
+        const effectiveUserMatch =
+          explicitUserMatch !== undefined
+            ? explicitUserMatch
+            : userScope === 'mine' && currentUser
+              ? currentUser.name
+              : undefined;
         const params = {
           allUsers: true,
+          jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
-          userMatch: getFilterValue('user'),
+          userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
-          statuses: statusesParam,
-          page: currentPage, // page index starting from 1
+          statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
+          page: currentPage,
           limit: pageSize,
+          sortBy,
+          sortOrder,
         };
 
-        let jobsResponse;
-        let clustersData = null;
+        console.log('[ManagedJobsTable] Fetching jobs with params:', params);
 
-        // Check cache status before making requests
-        const isDataCached = jobsCacheManager.isDataCached(params);
-        const isDataLoading = jobsCacheManager.isDataLoading(params);
+        // Fetch jobs using jobsCacheManager
+        const response = await jobsCacheManager.getPaginatedJobs(params);
 
+        // Only update state if this is still the latest request
+        if (version === requestSeqRef.current) {
+          // Handle controller stopped
+          if (response.controllerStopped) {
+            setHookControllerStopped(true);
+            setData([]);
+            setTotalCount(0);
+            setTotalNoFilter(0);
+            setStatusCounts({});
+          } else {
+            setHookControllerStopped(false);
+            setData(response.jobs || []);
+            setTotalCount(response.total || 0);
+            setTotalNoFilter(response.totalNoFilter || response.total || 0);
+            setStatusCounts(response.statusCounts || {});
+          }
+
+          // Prefetch next page in background
+          if (response.hasNext) {
+            jobsCacheManager.prefetchNextPage(params).catch(() => {});
+          }
+        }
+
+        // Check controller status from clusters
         if (includeStatus) {
           try {
-            clustersData = await dashboardCache.get(getClusters);
+            const clustersData = await dashboardCache.get(getClusters);
+
+            let isControllerStopped = false;
+            let isLaunching = false;
+
+            if (clustersData) {
+              const jobControllerCluster = clustersData?.find((c) =>
+                isJobController(c.cluster)
+              );
+              const jobControllerClusterStatus = jobControllerCluster
+                ? jobControllerCluster.status
+                : 'NOT_FOUND';
+              // Check both cluster status and API response
+              if (
+                jobControllerClusterStatus === 'STOPPED' &&
+                response.controllerStopped
+              ) {
+                isControllerStopped = true;
+              }
+              if (jobControllerClusterStatus === 'LAUNCHING') {
+                isLaunching = true;
+              }
+            }
+
+            if (version === requestSeqRef.current) {
+              setControllerStopped(!!isControllerStopped);
+              setControllerLaunching(!!isLaunching);
+            }
           } catch (error) {
             console.error('Error fetching clusters:', error);
           }
         }
-        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
-        // Always process the response, even if it's null
-        const {
-          jobs = [],
-          total = 0,
-          totalNoFilter = 0,
-          controllerStopped = false,
-          cacheStatus = 'unknown',
-          statusCounts = {},
-        } = jobsResponse || {};
-
-        let isControllerStopped = false;
-        let isLaunching = false;
-        if (includeStatus && clustersData) {
-          const jobControllerCluster = clustersData?.find((c) =>
-            isJobController(c.cluster)
-          );
-          const jobControllerClusterStatus = jobControllerCluster
-            ? jobControllerCluster.status
-            : 'NOT_FOUND';
-          if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
-            isControllerStopped = true;
-          }
-          if (jobControllerClusterStatus == 'LAUNCHING') {
-            isLaunching = true;
-          }
-        }
-
-        // Only commit if this is still the latest request
         if (version === requestSeqRef.current) {
-          setData(jobs);
-          setTotalCount(total || 0);
-          setTotalNoFilter(totalNoFilter || 0);
-          setControllerStopped(!!isControllerStopped);
-          setControllerLaunching(!!isLaunching);
-          setApiStatusCounts(statusCounts);
           setIsInitialLoad(false);
-        }
-
-        // Log cache status for debugging
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Jobs cache status:', {
-            cacheStatus,
-            isDataCached,
-            isDataLoading,
-            jobCount: jobs.length,
-            totalCount: total,
-            totalNoFilter: totalNoFilter,
-          });
         }
       } catch (err) {
         console.error('Error fetching data:', err);
-        // Still set data to empty array on error to show proper UI
         if (version === requestSeqRef.current) {
           setData([]);
+          setTotalCount(0);
+          setTotalNoFilter(0);
+          setStatusCounts({});
           setControllerStopped(false);
           setIsInitialLoad(false);
         }
       } finally {
         if (version === requestSeqRef.current) {
           setLocalLoading(false);
-          setLoading(false); // Clear parent loading state
+          setLoading(false);
         }
       }
     },
@@ -547,9 +733,11 @@ export function ManagedJobsTable({
       filters,
       currentPage,
       pageSize,
-      selectedStatuses,
-      showAllMode,
-      activeTab,
+      computedStatuses,
+      sortBy,
+      sortOrder,
+      userScope,
+      currentUser,
     ]
   );
 
@@ -573,13 +761,35 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - runs immediately on mount, don't wait for full preloading
-  // The preloader will warm the cache in background, but we fetch jobs data
-  // right away so the table displays as fast as possible
+  // Initial load - wait for the /users/role lookup to settle (real
+  // user, 'local' sentinel, or error) before firing the first jobs
+  // fetch. Going Mine-first matters on tenants with tens of thousands
+  // of finished jobs: the Everyone query is expensive (full count +
+  // status aggregation) and we'd pay it twice — once on the unscoped
+  // initial fetch, once on the narrow Mine refetch — if we didn't gate.
+  // With the shared cache warm this gate adds essentially zero latency;
+  // cold loads pay a single ~200ms /users/role wait.
   React.useEffect(() => {
+    if (!isInitialFetch.current) return;
+    if (!userResolved) return;
     fetchData({ includeStatus: true });
-    // Mark that initial fetch is complete so other effects can run
     isInitialFetch.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userResolved]);
+
+  // Safety net: if /users/role somehow never resolves (network hang),
+  // fall back to the unscoped fetch so the page still renders. Almost
+  // never triggers in practice — getCurrentUserInfo() catches its own
+  // errors and resolves with the 'local' sentinel.
+  React.useEffect(() => {
+    if (!isInitialFetch.current) return undefined;
+    const t = setTimeout(() => {
+      if (isInitialFetch.current) {
+        setUserScope('all');
+        setUserResolved(true);
+      }
+    }, 3000);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -607,6 +817,26 @@ export function ManagedJobsTable({
     }
   }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
 
+  // Fetch on sort config changes for server-side sorting
+  // Skip on initial fetch (sortConfig has default value)
+  React.useEffect(() => {
+    if (!isInitialFetch.current && preloadingComplete) {
+      fetchData({ includeStatus: false });
+    }
+  }, [sortConfig, fetchData, preloadingComplete]);
+
+  // Use faster refresh when there are running batch jobs with incomplete progress
+  const hasRunningBatches = React.useMemo(() => {
+    return data.some(
+      (job) =>
+        job.batch_total_batches != null &&
+        (job.status === 'RUNNING' || job.status === 'WINDING_DOWN') &&
+        (job.batch_completed_batches || 0) < job.batch_total_batches
+    );
+  }, [data]);
+
+  const effectiveRefreshInterval = hasRunningBatches ? 1000 : refreshInterval;
+
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
     if (!preloadingComplete) {
@@ -618,16 +848,20 @@ export function ManagedJobsTable({
         fetchDataRef.current &&
         window.document.visibilityState === 'visible'
       ) {
-        fetchDataRef.current({ includeStatus: true });
+        // Invalidate cache for fast refresh so we get fresh data
+        if (hasRunningBatches) {
+          jobsCacheManager.invalidateCache();
+        }
+        fetchDataRef.current({ includeStatus: !hasRunningBatches });
       }
-    }, refreshInterval);
+    }, effectiveRefreshInterval);
 
     return () => {
       clearInterval(interval);
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval, preloadingComplete]);
+  }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
   // Reset to first page when activeTab changes
   useEffect(() => {
@@ -639,11 +873,29 @@ export function ManagedJobsTable({
     setCurrentPage(1);
   }, [filters, pageSize]);
 
+  // Reset to first page when sort config changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [sortConfig]);
+
   // Reset status filter when activeTab changes
   useEffect(() => {
     setSelectedStatuses([]);
     setShowAllMode(true); // Default to show all mode when changing tabs
   }, [activeTab]);
+
+  // Switch ownership scope (My Jobs vs All Jobs). Resets status narrowing
+  // so a status chip selected in one scope (e.g. RUNNING in My Jobs)
+  // doesn't carry over and silently empty the table under the new scope.
+  // Leaves `activeTab` alone — Active/All is orthogonal to ownership.
+  const selectScope = React.useCallback((scope) => {
+    React.startTransition(() => {
+      setUserScope(scope);
+      setSelectedStatuses([]);
+      setShowAllMode(true);
+      setCurrentPage(1);
+    });
+  }, []);
 
   // Populate valueList for filter dropdown
   useEffect(() => {
@@ -655,12 +907,20 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const labels = new Set();
 
     data.forEach((job) => {
       if (job.name) names.add(job.name);
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+
+      // Extract labels - add only key:value pairs
+      const jobLabels = job.labels || {};
+      Object.entries(jobLabels).forEach(([key, value]) => {
+        // Add key:value pair format only
+        labels.add(`${key}:${value}`);
+      });
     });
 
     // Extract pool names from poolsData, but only include pools that:
@@ -696,23 +956,50 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      labels: Array.from(labels).sort(),
+    });
+
+    // Fetch full users/workspaces from cache (preloaded by cache-preloader).
+    // dashboardCache.get() returns cached data if fresh, or re-fetches if
+    // expired. Updates only user/workspace to avoid blocking other fields.
+    Promise.all([
+      dashboardCache.get(getUsers, []),
+      dashboardCache.get(getWorkspaces, []),
+    ]).then(([usersData, workspacesData]) => {
+      setValueList((prev) => ({
+        ...prev,
+        user: usersData
+          ? [
+              ...new Set(usersData.map((u) => u.username).filter(Boolean)),
+            ].sort()
+          : prev.user,
+        workspace: workspacesData
+          ? Object.keys(workspacesData).sort()
+          : prev.workspace,
+      }));
     });
   }, [data, poolsData, setValueList]);
 
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  };
+  const requestSort = React.useCallback(
+    (key) => {
+      let direction = 'ascending';
+      if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+        direction = 'descending';
+      }
+      setSortConfig({ key, direction });
+    },
+    [sortConfig]
+  );
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
-      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
-    }
-    return '';
-  };
+  const getSortDirection = React.useCallback(
+    (key) => {
+      if (sortConfig.key === key) {
+        return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+      }
+      return '';
+    },
+    [sortConfig]
+  );
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
@@ -725,6 +1012,20 @@ export function ManagedJobsTable({
     ).length;
     return { active, finished };
   }, [data]);
+
+  // Non-primary statuses currently selected — surface them as inline chips
+  // alongside the More dropdown so active filters are always visible.
+  const nonPrimarySelectedStatuses = React.useMemo(
+    () => selectedStatuses.filter((s) => !PRIMARY_STATUSES.includes(s)),
+    [selectedStatuses]
+  );
+
+  // Total count of jobs across all "other" (More dropdown) statuses; surfaced
+  // on the dropdown pill so users see how many jobs the long tail covers.
+  const otherStatusesTotalCount = React.useMemo(
+    () => OTHER_STATUSES.reduce((sum, s) => sum + (statusCounts[s] ?? 0), 0),
+    [statusCounts]
+  );
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -742,10 +1043,24 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Server already applied all filters including status filtering
+  // Server already applied some filters (name, user, workspace, pool, status)
+  // But we need to apply client-side filtering for labels
   const filteredData = React.useMemo(() => {
-    return data;
-  }, [data]);
+    let filtered = data;
+
+    // Apply client-side label filtering if present
+    const labelFilter = filters?.find(
+      (f) => (f.property || '').toLowerCase() === 'labels'
+    );
+
+    if (labelFilter && labelFilter.value) {
+      filtered = filtered.filter((item) => {
+        return evaluateCondition(item, labelFilter);
+      });
+    }
+
+    return filtered;
+  }, [data, filters]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -762,12 +1077,205 @@ export function ManagedJobsTable({
     });
   }, [filteredData, sortConfig]);
 
-  // Pagination is performed server-side; derive display indices and end-of-list
+  // Pagination is performed server-side by unique jobs (not tasks)
   const startIndex = (currentPage - 1) * pageSize;
   const paginatedData = sortedData; // already paginated by server
   const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
-  const endIndexDisplay =
-    totalCount > 0 ? Math.min(startIndex + sortedData.length, totalCount) : 0;
+
+  // Group jobs by job_id for expandable row functionality
+  const groupedJobs = React.useMemo(() => {
+    const groups = new Map();
+    paginatedData.forEach((job) => {
+      const jobId = job.id;
+      if (!groups.has(jobId)) {
+        groups.set(jobId, []);
+      }
+      groups.get(jobId).push(job);
+    });
+    return groups;
+  }, [paginatedData]);
+
+  // Pre-compute aggregated data for job groups to avoid inline computations during render
+  const jobGroupAggregates = React.useMemo(() => {
+    const aggregates = new Map();
+    groupedJobs.forEach((tasks, jobId) => {
+      if (tasks.length > 1) {
+        // Check if this job group has auxiliary tasks (is_primary_in_job_group=false)
+        const hasAuxiliaryTasks = tasks.some(
+          (t) => t.is_primary_in_job_group === false
+        );
+
+        // Compute aggregated status (respects is_primary_in_job_group)
+        const aggregatedStatus = getAggregatedStatus(tasks);
+
+        // Compute status tooltip showing all task statuses
+        // Also indicate which tasks are primary with a star marker
+        const statusTooltip = hasAuxiliaryTasks
+          ? `Task statuses:\n${tasks
+              .map((t, i) => {
+                const isPrimary = t.is_primary_in_job_group === true;
+                return `Task ${i}${isPrimary ? ' ★' : ''}: ${t.status}`;
+              })
+              .join('\n')}\n\n★ = Primary task`
+          : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
+
+        // Compute aggregated resources
+        const resourcesList = tasks
+          .map((t) => t.requested_resources || t.resources_str)
+          .filter(Boolean);
+        const uniqueResources = [...new Set(resourcesList)];
+        const resourcesDisplay =
+          resourcesList.length === 0
+            ? '-'
+            : uniqueResources.length === 1
+              ? uniqueResources[0]
+              : `${uniqueResources[0]} (+${tasks.length - 1} more)`;
+        const resourcesTooltip =
+          resourcesList.length === 0
+            ? null
+            : `Aggregated from ${tasks.length} tasks:\n${resourcesList.map((r, i) => `Task ${i}: ${r}`).join('\n')}`;
+
+        // Compute total recoveries
+        const totalRecoveries = tasks.reduce(
+          (sum, t) => sum + (t.recoveries || 0),
+          0
+        );
+
+        aggregates.set(jobId, {
+          aggregatedStatus,
+          statusTooltip,
+          resourcesDisplay,
+          resourcesTooltip,
+          totalRecoveries,
+        });
+      }
+    });
+    return aggregates;
+  }, [groupedJobs]);
+
+  // Check if there are any job groups (multi-task jobs) in the current view
+  const hasAnyJobGroups = React.useMemo(() => {
+    return Array.from(groupedJobs.values()).some((tasks) => tasks.length > 1);
+  }, [groupedJobs]);
+
+  // Toggle expand/collapse for a job group
+  const toggleJobGroup = (jobId) => {
+    setExpandedJobGroups((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId);
+      } else {
+        newSet.add(jobId);
+      }
+      return newSet;
+    });
+  };
+
+  // Check if a job group is expanded
+  const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
+
+  // Fetch the current user once so the Mine/Everyone toggle can scope
+  // results to the logged-in user. Routes through the shared
+  // getCurrentUserInfo() cache in client.js so we don't pay the
+  // /users/role round-trip more than once per page session (sidebar /
+  // config / etc. typically already populated the cache by the time we
+  // get here). The 'local' sentinel id means the caller is anonymous
+  // (no auth / basic-auth without a logged-in user) — there's no
+  // meaningful "Mine" view in that case, so flip to Everyone and hide
+  // the Mine/Everyone toggle so the dashboard works the way every
+  // unauthenticated tenant expects.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await getCurrentUserInfo();
+        if (cancelled) return;
+        if (info && info.id && info.id !== 'local') {
+          setCurrentUser({ id: info.id, name: info.name || info.id });
+        } else {
+          setUserScope('all');
+        }
+      } catch (e) {
+        // Role endpoint unreachable — assume no usable identity and
+        // default to Everyone rather than leaving the page stuck.
+        if (!cancelled) setUserScope('all');
+      } finally {
+        if (!cancelled) setUserResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // When the Mine view comes up empty, fire a one-shot probe for the
+  // Everyone total so the empty state can tell the user "you haven't
+  // submitted anything yet, but N jobs from others are out there —
+  // click to see them". Avoids leaving the user staring at a blank
+  // table wondering whether SkyPilot has any activity at all.
+  //
+  // We use the client-side rendered row count (data.length) as the
+  // empty signal rather than the server's totalNoFilter — totalNoFilter
+  // currently reflects the unfiltered (including-other-users) total and
+  // doesn't honor userMatch, so it would suppress this CTA for any
+  // installation where other users have jobs.
+  const [everyoneTotal, setEveryoneTotal] = useState(null);
+  useEffect(() => {
+    if (userScope !== 'mine') return;
+    if (!currentUser) return;
+    if (loading || isInitialLoad) return;
+    if (data.length > 0) return;
+    if (everyoneTotal !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await jobsCacheManager.getPaginatedJobs({
+          allUsers: true,
+          page: 1,
+          limit: 1,
+        });
+        if (cancelled) return;
+        setEveryoneTotal(resp?.totalNoFilter ?? resp?.total ?? 0);
+      } catch (e) {
+        if (!cancelled) setEveryoneTotal(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    userScope,
+    currentUser,
+    loading,
+    isInitialLoad,
+    data.length,
+    everyoneTotal,
+  ]);
+
+  // After ~1s of a non-initial load, fade a spinner overlay onto the
+  // table so the user knows their toggle/filter click is in-flight.
+  // We delay so quick (sub-second) fetches don't flash a spinner.
+  const [showSlowSpinner, setShowSlowSpinner] = useState(false);
+  useEffect(() => {
+    if (!loading || isInitialLoad) {
+      setShowSlowSpinner(false);
+      return undefined;
+    }
+    const t = setTimeout(() => setShowSlowSpinner(true), 1000);
+    return () => clearTimeout(t);
+  }, [loading, isInitialLoad]);
+
+  // Close the "More" status menu when clicking outside of it.
+  useEffect(() => {
+    if (!moreMenuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [moreMenuOpen]);
 
   // Handle status selection
   const handleStatusClick = (status) => {
@@ -797,11 +1305,6 @@ export function ManagedJobsTable({
     setCurrentPage(1);
   };
 
-  // Update status counts from API data
-  useEffect(() => {
-    setStatusCounts(apiStatusCounts);
-  }, [apiStatusCounts]);
-
   // Page navigation handlers
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -819,104 +1322,884 @@ export function ManagedJobsTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
+  // Define base columns with their order
+  // Each column's renderCell receives a context object:
+  // - item: The task data
+  // - renderMode: 'single' | 'groupParent' | 'groupChild'
+  // - jobId, tasks, taskIndex, aggregates (for job groups)
+  // - isExpanded, toggleJobGroup, hasAnyJobGroups (for job group UI)
+  const baseColumns = React.useMemo(
+    () => [
+      {
+        id: 'id',
+        order: 0,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('id')}
+          >
+            ID{getSortDirection('id')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const {
+            renderMode,
+            jobId,
+            taskIndex,
+            isExpanded,
+            toggleJobGroup,
+            hasAnyJobGroups,
+          } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                <div className="flex items-center">
+                  <button
+                    onClick={() => toggleJobGroup(jobId)}
+                    className="p-1 hover:bg-gray-200 rounded mr-1"
+                  >
+                    {isExpanded ? (
+                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                    ) : (
+                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                    )}
+                  </button>
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                    {jobId}
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
+
+          if (renderMode === 'groupChild') {
+            return (
+              <TableCell className="whitespace-nowrap relative">
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
+                <span className="text-gray-500 pl-6">{taskIndex}</span>
+              </TableCell>
+            );
+          }
+
+          // Single task
+          return (
+            <TableCell>
+              {hasAnyJobGroups ? (
+                <div className="flex items-center">
+                  <span className="w-6 mr-1" aria-hidden="true" />
+                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                    {item.id}
+                  </Link>
+                </div>
+              ) : (
+                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  {item.id}
+                </Link>
+              )}
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'name',
+        order: 1,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('name')}
+          >
+            Name{getSortDirection('name')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
+            ctx || {};
+
+          // Detect batch job via is_batch field or batch_total_batches presence
+          const isBatch =
+            item.is_batch === true || item.batch_total_batches != null;
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell className="whitespace-nowrap">
+                <div className="flex items-center">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                    {item.name}
+                  </Link>
+                  {isBatch && <BatchBadge className="ml-2" />}
+                  <button
+                    onClick={() => toggleJobGroup(jobId)}
+                    className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                  >
+                    JobGroup: {tasks.length} tasks
+                  </button>
+                </div>
+              </TableCell>
+            );
+          }
+
+          if (renderMode === 'groupChild') {
+            // Check if this job group has auxiliary tasks
+            const hasAuxiliaryTasks = tasks.some(
+              (t) => t.is_primary_in_job_group === false
+            );
+            return (
+              <TableCell className="whitespace-nowrap">
+                <Link
+                  href={`/jobs/${item.id}/${taskIndex}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {item.task || `Task ${taskIndex}`}
+                </Link>
+                {hasAuxiliaryTasks && item.is_primary_in_job_group === true && (
+                  <span className="ml-1.5">
+                    <PrimaryBadge />
+                  </span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task
+          return (
+            <TableCell className="whitespace-nowrap">
+              <div className="flex items-center">
+                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  {item.name}
+                </Link>
+                {isBatch && <BatchBadge className="ml-2" />}
+              </div>
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'user',
+        order: 2,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('user')}
+          >
+            User{getSortDirection('user')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <UserDisplay username={item.user} userHash={item.user_hash} />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'workspace',
+        order: 2.5,
+        conditional: true,
+        renderHeader: () =>
+          shouldShowWorkspace ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('workspace')}
+            >
+              Workspace{getSortDirection('workspace')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowWorkspace ? (
+            <TableCell>
+              <Link
+                href="/workspaces"
+                className="text-gray-700 hover:text-blue-600 hover:underline"
+              >
+                {item.workspace || 'default'}
+              </Link>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'submitted',
+        order: 3,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('submitted_at')}
+          >
+            Submitted{getSortDirection('submitted_at')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+        ),
+      },
+      {
+        id: 'duration',
+        order: 4,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('job_duration')}
+          >
+            Duration{getSortDirection('job_duration')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatDuration(item.job_duration)}</TableCell>
+        ),
+      },
+      {
+        id: 'status',
+        order: 5,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('status')}
+          >
+            Status{getSortDirection('status')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                <NonCapitalizedTooltip
+                  content={aggregates?.statusTooltip}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span>
+                    <StatusBadge status={aggregates?.aggregatedStatus} />
+                  </span>
+                </NonCapitalizedTooltip>
+              </TableCell>
+            );
+          }
+
+          // For batch jobs that are RUNNING with progress data,
+          // show the progress bar instead of the status badge.
+          const isBatchRunning =
+            item.status === 'RUNNING' && item.batch_total_batches != null;
+          if (isBatchRunning) {
+            return (
+              <TableCell>
+                <BatchProgressBar
+                  completed={item.batch_completed_batches || 0}
+                  total={item.batch_total_batches}
+                />
+              </TableCell>
+            );
+          }
+
+          // Single task or group child
+          return (
+            <TableCell>
+              <PluginSlot
+                name="jobs.table.status.badge"
+                context={item}
+                fallback={
+                  <StatusBadge
+                    status={item.status}
+                    statusTooltip={item.statusTooltip}
+                  />
+                }
+              />
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'infra',
+        order: 6,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('infra')}
+          >
+            Infra{getSortDirection('infra')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode } = ctx || {};
+
+          // For group parent, show simplified infra (no tooltip with region details)
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                {item.infra && item.infra !== '-' ? (
+                  <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
+                ) : (
+                  <span>-</span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task or group child - show full infra with tooltip
+          return (
+            <TableCell>
+              {item.infra && item.infra !== '-' ? (
+                <NonCapitalizedTooltip
+                  content={item.full_infra || item.infra}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span>
+                    <Link
+                      href="/infra"
+                      className="text-blue-600 hover:underline"
+                    >
+                      {item.cloud || item.infra.split('(')[0].trim()}
+                    </Link>
+                    {item.infra.includes('(') && (
+                      <span>
+                        {' ' +
+                          (() => {
+                            const NAME_TRUNCATE_LENGTH =
+                              UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                            const fullRegionPart = item.infra.substring(
+                              item.infra.indexOf('(')
+                            );
+                            const regionContent = fullRegionPart.substring(
+                              1,
+                              fullRegionPart.length - 1
+                            );
+                            if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                              return fullRegionPart;
+                            }
+                            const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                            return `(${truncatedRegion})`;
+                          })()}
+                      </span>
+                    )}
+                  </span>
+                </NonCapitalizedTooltip>
+              ) : (
+                <span>{item.infra || '-'}</span>
+              )}
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'requested_resources',
+        order: 7,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('cluster')}
+          >
+            Requested Resources{getSortDirection('cluster')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                {aggregates?.resourcesTooltip ? (
+                  <NonCapitalizedTooltip
+                    content={aggregates.resourcesTooltip}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>{aggregates.resourcesDisplay}</span>
+                  </NonCapitalizedTooltip>
+                ) : (
+                  <span>{aggregates?.resourcesDisplay}</span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task or group child
+          return (
+            <TableCell>
+              <NonCapitalizedTooltip
+                content={
+                  item.requested_resources ||
+                  item.resources_str_full ||
+                  item.resources_str ||
+                  '-'
+                }
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  {item.requested_resources || item.resources_str || '-'}
+                </span>
+              </NonCapitalizedTooltip>
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'recoveries',
+        order: 8,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('recoveries')}
+          >
+            Recoveries{getSortDirection('recoveries')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return <TableCell>{aggregates?.totalRecoveries}</TableCell>;
+          }
+
+          return <TableCell>{item.recoveries}</TableCell>;
+        },
+      },
+      {
+        id: 'pool',
+        order: 9.5,
+        conditional: true,
+        renderHeader: () =>
+          shouldShowPool ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('pool')}
+            >
+              Pool{getSortDirection('pool')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowPool ? (
+            <TableCell>
+              <div
+                className={
+                  poolsLoading ? 'blur-sm transition-all duration-300' : ''
+                }
+              >
+                {poolsLoading
+                  ? '-'
+                  : renderPoolLink(item.pool, item.pool_hash, poolsData)}
+              </div>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'details',
+        order: 10,
+        renderHeader: () => <TableHead>Details</TableHead>,
+        renderCell: (item, ctx) => {
+          const { renderMode } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return <TableCell>-</TableCell>;
+          }
+
+          // Use task_job_id for group children to avoid conflicts
+          const rowId =
+            ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+
+          return (
+            <TableCell>
+              {item.details ? (
+                <TruncatedDetails
+                  text={item.details}
+                  rowId={rowId}
+                  expandedRowId={expandedRowId}
+                  setExpandedRowId={setExpandedRowId}
+                />
+              ) : (
+                '-'
+              )}
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'logs',
+        order: 11,
+        renderHeader: () => <TableHead>Logs</TableHead>,
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId } = ctx || {};
+
+          // For group parent, use jobId; otherwise use item.id
+          const logJobId = renderMode === 'groupParent' ? jobId : item.id;
+
+          return (
+            <TableCell>
+              <Status2Actions
+                jobParent="/jobs"
+                jobId={logJobId}
+                managed={true}
+                workspace={item.workspace}
+              />
+            </TableCell>
+          );
+        },
+      },
+    ],
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      poolsLoading,
+      poolsData,
+    ]
+  );
+
+  // Transform function to convert plugin columns to the format expected by the table
+  const transformPluginColumn = React.useCallback(
+    (col) => ({
+      id: col.id,
+      order: col.header.order,
+      isPlugin: true,
+      pluginColumn: col,
+      renderHeader: () => {
+        const baseClasses = col.header.sortKey
+          ? 'sortable whitespace-nowrap'
+          : 'whitespace-nowrap';
+        const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+        return (
+          <TableHead
+            className={className}
+            onClick={
+              col.header.sortKey
+                ? () => requestSort(col.header.sortKey)
+                : undefined
+            }
+          >
+            {col.header.label}
+            {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          </TableHead>
+        );
+      },
+      renderCell: (item, ctx) => {
+        // Merge job group context with plugin context
+        const context = {
+          item,
+          shouldShowWorkspace,
+          shouldShowPool,
+          expandedRowId,
+          setExpandedRowId,
+          expandedRowRef,
+          // Forward job group context for plugins that need it
+          ...(ctx || {}),
+        };
+        const cellContent = col.cell.render(item, context);
+        return (
+          <TableCell className={col.cell.className || ''}>
+            {cellContent}
+          </TableCell>
+        );
+      },
+    }),
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      setExpandedRowId,
+      expandedRowRef,
+    ]
+  );
+
+  // Merge base and plugin columns using the plugin system
+  // Plugin columns with the same ID as base columns will automatically replace them
+  const visibleColumns = useMergedTableColumns(
+    'jobs',
+    baseColumns,
+    {
+      shouldShowColumn: (columnId) => {
+        // Handle conditional columns
+        if (columnId === 'workspace') return shouldShowWorkspace;
+        if (columnId === 'pool') return shouldShowPool;
+        return true;
+      },
+    },
+    transformPluginColumn
+  );
+
+  // Calculate dynamic colSpan (used for expanded rows)
+  const totalColSpan = visibleColumns.length;
+
   return (
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center justify-between text-sm mb-1">
-          <div className="flex flex-wrap items-center">
+        <div className="flex items-center justify-between text-sm mb-1">
+          <div className="flex flex-wrap items-center min-w-0">
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
               )}
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <button
-                  key={status}
-                  onClick={() => handleStatusClick(status)}
-                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                    isStatusHighlighted(status) ||
-                    selectedStatuses.includes(status)
-                      ? getBadgeStyle(status)
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <span>{status}</span>
-                  <span
-                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              ))}
-              {totalNoFilter > 0 && (
-                <div className="flex items-center ml-2 gap-2">
-                  <span className="text-gray-500">(</span>
+              {/* Primary statuses: always rendered in fixed order so the bar
+                  doesn't jitter when counts change. The count badge uses
+                  tabular-nums + a fixed min-width so the chip width stays
+                  stable as counts change between 1 and many digits. */}
+              {PRIMARY_STATUSES.map((status) => {
+                const count = statusCounts[status] ?? 0;
+                const highlighted =
+                  isStatusHighlighted(status) ||
+                  selectedStatuses.includes(status);
+                return (
                   <button
-                    onClick={() => {
-                      // When showing all jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('all');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'all' && showAllMode
-                        ? 'text-purple-700 underline'
-                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                      highlighted
+                        ? getBadgeStyle(status)
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                     }`}
                   >
-                    show all jobs
+                    <span>{status}</span>
+                    <span
+                      className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                    >
+                      {count}
+                    </span>
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
+                );
+              })}
+              {/* Selected non-primary statuses surface as inline chips so the
+                  user can always see which filters are active without opening
+                  the dropdown. */}
+              {nonPrimarySelectedStatuses.map((status) => {
+                const count = statusCounts[status] ?? 0;
+                return (
                   <button
-                    onClick={() => {
-                      // When showing all active jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('active');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'active' && showAllMode
-                        ? 'text-green-700 underline'
-                        : 'text-gray-600 hover:text-green-700 hover:underline'
-                    }`}
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
                   >
-                    show all active jobs
+                    <span>{status}</span>
+                    <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
+                      {count}
+                    </span>
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
-                  <button
-                    onClick={() => {
-                      // When showing all finished jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('finished');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'finished' && showAllMode
-                        ? 'text-blue-700 underline'
-                        : 'text-gray-600 hover:text-blue-700 hover:underline'
-                    }`}
+                );
+              })}
+              {/* More dropdown: holds the long tail of statuses
+                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
+              {(() => {
+                // Count dropdown items currently included in the filter
+                // (either explicitly via selectedStatuses or implicitly
+                // because Active is selected). When the user is in any
+                // narrowed state, surface that count on the pill so the
+                // button itself signals filtering is active.
+                const otherIncludedCount = OTHER_STATUSES.filter((s) =>
+                  isStatusHighlighted(s)
+                ).length;
+                const otherTotalCount = otherStatusesTotalCount;
+                const isNarrowed =
+                  activeTab !== 'all' || selectedStatuses.length > 0;
+                return (
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      onClick={() => setMoreMenuOpen((v) => !v)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
+                        isNarrowed
+                          ? 'bg-gray-200 text-gray-800'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      }`}
+                      aria-haspopup="true"
+                      aria-expanded={moreMenuOpen}
+                    >
+                      <span>More</span>
+                      {isNarrowed ? (
+                        <span className="text-xs tabular-nums bg-white/70 px-1.5 py-0.5 rounded">
+                          <span className="inline-block text-center min-w-[1rem]">
+                            {otherIncludedCount}
+                          </span>{' '}
+                          selected
+                        </span>
+                      ) : (
+                        otherTotalCount > 0 && (
+                          <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-gray-200 px-1.5 py-0.5 rounded">
+                            {otherTotalCount}
+                          </span>
+                        )
+                      )}
+                      <ChevronDownIcon
+                        className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    {moreMenuOpen && (
+                      <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
+                        {OTHER_STATUSES.map((status) => {
+                          const count = statusCounts[status] ?? 0;
+                          // A status is included in the current view either
+                          // explicitly (selectedStatuses) or implicitly via
+                          // the Active/All toggle (e.g. PENDING/STARTING are
+                          // implicitly included when Active is selected).
+                          // Both cases should light up the check + label.
+                          const included = isStatusHighlighted(status);
+                          const explicit = selectedStatuses.includes(status);
+                          return (
+                            <button
+                              key={status}
+                              onClick={() => handleStatusClick(status)}
+                              className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
+                                explicit ? 'bg-gray-50' : ''
+                              }`}
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                <CheckIcon
+                                  className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
+                                />
+                                <span
+                                  className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+                                >
+                                  {status}
+                                </span>
+                              </span>
+                              <span
+                                className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                              >
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {/* Activity toggle stays visible past the loading state.
+                  Hiding it on totalNoFilter===0 stranded users who'd
+                  narrowed Everyone with a filter that returned zero,
+                  or whose Mine view was empty — they had no easy way
+                  back. The toggle is harmless when the table is empty
+                  and indispensable as soon as anything else changes. */}
+              {!isInitialLoad &&
+                (() => {
+                  const selectTab = (tab) => {
+                    React.startTransition(() => {
+                      setActiveTab(tab);
+                      setSelectedStatuses([]);
+                      setShowAllMode(true);
+                      setCurrentPage(1);
+                    });
+                  };
+                  const isActive = activeTab === 'active' && showAllMode;
+                  const isAll = activeTab === 'all' && showAllMode;
+                  return (
+                    <div
+                      role="tablist"
+                      aria-label="Filter jobs by activity"
+                      className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+                    >
+                      <button
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => selectTab('active')}
+                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                          isActive
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Active
+                      </button>
+                      <button
+                        role="tab"
+                        aria-selected={isAll}
+                        onClick={() => selectTab('all')}
+                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                          isAll
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        All
+                      </button>
+                    </div>
+                  );
+                })()}
+              {(() => {
+                if (!currentUser) return null;
+                if (isInitialLoad) return null;
+                const explicitUserFilter = (filters || []).find(
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                const isMine = explicitUserFilter
+                  ? String(explicitUserFilter.value) === currentUser.id ||
+                    String(explicitUserFilter.value) === currentUser.name
+                  : userScope === 'mine';
+                const isEveryone = !explicitUserFilter && userScope === 'all';
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by owner"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
                   >
-                    show all finished jobs
-                  </button>
-                  <span className="text-gray-500">)</span>
-                </div>
-              )}
+                    <button
+                      role="tab"
+                      aria-selected={isMine}
+                      onClick={() => selectScope('mine')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isMine
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      My Jobs
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isEveryone}
+                      onClick={() => selectScope('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isEveryone
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      All Jobs
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Scope hint: when filtered to the current user's jobs,
+                  remind them and offer a one-click path to All Jobs.
+                  Sits at the tail of the chip + toggle row (same flex-wrap
+                  container) so it flows inline with the filter bar on
+                  wide screens and wraps below on narrow ones. Suppress
+                  in the empty state (the CTA already says this) and
+                  when an explicit user filter has overridden the toggle. */}
+              {(() => {
+                const explicitUserFilter = (filters || []).find(
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                const showHint =
+                  userScope === 'mine' &&
+                  currentUser &&
+                  !explicitUserFilter &&
+                  !isInitialLoad &&
+                  paginatedData.length > 0;
+                if (!showHint) return null;
+                return (
+                  <div
+                    className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
+                    <span className="text-gray-700">
+                      Showing your jobs only.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => selectScope('all')}
+                      className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                    >
+                      View all jobs
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 ml-2">
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
@@ -979,95 +2262,40 @@ export function ManagedJobsTable({
           </div>
         )}
 
-      <Card>
-        <div className="overflow-x-auto rounded-lg">
-          <Table className="min-w-full">
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto relative">
+          {showSlowSpinner && (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 pointer-events-none transition-opacity"
+              aria-hidden="true"
+            >
+              <CircularProgress size={28} />
+            </div>
+          )}
+          <Table className="min-w-full border-collapse">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('id')}
-                >
-                  ID{getSortDirection('id')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('name')}
-                >
-                  Name{getSortDirection('name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('user')}
-                >
-                  User{getSortDirection('user')}
-                </TableHead>
-                {shouldShowWorkspace && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('workspace')}
-                  >
-                    Workspace{getSortDirection('workspace')}
-                  </TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
                 )}
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('submitted_at')}
-                >
-                  Submitted{getSortDirection('submitted_at')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('job_duration')}
-                >
-                  Duration{getSortDirection('job_duration')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('cluster')}
-                >
-                  Resources{getSortDirection('cluster')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('recoveries')}
-                >
-                  Recoveries{getSortDirection('recoveries')}
-                </TableHead>
-                {shouldShowPool && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('pool')}
-                  >
-                    Pool{getSortDirection('pool')}
-                  </TableHead>
-                )}
-
-                <TableHead>Details</TableHead>
-                <TableHead>Logs</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && isInitialLoad ? (
+              {(loading ||
+                (userScope === 'mine' &&
+                  currentUser &&
+                  everyoneTotal === null)) &&
+              paginatedData.length === 0 ? (
+                // Show the loading row both on initial fetch AND whenever
+                // a refetch starts with an empty table (e.g. right after
+                // clicking "View all jobs" or flipping the My Jobs/All
+                // Jobs toggle from a zero-row scope). Also covers the
+                // brief window between the empty Mine fetch returning
+                // and the Everyone probe answering, so the user doesn't
+                // flash through "No active jobs" before the CTA renders.
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -1078,180 +2306,107 @@ export function ManagedJobsTable({
                 </TableRow>
               ) : paginatedData.length > 0 ? (
                 <>
-                  {paginatedData.map((item) => (
-                    <React.Fragment key={item.task_job_id}>
-                      <TableRow>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.id}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.name}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <UserDisplay
-                            username={item.user}
-                            userHash={item.user_hash}
-                          />
-                        </TableCell>
-                        {shouldShowWorkspace && (
-                          <TableCell>
-                            <Link
-                              href="/workspaces"
-                              className="text-gray-700 hover:text-blue-600 hover:underline"
-                            >
-                              {item.workspace || 'default'}
-                            </Link>
-                          </TableCell>
-                        )}
-                        <TableCell>
-                          {formatSubmittedTime(item.submitted_at)}
-                        </TableCell>
-                        <TableCell>
-                          {formatDuration(item.job_duration)}
-                        </TableCell>
-                        <TableCell>
-                          <PluginSlot
-                            name="jobs.table.status.badge"
-                            context={item}
-                            fallback={
-                              <StatusBadge
-                                status={item.status}
-                                statusTooltip={item.statusTooltip}
-                              />
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {item.infra && item.infra !== '-' ? (
-                            <NonCapitalizedTooltip
-                              content={item.full_infra || item.infra}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span>
-                                <Link
-                                  href="/infra"
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  {item.cloud ||
-                                    item.infra.split('(')[0].trim()}
-                                </Link>
-                                {item.infra.includes('(') && (
-                                  <span>
-                                    {' ' +
-                                      (() => {
-                                        const NAME_TRUNCATE_LENGTH =
-                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                                        const fullRegionPart =
-                                          item.infra.substring(
-                                            item.infra.indexOf('(')
-                                          );
-                                        const regionContent =
-                                          fullRegionPart.substring(
-                                            1,
-                                            fullRegionPart.length - 1
-                                          );
+                  {Array.from(groupedJobs.entries()).map(([jobId, tasks]) => {
+                    const isMultiTask = tasks.length > 1;
+                    const isExpanded = isJobGroupExpanded(jobId);
+                    const firstTask = tasks[0];
 
-                                        if (
-                                          regionContent.length <=
-                                          NAME_TRUNCATE_LENGTH
-                                        ) {
-                                          return fullRegionPart;
-                                        }
-
-                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                                        return `(${truncatedRegion})`;
-                                      })()}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
-                          ) : (
-                            <span>{item.infra || '-'}</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <NonCapitalizedTooltip
-                            content={
-                              item.resources_str_full || item.resources_str
-                            }
-                            className="text-sm text-muted-foreground"
-                          >
-                            <span>{item.resources_str}</span>
-                          </NonCapitalizedTooltip>
-                        </TableCell>
-                        <TableCell>{item.recoveries}</TableCell>
-                        {shouldShowPool && (
-                          <TableCell>
-                            <div
-                              className={
-                                poolsLoading
-                                  ? 'blur-sm transition-all duration-300'
-                                  : ''
-                              }
-                            >
-                              {poolsLoading
-                                ? '-'
-                                : renderPoolLink(
-                                    item.pool,
-                                    item.pool_hash,
-                                    poolsData
-                                  )}
-                            </div>
-                          </TableCell>
-                        )}
-                        <TableCell>
-                          {item.details ? (
-                            <TruncatedDetails
+                    // For single-task jobs, render using plugin columns
+                    if (!isMultiTask) {
+                      const item = firstTask;
+                      const singleCtx = {
+                        renderMode: 'single',
+                        hasAnyJobGroups,
+                      };
+                      return (
+                        <React.Fragment key={item.task_job_id}>
+                          <TableRow>
+                            {visibleColumns.map((col) => {
+                              const cell = col.renderCell(item, singleCtx);
+                              return cell
+                                ? React.cloneElement(cell, { key: col.id })
+                                : null;
+                            })}
+                          </TableRow>
+                          {expandedRowId === item.id && (
+                            <ExpandedDetailsRow
                               text={item.details}
-                              rowId={item.id}
-                              expandedRowId={expandedRowId}
-                              setExpandedRowId={setExpandedRowId}
+                              colSpan={totalColSpan}
+                              innerRef={expandedRowRef}
                             />
-                          ) : (
-                            '-'
                           )}
-                        </TableCell>
-                        <TableCell>
-                          <Status2Actions
-                            jobParent="/jobs"
-                            jobId={item.id}
-                            managed={true}
-                            workspace={item.workspace}
-                          />
-                        </TableCell>
-                      </TableRow>
-                      {expandedRowId === item.id && (
-                        <ExpandedDetailsRow
-                          text={item.details}
-                          colSpan={
-                            11 +
-                            (shouldShowWorkspace ? 1 : 0) +
-                            (shouldShowPool ? 1 : 0)
-                          }
-                          innerRef={expandedRowRef}
-                        />
-                      )}
-                    </React.Fragment>
-                  ))}
+                        </React.Fragment>
+                      );
+                    }
+
+                    // For multi-task jobs, render parent row with expand toggle
+                    // Get pre-computed aggregates for this job group
+                    const aggregates = jobGroupAggregates.get(jobId) || {};
+                    const parentCtx = {
+                      renderMode: 'groupParent',
+                      jobId,
+                      tasks,
+                      aggregates,
+                      isExpanded,
+                      toggleJobGroup,
+                      hasAnyJobGroups,
+                    };
+
+                    return (
+                      <React.Fragment key={`group-${jobId}`}>
+                        {/* Parent row for job group */}
+                        <TableRow className="hover:bg-gray-50">
+                          {visibleColumns.map((col) => {
+                            const cell = col.renderCell(firstTask, parentCtx);
+                            return cell
+                              ? React.cloneElement(cell, { key: col.id })
+                              : null;
+                          })}
+                        </TableRow>
+
+                        {/* Child task rows when expanded */}
+                        {isExpanded &&
+                          tasks.map((task, taskIndex) => {
+                            const childCtx = {
+                              renderMode: 'groupChild',
+                              jobId,
+                              tasks,
+                              taskIndex,
+                              aggregates,
+                              isExpanded,
+                              toggleJobGroup,
+                              hasAnyJobGroups,
+                            };
+                            return (
+                              <React.Fragment key={task.task_job_id}>
+                                <TableRow className="bg-gray-50/50">
+                                  {visibleColumns.map((col) => {
+                                    const cell = col.renderCell(task, childCtx);
+                                    return cell
+                                      ? React.cloneElement(cell, {
+                                          key: col.id,
+                                        })
+                                      : null;
+                                  })}
+                                </TableRow>
+                                {expandedRowId === task.task_job_id && (
+                                  <ExpandedDetailsRow
+                                    text={task.details}
+                                    colSpan={totalColSpan}
+                                    innerRef={expandedRowRef}
+                                  />
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                      </React.Fragment>
+                    );
+                  })}
                 </>
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6"
                   >
                     <div className="flex flex-col items-center space-y-4">
@@ -1267,9 +2422,41 @@ export function ManagedJobsTable({
                           </div>
                         </div>
                       )}
-                      {!controllerStopped && !controllerLaunching && (
-                        <p className="text-gray-500">No active jobs</p>
-                      )}
+                      {!controllerStopped &&
+                        !controllerLaunching &&
+                        (userScope === 'mine' &&
+                        currentUser &&
+                        activeTab === 'all' &&
+                        showAllMode &&
+                        everyoneTotal > 0 ? (
+                          <div className="flex flex-col items-center space-y-2 max-w-md">
+                            <p className="text-gray-700">
+                              You haven&apos;t submitted any managed jobs yet.
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {everyoneTotal.toLocaleString()} job
+                              {everyoneTotal === 1 ? '' : 's'} in total — switch
+                              to All Jobs to see them.
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                React.startTransition(() => {
+                                  setUserScope('all');
+                                  setSelectedStatuses([]);
+                                  setShowAllMode(true);
+                                  setCurrentPage(1);
+                                });
+                              }}
+                              className="text-sky-blue hover:text-sky-blue-bright"
+                            >
+                              View all jobs
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-gray-500">No active jobs</p>
+                        ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">
@@ -1311,7 +2498,7 @@ export function ManagedJobsTable({
       <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
         <div className="flex items-center space-x-4">
           <div className="flex items-center">
-            <span className="mr-2">Rows per page:</span>
+            <span className="mr-2">Jobs per page:</span>
             <div className="relative inline-block">
               <select
                 value={pageSize}
@@ -1343,7 +2530,7 @@ export function ManagedJobsTable({
           </div>
           <div>
             {totalCount > 0
-              ? `${startIndex + 1} – ${endIndexDisplay} of ${totalCount}`
+              ? `${startIndex + 1} – ${Math.min(startIndex + groupedJobs.size, totalCount)} of ${totalCount}`
               : '0 – 0 of 0'}
           </div>
           <div className="flex items-center space-x-2">
@@ -1433,6 +2620,7 @@ export function Status2Actions({
   const handleLogsClick = (e, type) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('view_logs', { jobId });
     router.push({
       pathname: `${jobParent}/${jobId}`,
       query: { tab: type },
@@ -1442,6 +2630,7 @@ export function Status2Actions({
   const handleDownloadLogs = (e, controller = false) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('download_logs', { jobId });
 
     if (managed) {
       // For managed jobs
@@ -1480,12 +2669,13 @@ export function Status2Actions({
       </Tooltip>
       <Tooltip
         key="downloadlogs"
-        content="Download Job Logs"
+        content="Download All Task Logs (zip)"
         className="capitalize text-sm text-muted-foreground"
       >
         <button
           onClick={(e) => handleDownloadLogs(e, false)}
           className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+          title="Download logs"
         >
           <Download className="w-4 h-4" />
           {withLabel && <span className="ml-1.5">Download</span>}

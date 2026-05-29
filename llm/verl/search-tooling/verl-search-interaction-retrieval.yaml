@@ -1,0 +1,112 @@
+# Search Tool Retrieval Service
+#
+# This service provides Wikipedia retrieval capabilities using FAISS indexing.
+# It runs on CPU nodes and exposes a retrieval API on port 8000.
+#
+# Usage:
+#   sky launch -c retrieval llm/verl/verl-search-interaction-retrieval.yaml --cpus 32+ --memory 256+ -y
+#
+# Get endpoint:
+#   sky status retrieval --endpoint 8000
+# 
+# OR with sky serve
+#   sky serve up -n retrieval llm/verl/verl-search-interaction-retrieval.yaml --cpus 32+ --memory 256+ -y
+# 
+# Get endpoint:
+#   sky serve status retrieval --endpoint 8000
+
+service:
+  readiness_probe: /
+  replicas: 3
+
+resources:
+  cpus: 32+
+  memory: 256+
+  use_spot: false
+  ports:
+    - 8000  # Retrieval service API
+
+num_nodes: 1
+
+envs:
+  RETRIEVAL_TOPK: 3
+  RETRIEVER_NAME: e5
+  RETRIEVER_MODEL: intfloat/e5-base-v2
+
+setup: |
+  set -e
+
+  echo "=== Retrieval Service Setup ==="
+
+  # System dependencies
+  echo "Installing system dependencies..."
+  sudo apt update && sudo apt install -y iproute2
+
+  # Python environment
+  echo "Setting up Python virtual environment..."
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+
+  # Install retrieval service dependencies
+  echo "Installing retrieval service dependencies..."
+  uv pip install "torch==2.8.*" torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+  uv pip install transformers datasets huggingface_hub
+  uv pip install faiss-cpu
+  uv pip install uvicorn fastapi uvloop==0.21.0
+
+  # Download Wikipedia corpus and FAISS index
+  echo "Downloading Wikipedia corpus and FAISS index..."
+  export save_path=~/dataset
+  mkdir -p $save_path
+
+  huggingface-cli download maknee/wiki-18-subsets wiki-18-100k.jsonl.gz --repo-type=dataset --local-dir $save_path
+  huggingface-cli download maknee/wiki-18-subsets e5_Flat-100k.index --repo-type=dataset --local-dir $save_path
+
+  # Move files to expected locations
+  mv $save_path/wiki-18-100k.jsonl.gz $save_path/wiki-18.jsonl.gz
+  mv $save_path/e5_Flat-100k.index $save_path/e5_Flat.index
+
+  # Decompress the JSONL file
+  gzip -d $save_path/wiki-18.jsonl.gz -f
+
+  # Clone VERL repository for retrieval server code
+  echo "Cloning repositories..."
+  git clone https://github.com/volcengine/verl.git
+  cd verl
+  git checkout v0.6.0
+
+  # Patch retrieval server for CPU-only usage (comment out CUDA calls)
+  echo "Patching retrieval server for CPU-only usage..."
+  sed -i 's/^\(\s*\)\(model\.cuda()\)/\1# \2  # Commented out for CPU-only deployment/' \
+    examples/sglang_multiturn/search_r1_like/local_dense_retriever/retrieval_server.py
+  sed -i 's/^\(\s*\)\(inputs = {k: v\.cuda() for k, v in inputs\.items()}\)/\1# \2  # Commented out for CPU-only deployment/' \
+    examples/sglang_multiturn/search_r1_like/local_dense_retriever/retrieval_server.py
+
+  cd ..
+
+  echo "✓ Retrieval service setup complete!"
+
+run: |
+  set -e
+
+  echo "=== Starting Retrieval Service ==="
+
+  # Activate environment
+  source .venv/bin/activate
+
+  # Set up paths
+  save_path=~/dataset
+  index_file=$save_path/e5_Flat.index
+  corpus_file=$save_path/wiki-18.jsonl
+
+  # Start retrieval server
+  echo "Starting retrieval server on port 8000..."
+  cd verl
+  python examples/sglang_multiturn/search_r1_like/local_dense_retriever/retrieval_server.py \
+    --index_path $index_file \
+    --corpus_path $corpus_file \
+    --topk $RETRIEVAL_TOPK \
+    --retriever_name $RETRIEVER_NAME \
+    --retriever_model $RETRIEVER_MODEL &
+
+  echo "✓ Retrieval service running on port 8000"

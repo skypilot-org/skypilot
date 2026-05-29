@@ -627,6 +627,35 @@ class TestEfaHelpers:
             aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-northeast-1')
 
 
+class TestAwsLoginIdentityDetection:
+    """Detection of the `aws login` credential provider (2026 AWS CLI command)."""
+
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
+    @mock.patch('subprocess.run')
+    def test_aws_login_detected_as_LOGIN_identity_type(self, mock_run,
+                                                       mock_get_profile):
+        """`aws configure list` Type column 'login' → AWSIdentityType.LOGIN."""
+        configure_list_output = (
+            b'      Name                    Value             Type    Location\n'
+            b'      ----                    -----             ----    --------\n'
+            b'   profile                <not set>             None    None\n'
+            b'access_key     ****************abcd            login\n'
+            b'secret_key     ****************abcd            login\n'
+            b'    region                ap-northeast-1      config-file    ~/.aws/config\n'
+        )
+        mock_run.return_value = mock.Mock(returncode=0,
+                                          stdout=configure_list_output)
+        mock_get_profile.return_value = None
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        identity_type = aws_mod.AWS._current_identity_type()
+        assert identity_type == aws_mod.AWSIdentityType.LOGIN
+
+    def test_login_credentials_do_not_auto_expire(self):
+        """LOGIN auto-rotates via refresh token, so should not be in expirable set."""
+        assert not aws_mod.AWSIdentityType.LOGIN.can_credential_expire()
+
+
 class TestAwsConfigureList:
 
     @mock.patch('sky.adaptors.aws.get_workspace_profile')

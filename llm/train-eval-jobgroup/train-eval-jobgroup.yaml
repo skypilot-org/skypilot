@@ -1,0 +1,90 @@
+# Parallel Training and Evaluation with Shared Volume
+#
+# This example demonstrates a job group with parallel training and evaluation
+# tasks that share a Kubernetes volume for checkpoints. The evaluator monitors
+# the checkpoint directory and evaluates models as training produces them.
+#
+# Architecture:
+#   - trainer: Trains ResNet-18 on CIFAR-10, saves checkpoints to shared volume
+#   - evaluator: Watches for checkpoints, evaluates and reports accuracy
+#
+# Completion Behavior:
+#   When training completes, the trainer writes a "training_complete" marker
+#   file to the shared volume. The evaluator detects this marker, finishes
+#   evaluating any remaining checkpoints, and exits gracefully. Both tasks
+#   complete naturally without forced termination.
+#
+# Usage:
+#   # First, create the shared volume:
+#   sky volume apply llm/train-eval-jobgroup/train-eval-ckpts-volume.yaml
+#
+#   # Then launch the job group:
+#   sky jobs launch llm/train-eval-jobgroup/train-eval-jobgroup.yaml
+#
+# The components share storage via a Kubernetes PVC:
+#   /checkpoints - Shared volume for checkpoint files
+---
+name: train-eval
+execution: parallel
+
+---
+# Trainer: Trains ResNet-18 on CIFAR-10 and saves checkpoints
+name: trainer
+resources:
+  accelerators: H100:1
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/train-eval-jobgroup/code
+
+volumes:
+  /checkpoints: train-eval-ckpts
+
+envs:
+  CHECKPOINT_DIR: /checkpoints
+  NUM_EPOCHS: 10
+  SAVE_EVERY: 2
+
+setup: |
+  uv pip install torch torchvision --system
+
+run: |
+  echo "Starting trainer..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Checkpoints will be saved to ${CHECKPOINT_DIR}"
+
+  cd /code
+  python trainer.py \
+    --checkpoint-dir ${CHECKPOINT_DIR} \
+    --num-epochs ${NUM_EPOCHS} \
+    --save-every ${SAVE_EVERY}
+
+---
+# Evaluator: Watches for checkpoints and evaluates them
+name: evaluator
+resources:
+  accelerators: H100:1
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/train-eval-jobgroup/code
+
+volumes:
+  /checkpoints: train-eval-ckpts
+
+envs:
+  CHECKPOINT_DIR: /checkpoints
+
+setup: |
+  uv pip install torch torchvision --system
+
+run: |
+  echo "Starting evaluator..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Watching for checkpoints in ${CHECKPOINT_DIR}"
+
+  cd /code
+  python evaluator.py \
+    --checkpoint-dir ${CHECKPOINT_DIR}

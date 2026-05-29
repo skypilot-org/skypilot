@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import base64
 import ctypes
 import difflib
 import enum
@@ -8,13 +9,16 @@ import gc
 import getpass
 import hashlib
 import inspect
+import json
 import os
 import platform
 import random
 import re
+import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -27,18 +31,19 @@ from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
-from sky.usage import constants as usage_constants
-from sky.utils import annotations
 from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
 
 if typing.TYPE_CHECKING:
+    import webbrowser
+
     import jinja2
     import psutil
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
+    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -72,20 +77,6 @@ class ProcessStatus(enum.Enum):
 
     # The process failed
     FAILED = 'FAILED'
-
-
-@annotations.lru_cache(scope='request')
-def get_usage_run_id() -> str:
-    """Returns a unique run id for each 'run'.
-
-    A run is defined as the lifetime of a process that has imported `sky`
-    and has called its CLI or programmatic APIs. For example, two successive
-    `sky launch` are two runs.
-    """
-    usage_run_id = os.getenv(usage_constants.USAGE_RUN_ID_ENV_VAR)
-    if usage_run_id is not None:
-        return usage_run_id
-    return str(uuid.uuid4())
 
 
 def is_valid_user_hash(user_hash: Optional[str]) -> bool:
@@ -187,6 +178,79 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 'ensure it is fully matched by regex (e.g., '
                 'only contains letters, numbers and dash): '
                 f'{valid_regex}')
+
+
+def cluster_name_looks_like_file_path(cluster_name: Optional[str]) -> bool:
+    """Returns True if the cluster name looks like a file path.
+
+    This detects a common user mistake: typing 'sky launch -c job.yaml'
+    instead of 'sky launch -c mycluster job.yaml'.
+    """
+    if cluster_name is None:
+        return False
+
+    file_extensions = ('.yaml', '.yml', '.json')
+    return (cluster_name.lower().endswith(file_extensions) or
+            os.path.isfile(os.path.expanduser(cluster_name)))
+
+
+def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
+    """Errors out on invalid recipe names.
+
+    Recipe names must:
+    - Start with a letter
+    - Contain only letters, numbers, and dashes (no underscores or dots)
+    - End with a letter or number
+    - Be at most constants.RECIPE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the recipe name is invalid.
+    """
+    if recipe_name is None:
+        return
+    if len(recipe_name) > constants.RECIPE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is too long; '
+                f'maximum length is {constants.RECIPE_NAME_MAX_LENGTH} '
+                f'characters, got {len(recipe_name)}')
+    valid_regex = constants.RECIPE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, recipe_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers, and dashes).')
+
+
+def check_workspace_name_is_valid(workspace_name: Optional[str]) -> None:
+    """Errors out on invalid workspace names.
+
+    Workspace names must:
+    - Start with a lowercase letter
+    - Contain only lowercase letters, numbers, dashes, and underscores
+    - End with a lowercase letter or number
+    - Be at most constants.WORKSPACE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidWorkspaceNameError: If the workspace name is invalid.
+    """
+    if workspace_name is None:
+        return
+    if len(workspace_name) > constants.WORKSPACE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidWorkspaceNameError(
+                f'Workspace name "{workspace_name}" is too long; '
+                f'maximum length is {constants.WORKSPACE_NAME_MAX_LENGTH} '
+                f'characters, got {len(workspace_name)}')
+    valid_regex = constants.WORKSPACE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, workspace_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidWorkspaceNameError(
+                f'Workspace name "{workspace_name}" is invalid; '
+                'ensure it starts with a lowercase letter, ends with '
+                'a lowercase letter or number, and contains only '
+                'lowercase letters, numbers, dashes, and underscores.')
 
 
 def make_cluster_name_on_cloud(display_name: str,
@@ -417,7 +481,7 @@ def get_pretty_entrypoint_cmd() -> str:
     # Redact sensitive values from secrets arguments
     argv = _redact_secrets_values(argv)
 
-    return ' '.join(argv)
+    return shlex.join(argv)
 
 
 def read_last_n_lines(file_path: str,
@@ -723,7 +787,44 @@ def remove_file_if_exists(path: Optional[str]):
 
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
-    return 'microsoft' in platform.uname()[3].lower()
+    return 'microsoft' in platform.uname().release.lower()
+
+
+def open_browser(url: str) -> bool:
+    """Open a URL in the default browser, with WSL support.
+
+    On WSL, Python's webbrowser module tries xdg-open which fails because
+    there are no GUI browsers in the Linux environment. This function detects
+    WSL and uses Windows-side browser opening instead.
+
+    Returns:
+        True if the browser was likely opened successfully, False otherwise.
+    """
+    if is_wsl():
+        # On WSL, use Windows-side browser opening.
+        # Try wslview (from wslu package) first, then powershell.exe.
+        for cmd in [
+            ['wslview', url],
+            ['powershell.exe', '/c', 'start', url],
+            ['cmd.exe', '/c', 'start', url],
+        ]:
+            try:
+                logger.debug(f'trying to open browser via {cmd}')
+                result = subprocess.run(cmd,
+                                        capture_output=True,
+                                        timeout=10,
+                                        check=False)
+                if result.returncode == 0:
+                    return True
+            except FileNotFoundError:
+                logger.debug(f'{cmd[0]} failed', exc_info=True)
+                continue
+            except Exception:  # pylint: disable=broad-except
+                logger.debug('failed', exc_info=True)
+                continue
+        return False
+
+    return webbrowser.open(url)
 
 
 def find_free_port(start_port: int) -> int:
@@ -797,23 +898,34 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                 known_fields = set(e.schema.get('properties', {}).keys())
                 assert isinstance(e.instance,
                                   dict), 'Instance must be a dictionary'
+                sub_msgs = []
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'Instead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
+                            sub_msgs.append(
+                                f'Instead of {field!r}, did you mean '
+                                f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'Found unsupported field {field!r}.'
+                            sub_msgs.append(
+                                f'Found unsupported field {field!r}.')
+                err_msg += ' '.join(sub_msgs)
         else:
-            message = e.message
+            # When the error came from an anyOf/oneOf branch, jsonschema's
+            # default message is the unhelpful "X is not valid under any of
+            # the given schemas" with json_path truncated at the branch
+            # boundary. best_match recurses into the sub-error context for
+            # anyOf/oneOf nodes specifically (see its docstring) and
+            # surfaces the deepest, most-specific sub-error.
+            best = jsonschema.exceptions.best_match([e])
+            message = best.message
             # Object in jsonschema is represented as dict in Python. Replace
             # 'object' with 'dict' for better readability.
             message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + message +
-                       f'. Check problematic field(s): {e.json_path}')
+                       f'. Check problematic field(s): {best.json_path}')
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
@@ -849,14 +961,23 @@ def get_cleaned_username(username: str = '') -> str:
     return username
 
 
-def fill_template(template_name: str, variables: Dict[str, Any],
+def fill_template(template_ref: str, variables: Dict[str, Any],
                   output_path: str) -> None:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_name.endswith('.j2'), template_name
-    root_dir = os.path.dirname(os.path.dirname(__file__))
-    template_path = os.path.join(root_dir, 'templates', template_name)
+    """Create a file from a Jinja template.
+
+    ``template_ref`` is either a bare filename (resolved against
+    ``sky/templates/``) or an absolute path. Plugins ship their own
+    templates inside their package and pass an absolute path so they
+    don't have to write into SkyPilot's tree.
+    """
+    assert template_ref.endswith('.j2'), template_ref
+    if os.path.isabs(template_ref):
+        template_path = template_ref
+    else:
+        root_dir = os.path.dirname(os.path.dirname(__file__))
+        template_path = os.path.join(root_dir, 'templates', template_ref)
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
+        raise FileNotFoundError(f'Template "{template_ref}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
@@ -1139,3 +1260,149 @@ def release_memory():
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0
+
+
+def base64_url_encode(data: bytes) -> str:
+    """Base64url encode data without padding.
+
+    Uses URL-safe alphabet (- and _ instead of + and /) and strips padding
+    to avoid URL encoding issues with = characters.
+    """
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def compute_code_challenge(code_verifier: str) -> str:
+    """Compute a code_challenge from code_verifier using SHA256.
+
+    Used in the CLI login flow for CSRF protection. The CLI generates a
+    random code_verifier, computes the challenge, and sends the challenge
+    to the server. Later, the CLI proves it initiated the request by
+    providing the original verifier which the server hashes to verify.
+    """
+    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    return base64_url_encode(digest)
+
+
+def merge_node_names_lineage(
+        existing_json: Optional[str],
+        current_names: Optional[List[str]]) -> Optional[str]:
+    """Merge current node names into the existing node name lineage.
+
+    The node_names column stores a JSON list of lists. Each inner list
+    represents one node (head first, then workers) and contains the
+    lineage of names that have been assigned to that node over time
+    (e.g. across recovery events). Each inner list is capped at
+    constants.MAX_NODE_NAME_LINEAGE entries.
+
+    Args:
+        existing_json: JSON string of list-of-lists from the DB, or None.
+        current_names: List of current node names (head first), or None.
+
+    Returns:
+        JSON string of list-of-lists with lineage updated, or None.
+    """
+    if current_names is None:
+        return existing_json
+
+    existing: List[List[str]] = []
+    if existing_json is not None:
+        try:
+            parsed = json.loads(existing_json)
+            if isinstance(parsed, list):
+                existing = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    result: List[List[str]] = []
+    for i, name in enumerate(current_names):
+        if i < len(existing) and isinstance(existing[i], list):
+            lineage = list(existing[i])
+            # Only append if name is valid and different from last entry
+            if name and (not lineage or lineage[-1] != name):
+                lineage.append(name)
+            # Cap at max lineage length
+            if len(lineage) > constants.MAX_NODE_NAME_LINEAGE:
+                lineage = lineage[-constants.MAX_NODE_NAME_LINEAGE:]
+        else:
+            lineage = [name] if name else []
+        result.append(lineage)
+
+    return json.dumps(result) if result else None
+
+
+def get_display_node_names(node_names_json: Optional[str]) -> Optional[str]:
+    """Extract display node names from the lineage JSON.
+
+    Takes the last entry from each inner list (the most recent name for
+    each node) and returns them as a comma-separated string.
+
+    Args:
+        node_names_json: JSON string of list-of-lists, or None.
+
+    Returns:
+        Comma-separated string of current node names, or None.
+    """
+    if node_names_json is None:
+        return None
+
+    try:
+        lineage = json.loads(node_names_json)
+        if not isinstance(lineage, list):
+            # Backward compat: might be old comma-separated format
+            return node_names_json
+        names = []
+        for node_lineage in lineage:
+            if isinstance(node_lineage, list) and node_lineage:
+                names.append(node_lineage[-1])
+            elif isinstance(node_lineage, str):
+                # Backward compat: flat list of strings
+                names.append(node_lineage)
+        return ','.join(names) if names else None
+    except (json.JSONDecodeError, TypeError):
+        # Backward compat: return as-is if not valid JSON
+        return node_names_json
+
+
+def atomic_write_text(path: str, content: str, mode: int = 0o644) -> None:
+    """Write text to ``path`` atomically using tmp + rename.
+
+    On shared filesystems (NFS / EFS / k8s PVC) ``open(path, 'w')`` (which
+    uses ``O_TRUNC``) creates a window where readers on other nodes can
+    observe a zero-byte or partially-written file.  ``rename()`` is atomic
+    across the common shared FS implementations, so writers stage the
+    content to a sibling tmp file under the same directory and then rename
+    it into place; readers always see either the old inode or the new
+    inode, never a torn write.
+
+    The tmp file's basename is prefixed with a dot so that glob patterns
+    like ``Include ~/.sky/generated/ssh/*`` (which by default skip
+    dotfiles) do not pick up an in-progress tmp file.
+
+    On any failure -- including SIGINT / SystemExit during the write --
+    the tmp file is removed via ``try/finally`` so we do not leak dotfile
+    fragments into the destination directory.  The original exception is
+    propagated unchanged.
+
+    Args:
+        path: The destination file path.  The parent directory must
+            already exist.
+        content: The text content to write.  Encoded as UTF-8.
+        mode: The Unix file permission bits to apply to the destination
+            file.  Defaults to 0o644.
+    """
+    parent_dir = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=parent_dir)
+    success = False
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # mkstemp creates with mode 0o600; chmod to the requested mode.
+        os.chmod(tmp_path, mode)
+        os.rename(tmp_path, path)
+        success = True
+    finally:
+        if not success:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass

@@ -1,64 +1,313 @@
 """Slurm instance provisioning."""
 
+import os
+import shlex
 import tempfile
-import textwrap
+import threading
 import time
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import colorama
+
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import env_options
+from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# TODO(kevin): This assumes $HOME is in a shared filesystem.
-# We should probably make it configurable, and add a check
-# during sky check.
-SHARED_ROOT_SKY_DIRECTORY = '~/.sky_clusters'
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
-PROVISION_SCRIPTS_DIRECTORY = f'~/{PROVISION_SCRIPTS_DIRECTORY_NAME}'
+
+
+def _sbatch_log_path(base_dir: str, job_id: str) -> str:
+    return f'{base_dir}/{PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-{job_id}.out'
+
 
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
-_SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
+
+# sbatch options that SkyPilot controls and must not be overridden by users.
+# These are either set dynamically based on the resource spec, or are required
+# for SkyPilot's job lifecycle management.
+_SBATCH_PROTECTED_OPTIONS = frozenset({
+    'job-name',
+    'output',
+    'error',
+    'nodes',
+    'wait-all-nodes',
+    'no-requeue',
+    'cpus-per-task',
+    'mem',
+    'gres',
+    'partition',
+})
 
 
-def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
+def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
+    """Build #SBATCH directive lines from user-supplied sbatch_options.
+
+    Args:
+        sbatch_options: Dict mapping sbatch option names to values.
+
+    Returns:
+        A string of #SBATCH directives, one per line. Protected options
+        managed by SkyPilot are skipped with a warning.
+    """
+    if not sbatch_options:
+        return ''
+
+    # Normalize: replace underscores with hyphens (sbatch uses hyphens).
+    normalized = {k.replace('_', '-'): v for k, v in sbatch_options.items()}
+
+    # Warn and skip protected options.
+    conflicting = set(normalized.keys()) & _SBATCH_PROTECTED_OPTIONS
+    if conflicting:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Ignoring protected sbatch options '
+            f'managed by SkyPilot: {sorted(conflicting)}. Remove them '
+            f'from slurm.sbatch_options in ~/.sky/config.yaml.'
+            f'{colorama.Style.RESET_ALL}')
+        for key in conflicting:
+            del normalized[key]
+
+    # Build directive lines.
+    lines = []
+    for key in sorted(normalized):
+        value = normalized[key]
+        if value is None or value is False:
+            continue
+        # Defense in depth: schema validation rejects newlines, but
+        # guard here too to prevent script injection.
+        str_value = str(value)
+        if '\n' in key or '\n' in str_value:
+            raise ValueError(
+                f'Newline characters are not allowed in sbatch options: '
+                f'{key!r}={str_value!r}')
+        if key in ('time', 't'):
+            slurm_utils.validate_sbatch_time(str_value)
+        if value is True:
+            lines.append(f'#SBATCH --{key}')
+        else:
+            lines.append(f'#SBATCH --{key}={value}')
+    if not lines:
+        return ''
+    # Prefix with newline so it slots in after other directives
+    # in the provision script f-string.
+    return '\n' + '\n'.join(lines)
+
+
+def _compute_time_directive(sbatch_options: Dict[str, Any],
+                            partition_info: 'slurm.SlurmPartition',
+                            partition: str) -> str:
+    """Compute the auto-generated ``#SBATCH --time=...`` directive.
+
+    Priority: user-supplied > partition MaxTime > partition DefaultTime >
+    warn-and-omit. The MaxTime-before-DefaultTime ordering preserves
+    longstanding behavior (pre-existing code always emitted
+    ``--time={MaxTime}`` and ignored ``DefaultTime``). DefaultTime is
+    only consulted when MaxTime is UNLIMITED — emitting
+    ``--time=UNLIMITED`` is the #9370 footgun (backfill scheduler
+    refuses to schedule ahead of maintenance reservations).
+
+    TODO(kevin): consider preferring DefaultTime over MaxTime. Arguments:
+    (1) matches Slurm's own default-resolution order; (2) DefaultTime
+    is the more intentional admin signal — MaxTime is usually the
+    ceiling, DefaultTime is "what a typical job should get";
+    (3) friendlier to the backfill scheduler; (4) less surprising for
+    admins who explicitly configured DefaultTime.
+
+    Returns the directive line (no trailing newline), or empty string
+    when no auto-generated directive should be emitted (user supplied
+    their own, or DefaultTime path, or warn path).
+    """
+    # Match _build_custom_sbatch_directives' emit criteria: None and False
+    # are skipped there (the convention for boolean-shaped options like
+    # `exclusive: false`), so we treat them the same way here. Otherwise
+    # `time: false` would suppress both the user's directive AND the auto
+    # fallback, silently bypassing the safety net.
+    user_supplied_time = any(
+        sbatch_options.get(k) not in (None, False) for k in ('time', 't'))
+    if user_supplied_time:
+        return ''
+    # MaxTime first: preserve pre-existing behavior for partitions where
+    # MaxTime is set.
+    if partition_info.maxtime is not None:
+        max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
+        return f'#SBATCH --time={max_time}'
+    # MaxTime is UNLIMITED / NONE. Fall back to DefaultTime (the #9370
+    # fix path) so Slurm doesn't see --time=UNLIMITED.
+    if partition_info.default_time is not None:
+        return ''
+    logger.warning(
+        f'Partition {partition!r} has no MaxTime or DefaultTime configured. '
+        'Submitting without --time may cause the job to hang behind '
+        'maintenance reservations. Set slurm.sbatch_options.time in your '
+        'task YAML or in ~/.sky/config.yaml.')
+    return ''
+
+
+def _build_sbatch_directives(sbatch_options: Dict[str, Any],
+                             partition_info: 'slurm.SlurmPartition',
+                             partition: str) -> str:
+    """Combine auto-generated and user-supplied ``#SBATCH`` directives.
+
+    Returns a string with a leading newline so it slots into the sbatch
+    script f-string after the pre-existing directives, or empty string
+    when nothing to emit.
+    """
+    user_block = _build_custom_sbatch_directives(sbatch_options)
+    auto_time = _compute_time_directive(sbatch_options, partition_info,
+                                        partition)
+    if not auto_time:
+        return user_block
+    # user_block is either '' or '\n#SBATCH ...' (leading \n, no trailing).
+    return '\n' + auto_time + user_block
+
+
+def _wait_for_job_nodes(
+    client: 'slurm.SlurmClient',
+    job_id: str,
+    timeout: int,
+    partition: str,
+    on_pending: Callable[[str, Optional[str], Optional[int]], None],
+) -> None:
+    """Wait for a Slurm job to have nodes allocated.
+
+    Args:
+        client: The Slurm client to use for queries.
+        job_id: The Slurm job ID.
+        timeout: Maximum time to wait in seconds. If negative, wait
+            indefinitely.
+        partition: Optional partition name for querying pending job count.
+        on_pending: Optional callback invoked when the job is pending or
+            configuring. Called with (state, reason, pending_count) where
+            reason and pending_count may be None.
+    """
+    start_time = time.time()
+    last_state = None
+
+    while timeout < 0 or time.time() - start_time < timeout:
+        state = client.get_job_state(job_id)
+
+        if state != last_state:
+            logger.debug(f'Job {job_id} state: {state}')
+            last_state = state
+
+        if state is None:
+            raise RuntimeError(f'Job {job_id} not found. It may have been '
+                               'cancelled or failed.')
+
+        if state in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT'):
+            raise RuntimeError(f'Job {job_id} terminated with state {state} '
+                               'before nodes were allocated.')
+
+        if state in ('PENDING', 'CONFIGURING') and on_pending is not None:
+            try:
+                reason = client.get_job_reason(job_id)
+                pending_count: Optional[int] = None
+                if partition is not None:
+                    pending_count = client.get_pending_job_count(
+                        partition, exclude_job_id=job_id)
+                    if pending_count < 0:
+                        pending_count = None
+                on_pending(state, reason, pending_count)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get pending status for job '
+                             f'{job_id}: {e}')
+
+        if client.check_job_has_nodes(job_id):
+            logger.debug(f'Job {job_id} has nodes allocated')
+            return
+
+        time.sleep(2)
+
+    raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
+                       f'{timeout} seconds. Last state: {last_state}')
+
+
+def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
 
     This path is assumed to be on a shared NFS mount accessible by all nodes.
-    To support clusters with non-NFS home directories, we would need to let
-    users specify an NFS-backed "working directory" or use a different
-    coordination mechanism.
     """
-    return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
+    return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
 
 
-def _sbatch_provision_script_path(filename: str) -> str:
+def _sbatch_provision_script_path(base_dir: str,
+                                  cluster_name_on_cloud: str) -> str:
     """Returns the path to the sbatch provision script on the login node."""
     # Put sbatch script in $HOME instead of /tmp as there can be
     # multiple login nodes, and different SSH connections
     # can land on different login nodes.
-    return f'{PROVISION_SCRIPTS_DIRECTORY}/{filename}'
+    return os.path.join(base_dir, PROVISION_SCRIPTS_DIRECTORY_NAME,
+                        f'{cluster_name_on_cloud}.sh')
 
 
-def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
+def _skypilot_runtime_dir(tmpdir: Optional[str],
+                          cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot runtime directory path on the Slurm cluster."""
-    return f'/tmp/{cluster_name_on_cloud}'
+    tmp = tmpdir if tmpdir is not None else '/tmp'
+    return os.path.join(tmp, cluster_name_on_cloud)
+
+
+def _enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
+    """Get enroot container name when container_scope=global."""
+    # Not publicly documented, but see:
+    # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
+    # Added in commit:
+    # https://github.com/NVIDIA/pyxis/commit/a35027cf2ffa45cf702b117d215b1240aa6de22e
+    return f'pyxis_{slurm_utils.pyxis_container_name(cluster_name_on_cloud)}'
+
+
+def _wait_for_job_ready(
+    login_node_runner: 'command_runner.SSHCommandRunner',
+    client: 'slurm.SlurmClient',
+    job_id: str,
+    ready_signal: str,
+    slurm_log: str,
+) -> None:
+    """Wait for Slurm job initialization to complete.
+
+    Polls while the job is running. Fails if:
+    1. The job exits/fails (state not in PENDING/RUNNING/CONFIGURING)
+    2. The ready signal file never appears
+    """
+    poll_interval_seconds = 1
+
+    while True:
+        rc, _, _ = login_node_runner.run(f'test -f {ready_signal}',
+                                         require_outputs=True,
+                                         stream_logs=False)
+        if rc == 0:
+            return
+
+        job_state = client.get_job_state(job_id)
+        # Job states that indicate the job is still initializing
+        # See: https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+        if job_state not in ('PENDING', 'RUNNING', 'CONFIGURING'):
+            raise RuntimeError(f'Slurm job {job_id} exited ({job_state}) '
+                               'before initialization completed. See sbatch '
+                               f'logs for details: {slurm_log}')
+
+        time.sleep(poll_interval_seconds)
 
 
 @timeline.event
 def _create_virtual_instance(
-        region: str, cluster_name_on_cloud: str,
+        region: str, cluster_name: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Creates a Slurm virtual instance from the config.
 
@@ -70,9 +319,10 @@ def _create_virtual_instance(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+    identities_only = ssh_config_dict.get('identities_only', False)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
     client = slurm.SlurmClient(
@@ -82,7 +332,16 @@ def _create_virtual_instance(
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
+        identities_only=identities_only,
     )
+
+    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+
+    proctrack_type = slurm_utils.get_proctrack_type(slurm_cluster)
+    partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
+    if partition_info is None:
+        raise ValueError(f'Partition info for {partition} not found '
+                         f'for SLURM cluster {slurm_cluster}')
 
     # COMPLETING state occurs when a job is being terminated - during this
     # phase, slurmd sends SIGTERM to tasks, waits for KillWait period, sends
@@ -120,14 +379,42 @@ def _create_virtual_instance(
         ['pending', 'running'],
     )
 
-    # Get provision_timeout from config. If not specified, use None,
-    # which will use the default timeout specified in the Slurm adaptor.
-    provision_timeout = skypilot_config.get_effective_region_config(
-        cloud='slurm',
-        region=region,
-        keys=('provision_timeout',),
-        default_value=None)
+    provision_timeout: int = provider_config['provision_timeout']
+    wait_str = ('indefinitely'
+                if provision_timeout < 0 else f'for {provision_timeout}s')
+    logger.debug(f'Waiting {wait_str} for '
+                 f'job to be allocated on partition {partition}')
 
+    num_nodes = config.count
+    last_status_msg = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        if parts:
+            msg = f'Launching ({", ".join(parts)})'
+        else:
+            msg = 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=region,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    tmpdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                         region=region,
+                                                         keys=('tmpdir',),
+                                                         default_value=None)
     if existing_jobs:
         assert len(existing_jobs) == 1, (
             f'Multiple jobs found with name {cluster_name_on_cloud}: '
@@ -138,9 +425,12 @@ def _create_virtual_instance(
                      f'(JOBID: {job_id})')
 
         # Wait for nodes to be allocated (job might be in PENDING state)
-        nodes, _ = client.get_job_nodes(job_id,
-                                        wait=True,
-                                        timeout=provision_timeout)
+        _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                            _on_pending)
+        nodes, _ = client.get_job_nodes(job_id)
+        # Reset spinner since nodes are now allocated
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching', cluster_name=cluster_name))
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=partition,
@@ -157,75 +447,16 @@ def _create_virtual_instance(
     # In the future we can consider running sbatch with --no-kill to not
     # automatically terminate a job if one of the nodes it has been
     # allocated fails.
-    num_nodes = config.count
-
     accelerator_type = resources.get('accelerator_type')
     accelerator_count_raw = resources.get('accelerator_count')
     try:
         accelerator_count = int(
             accelerator_count_raw) if accelerator_count_raw is not None else 0
     except (TypeError, ValueError):
+        logger.warning(
+            f'Invalid accelerator_count value: {accelerator_count_raw!r}. '
+            'Defaulting to 0 (no accelerators).')
         accelerator_count = 0
-
-    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
-    sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
-    ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
-    slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
-
-    # Build the sbatch script
-    gpu_directive = ''
-    if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
-            accelerator_count > 0):
-        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
-                         f'{accelerator_count}')
-
-    # By default stdout and stderr will be written to $HOME/slurm-%j.out
-    # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
-    # the home directory.
-    provision_script = textwrap.dedent(f"""\
-        #!/bin/bash
-        #SBATCH --job-name={cluster_name_on_cloud}
-        #SBATCH --output={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
-        #SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
-        #SBATCH --nodes={num_nodes}
-        #SBATCH --wait-all-nodes=1
-        # Let the job be terminated rather than requeued implicitly.
-        #SBATCH --no-requeue
-        #SBATCH --cpus-per-task={int(resources["cpus"])}
-        #SBATCH --mem={int(resources["memory"])}G
-        {gpu_directive}
-
-        # Cleanup function to remove cluster dirs on job termination.
-        cleanup() {{
-            # The Skylet is daemonized, so it is not automatically terminated when
-            # the Slurm job is terminated, we need to kill it manually.
-            echo "Terminating Skylet..."
-            if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
-                kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
-            fi
-            echo "Cleaning up sky directories..."
-            # Clean up sky runtime directory on each node.
-            # NOTE: We can do this because --nodes for both this srun and the
-            # sbatch is the same number. Otherwise, there are no guarantees
-            # that this srun will run on the same subset of nodes as the srun
-            # that created the sky directories.
-            srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
-            rm -rf {sky_home_dir}
-        }}
-        trap cleanup TERM
-
-        # Create sky home directory for the cluster.
-        mkdir -p {sky_home_dir}
-        # Create sky runtime directory on each node.
-        srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
-        # Marker file to indicate we're in a Slurm cluster.
-        touch {slurm_marker_file}
-        # Suppress login messages.
-        touch {sky_home_dir}/.hushlogin
-        # Signal that the sbatch script has completed setup.
-        touch {ready_signal}
-        sleep infinity
-        """)
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
@@ -235,9 +466,228 @@ def _create_virtual_instance(
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
+        enable_interactive_auth=True,
+        disable_identities_only=not identities_only,
     )
+    remote_home_dir = login_node_runner.get_remote_home_dir()
 
-    cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
+    # Resolve shell variables (e.g. $USER) in workdir/tmpdir using the
+    # remote host's environment.
+    if workdir is not None or tmpdir is not None:
+        remote_env = client.get_env()
+        if workdir is not None:
+            workdir = slurm_utils.expand_path_vars(workdir, remote_env)
+        if tmpdir is not None:
+            tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
+        logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
+
+    # Must be absolute — #SBATCH directives don't expand ~ or $HOME.
+    sky_base_dir = workdir if workdir is not None else remote_home_dir
+    assert os.path.isabs(sky_base_dir), (
+        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    sbatch_log_base_dir = sky_base_dir
+
+    provision_script_path = _sbatch_provision_script_path(
+        sky_base_dir, cluster_name_on_cloud)
+    provision_scripts_dir = os.path.dirname(provision_script_path)
+
+    skypilot_runtime_dir = _skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)
+    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                                 cluster_name_on_cloud)
+    ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
+    slurm_marker_file = (
+        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
+
+    # For non-Docker Hub registries, pyxis/enroot requires '#' separator
+    # between registry and path. See:
+    # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
+    container_image = resources.get('image_id')
+    if container_image is not None:
+        if container_image.endswith('.sqsh'):
+            # Local .sqsh file, use path directly.
+            pass
+        else:
+            parts = container_image.split('/', 1)
+            if len(parts) > 1:
+                maybe_domain, maybe_path = parts
+                is_custom_registry = ('.' in maybe_domain or
+                                      ':' in maybe_domain or
+                                      maybe_domain == 'localhost')
+                if is_custom_registry:
+                    container_image = f'{maybe_domain}#{maybe_path}'
+    container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
+
+    # Build the appended sbatch directive block (auto-generated --time
+    # + user-supplied options from sbatch_options).
+    sbatch_options = resources.get('sbatch_options', {}) or {}
+    extra_sbatch_directives = _build_sbatch_directives(sbatch_options,
+                                                       partition_info,
+                                                       partition)
+
+    # Build the sbatch script
+    gpu_directive = ''
+    if accelerator_count > 0:
+        if (accelerator_type is not None and
+                accelerator_type.upper() != 'NONE'):
+            # Typed GRES: #SBATCH --gres=gpu:<type>:<count>
+            gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
+                             f'{accelerator_count}')
+        else:
+            # GRES without GPU type: #SBATCH --gres=gpu:<count>
+            gpu_directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+
+    # Build container initialization block if container image specified
+    container_block = ''
+    if container_image is not None:
+        # Note: /dev/shm is NOT mounted here because enroot handles it:
+        # - If ENROOT_RESTRICT_DEV is set: /dev is restricted but /dev/shm is
+        #   explicitly mounted by the 10-devices.sh hook
+        # - If ENROOT_RESTRICT_DEV is unset: /dev is not restricted, so
+        #   /dev/shm is inherited from the host
+        # See:
+        # https://github.com/NVIDIA/enroot/blob/main/conf/hooks/10-devices.sh
+        host_ccache_dir = '/tmp/ccache_$(id -u)'
+        container_ccache_dir = '/var/cache/ccache'
+        mount_paths = [
+            f'{remote_home_dir}:{remote_home_dir}',
+            f'{host_ccache_dir}:{container_ccache_dir}',
+        ]
+        # When workdir differs from remote_home_dir (e.g. workdir is on
+        # NFS at /home/ubuntu while $HOME is /home_local/ubuntu), mount
+        # it so the container can access sky_cluster_home_dir.
+        if workdir is not None and workdir != remote_home_dir:
+            mount_paths.append(f'{workdir}:{workdir}')
+        container_mounts = ','.join(mount_paths)
+        # Add sudo alias to bashrc since we're already root in the container.
+        # This allows scripts with 'sudo' commands to work without modification.
+        # For containers, ~ is /root which is isolated inside the container,
+        # so modifying bashrc doesn't affect non-containerized sessions.
+        container_init_script = """\
+set -e
+echo "[container-init] Starting..."
+INIT_START=$SECONDS
+apt-get update
+apt-get install -y ca-certificates rsync curl git wget fuse
+echo 'alias sudo=""' >> ~/.bashrc
+echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
+"""
+        container_marker_file = (f'{sky_cluster_home_dir}/'
+                                 f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
+        container_init_done_dir = (
+            f'{sky_cluster_home_dir}/.sky_container_init_done')
+        # Run container init, touch per-node "done" marker, then sleep infinity
+        # to keep container running. Use --overlap so subsequent sruns can share
+        # the allocation. Background with & so sbatch continues.
+        container_cmd = shlex.quote(
+            f'{container_init_script}'
+            f'touch {container_init_done_dir}/$SLURM_PROCID && sleep infinity')
+        container_block = (
+            f'srun --nodes={num_nodes} mkdir -p {host_ccache_dir}\n'
+            f'CONTAINER_START=$SECONDS\n'
+            f'echo "[container] Initializing {container_name} on all nodes"\n'
+            f'rm -rf {container_init_done_dir}\n'
+            f'mkdir -p {container_init_done_dir}\n'
+            f'srun --overlap {"--label " if num_nodes > 1 else ""}--unbuffered '
+            f'--nodes={num_nodes} --ntasks-per-node=1 '
+            f'--container-image={shlex.quote(container_image)} '
+            f'--container-name={shlex.quote(container_name)}:create '
+            f'--container-mounts="{container_mounts}" '
+            f'--container-remap-root '
+            f'--no-container-mount-home '
+            f'--container-writable '
+            f'bash -c {container_cmd} &\n'
+            f'CONTAINER_PID=$!\n'
+            f'while true; do\n'
+            f'  num_ready=$(ls -1 {container_init_done_dir} 2>/dev/null | '
+            f'wc -l)\n'
+            f'  if [ "$num_ready" -ge "{num_nodes}" ]; then\n'
+            f'    break\n'
+            f'  fi\n'
+            f'  if ! kill -0 $CONTAINER_PID 2>/dev/null; then\n'
+            f'    echo "[container] ERROR: Container initialization failed."\n'
+            f'    echo "[container] Only $num_ready of {num_nodes}'
+            f' node(s) completed initialization."\n'
+            f'    wait $CONTAINER_PID\n'
+            f'    exit $?\n'
+            f'  fi\n'
+            f'  sleep 1\n'
+            f'done\n'
+            f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
+            f'touch {container_marker_file} {ready_signal}')
+
+    # By default stdout and stderr will be written to $HOME/slurm-%j.out
+    # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
+    # the home directory.
+    mem_directive = ''
+    if float(resources['memory']) > 0:
+        # Memory is in MB to support fractional GB values (e.g. 0.5GB ->
+        # 512M), since Slurm's --mem requires integer values per unit.
+        # Slurm's M suffix means MiB (1G = 1024M), matching SkyPilot's
+        # GB convention.
+        mem_in_mb = int(float(resources['memory']) * 1024)
+        mem_directive = f'#SBATCH --mem={mem_in_mb}M\n'
+    # pylint: disable=line-too-long
+    # fmt: off
+    provision_script = f"""\
+#!/bin/bash
+#SBATCH --job-name={cluster_name_on_cloud}
+#SBATCH --output={_sbatch_log_path(sbatch_log_base_dir, '%j')}
+#SBATCH --error={_sbatch_log_path(sbatch_log_base_dir, '%j')}
+#SBATCH --nodes={num_nodes}
+#SBATCH --wait-all-nodes=1
+# Let the job be terminated rather than requeued implicitly.
+#SBATCH --no-requeue
+#SBATCH --cpus-per-task={int(resources["cpus"])}
+{mem_directive}{gpu_directive}{extra_sbatch_directives}
+
+# Cleanup function to remove cluster dirs on job termination.
+cleanup() {{
+    saved_exit=$?
+    # The Skylet is daemonized, so it is not automatically terminated when
+    # the Slurm job is terminated, we need to kill it manually.
+    echo "Terminating Skylet..."
+    if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
+        kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
+    fi
+    echo "Cleaning up sky directories..."
+    # Remove the per-node enroot container, if it exists.
+    # This is only needed when container_scope=global.
+    # When container_scope=job, named containers are removed automatically
+    # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
+    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(_enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
+    # Clean up sky runtime directory on each node.
+    # NOTE: We can do this because --nodes for both this srun and the
+    # sbatch is the same number. Otherwise, there are no guarantees
+    # that this srun will run on the same subset of nodes as the srun
+    # that created the sky directories.
+    srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
+    rm -rf {sky_cluster_home_dir}
+    exit $saved_exit
+}}
+# Run cleanup on any exit, including container init failures.
+trap cleanup EXIT
+# On SIGTERM (job cancellation via scancel), exit 0 so cleanup treats
+# it as a graceful shutdown rather than propagating an error code.
+trap 'exit 0' TERM
+
+# Create sky home directory and subdirectories for the cluster.
+mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
+# Create sky runtime directory on each node.
+srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+# Marker file to indicate we're in a Slurm cluster.
+touch {slurm_marker_file}
+# Store proctrack type for task executor to read.
+echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
+# Suppress login messages.
+touch {sky_cluster_home_dir}/.hushlogin
+{container_block}
+{f'touch {ready_signal}' if container_image is None else ''}
+{'sleep infinity' if container_image is None else 'wait'}
+"""
+    # fmt: on
+    # pylint: enable=line-too-long
+
+    cmd = f'mkdir -p {provision_scripts_dir}'
     rc, stdout, stderr = login_node_runner.run(cmd,
                                                require_outputs=True,
                                                stream_logs=False)
@@ -251,7 +701,7 @@ def _create_virtual_instance(
         f.write(provision_script)
         f.flush()
         src_path = f.name
-        tgt_path = _sbatch_provision_script_path(f'{cluster_name_on_cloud}.sh')
+        tgt_path = provision_script_path
         login_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
@@ -259,30 +709,55 @@ def _create_virtual_instance(
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
 
-    nodes, _ = client.get_job_nodes(job_id,
-                                    wait=True,
-                                    timeout=provision_timeout)
+    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                        _on_pending)
+    nodes, _ = client.get_job_nodes(job_id)
+    # Reset spinner since nodes are now allocated
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
 
+    # No timeout for job initialization: once nodes are allocated, the
+    # provision has effectively succeeded. Container image pulls and
+    # package installation can take a long time for large images, and
+    # should not be subject to the provision timeout (which is meant for
+    # the Slurm scheduler queue, not for container setup).
+
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
     # access the directories before they are created.
-    ready_check_cmd = (f'end=$((SECONDS+{_SKY_DIR_CREATION_TIMEOUT_SECONDS})); '
-                       f'while [ ! -f {ready_signal} ]; do '
-                       'if (( SECONDS >= end )); then '
-                       'exit 1; fi; '
-                       'sleep 0.5; '
-                       'done')
-    rc, stdout, stderr = login_node_runner.run(ready_check_cmd,
-                                               require_outputs=True,
-                                               stream_logs=False)
-    subprocess_utils.handle_returncode(
-        rc,
-        ready_check_cmd,
-        'Failed to verify sky directories creation.',
-        stderr=f'{stdout}\n{stderr}')
+    slurm_log = _sbatch_log_path(sbatch_log_base_dir, job_id)
+
+    # Stream logs in background thread for visibility if debug mode
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+
+        def _stream_logs():
+            login_node_runner.run(f'tail -f {slurm_log} 2>/dev/null',
+                                  require_outputs=False,
+                                  stream_logs=True)
+
+        log_thread = threading.Thread(target=_stream_logs, daemon=True)
+        log_thread.start()
+
+    try:
+        _wait_for_job_ready(
+            login_node_runner,
+            client,
+            job_id,
+            ready_signal,
+            slurm_log,
+        )
+    except (RuntimeError, exceptions.CommandError) as e:
+        _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
+                                             require_outputs=True,
+                                             stream_logs=False)
+        if stdout:
+            logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
+                         f'{stdout}'
+                         f'=== End of Slurm job logs ===')
+        raise e
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
@@ -309,9 +784,10 @@ def query_instances(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+    identities_only = ssh_config_dict.get('identities_only', False)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -320,6 +796,7 @@ def query_instances(
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
+        identities_only=identities_only,
     )
 
     # Map Slurm job states to SkyPilot ClusterStatus
@@ -362,7 +839,7 @@ def query_instances(
                     continue
                 statuses[job_id] = (sky_status, reason)
             else:
-                nodes, _ = client.get_job_nodes(job_id, wait=False)
+                nodes, _ = client.get_job_nodes(job_id)
                 for node in nodes:
                     instance_id = slurm_utils.instance_id(job_id, node)
                     statuses[instance_id] = (sky_status, None)
@@ -375,13 +852,11 @@ def query_instances(
     return statuses
 
 
-def run_instances(
-        region: str,
-        cluster_name: str,  # pylint: disable=unused-argument
-        cluster_name_on_cloud: str,
-        config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
-    return _create_virtual_instance(region, cluster_name_on_cloud, config)
+    return _create_virtual_instance(region, cluster_name, cluster_name_on_cloud,
+                                    config)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
@@ -407,9 +882,10 @@ def get_cluster_info(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+    identities_only = ssh_config_dict.get('identities_only', False)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -418,6 +894,7 @@ def get_cluster_info(
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
+        identities_only=identities_only,
     )
 
     # Find running job for this cluster
@@ -431,7 +908,6 @@ def get_cluster_info(
         return common.ClusterInfo(
             instances={},
             head_instance_id=None,
-            ssh_user=ssh_user,
             provider_name='slurm',
             provider_config=provider_config,
         )
@@ -440,8 +916,8 @@ def get_cluster_info(
         f'{running_jobs}')
 
     job_id = running_jobs[0]
-    # Running jobs should already have nodes allocated, so don't wait
-    nodes, node_ips = client.get_job_nodes(job_id, wait=False)
+    # Running jobs should already have nodes allocated
+    nodes, node_ips = client.get_job_nodes(job_id)
 
     instances = {
         f'{slurm_utils.instance_id(job_id, node)}': [
@@ -455,6 +931,7 @@ def get_cluster_info(
                     'job_id': job_id,
                     'node': node,
                 },
+                node_name=slurm_utils.instance_id(job_id, node),
             )
         ] for node, node_ip in zip(nodes, node_ips)
     }
@@ -462,7 +939,6 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
-        ssh_user=ssh_user,
         provider_name='slurm',
         provider_config=provider_config,
     )
@@ -503,9 +979,10 @@ def terminate_instances(
         ssh_host = ssh_config_dict['hostname']
         ssh_port = int(ssh_config_dict['port'])
         ssh_user = ssh_config_dict['user']
-        ssh_private_key = ssh_config_dict['private_key']
+        ssh_private_key = ssh_config_dict.get('private_key', None)
         ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
         ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+        identities_only = ssh_config_dict.get('identities_only', False)
 
         client = slurm.SlurmClient(
             ssh_host,
@@ -514,6 +991,7 @@ def terminate_instances(
             ssh_private_key,
             ssh_proxy_command=ssh_proxy_command,
             ssh_proxy_jump=ssh_proxy_jump,
+            identities_only=identities_only,
         )
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
@@ -571,11 +1049,26 @@ def cleanup_ports(
     pass
 
 
+def _build_pyxis_args(cluster_name_on_cloud: str) -> str:
+    """Build pyxis/enroot container args for srun.
+
+    Uses :exec flag to attach to the already-running container (started with
+    sleep infinity in sbatch). Container settings like --container-remap-root,
+    --container-writable are preserved from when the container was created.
+    """
+    container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
+    quoted_name = shlex.quote(container_name)
+    return f'--container-remap-root --container-name={quoted_name}:exec'
+
+
 def get_command_runners(
     cluster_info: common.ClusterInfo,
     **credentials: Dict[str, Any],
 ) -> List[command_runner.SlurmCommandRunner]:
     """Get a command runner for the given cluster."""
+    # For Slurm, we use the login node credentials from provider_config['ssh']
+    # instead of `credentials` which is for ssh'ing to the SkyPilot cluster.
+    del credentials
     assert cluster_info.provider_config is not None, cluster_info
 
     if cluster_info.head_instance_id is None:
@@ -593,26 +1086,88 @@ def get_command_runners(
         instance_infos[0] for instance_infos in cluster_info.instances.values()
     ]
 
-    # Note: For Slurm, the external IP for all instances is the same,
-    # it is the login node's. The internal IP is the private IP of the node.
-    ssh_user = cast(str, credentials.pop('ssh_user'))
-    ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
-    # ssh_proxy_jump is Slurm-specific, it does not exist in the auth section
-    # of the cluster yaml.
-    ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
-        'proxyjump', None)
+    provider_config = cluster_info.provider_config
+
+    # Get login node SSH credentials.
+    login_node_ssh_config = provider_config['ssh']
+    login_node_ssh_hostname = login_node_ssh_config['hostname']
+    login_node_ssh_port = int(login_node_ssh_config.get('port', 22))
+    login_node_ssh_user = login_node_ssh_config['user']
+    login_node_ssh_private_key = login_node_ssh_config.get('private_key', None)
+    login_node_ssh_proxy_command = login_node_ssh_config.get(
+        'proxycommand', None)
+    login_node_ssh_proxy_jump = login_node_ssh_config.get('proxyjump', None)
+    login_node_identities_only = login_node_ssh_config.get(
+        'identities_only', False)
+    # For Slurm, multiple SkyPilot clusters may share the same underlying
+    # Slurm login node. By using a fixed ssh_control_name ('__default__'),
+    # we ensure that all connections to the same login node reuse the same
+    # SSH ControlMaster process, avoiding repeated SSH handshakes.
+    #
+    # The %C token in ControlPath (see ssh_options_list) ensures that
+    # connections to different login nodes use different sockets, avoiding
+    # collisions between different Slurm clusters.
+    ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
+
+    client = slurm.SlurmClient(
+        login_node_ssh_hostname,
+        login_node_ssh_port,
+        login_node_ssh_user,
+        login_node_ssh_private_key,
+        ssh_proxy_command=login_node_ssh_proxy_command,
+        ssh_proxy_jump=login_node_ssh_proxy_jump,
+        identities_only=login_node_identities_only,
+    )
+    remote_home_dir = client.get_remote_home_dir()
+
+    slurm_cluster_name = provider_config.get('cluster')
+    workdir = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=slurm_cluster_name,
+        keys=('workdir',),
+        default_value=None)
+    tmpdir = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=slurm_cluster_name,
+        keys=('tmpdir',),
+        default_value=None)
+    if workdir is not None or tmpdir is not None:
+        remote_env = client.get_env()
+        if workdir is not None:
+            workdir = slurm_utils.expand_path_vars(workdir, remote_env)
+        if tmpdir is not None:
+            tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
+
+    sky_base_dir = workdir if workdir is not None else remote_home_dir
+    assert os.path.isabs(sky_base_dir), (
+        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                                 cluster_name_on_cloud)
+    container_marker = (
+        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
+    has_container = client.check_file_exists(container_marker)
+    container_args = _build_pyxis_args(
+        cluster_name_on_cloud) if has_container else None
+
     runners = [
+        # Note: For Slurm, the external IP for all instances is the same,
+        # it is the login node's. The internal IP is the private IP of the node.
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
-            ssh_user,
-            ssh_private_key,
-            sky_dir=_sky_cluster_home_dir(cluster_name_on_cloud),
-            skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
+            login_node_ssh_user,
+            login_node_ssh_private_key,
+            sky_dir=sky_cluster_home_dir,
+            skypilot_runtime_dir=_skypilot_runtime_dir(tmpdir,
+                                                       cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
-            ssh_proxy_jump=ssh_proxy_jump,
+            ssh_proxy_jump=login_node_ssh_proxy_jump,
+            ssh_proxy_command=login_node_ssh_proxy_command,
+            ssh_control_name=ssh_control_name,
+            container_args=container_args,
             enable_interactive_auth=True,
-            **credentials) for instance_info in instances
+            # Allow ssh-agent and default key fallback for Slurm.
+            disable_identities_only=True) for instance_info in instances
     ]
 
     return runners

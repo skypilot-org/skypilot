@@ -1,0 +1,55 @@
+resources:
+  cpus: 1
+  memory: 8+
+
+num_nodes: 2
+
+run: |
+  set -e
+
+  # Shared heartbeat directory (works on shared filesystem)
+  HEARTBEAT_DIR=~/.sky_proctrack_test
+  HEARTBEAT_FILE="$HEARTBEAT_DIR/heartbeat_$SKYPILOT_NODE_RANK"
+
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    # Head: create heartbeat dir and set up cleanup
+    rm -rf "$HEARTBEAT_DIR"
+    mkdir -p "$HEARTBEAT_DIR"
+    trap 'rm -rf "$HEARTBEAT_DIR"' EXIT
+  else
+    # Worker: wait for dir to exist
+    while [ ! -d "$HEARTBEAT_DIR" ]; do sleep 0.1; done
+  fi
+
+  # Start a daemon that writes heartbeats (simulates Ray worker)
+  # Uses setsid to detach from session, simulating what ray start does
+  setsid bash -c "while true; do date +%s > $HEARTBEAT_FILE; sleep 1; done" </dev/null >/dev/null 2>&1 &
+  echo "Started heartbeat daemon for rank $SKYPILOT_NODE_RANK"
+
+  sleep 5  # Let daemon start
+
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    echo "Head: waiting 30s for worker to exit..."
+    sleep 30
+
+    echo "Head: checking heartbeats..."
+    for i in $(seq 0 $((SKYPILOT_NUM_NODES - 1))); do
+      FILE="$HEARTBEAT_DIR/heartbeat_$i"
+      if [ ! -f "$FILE" ]; then
+        echo "FAIL: Heartbeat file missing for rank $i"
+        exit 1
+      fi
+      LAST_BEAT=$(cat "$FILE")
+      NOW=$(date +%s)
+      AGE=$((NOW - LAST_BEAT))
+      echo "Rank $i: last heartbeat ${AGE}s ago"
+      if [ "$AGE" -gt 5 ]; then
+        echo "FAIL: Rank $i heartbeat is stale (${AGE}s > 5s) - process was killed!"
+        exit 1
+      fi
+    done
+
+    echo "SUCCESS: All heartbeats are recent - processes survived!"
+  else
+    echo "Worker: exiting immediately"
+  fi

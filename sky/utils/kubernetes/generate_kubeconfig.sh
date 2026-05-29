@@ -160,7 +160,7 @@ rules:
   - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
     resources: ["ingressclasses"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]                 # Required for sky show-gpus command
+  - apiGroups: [""]                 # Required for sky gpus list command
     resources: ["pods"]
     verbs: ["get", "list"]
   - apiGroups: ["rbac.authorization.k8s.io"]   # Required for SkyPilot to inspect its own permissions

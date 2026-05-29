@@ -7,14 +7,36 @@ import argparse
 import json
 import os
 import pathlib
+import shutil
 import socket
-import subprocess
 import sys
 import time
 
 import colorama
+import hostlist
 
+from sky.skylet import constants
 from sky.skylet.log_lib import run_bash_command_with_log
+
+
+def _is_proctrack_cgroup_enabled(shared_home_dir: str) -> bool:
+    """Check if Slurm uses proctrack/cgroup.
+
+    The proctrack type file is written by the provisioner to the shared
+    filesystem home directory. Inside containers, ~ resolves to a
+    container-local path (/root/), so we must use the explicit shared
+    home directory passed from outside the container.
+    """
+    proctrack_file = os.path.join(shared_home_dir,
+                                  constants.SLURM_PROCTRACK_TYPE_FILE)
+    try:
+        with open(proctrack_file, 'r', encoding='utf-8') as f:
+            proctrack_type = f.read().strip()
+            return proctrack_type == 'cgroup'
+    except (FileNotFoundError, IOError):
+        # If file doesn't exist or can't be read,
+        # default to True to be conservative.
+        return True
 
 
 def _get_ip_address() -> str:
@@ -30,16 +52,10 @@ def _get_job_node_ips() -> str:
     nodelist = os.environ.get('SLURM_JOB_NODELIST', '')
     assert nodelist, 'SLURM_JOB_NODELIST is not set'
 
-    # Expand compressed nodelist (e.g., "node[1-3,5]"
-    # -> "node1\nnode2\nnode3\nnode5")
-    result = subprocess.run(['scontrol', 'show', 'hostnames', nodelist],
-                            capture_output=True,
-                            text=True,
-                            check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f'Failed to get hostnames for: {nodelist}')
-
-    hostnames = result.stdout.strip().split('\n')
+    # Expand compressed nodelist (e.g., "node[1-3,5]" -> "node1\nnode2...")
+    # Alternative: `scontrol show hostnames $SLURM_JOB_NODELIST`, but `scontrol`
+    # (and Slurm CLI binaries in general) may not exist inside containers.
+    hostnames = list(hostlist.expand_hostlist(nodelist))
     ips = []
     for hostname in hostnames:
         try:
@@ -79,6 +95,11 @@ def main():
         action='store_true',
         help=
         'Whether this is a setup command (affects logging prefix and filename)')
+    parser.add_argument('--cluster-home-dir',
+                        help='Shared filesystem home directory for the '
+                        'cluster. Inside containers, ~ is container-local, '
+                        'so this provides the shared path for cross-node '
+                        'coordination files.')
     parser.add_argument('--alloc-signal-file',
                         help='Path to allocation signal file')
     parser.add_argument('--setup-done-signal-file',
@@ -179,6 +200,58 @@ def main():
                                            env_vars=env_vars,
                                            stream_logs=True,
                                            streaming_prefix=prefix)
+
+    # For multi-node Slurm jobs (one task per node), we need to wait for all
+    # tasks to complete before any task exits, because Slurm's proctrack/cgroup
+    # kills all processes in a task's cgroup when that task's main process
+    # exits. If one task exits early, child processes (e.g., Ray workers) get
+    # killed even while other tasks are still running.
+    # This ensures all tasks wait until every task has completed before exiting.
+    # Only needed when proctrack/cgroup is enabled.
+    # https://slurm.schedmd.com/cgroups.html#proctrack
+    # Use the shared filesystem home for cross-node coordination.
+    # Inside containers, ~ is container-local (/root/), not on the
+    # shared filesystem, so we use the explicitly passed path.
+    shared_home = (args.cluster_home_dir
+                   if args.cluster_home_dir else os.path.expanduser('~'))
+
+    if num_nodes > 1 and not args.is_setup and _is_proctrack_cgroup_enabled(
+            shared_home):
+        slurm_job_id = os.environ['SLURM_JOB_ID']
+        slurm_step_id = os.environ['SLURM_STEP_ID']
+        run_done_dir = os.path.join(
+            shared_home, f'.sky_run_done_{slurm_job_id}_{slurm_step_id}')
+        done_file = f'{run_done_dir}/{rank}'
+
+        if rank == 0:
+            shutil.rmtree(run_done_dir, ignore_errors=True)
+            os.makedirs(run_done_dir, exist_ok=True)
+        else:
+            # Workers wait for dir to exist (rank 0 creates it)
+            while not os.path.isdir(run_done_dir):
+                time.sleep(0.1)
+
+        pathlib.Path(done_file).touch()
+
+        # All ranks wait for all done files to exist.
+        max_errs = 10
+        errs = 0
+        while True:
+            try:
+                num_ready = len(os.listdir(run_done_dir))
+                errs = 0
+            except OSError as e:
+                errs += 1
+                if errs >= max_errs:
+                    raise OSError(f'Failed to read {run_done_dir} after '
+                                  f'{max_errs} attempts') from e
+                num_ready = 0
+            if num_ready >= num_nodes:
+                break
+            time.sleep(0.5)
+
+        if rank == 0:
+            shutil.rmtree(run_done_dir, ignore_errors=True)
 
     sys.exit(returncode)
 

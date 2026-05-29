@@ -1,6 +1,7 @@
 """Kubernetes provisioner for SkyPilot."""
 
 from sky.provision.kubernetes.config import bootstrap_instances
+from sky.provision.kubernetes.instance import cleanup_cluster_resources
 from sky.provision.kubernetes.instance import get_cluster_info
 from sky.provision.kubernetes.instance import get_command_runners
 from sky.provision.kubernetes.instance import query_instances
@@ -13,6 +14,8 @@ from sky.provision.kubernetes.network import open_ports
 from sky.provision.kubernetes.network import query_ports
 from sky.provision.kubernetes.volume import apply_volume
 from sky.provision.kubernetes.volume import delete_volume
+from sky.provision.kubernetes.volume import get_all_volumes_errors
 from sky.provision.kubernetes.volume import get_all_volumes_usedby
 from sky.provision.kubernetes.volume import get_volume_usedby
 from sky.provision.kubernetes.volume import map_all_volumes_usedby
+from sky.provision.kubernetes.volume import refresh_volume_config

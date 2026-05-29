@@ -27,16 +27,13 @@ Values
 
 Below is the available helm value keys and the default value of each key:
 
-..
-  Omitted values:
-  * storage.accessMode: accessMode other than ReadWriteOnce is not tested yet.
-
 .. parsed-literal::
 
   :ref:`global <helm-values-global>`:
     :ref:`imageRegistry <helm-values-global-imageRegistry>`: null
     :ref:`imagePullSecrets <helm-values-global-imagePullSecrets>`: null
     :ref:`extraEnvs <helm-values-global-extraEnvs>`: null
+  :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
@@ -69,6 +66,7 @@ Below is the available helm value keys and the default value of each key:
         cpu: "4"
         memory: "8Gi"
     :ref:`skypilotDev <helm-values-apiService-skypilotDev>`: false
+    :ref:`serveServerLog <helm-values-apiService-serveServerLog>`: true
     :ref:`metrics <helm-values-apiService-metrics>`:
       :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
       :ref:`port <helm-values-apiService-metrics-port>`: 9090
@@ -99,6 +97,11 @@ Below is the available helm value keys and the default value of each key:
       :ref:`cookie-expire <helm-values-auth-oauth-cookie-expire>`: null
     :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
       :ref:`enabled <helm-values-auth-serviceAccount-enabled>`: null
+    :ref:`externalProxy <helm-values-auth-externalProxy>`:
+      :ref:`enabled <helm-values-auth-externalProxy-enabled>`: false
+      :ref:`headerName <helm-values-auth-externalProxy-headerName>`: 'X-Auth-Request-Email'
+      :ref:`headerFormat <helm-values-auth-externalProxy-headerFormat>`: 'plaintext'
+      :ref:`jwtIdentityClaim <helm-values-auth-externalProxy-jwtIdentityClaim>`: 'sub'
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -111,6 +114,7 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`ingress <helm-values-ingress>`:
     :ref:`enabled <helm-values-ingress-enabled>`: true
+    :ref:`unified <helm-values-ingress-unified>`: false
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: null
     :ref:`host <helm-values-ingress-host>`: null
@@ -242,6 +246,9 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-digitaloceanCredentials-enabled>`: false
     :ref:`digitaloceanSecretName <helm-values-digitaloceanCredentials-digitaloceanSecretName>`: digitalocean-credentials
 
+  :ref:`slurmCredentials <helm-values-slurmCredentials>`:
+    :ref:`config <helm-values-slurmCredentials-config>`: null
+
   :ref:`extraInitContainers <helm-values-extraInitContainers>`: null
 
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
@@ -332,6 +339,35 @@ Default: ``null``
       - name: HTTP_PROXY
         value: http://proxy.example.com
 
+
+.. _helm-values-fullnameOverride:
+
+``fullnameOverride``
+~~~~~~~~~~~~~~~~~~~~
+
+Override the full name used for all resources created by this chart. By default, names are derived from the Helm release name (``Release.Name``). Set ``fullnameOverride`` to enforce a specific base name when coordinating multiple environments.
+
+Note that sub charts will not inherit the top-level ``fullnameOverride`` value, so you need to set it for each sub chart if you want to use a different base name for each sub chart, and the ``fullnameOverride`` of prometheus must be consistent with the top-level ``fullnameOverride`` to make sure the scrape target is consistent.
+
+.. code-block:: yaml
+
+  fullenameOverride: custom-name
+  prometheus:
+    # Must use the same fullnameOverride as top-level
+    fullnameOverride: custom-name
+  ingress-nginx:
+    fullnameOverride: other-name
+  grafana:
+    fullnameOverride: other-name
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  fullnameOverride: custom-name
+  prometheus:
+    fullnameOverride: custom-name
+
 .. _helm-values-apiService:
 
 ``apiService``
@@ -391,6 +427,11 @@ Upgrade strategy for the API server deployment. Available options are:
 - ``RollingUpdate``: Create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
 
 When set to ``RollingUpdate``, an external database must be configured via :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`.
+
+For persistent storage with RollingUpdate:
+
+- If :ref:`storage.enabled=true <helm-values-storage-enabled>`, use :ref:`storage.accessMode <helm-values-storage-accessMode>` =ReadWriteMany with an RWX-capable storage class (e.g., NFS-backed storage). This sets the ``SKYPILOT_API_SERVER_STORAGE_ENABLED`` environment variable, ensuring managed job logs and file mounts persist across rolling updates.
+- If ``storage.enabled=false``, file mounts and logs will be lost on pod restart. Consider configuring ``jobs.bucket`` in the SkyPilot config to persist file mounts to cloud storage.
 
 Default: ``"Recreate"``
 
@@ -599,7 +640,12 @@ Default: ``null``
 ``apiService.sshKeySecret``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Optional secret that contains SSH identity files to the API server to use, all the entries in the secret will be mounted to ``~/.ssh/`` directory in the API server. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+Optional secret that contains SSH identity files for the API server. All entries in the secret will be mounted to the ``~/.ssh/`` directory in the API server.
+
+This is used for:
+
+- :ref:`SSH Node Pools <existing-machines>` - to connect to existing machines
+- :ref:`Slurm clusters <slurm-getting-started>` - to connect to Slurm login nodes
 
 Default: ``null``
 
@@ -667,6 +713,20 @@ Default: ``false``
 
   apiService:
     skypilotDev: false
+
+.. _helm-values-apiService-serveServerLog:
+
+``apiService.serveServerLog``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Whether to save server logs to a file (``/root/.sky/api_server/server.log``) in addition to stdout. When ``false``, logs are only written to stdout (container logs).
+
+Default: ``true``
+
+.. code-block:: yaml
+
+  apiService:
+    serveServerLog: true
 
 .. _helm-values-apiService-metrics:
 
@@ -1099,6 +1159,95 @@ Default: ``null``
     serviceAccount:
       enabled: true
 
+.. _helm-values-auth-externalProxy:
+
+``auth.externalProxy``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for trusting an external authentication proxy in front of the API server. Use this when your infrastructure has a reverse proxy or load balancer that handles authentication (e.g., AWS ALB with Cognito, Azure Front Door with Azure AD, or a custom ingress controller with authentication middleware).
+
+When enabled, the API server extracts user identity from the HTTP header set by the proxy. The proxy is trusted to have already authenticated the user.
+
+This is mutually exclusive with :ref:`auth.oauth <helm-values-auth-oauth>` and :ref:`ingress.oauth2-proxy <helm-values-ingress-oauth2-proxy>`.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      enabled: false
+      headerName: 'X-Auth-Request-Email'
+      headerFormat: 'plaintext'
+
+.. _helm-values-auth-externalProxy-enabled:
+
+``auth.externalProxy.enabled``
+''''''''''''''''''''''''''''''
+
+Enable external proxy authentication. When enabled, the API server will extract user identity from the header specified by ``headerName``.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      enabled: true
+
+.. _helm-values-auth-externalProxy-headerName:
+
+``auth.externalProxy.headerName``
+'''''''''''''''''''''''''''''''''
+
+The HTTP header name containing the user identity.
+
+Default: ``'X-Auth-Request-Email'``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      headerName: 'X-WEBAUTH-USER'
+
+.. _helm-values-auth-externalProxy-headerFormat:
+
+``auth.externalProxy.headerFormat``
+'''''''''''''''''''''''''''''''''''
+
+The format of the header value. Available options:
+
+- ``plaintext``: The header value is the user identity directly (e.g., ``user@example.com``)
+- ``jwt``: The header value is a JWT token from which the identity should be extracted using ``jwtIdentityClaim``
+
+Use ``jwt`` when integrating with load balancers that pass JWT tokens.
+
+Default: ``'plaintext'``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      headerFormat: 'jwt'
+
+.. _helm-values-auth-externalProxy-jwtIdentityClaim:
+
+``auth.externalProxy.jwtIdentityClaim``
+'''''''''''''''''''''''''''''''''''''''
+
+The JWT claim to extract the user identity from when ``headerFormat`` is ``jwt``.
+
+Only used when ``headerFormat`` is ``jwt``.
+
+Default: ``'sub'``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      headerFormat: 'jwt'
+      jwtIdentityClaim: 'email'
+
 
 .. _helm-values-storage:
 
@@ -1111,6 +1260,19 @@ Default: ``null``
 ^^^^^^^^^^^^^^^^^^^
 
 Enable persistent storage for the API server, setting this to ``false`` is prone to data loss and should only be used for testing.
+
+When enabled, SkyPilot creates a PersistentVolumeClaim (PVC) to persist:
+
+- **Managed job logs**: Accessible via ``sky jobs logs <job_id>`` and ``sky jobs logs --controller <job_id>``
+- **File mounts**: Local files uploaded during managed job submission
+
+.. note::
+
+  Setting ``storage.enabled=true`` sets the environment variable ``SKYPILOT_API_SERVER_STORAGE_ENABLED=true`` on the API server pod. This ensures that managed job logs and file mounts persist across API server restarts and rolling updates.
+
+  Transient logs (api_server logs, sky-* cluster logs) are NOT persisted to minimize storage usage.
+
+For RollingUpdate upgrade strategy, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` for storage access mode requirements.
 
 Default: ``true``
 
@@ -1138,14 +1300,31 @@ Default: ``""``
 ``storage.accessMode``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Access mode for the persistent storage volume. Can be set to ``ReadWriteOnce`` or ``ReadWriteMany`` depending on what is supported by the storage class.
+Access mode for the persistent storage volume. Available options:
+
+- ``ReadWriteOnce`` (RWO): The volume can be mounted as read-write by a single node. This is the default and works with most storage classes. Compatible with ``Recreate`` upgrade strategy. **Not compatible with RollingUpdate upgrade strategy** since the PVC cannot be mounted by both old and new pods simultaneously during rolling updates.
+
+- ``ReadWriteMany`` (RWX): The volume can be mounted as read-write by multiple nodes. Compatible with both ``Recreate`` and ``RollingUpdate`` upgrade strategies. Requires an RWX-capable storage class such as:
+
+  - GKE: Filestore-backed storage class
+  - EKS: EFS CSI driver
+  - AKS: Azure Files
+  - On-prem: NFS provisioner
+
+For more details on upgrade strategies, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>`.
 
 Default: ``ReadWriteOnce``
 
 .. code-block:: yaml
 
+  # For Recreate upgrade strategy (default), ReadWriteOnce is sufficient
   storage:
     accessMode: ReadWriteOnce
+
+  # For RollingUpdate upgrade strategy with persistent storage, use ReadWriteMany
+  storage:
+    accessMode: ReadWriteMany
+    storageClassName: <your-rwx-storage-class>
 
 .. _helm-values-storage-size:
 
@@ -1221,6 +1400,20 @@ Default: ``true``
 
   ingress:
     enabled: true
+
+.. _helm-values-ingress-unified:
+
+``ingress.unified``
+^^^^^^^^^^^^^^^^^^^
+
+Use a single ingress resource for the API server and other auxiliary services. Dedicated ingresses for these services will be skipped, e.g. grafana and oauth2-proxy.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    unified: false
 
 .. _helm-values-ingress-authSecret:
 
@@ -2205,6 +2398,31 @@ Default: ``digitalocean-credentials``
   digitaloceanCredentials:
     digitaloceanSecretName: digitalocean-credentials
 
+.. _helm-values-slurmCredentials:
+
+``slurmCredentials``
+~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-slurmCredentials-config:
+
+``slurmCredentials.config``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the ``~/.slurm/config`` SSH configuration file for connecting to Slurm login nodes. This file follows the same format described in :ref:`slurm-getting-started`.
+
+Pass the config file content via ``--set-file slurmCredentials.config=/path/to/slurm/config`` when installing or upgrading the Helm chart.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  slurmCredentials:
+    config: |
+      Host mycluster1
+          HostName login.mycluster1.myorg.com
+          User myusername
+          IdentityFile ~/.ssh/id_rsa
+
 .. _helm-values-extraInitContainers:
 
 ``extraInitContainers``
@@ -2380,6 +2598,7 @@ By default, Grafana is configured to work with the ingress controller and auth p
     sidecar:
       datasources:
         enabled: true
+        initDatasources: true
       dashboards:
         enabled: true
     dashboardProviders:

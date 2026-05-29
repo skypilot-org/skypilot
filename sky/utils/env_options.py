@@ -31,6 +31,13 @@ class Options(enum.Enum):
     # config.
     ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
                                      False)
+    # Whether `allowed_contexts: 'all'` (or the env-var-triggered allow-all
+    # path) should include the API server's own in-cluster context. Default
+    # `True` (backward compatible). Set to `false` on the API server pod to
+    # keep the in-cluster context from being surfaced as a user-facing
+    # compute target via `allowed_contexts: 'all'`.
+    ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER = (
+        'SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER', True)
 
     def __init__(self, env_var: str, default: bool) -> None:
         super().__init__()

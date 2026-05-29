@@ -21,6 +21,7 @@ import re
 import runpy
 import subprocess
 import sys
+from typing import Any, cast
 
 import setuptools
 
@@ -161,11 +162,11 @@ if __name__ == '__main__':
         author='SkyPilot Team',
         license='Apache 2.0',
         readme='README.md',
-        description='SkyPilot: Run AI on Any Infra — Unified, Faster, Cheaper.',
+        description='SkyPilot: Manage all your AI compute.',
         long_description=long_description,
         long_description_content_type='text/markdown',
         setup_requires=['wheel'],
-        requires_python='>=3.7',
+        requires_python='>=3.9',
         install_requires=dependencies['install_requires'],
         extras_require=dependencies['extras_require'],
         entry_points={
@@ -173,8 +174,6 @@ if __name__ == '__main__':
         },
         include_package_data=True,
         classifiers=[
-            'Programming Language :: Python :: 3.7',
-            'Programming Language :: Python :: 3.8',
             'Programming Language :: Python :: 3.9',
             'Programming Language :: Python :: 3.10',
             'Programming Language :: Python :: 3.11',
@@ -185,10 +184,11 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Topic :: System :: Distributed Computing',
         ],
-        project_urls={
-            'Homepage': 'https://github.com/skypilot-org/skypilot',
-            'Issues': 'https://github.com/skypilot-org/skypilot/issues',
-            'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
-            'Documentation': 'https://docs.skypilot.co/',
-        },
+        project_urls=cast(
+            Any, {
+                'Homepage': 'https://github.com/skypilot-org/skypilot',
+                'Issues': 'https://github.com/skypilot-org/skypilot/issues',
+                'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
+                'Documentation': 'https://docs.skypilot.co/',
+            }),
     )

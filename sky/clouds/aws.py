@@ -9,9 +9,10 @@ import re
 import subprocess
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
-                    Tuple, TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, Tuple, TypeVar, Union)
 
+import colorama
 from typing_extensions import ParamSpec
 
 from sky import catalog
@@ -84,6 +85,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
+    'p6-b300.',
 ]
 
 # Docker run options for EFA.
@@ -238,6 +240,19 @@ class AWSIdentityType(enum.Enum):
     CUSTOM_PROCESS = 'custom-process'
 
     ASSUME_ROLE = 'assume-role'
+
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                <not set>             None    None
+    # access_key     ****************abcd            login
+    # secret_key     ****************abcd            login
+    #     region                us-east-1      config-file    ~/.aws/config
+    # The `aws login` command (released 2026) is a browser-based OAuth 2.0 +
+    # PKCE flow that writes short-term credentials to ~/.aws/login/cache/ and
+    # auto-rotates them every 15 minutes. boto3 resolves them via the standard
+    # credential provider chain. No ~/.aws/credentials file is used.
+    # https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html
+    LOGIN = 'login'
 
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
@@ -686,19 +701,27 @@ class AWS(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='aws')
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -716,6 +739,14 @@ class AWS(clouds.Cloud):
         instance_type: str,
     ) -> Optional[str]:
         return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
+
+    @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_local_disk_from_instance_type(instance_type,
+                                                         clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -757,6 +788,36 @@ class AWS(clouds.Cloud):
         else:
             max_efa_interfaces = 0
             enable_efa = False
+
+        use_internal_ips = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('use_internal_ips',),
+            default_value=False)
+        if max_efa_interfaces > 1 and not use_internal_ips:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                f'Instance type {resources.instance_type} supports up to '
+                f'{max_efa_interfaces} EFA interfaces, but '
+                '`use_internal_ips` is not enabled.\nLaunching with the '
+                'current configuration will use only 1 EFA interface.\n'
+                f'To use all {max_efa_interfaces} EFA interfaces, enable '
+                'internal IPs by adding one of the following '
+                'configurations to SkyPilot config:\n'
+                'Option 1 (with SSM):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    use_ssm: true\n'
+                'Option 2 (with SSH proxy):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    ssh_proxy_command: ssh -W %h:%p -i <ssh key path> '
+                '-o StrictHostKeyChecking=no <user>@<jump server public'
+                ' ip>\n'
+                'Refer to '
+                'https://docs.skypilot.co/en/latest/reference/config.html'
+                '#aws-use-internal-ips for more details.'
+                f'{colorama.Style.RESET_ALL}')
 
         docker_run_options = []
         if resources.extract_docker_image() is not None:
@@ -873,8 +934,11 @@ class AWS(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -890,8 +954,10 @@ class AWS(clouds.Cloud):
              use_spot=resources.use_spot,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='aws')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
@@ -1042,6 +1108,11 @@ class AWS(clouds.Cloud):
             # variables. So we don't check for the existence of ~/.aws/credentials.
             # i.e. the identity is not determined by the file.
             hints = f'AWS env is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.LOGIN:
+            # `aws login` stores credentials in ~/.aws/login/cache/ and rotates
+            # them automatically; the ~/.aws/credentials file is not used.
+            # boto3 resolves them via the standard credential provider chain.
+            hints = f'AWS login is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -1105,6 +1176,7 @@ class AWS(clouds.Cloud):
             AWSIdentityType.SSO,
             AWSIdentityType.IAM_ROLE,
             AWSIdentityType.CONTAINER_ROLE,
+            AWSIdentityType.LOGIN,
         }
         return identity_type in non_static_types
 
@@ -1275,6 +1347,9 @@ class AWS(clouds.Cloud):
                 pass
 
         result = cls._sts_get_caller_identity()
+        # get_catalog_path() is now a pure path getter; create the
+        # parent dir explicitly before writing.
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         with open(cache_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(result))
         return result
@@ -1623,3 +1698,18 @@ class AWS(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def yield_cloud_specific_failover_overrides(cls,
+                                                region: Optional[str] = None
+                                               ) -> Iterable[Dict[str, Any]]:
+        vpc_names = skypilot_config.get_effective_region_config(
+            cloud='aws', region=region, keys=('vpc_names',), default_value=None)
+        if vpc_names:
+            if isinstance(vpc_names, str):
+                vpc_names = [vpc_names]
+            for vpc_name in vpc_names:
+                yield {'vpc_name': vpc_name}
+        else:
+            yield {}
+        return

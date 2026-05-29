@@ -32,12 +32,14 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-# We will select from the following three instance families:
+# We will select from the following six instance families. The suffix
+# 'd' denotes that instance storage is attached:
 _DEFAULT_INSTANCE_FAMILY = [
     # This is the latest general-purpose instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8375C.
     # Memory: 4 GiB RAM per 1 vCPU;
     'm6i',
+    'm6id',
     # This is the latest general-purpose instance family as of Jul 2025.
     # CPU: Intel Sapphire Rapids.
     # Memory: 4 GiB RAM per 1 vCPU;
@@ -46,6 +48,7 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8375C
     # Memory: 8 GiB RAM per 1 vCPU;
     'r6i',
+    'r6id',
     # This is the latest memory-optimized instance family as of Jul 2025.
     # CPU: Intel Sapphire Rapids.
     # Memory: 8 GiB RAM per 1 vCPU;
@@ -54,6 +57,7 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8375C
     # Memory: 2 GiB RAM per 1 vCPU;
     'c6i',
+    'c6id',
     # This is the latest compute-optimized instance family as of Jul 2025.
     # CPU: Intel Sapphire Rapids.
     # Memory: 2 GiB RAM per 1 vCPU;
@@ -101,6 +105,10 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
                 az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             return None
+        # get_catalog_path() is now a pure path getter; create the
+        # parent dirs explicitly before writing.
+        os.makedirs(os.path.dirname(az_mapping_path), exist_ok=True)
+        os.makedirs(os.path.dirname(az_mapping_md5_path), exist_ok=True)
         az_mappings.to_csv(az_mapping_path, index=False)
         # Write md5 of the az_mapping file to a file so we can check it for
         # any changes when uploading to the controller
@@ -242,12 +250,15 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -260,9 +271,11 @@ def get_default_instance_type(cpus: Optional[str] = None,
         f'{family}.' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _get_df()
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    df = common.filter_with_local_disk(df, local_disk)
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio,
-                                                      region, zone)
+                                                      region, zone, use_spot,
+                                                      max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
@@ -275,14 +288,21 @@ def get_arch_from_instance_type(instance_type: str) -> Optional[str]:
     return common.get_arch_from_instance_type_impl(_get_df(), instance_type)
 
 
+def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
+    return common.get_local_disk_from_instance_type_impl(
+        _get_df(), instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
+    local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
@@ -290,14 +310,17 @@ def get_instance_type_for_accelerator(
     accelerators/cpus/memory with sorted prices and a list of candidates with
     fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_get_df(),
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    df = common.filter_with_local_disk(_get_df(), local_disk)
+    return common.get_instance_type_for_accelerator_impl(
+        df=df,
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        region=region,
+        zone=zone,
+        max_hourly_cost=max_hourly_cost)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+import enum
 from typing import List, Tuple
 
 from packaging import version
@@ -20,6 +21,7 @@ SKY_RUNTIME_DIR = '${SKY_RUNTIME_DIR:-$HOME}'
 #    os.path.expanduser(os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')),
 #    '.sky/jobs.db')
 SKY_RUNTIME_DIR_ENV_VAR_KEY = 'SKY_RUNTIME_DIR'
+SKY_CLUSTER_NAME_ENV_VAR_KEY = 'SKY_CLUSTER_NAME'
 # We keep sky_logs and sky_workdir in $HOME, because
 # these are artifacts that users can access, and having
 # them be in $HOME makes it more convenient.
@@ -37,9 +39,17 @@ SKY_REMOTE_RAY_PORT = 6380
 SKY_REMOTE_RAY_DASHBOARD_PORT = 8266
 # Note we can not use json.dumps which will add a space between ":" and its
 # value which causes the yaml parser to fail.
+# The os.environ.get(...) calls stay unevaluated here on purpose: this
+# string is executed remotely on the pod, where the hostNetwork probe
+# (sky.provision.kubernetes.host_network_probe) may have set the port env
+# vars. It falls back to the SkyPilot defaults otherwise.
 SKY_REMOTE_RAY_PORT_DICT_STR = (
-    f'{{"ray_port":{SKY_REMOTE_RAY_PORT}, '
-    f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
+    '{'
+    f'"ray_port":int(os.environ.get("SKYPILOT_RAY_PORT",'
+    f'{SKY_REMOTE_RAY_PORT})), '
+    f'"ray_dashboard_port":int(os.environ.get('
+    f'"SKYPILOT_RAY_DASHBOARD_PORT",{SKY_REMOTE_RAY_DASHBOARD_PORT}))'
+    '}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
@@ -103,7 +113,9 @@ SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # set UV_SYSTEM_PYTHON to false in case the
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
-SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
+# UV_LINK_MODE=copy avoids a uv >=0.10.5 bug where clone/reflink mode
+# strips execute permissions on XFS filesystems, breaking Ray binaries.
+SKY_UV_CMD = ('UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false '
               f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
@@ -136,6 +148,9 @@ TASK_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_ID'
 # lifetime of the job.
 TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
+# The integer managed job ID assigned by the jobs controller.
+MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
+
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
 # e.g., when we add new events to skylet, we fix a bug in skylet, or skylet
@@ -143,17 +158,52 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '28'
+SKYLET_VERSION = '37'  # log_lib.tail_logs supports tail_offset.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 4
+SKYLET_LIB_VERSION = 7  # Generalized lifecycle-hooks framework.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+# TODO(zpoint): legacy autostop-hook log path, kept so the new
+# tail_hook_logs(event='stop') can fall back to it on clusters
+# launched before the lifecycle-hooks framework. Remove after v0.15.0
+# (aligned with the autostop.hook removal pinned at v0.15.0 in
+# sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
+AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
+
+# Lifecycle-hooks framework — per-event log directory on cluster nodes.
+HOOK_LOG_DIR = '.sky/hooks'
+
+
+class LifecycleEvent(str, enum.Enum):
+    """The three lifecycle events that can trigger a hook.
+
+    Subclasses ``str`` so direct equality comparisons against the
+    canonical string spellings keep working (e.g.,
+    ``LifecycleEvent.STOP == 'stop'``). Use this enum at
+    callsites that handle events as identifiers; user-facing surfaces
+    (YAML, CLI help, log messages) continue to use the string forms.
+
+    Naming convention follows k8s: events describe lifecycle position
+    (``stop``, ``down``), not trigger. Autodown (idle timer with
+    ``autostop.down: true``) fires ``down`` — not ``stop`` — because
+    the outcome is teardown, not pause.
+    """
+    STOP = 'stop'
+    PREEMPTION = 'preemption'
+    DOWN = 'down'
+
+
+# Backwards-compatible tuple of the three event strings.
+HOOK_EVENTS = tuple(e.value for e in LifecycleEvent)
+
+# Autostop hook timeout default (1 hour in seconds)
+DEFAULT_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
@@ -204,13 +254,14 @@ CONDA_INSTALLATION_COMMANDS = (
     '{ '
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniconda3-Linux.sh script.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
+    # Download to /tmp to ensure write access for non-root users.
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
     '{ '
-    f'bash Miniconda3-Linux.sh -b -p "{SKY_CONDA_ROOT}" || true; '
+    f'bash /tmp/Miniconda3-Linux.sh -b -p "{SKY_CONDA_ROOT}" || true; '
     f'eval "$({SKY_CONDA_ROOT}/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
@@ -229,7 +280,9 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    'fi;'
+    'fi;')
+
+UV_INSTALLATION_COMMANDS = (
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate python environment for SkyPilot dependencies.
@@ -247,7 +300,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
 
 _sky_version = str(version.parse(sky.__version__))
@@ -261,6 +314,13 @@ RAY_INSTALLATION_COMMANDS = (
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
     f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
+    # Always pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy
+    # issues with Sentinel values. We force this even when ray is already
+    # installed (e.g. baked into the SkyPilot AMI), since the ray-version
+    # idempotency guard below would otherwise skip the install and leave
+    # click at whatever the AMI shipped.
+    # See: https://github.com/ray-project/ray/issues/56747
+    f'{SKY_UV_PIP_CMD} install "click<8.3.0"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -279,7 +339,9 @@ RAY_INSTALLATION_COMMANDS = (
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '  # pylint: disable=line-too-long
+    # Pin click<8.3.0: click 8.3.0+ breaks Ray CLI due to deepcopy issues
+    # with Sentinel values. See https://github.com/ray-project/ray/issues/56747.
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1" "click<8.3.0"; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -361,6 +423,11 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# The name for the environment variable that stores the client user hash.
+# This captures the machine-local identity of the actual client user, used to
+# aggregate usage across multiple API servers when basic auth is enabled.
+CLIENT_USER_HASH_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}CLIENT_USER_HASH'
+
 # SSH configuration to allow more concurrent sessions and connections.
 # Default MaxSessions is 10.
 # Default MaxStartups is 10:30:60, meaning:
@@ -388,6 +455,16 @@ USING_REMOTE_API_SERVER_ENV_VAR = (
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
+
+# Recipe names: letters, numbers, and dashes only (no underscores or dots).
+# Must start with a letter, end with an alphanumeric character.
+RECIPE_NAME_VALID_REGEX = r'[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?'
+RECIPE_NAME_MAX_LENGTH = 40
+
+# Workspace names: lowercase letters, numbers, dashes, and underscores.
+# Must start with a lowercase letter, end with a lowercase letter or digit.
+WORKSPACE_NAME_VALID_REGEX = r'[a-z]([-_a-z0-9]*[a-z0-9])?'
+WORKSPACE_NAME_MAX_LENGTH = 63
 
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
@@ -471,11 +548,21 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'quota'),
+    ('kubernetes', 'remote_identity'),
+    ('kubernetes', 'enable_docker'),
+    ('azure', 'remote_identity'),
+    ('azure', 'vpc_name'),
+    ('gcp', 'vpc_name'),
+    ('gcp', 'subnet_names'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
     ('vast', 'datacenter_only'),
+    ('vast', 'create_instance_kwargs'),
+    ('slurm', 'sbatch_options'),
+    ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
@@ -500,6 +587,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+    # Slurm cluster configs (workdir, tmpdir, etc.) are admin-managed
+    # server-side settings and should not be overridden by clients.
+    ('slurm', 'cluster_configs'),
 ]
 
 # Constants for Azure blob storage
@@ -539,6 +629,11 @@ IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.
 SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
+# Environment variable that is set to 'true' if persistent storage is enabled
+# for the API server deployment (via Helm storage.enabled=true).
+# This enables persistence of managed job logs and file mounts across rolling
+# updates.
+SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
@@ -558,6 +653,8 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
 SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
+SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE = (
+    'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE')
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.
@@ -574,11 +671,14 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
 SKYPILOT_SYSTEM_USER_ID = 'skypilot-system'
+
+# A built-in viewer-role counterpart to SKYPILOT_SYSTEM_USER_ID.
+SKYPILOT_SYSTEM_VIEWER_USER_ID = 'skypilot-system-viewer'
 
 # The directory to store the logging configuration.
 LOGGING_CONFIG_DIR = '~/.sky/logging'
@@ -591,10 +691,26 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = ('^[0-9]+('
-                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
-                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
-                     ')?$')
+# Time units for seconds-based duration parsing (for termination_delay, etc.)
+# This includes 's' for seconds, which is not in TIME_UNITS (minutes-based).
+TIME_UNITS_SECONDS = {
+    's': 1,
+    'm': 60,
+    'h': 3600,
+    'd': 86400,
+    'w': 604800,
+}
+
+
+def _make_time_pattern(units: dict) -> str:
+    """Create a regex pattern for time duration strings."""
+    unit_pattern = '|'.join([unit.lower() for unit in units] +
+                            [unit.upper() for unit in units])
+    return f'^[0-9]+({unit_pattern})?$'
+
+
+TIME_PATTERN: str = _make_time_pattern(TIME_UNITS)
+TIME_PATTERN_SECONDS: str = _make_time_pattern(TIME_UNITS_SECONDS)
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,
@@ -609,6 +725,8 @@ MEMORY_SIZE_UNITS = {
     'pi': 2**50,
 }
 
+SUB_PATH_PATTERN = '^[a-zA-Z0-9._-][a-zA-Z0-9./_-]*$'
+
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
     f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
@@ -618,6 +736,7 @@ MEMORY_SIZE_PATTERN = (
 
 LAST_USE_TRUNC_LENGTH = 25
 USED_BY_TRUNC_LENGTH = 25
+ERROR_MESSAGE_TRUNC_LENGTH = 60
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000
@@ -632,5 +751,15 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
 
+# Slurm marker file for proctrack type detection.
+# Used by the executor to conditionally apply multi-node barrier.
+SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
+
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
+
+# Maximum number of node name entries to keep per node in the lineage.
+MAX_NODE_NAME_LINEAGE = 10
+
+# Clouds that provide storage only (no compute).
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']

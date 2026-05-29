@@ -22,6 +22,7 @@ from sky.adaptors import coreweave
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import vastdata
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.skylet import constants
@@ -680,6 +681,72 @@ class CoreWeaveCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class VastDataCloudStorage(CloudStorage):
+    """VastData Cloud Storage (S3-compatible).
+
+    Note: VastData (object storage) is a separate company from Vast.ai
+    (GPU compute).
+    """
+
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether VastData 'url' is a directory."""
+        vd_s3 = vastdata.resource('s3')
+        bucket_name, path = data_utils.split_vastdata_path(url)
+        bucket = vd_s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            if num_objects == 3:
+                return True
+
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        assert 'vastdata://' in source, 'vastdata:// is not in source'
+        source = source.replace('vastdata://', 's3://')
+        endpoint_url = vastdata.get_endpoint()
+        download_via_awscli = (
+            'AWS_SHARED_CREDENTIALS_FILE='
+            f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
+            f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
+            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            'sync --no-follow-symlinks '
+            f'{source} {destination} '
+            f'--endpoint {endpoint_url} '
+            f'--profile={vastdata.VASTDATA_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        assert 'vastdata://' in source, 'vastdata:// is not in source'
+        source = source.replace('vastdata://', 's3://')
+        endpoint_url = vastdata.get_endpoint()
+        download_via_awscli = (
+            'AWS_SHARED_CREDENTIALS_FILE='
+            f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
+            f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
+            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            f'cp {source} {destination} '
+            f'--endpoint {endpoint_url} '
+            f'--profile={vastdata.VASTDATA_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -698,6 +765,7 @@ _REGISTRY = {
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
     'cw': CoreWeaveCloudStorage(),
+    'vastdata': VastDataCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

@@ -69,6 +69,7 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  log_cmd: bool = ...,
+                 timeout: Optional[int] = ...,
                  **kwargs) -> int:
     ...
 
@@ -88,6 +89,7 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  log_cmd: bool = ...,
+                 timeout: Optional[int] = ...,
                  **kwargs) -> Tuple[int, str, str]:
     ...
 
@@ -107,6 +109,7 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  log_cmd: bool = ...,
+                 timeout: Optional[int] = ...,
                  **kwargs) -> Tuple[int, int]:
     ...
 
@@ -140,10 +143,18 @@ def run_bash_command_with_log_and_return_pid(
     ...
 
 
+def tail_lines_from_end(path: str,
+                        tail: int,
+                        offset: int = ...) -> Tuple[List[str], int]:
+    ...
+
+
 def tail_logs(job_id: int,
               log_dir: Optional[str],
               managed_job_id: Optional[int] = ...,
-              follow: bool = ...) -> None:
+              follow: bool = ...,
+              tail: int = ...,
+              tail_offset: int = ...) -> None:
     ...
 
 
@@ -151,7 +162,8 @@ def tail_logs_iter(job_id: Optional[int],
                    log_dir: Optional[str],
                    managed_job_id: Optional[int] = ...,
                    follow: bool = ...,
-                   tail: int = ...) -> Iterator[str]:
+                   tail: int = ...,
+                   tail_offset: int = ...) -> Iterator[str]:
     ...
 
 

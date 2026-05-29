@@ -4,13 +4,26 @@ CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
-# The filelock for selecting service ports on controller VM when starting a
-# service. We need to have a filelock to avoid port collision when starting
-# multiple services at the same time.
-PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
+# The filelock for selecting service ports when starting a service. Two
+# requirements:
+#  (1) Same-pod sky.serve.service subprocesses must serialize so they don't
+#      both pick the same just-freed port between their respective
+#      `find_free_port` and the controller subprocess actually `bind()`-ing.
+#  (2) The lock must NOT live on a network filesystem. fcntl/flock over NFS
+#      requires a working NLM server (rpc.statd/lockd); many K8s NFS PVC
+#      setups mount with `local_lock=none` and the server has no lockd, so
+#      flock silently becomes a no-op — multiple processes "acquire" the
+#      lock simultaneously and race anyway.
+PORT_SELECTION_FILE_LOCK_PATH = '~/.sky/skyserve_port_selection.lock'
 
 # Signal file path for controller to handle signals.
-SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
+SIGNAL_FILE_PATH = '~/.sky/signals/sky_serve_controller_signal_{}'
+
+# The consolidation mode lock ensures that if multiple API servers are running
+# at the same time (e.g. during a rolling update), recovery can only happen once
+# the previous API server has exited.
+POOL_CONSOLIDATION_MODE_LOCK_ID = '~/.sky/pool_consolidation_mode_lock'
+SERVE_CONSOLIDATION_MODE_LOCK_ID = '~/.sky/serve_consolidation_mode_lock'
 
 # Time to wait in seconds for controller to setup, this involves the time to run
 # cloud dependencies installation.
@@ -33,11 +46,12 @@ LB_MAX_RETRY = 3
 # Large LLMs like Llama2-70b is able to process the request within ~30 seconds.
 # We set the timeout to 120s to be safe. For reference, FastChat uses 100s:
 # https://github.com/lm-sys/FastChat/blob/f2e6ca964af7ad0585cadcf16ab98e57297e2133/fastchat/constants.py#L39 # pylint: disable=line-too-long
-# TODO(tian): Expose this option to users in yaml file.
-LB_STREAM_TIMEOUT = 120
+DEFAULT_LB_STREAM_TIMEOUT = 120
 
-# Interval in seconds to probe replica endpoint.
-ENDPOINT_PROBE_INTERVAL_SECONDS = 10
+# Default interval in seconds to probe replica endpoint.
+DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS = 10
+# Backward compatibility alias.
+ENDPOINT_PROBE_INTERVAL_SECONDS = DEFAULT_ENDPOINT_PROBE_INTERVAL_SECONDS
 
 # The default timeout in seconds for a readiness probe request. We set the
 # timeout to 15s since using actual generation in LLM services as readiness
@@ -60,6 +74,10 @@ AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS = 300
 # We will downscale only if the target number of instances
 # is smaller than the current launched instances for delay amount of time.
 AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
+# Default queue length threshold for pool autoscaling.
+# When max_workers is set but queue_length_threshold is not specified,
+# this default threshold will be used.
+AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD = 1
 # The default controller resources. We need 200 GB disk space to enable using
 # Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of
@@ -110,5 +128,6 @@ TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
 # Dummy run command for pool.
 POOL_DUMMY_RUN_COMMAND = 'echo "setup done"'
 
-# Error message for max number of services reached.
-MAX_NUMBER_OF_SERVICES_REACHED_ERROR = 'Max number of services reached.'
+# Error message prefix for max number of services reached.
+# This is used as a marker to detect the error in controller logs.
+MAX_NUMBER_OF_SERVICES_REACHED_ERROR = 'Max number of services reached'

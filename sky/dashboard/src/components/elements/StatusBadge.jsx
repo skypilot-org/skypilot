@@ -1,6 +1,6 @@
 import React from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import { NonCapitalizedTooltip as Tooltip } from '@/components/utils';
 import {
   FilledCircleIcon,
   SquareIcon,
@@ -23,6 +23,8 @@ export const getStatusStyle = (status) => {
       return 'bg-green-50 text-green-700';
     case 'STOPPED':
       return 'bg-yellow-100 text-yellow-800';
+    case 'AUTOSTOPPING':
+      return 'bg-purple-100 text-purple-800';
     case 'TERMINATED':
       return 'bg-gray-100 text-gray-800';
 
@@ -37,6 +39,8 @@ export const getStatusStyle = (status) => {
       return 'bg-yellow-50 text-yellow-700';
     case 'RECOVERING':
       return 'bg-orange-50 text-orange-700';
+    case 'WINDING_DOWN':
+      return 'bg-purple-50 text-purple-700';
     case 'SUBMITTED':
       return 'bg-indigo-50 text-indigo-700';
     case 'STARTING':
@@ -51,6 +55,9 @@ export const getStatusStyle = (status) => {
       return 'bg-red-50 text-red-700';
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
+
+    // Volume statuses - 'READY' and 'NOT_READY' are
+    // handled below with Serve statuses
 
     // Serve specific statuses - ReplicaStatus
     case 'READY':
@@ -100,6 +107,8 @@ export const getStatusIcon = (status) => {
       return <FilledCircleIcon className="w-3 h-3 mr-1" />;
     case 'STOPPED':
       return <PauseIcon className="w-3 h-3 mr-1" />;
+    case 'AUTOSTOPPING':
+      return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
     case 'TERMINATED':
     case 'FAILED':
     case 'CANCELLED':
@@ -120,6 +129,7 @@ export const getStatusIcon = (status) => {
     case 'REPLICA_INIT':
     case 'NO_REPLICA':
       return <CircleIcon className="w-3 h-3 mr-1" />;
+    case 'WINDING_DOWN':
     case 'PROVISIONING':
     case 'SHUTTING_DOWN':
       return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
@@ -155,7 +165,7 @@ export const StatusBadge = ({ status, statusTooltip }) => {
   const tooltipContent = statusTooltip || status;
 
   return (
-    <Tooltip content={tooltipContent} className="text-muted-foreground text-sm">
+    <Tooltip content={tooltipContent}>
       <span>{status2Badge(status)}</span>
     </Tooltip>
   );

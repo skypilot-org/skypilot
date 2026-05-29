@@ -25,6 +25,7 @@ from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
@@ -80,30 +81,36 @@ def _bulk_provision(
                                                cluster_name.name_on_cloud,
                                                config=config)
 
-    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-    logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
-    rich_utils.force_update_status(
-        ux_utils.spinner_message('Launching - Checking instance status',
-                                 str(provision_logging.config.log_path),
-                                 cluster_name=str(cluster_name)))
-    # AWS would take a very short time (<<1s) updating the state of the
-    # instance.
-    time.sleep(1)
-    for retry_cnt in range(_MAX_RETRY):
-        try:
-            provision.wait_instances(provider_name,
-                                     region_name,
-                                     cluster_name.name_on_cloud,
-                                     state=status_lib.ClusterStatus.UP)
-            break
-        except (aws.botocore_exceptions().WaiterError, RuntimeError):
-            time.sleep(backoff.current_backoff())
-    else:
-        raise RuntimeError(
-            f'Failed to wait for instances of {cluster_name!r} to be '
-            f'ready on the cloud provider after max retries {_MAX_RETRY}.')
-    logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-                 'retries.')
+    # Kubernetes-based clouds' run_instances already synchronously wait for all
+    # pods to be scheduled and running, and their wait_instances is a no-op,
+    # so skip the post-run wait/retry loop entirely.
+    if provider_name.lower() not in provision_constants.K8S_BASED_CLOUDS:
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
+        logger.debug(
+            f'\nWaiting for instances of {cluster_name!r} to be ready...')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching - Checking instance status',
+                                     str(provision_logging.config.log_path),
+                                     cluster_name=str(cluster_name)))
+        # AWS would take a very short time (<<1s) updating the state of the
+        # instance.
+        time.sleep(1)
+        for retry_cnt in range(_MAX_RETRY):
+            try:
+                provision.wait_instances(provider_name,
+                                         region_name,
+                                         cluster_name.name_on_cloud,
+                                         state=status_lib.ClusterStatus.UP)
+                break
+            except (aws.botocore_exceptions().WaiterError, RuntimeError):
+                time.sleep(backoff.current_backoff())
+        else:
+            raise RuntimeError(
+                f'Failed to wait for instances of {cluster_name!r} to be '
+                f'ready on the cloud provider after max retries {_MAX_RETRY}.')
+        logger.debug(
+            f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+            'retries.')
 
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
@@ -240,9 +247,19 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
             specific exceptions will be raised by the cloud APIs.
     """
     if terminate:
-        provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
-                                      provider_config)
+        try:
+            provision.terminate_instances(cloud_name,
+                                          cluster_name.name_on_cloud,
+                                          provider_config)
+        except RuntimeError as e:
+            if provision_constants.ERROR_NO_NODES_LAUNCHED in str(e):
+                logger.info(
+                    'Ignoring teardown failure as no nodes were launched.')
+                logger.debug(f'Stacktrace: {traceback.format_exc()}')
+            else:
+                raise
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        # This won't crash because not found volumes is ignored.
         provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
@@ -289,15 +306,6 @@ def _ssh_probe_command(ip: str,
     return command
 
 
-def _shlex_join(command: List[str]) -> str:
-    """Join a command list into a shell command string.
-
-    This is copied from Python 3.8's shlex.join, which is not available in
-    Python 3.7.
-    """
-    return ' '.join(shlex.quote(arg) for arg in command)
-
-
 def _wait_ssh_connection_direct(ip: str,
                                 ssh_port: int,
                                 ssh_user: str,
@@ -341,7 +349,7 @@ def _wait_ssh_connection_direct(ip: str,
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
-                 f'{_shlex_join(command)}. '
+                 f'{shlex.join(command)}. '
                  f'{stderr}')
     return False, stderr
 
@@ -362,7 +370,7 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
-    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    message = f'Waiting for SSH using command: {shlex.join(command)}'
     logger.debug(message)
     try:
         proc = subprocess.run(command,
@@ -492,7 +500,8 @@ def _post_provision_setup(
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
+        is_k8s_cloud = cloud_name.lower(
+        ) in provision_constants.K8S_BASED_CLOUDS
         is_slurm_cloud = cloud_name.lower() == 'slurm'
         if not is_k8s_cloud and not is_slurm_cloud:
             logger.debug(
@@ -649,7 +658,7 @@ def _post_provision_setup(
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
              head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
-        elif cloud_name.lower() == 'kubernetes':
+        elif cloud_name.lower() in provision_constants.K8S_BASED_CLOUDS:
             timeout = 90  # 1.5-min maximum timeout
             start = time.time()
             while True:

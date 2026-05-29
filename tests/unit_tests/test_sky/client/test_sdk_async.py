@@ -37,12 +37,12 @@ def mock_stream_and_get():
 
 @pytest.fixture
 def mock_to_thread():
-    """Mock context_utils.to_thread to run synchronously."""
+    """Mock asyncio.to_thread to run synchronously."""
 
     async def mock_to_thread_func(func, *args, **kwargs):
         return func(*args, **kwargs)
 
-    with mock.patch('sky.utils.context_utils.to_thread',
+    with mock.patch('sky.client.sdk_async.asyncio.to_thread',
                     side_effect=mock_to_thread_func):
         yield
 

@@ -99,7 +99,7 @@ Deploying on Google Cloud GKE
 
        PROJECT_ID=$(gcloud config get-value project)
        CLUSTER_NAME=testcluster
-       gcloud beta container --project "${PROJECT_ID}" clusters create "${CLUSTER_NAME}" --zone "us-central1-c" --no-enable-basic-auth --cluster-version "1.29.4-gke.1043002" --release-channel "regular" --machine-type "e2-standard-16" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "2" --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias --network "projects/${PROJECT_ID}/global/networks/default" --subnetwork "projects/${PROJECT_ID}/regions/us-central1/subnetworks/default" --no-enable-intra-node-visibility --default-max-pods-per-node "110" --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --enable-managed-prometheus --enable-shielded-nodes --node-locations "us-central1-c"
+       gcloud beta container --project "${PROJECT_ID}" clusters create "${CLUSTER_NAME}" --zone "us-central1-c" --no-enable-basic-auth --release-channel "regular" --machine-type "e2-standard-16" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "2" --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias --network "projects/${PROJECT_ID}/global/networks/default" --subnetwork "projects/${PROJECT_ID}/regions/us-central1/subnetworks/default" --no-enable-intra-node-visibility --default-max-pods-per-node "110" --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --enable-managed-prometheus --enable-shielded-nodes --node-locations "us-central1-c"
 
    .. raw:: html
 
@@ -143,11 +143,11 @@ Deploying on Google Cloud GKE
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --infra k8s`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky gpus list --infra k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --infra k8s
+       $ sky gpus list --infra k8s
        GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
        L4    1, 2, 4                   6 of 8 free
        A100  1, 2                      2 of 4 free
@@ -159,9 +159,35 @@ Deploying on Google Cloud GKE
        my-cluster-2               A100      2 of 2 free
        my-cluster-3               A100      0 of 2 free
 
-.. note::
-    GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
+.. _kubernetes-setup-gke-autopilot:
 
+Using SkyPilot on GKE Autopilot
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GKE Autopilot scales to zero when idle, so SkyPilot must defer node-fit decisions to
+Autopilot. Set this in your config:
+
+.. code-block:: yaml
+
+    kubernetes:
+      autoscaler: gke
+      provision_timeout: 600
+
+**Limitations:**
+
+- **Object storage mounts via SkyPilot's bundled FUSE** (``file_mounts`` with cloud
+  storage URIs in ``MOUNT`` mode) — uses a privileged DaemonSet and ``hostPath``,
+  which Autopilot rejects. Instead, mount a GCS bucket through a :ref:`SkyPilot volume
+  <volumes-all>` backed by the
+  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_.
+- **Privileged or host-namespace features:** Docker-in-Docker, GPUDirect TCPX/TCPXO,
+  BuildKit image builds, RDMA (``IPC_LOCK``), and SSH node pools.
+- **Mounting a directory from the Kubernetes node** (via SkyPilot's ``k8s-hostpath``
+  volume type or ``hostPath`` in ``pod_config`` overrides). Autopilot does not allow
+  workloads to access the node filesystem directly.
+- **Pod preemption.** Autopilot may evict pods to consolidate workloads. For
+  long-running work, use :code:`sky jobs launch` so SkyPilot's managed jobs
+  automatically recover from preemption.
 
 .. _kubernetes-setup-eks:
 
@@ -179,14 +205,14 @@ Deploying on Amazon EKS
      # Example:
      # aws eks update-kubeconfig --name testcluster --region us-west-2
 
-3. [If using GPUs] EKS clusters already come with Nvidia drivers set up. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
+3. [If using GPUs] EKS clusters already come with Nvidia drivers set up. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling command to do so:
 
    .. code-block:: console
 
-     python -m sky.utils.kubernetes.gpu_labeler
+     sky gpus label
 
 
-   This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. You can check the status of these jobs by running:
+   This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. Note: This command currently only supports NVIDIA GPUs. You can check the status of these jobs by running:
 
    .. code-block:: console
 
@@ -198,11 +224,11 @@ Deploying on Amazon EKS
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --infra k8s`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky gpus list --infra k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --infra k8s
+       $ sky gpus list --infra k8s
        GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
        A100  1, 2                      2 of 2 free
 

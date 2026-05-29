@@ -1,0 +1,16 @@
+# Volume definition for train-eval-jobgroup shared checkpoint storage
+#
+# This volume is used by both the trainer and evaluator tasks to share
+# checkpoint files. Create this volume before launching the job group:
+#
+#   sky volume apply llm/train-eval-jobgroup/train-eval-ckpts-volume.yaml
+#
+# Then launch the job group:
+#   sky jobs launch llm/train-eval-jobgroup/train-eval-jobgroup.yaml
+
+name: train-eval-ckpts
+type: k8s-pvc
+size: 10Gi
+infra: kubernetes
+config:
+  access_mode: ReadWriteMany

@@ -49,7 +49,7 @@ Check for AMD GPU labels
 
 .. code-block:: bash
 
-    kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, labels: .metadata.labels}' | grep -e "amd.com/gpu" 
+    kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, labels: .metadata.labels}' | grep -e "amd.com/gpu"
 
 Check node capacity
 ~~~~~~~~~~~~~~~~~~~
@@ -116,7 +116,7 @@ List available accelerators (AMD GPUs)
 
 .. code-block:: bash
 
-    sky show-gpus --infra kubernetes
+    sky gpus list --infra kubernetes
 
 Sample output:
 
@@ -124,16 +124,16 @@ Sample output:
 
     Kubernetes GPUs
     Context: <your context name>
-    GPU    REQUESTABLE_QTY_PER_NODE  UTILIZATION  
-    MI300  1, 2, 4, 8                6 of 8 free  
+    GPU    REQUESTABLE_QTY_PER_NODE  UTILIZATION
+    MI300  1, 2, 4, 8                6 of 8 free
     Kubernetes per-node GPU availability
-    CONTEXT              NODE         GPU    UTILIZATION  
-    <your context name>  mi300-8gpus  MI300  6 of 8 free  
+    CONTEXT              NODE         GPU    UTILIZATION
+    <your context name>  mi300-8gpus  MI300  6 of 8 free
 
 Run a sample example with AMD Docker images
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Smoke test: 
+1. Smoke test:
 
 .. code-block:: bash
 

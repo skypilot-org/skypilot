@@ -268,3 +268,26 @@ def minimal_api_version(min_version: int) -> Callable:
         return wrapper
 
     return decorator
+
+
+def check_recipe_client_version(task: str) -> None:
+    """Reject recipe launches from clients older than the minimum version.
+
+    An old client that doesn't understand the recipes: prefix will treat it
+    as a literal shell command, producing a task YAML with
+    ``run: recipes:<name>``. We detect this pattern in the raw YAML string
+    and reject with a helpful error.
+
+    This is called during request execution (not in the endpoint handler) so
+    that the error propagates through the normal request polling path, which
+    old clients already handle.
+    """
+    if not re.search(r'^run:\s*recipes:', task, re.MULTILINE):
+        return
+
+    client_api_version = get_remote_api_version()
+    if (client_api_version is None or
+            client_api_version < constants.MIN_RECIPE_LAUNCH_API_VERSION):
+        raise RuntimeError(
+            'Launching recipes requires a newer SkyPilot client. '
+            'Please upgrade your SkyPilot installation.')

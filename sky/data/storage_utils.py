@@ -76,7 +76,12 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     # list the submodules and run `ls-files` within the root and each submodule.
     # Print the submodule paths relative to expand_src_dir_path, separated by
     # null chars.
-    submodules_cmd = (f'git -C {shlex.quote(expand_src_dir_path)} '
+    # Use safe.directory=* to avoid "dubious ownership" errors when the
+    # workdir is on a shared filesystem (e.g. EFS) where the UID on disk
+    # may differ from the running process.  See:
+    # https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/577
+    submodules_cmd = (f'git -c safe.directory="*" '
+                      f'-C {shlex.quote(expand_src_dir_path)} '
                       'submodule foreach -q "printf \\$displaypath\\\\\\0"')
 
     try:
@@ -140,7 +145,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
         #              entry rather than listing every single file
         # Since we are using --others instead of --cached, this will not show
         # files that are tracked but also present in .gitignore.
-        filter_cmd = (f'git -C {shlex.quote(repo_path)} ls-files -z '
+        filter_cmd = (f'git -c safe.directory="*" '
+                      f'-C {shlex.quote(repo_path)} ls-files -z '
                       '--others --ignore --exclude-standard --directory')
         output = subprocess.run(filter_cmd,
                                 shell=True,
@@ -209,7 +215,21 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 def zip_files_and_folders(items: List[str],
                           output_file: Union[str, pathlib.Path],
                           log_file: Optional[TextIO] = None,
-                          relative_to_items: bool = False):
+                          relative_to_items: bool = False,
+                          compression: int = zipfile.ZIP_DEFLATED,
+                          compresslevel: Optional[int] = None):
+    """Zip files and folders.
+
+    Args:
+        items: List of file/folder paths to include in the zip.
+        output_file: Path to the output zip file.
+        log_file: Optional file to log progress to.
+        relative_to_items: If True, paths in zip are relative to items.
+        compression: Compression method (default: ZIP_DEFLATED for good
+            compression with universal compatibility).
+        compresslevel: Compression level (1-9 for DEFLATED). None uses
+            the default (6).
+    """
 
     def _get_archive_name(file_path: str, item_path: str) -> str:
         """Get the archive name for a file based on the relative parameters."""
@@ -239,7 +259,10 @@ def zip_files_and_folders(items: List[str],
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
                                 message='Duplicate name:')
-        with zipfile.ZipFile(output_file, 'w') as zipf:
+        with zipfile.ZipFile(output_file,
+                             'w',
+                             compression=compression,
+                             compresslevel=compresslevel) as zipf:
             for item in items:
                 item = os.path.expanduser(item)
                 if not os.path.isfile(item) and not os.path.isdir(item):

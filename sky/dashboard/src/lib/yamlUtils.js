@@ -25,6 +25,11 @@ export const formatYaml = (yamlString) => {
     // Parse the YAML string into an object
     const parsed = yaml.load(yamlString);
 
+    // Remove internal metadata fields before display
+    if (parsed && typeof parsed === 'object') {
+      delete parsed._metadata;
+    }
+
     // Re-serialize with better handling for multi-line strings
     const formatted = yaml.dump(parsed, YAML_DUMP_OPTIONS);
 
@@ -64,7 +69,7 @@ export const getYamlPreview = (parsed) => {
     return parsed.substring(0, 50) + '...';
   }
   if (parsed && parsed.name) {
-    return `name: ${parsed.name}`;
+    return parsed.name;
   }
   if (parsed && parsed.resources) {
     return 'Task configuration';
@@ -82,6 +87,11 @@ export const formatSingleYamlDocument = (doc, index) => {
   try {
     // Parse the YAML string into an object
     const parsed = yaml.load(doc);
+
+    // Remove internal metadata fields before display
+    if (parsed && typeof parsed === 'object') {
+      delete parsed._metadata;
+    }
 
     // Re-serialize with better handling for multi-line strings
     const formatted = yaml.dump(parsed, YAML_DUMP_OPTIONS);

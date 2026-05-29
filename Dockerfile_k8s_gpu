@@ -1,29 +1,44 @@
 # We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
-FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
 # Detect architecture using ARG with default value
 ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Install ssh and other local dependencies
-# We remove cuda lists to avoid conflicts with the cuda version installed by ray
+# Install ssh, InfiniBand userspace, and other local dependencies.
+# We remove cuda lists to avoid conflicts with the cuda version installed by ray.
+# FUSE setup mirrors sky/templates/kubernetes-ray.yml.j2:825-832 — install
+# fuse (FUSE 2) in the main batch, then fuse3 in a separate apt-get call.
+# fuse and fuse3 cannot be installed together (fuse3 Breaks: fuse — both ship
+# /usr/bin/fusermount), but in two steps apt resolves the conflict by removing
+# the `fuse` package while leaving `libfuse2`. Final state: libfuse.so.2 +
+# libfuse3.so.3 both in ldconfig (covers hf-mount + legacy FUSE 2 clients).
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
-    apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl jq -y && \
+    apt-get update -y && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git build-essential rsync sudo patch openssh-server \
+        pciutils nano fuse unzip socat netcat-openbsd curl wget autossh jq \
+        rdma-core ibverbs-providers libibverbs1 libibverbs-dev \
+        librdmacm1 ibverbs-utils infiniband-diags \
+        numactl iputils-ping && \
+    apt-get install -y --no-install-recommends fuse3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
-RUN sudo mkdir -p /var/run/sshd && \
-    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+RUN mkdir -p /var/run/sshd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
     cd /etc/ssh/ && \
-    sudo ssh-keygen -A
+    ssh-keygen -A
 
-# Setup new user named sky and add to sudoers. \
-# Also add /opt/conda/bin to sudo path and give sky user permission to run sudo without password
-RUN sudo useradd -m -s /bin/bash sky && \
-    sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
-    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
+# Setup new user named sky and add to sudoers. secure_path is hardcoded
+# (sudoers cannot expand $HOME) with /home/sky/miniconda3/bin so that
+# `sudo conda ...` resolves — conda lives in $HOME/miniconda3 in this image.
+RUN useradd -m -s /bin/bash sky && \
+    echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    echo 'Defaults        secure_path="/home/sky/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
 
 # Switch to sky user
 USER sky
@@ -58,9 +73,10 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
-    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
+        'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.33.12/bin/linux/$ARCH/kubectl" && \
     # Install kubectl to user's local bin instead of system path to avoid
     # sudo-related issues during cross-architecture builds, especially on ARM
     chmod +x kubectl && \

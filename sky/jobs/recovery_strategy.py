@@ -10,7 +10,7 @@ import logging
 import os
 import traceback
 import typing
-from typing import List, Optional, Set
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -28,8 +29,8 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -75,6 +76,7 @@ class StrategyExecutor:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> None:
         """Initialize the strategy executor.
 
@@ -90,6 +92,11 @@ class StrategyExecutor:
             starting_signal: Condition to signal when a job can start.
             recover_on_exit_codes: List of exit codes that should trigger
                 recovery regardless of max_restarts_on_errors limit.
+            file_mounts_blob_id: If set, the content-addressed blob id
+                associated with this job's uploaded file mounts. It is
+                forwarded to the inner ``sdk.launch`` so that whichever API
+                server replica executes the launch can resolve the blob to
+                its own extraction cache (critical under HA failover).
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -111,6 +118,74 @@ class StrategyExecutor:
         self.starting = starting
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
+        self.file_mounts_blob_id = file_mounts_blob_id
+
+    def set_strategy_config(self, config: dict) -> None:
+        """Handle strategy-specific config from the job_recovery dict.
+
+        Override in subclasses to accept custom parameters registered
+        by plugins. Unknown keys are logged as warnings by default.
+
+        Args:
+            config: Remaining key-value pairs from the job_recovery dict
+                after common keys (strategy, max_restarts_on_errors,
+                recover_on_exit_codes) have been removed.
+        """
+        if config:
+            logger.debug('Unused job_recovery config keys for strategy '
+                         f'{type(self).__name__}: {list(config.keys())}')
+
+    def extra_launch_context(self) -> Dict[str, Any]:
+        """Return strategy-specific context for the launch pipeline.
+
+        The returned dict is merged into ``_extra_launch_context``
+        passed through ``sdk.launch()`` to the provisioner's
+        ``template_override()``.
+        """
+        return {}
+
+    def task_specs(self) -> Dict[str, Any]:
+        """Return strategy-specific keys for the persisted task specs.
+
+        Merged into the ``specs`` dict written by
+        ``set_starting_async()``. Must not collide with base spec keys.
+        """
+        return {}
+
+    async def on_resume(self, cluster_name: str) -> None:  # pylint: disable=unused-argument
+        """Called before monitoring an already-launched task on resume.
+
+        Subclasses use this to rehydrate state from persisted handles.
+        """
+        return None
+
+    async def monitor_task(  # pylint: disable=unused-argument
+        self,
+        *,
+        task_id: int,
+        task: 'task_lib.Task',
+        cluster_name: str,
+        job_id_on_pool_cluster: Optional[int] = None,
+        callback_func: Optional[Callable[..., Any]] = None,
+        cleanup_cluster_on_success: bool = True,
+        force_transit_to_recovering: bool = False,
+        on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+    ) -> Optional[bool]:
+        """Strategy-owned monitoring loop override.
+
+        # TODO(kevin): The default monitor (JobController._monitor_one_task)
+        # bakes in cluster-level detection logic (skylet polling, cluster
+        # status refresh, ExternalFailureSource). If we refactor detection
+        # into pluggable strategy methods (e.g. check_status() returning a
+        # uniform result), the controller could own a single generic loop
+        # and this override would be unnecessary.
+
+        Returns:
+            None: fall back to OSS default monitor.
+            True: task succeeded (strategy handled monitoring).
+            False: task failed (strategy handled monitoring).
+        """
+        return None
 
     @classmethod
     def make(
@@ -124,6 +199,7 @@ class StrategyExecutor:
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
@@ -131,7 +207,12 @@ class StrategyExecutor:
         # single context, since there are not multiple clouds/regions to
         # failover through.
         resource_list = list(task.resources)
+        # Copy to avoid mutating the original resources' job_recovery
+        # dict, which would cause issues if make() is called more than
+        # once on the same task.
         job_recovery = resource_list[0].job_recovery
+        if isinstance(job_recovery, dict):
+            job_recovery = dict(job_recovery)
         for resource in resource_list:
             if resource.job_recovery != job_recovery:
                 raise ValueError(
@@ -164,13 +245,21 @@ class StrategyExecutor:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
             recover_on_exit_codes = None
+        # Remaining keys in the dict are strategy-specific config,
+        # passed to the executor via set_strategy_config().
+        strategy_config = dict(job_recovery) if isinstance(job_recovery,
+                                                           dict) else {}
+
         job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
                                  from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
-        return job_recovery_strategy(cluster_name, backend, task,
-                                     max_restarts_on_errors, job_id, task_id,
-                                     pool, starting, starting_lock,
-                                     starting_signal, recover_on_exit_codes)
+        executor = job_recovery_strategy(cluster_name, backend, task,
+                                         max_restarts_on_errors, job_id,
+                                         task_id, pool, starting, starting_lock,
+                                         starting_signal, recover_on_exit_codes,
+                                         file_mounts_blob_id)
+        executor.set_strategy_config(strategy_config)
+        return executor
 
     async def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -201,7 +290,7 @@ class StrategyExecutor:
     async def _try_cancel_jobs(self):
         if self.cluster_name is None:
             return
-        handle = await context_utils.to_thread(
+        handle = await asyncio.to_thread(
             global_user_state.get_handle_from_cluster_name, self.cluster_name)
         if handle is None or self.pool is not None:
             return
@@ -228,21 +317,21 @@ class StrategyExecutor:
             # then kill the user process on remaining worker nodes.
             # Only cancel the corresponding job for pool.
             if self.pool is None:
-                request_id = await context_utils.to_thread(
+                request_id = await asyncio.to_thread(
                     sdk.cancel,
                     cluster_name=self.cluster_name,
                     all=True,
                     _try_cancel_if_cluster_is_init=True,
                 )
             else:
-                request_id = await context_utils.to_thread(
+                request_id = await asyncio.to_thread(
                     sdk.cancel,
                     cluster_name=self.cluster_name,
                     job_ids=[self.job_id_on_pool_cluster],
                     _try_cancel_if_cluster_is_init=True,
                 )
             logger.debug(f'sdk.cancel request ID: {request_id}')
-            await context_utils.to_thread(
+            await asyncio.to_thread(
                 sdk.get,
                 request_id,
             )
@@ -253,7 +342,7 @@ class StrategyExecutor:
                         f'{common_utils.format_exception(e)}\n'
                         'Terminating the cluster explicitly to ensure no '
                         'remaining job process interferes with recovery.')
-            await context_utils.to_thread(self._cleanup_cluster)
+            await asyncio.to_thread(self._cleanup_cluster)
 
     async def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
@@ -269,7 +358,7 @@ class StrategyExecutor:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
             try:
-                cluster_status, _ = (await context_utils.to_thread(
+                cluster_status, _ = (await asyncio.to_thread(
                     backend_utils.refresh_cluster_status_handle,
                     self.cluster_name,
                     force_refresh_statuses=set(status_lib.ClusterStatus)))
@@ -281,7 +370,8 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != status_lib.ClusterStatus.UP:
+            if cluster_status not in (status_lib.ClusterStatus.UP,
+                                      status_lib.ClusterStatus.AUTOSTOPPING):
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
@@ -315,8 +405,17 @@ class StrategyExecutor:
 
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
+                if managed_job_runtime.is_registered():
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        self.cluster_name)
+                    runtime_submitted_at = await asyncio.to_thread(
+                        managed_job_runtime.get_job_submitted_at, handle,
+                        self.cluster_name)
+                    if runtime_submitted_at is not None:
+                        return runtime_submitted_at
                 try:
-                    job_submitted_at = await context_utils.to_thread(
+                    job_submitted_at = await asyncio.to_thread(
                         managed_job_utils.get_job_timestamp,
                         self.backend,
                         self.cluster_name,
@@ -416,7 +515,7 @@ class StrategyExecutor:
                                                  f'{env_var}')
                                 logger.debug('Env vars for api_start: '
                                              f'{os.environ}')
-                                await context_utils.to_thread(sdk.api_start)
+                                await asyncio.to_thread(sdk.api_start)
                                 logger.info('API server started.')
                             finally:
                                 for env_var, value in vars_to_restore.items():
@@ -425,41 +524,49 @@ class StrategyExecutor:
                                                      f'{env_var}: {value}')
                                         os.environ[env_var] = value
 
+                            # HA failover may land the controller on new hosts,
+                            # ensure blob extraction on the current host
+                            if self.file_mounts_blob_id is not None:
+                                # pylint: disable=import-outside-toplevel
+                                from sky.server import common as server_common
+                                await asyncio.to_thread(
+                                    server_common.resolve_blob_dir,
+                                    self.file_mounts_blob_id,
+                                    common_utils.get_user_hash())
+
                             request_id = None
                             try:
-                                request_id = await context_utils.to_thread(
+                                extra_ctx = self.extra_launch_context()
+                                request_id = await asyncio.to_thread(
                                     sdk.launch,
                                     self.dag,
                                     cluster_name=self.cluster_name,
                                     # We expect to tear down the cluster as soon
                                     # as the job is finished. However, in case
-                                    # the controller dies, we may end up with a
-                                    # resource leak.
-                                    # Ideally, we should autodown to be safe,
-                                    # but it's fine to disable it for now, as
-                                    # Nebius doesn't support autodown yet.
-                                    # TODO(kevin): set down=True once Nebius
-                                    # supports autodown.
-                                    # idle_minutes_to_autostop=(
-                                    #     _AUTODOWN_MINUTES),
-                                    # down=True,
+                                    # the controller dies, set autodown to try
+                                    # and avoid a resource leak.
+                                    idle_minutes_to_autostop=_AUTODOWN_MINUTES,
+                                    down=True,
                                     _is_launched_by_jobs_controller=True,
+                                    _file_mounts_blob_id=(
+                                        self.file_mounts_blob_id),
+                                    _extra_launch_context=(extra_ctx if
+                                                           extra_ctx else None),
                                 )
                                 logger.debug('sdk.launch request ID: '
                                              f'{request_id}')
-                                await context_utils.to_thread(
+                                await asyncio.to_thread(
                                     sdk.stream_and_get,
                                     request_id,
                                 )
                             except asyncio.CancelledError:
                                 if request_id:
-                                    req = await context_utils.to_thread(
+                                    req = await asyncio.to_thread(
                                         sdk.api_cancel, request_id)
                                     logger.debug('sdk.api_cancel request '
                                                  f'ID: {req}')
                                     try:
-                                        await context_utils.to_thread(
-                                            sdk.get, req)
+                                        await asyncio.to_thread(sdk.get, req)
                                     except Exception as e:  # pylint: disable=broad-except
                                         # we must still return a CancelledError
                                         logger.error(
@@ -474,7 +581,7 @@ class StrategyExecutor:
                                 task = self.dag.tasks[self.task_id]
                                 task_resources = task.resources
 
-                            self.cluster_name = await (context_utils.to_thread(
+                            self.cluster_name = await (asyncio.to_thread(
                                 serve_utils.get_next_cluster_name, self.pool,
                                 self.job_id, task_resources))
                             if self.cluster_name is None:
@@ -482,25 +589,25 @@ class StrategyExecutor:
                                     'No cluster name found in the pool.')
                             request_id = None
                             try:
-                                request_id = await context_utils.to_thread(
+                                request_id = await asyncio.to_thread(
                                     sdk.exec,
                                     self.dag,
                                     cluster_name=self.cluster_name,
                                 )
                                 logger.debug('sdk.exec request ID: '
                                              f'{request_id}')
-                                job_id_on_pool_cluster, _ = (
-                                    await context_utils.to_thread(
-                                        sdk.get, request_id))
+                                job_id_on_pool_cluster, _ = (await
+                                                             asyncio.to_thread(
+                                                                 sdk.get,
+                                                                 request_id))
                             except asyncio.CancelledError:
                                 if request_id:
-                                    req = await context_utils.to_thread(
+                                    req = await asyncio.to_thread(
                                         sdk.api_cancel, request_id)
                                     logger.debug('sdk.api_cancel request '
                                                  f'ID: {req}')
                                     try:
-                                        await context_utils.to_thread(
-                                            sdk.get, req)
+                                        await asyncio.to_thread(sdk.get, req)
                                     except Exception as e:  # pylint: disable=broad-except
                                         # we must still return a CancelledError
                                         logger.error(
@@ -567,6 +674,52 @@ class StrategyExecutor:
                         # At this point, a sky.launch() has succeeded. Cluster
                         # may be UP (no preemption since) or DOWN (newly
                         # preempted).
+                        # Auto-populate instance links if cluster is on a real
+                        # cloud
+                        if self.cluster_name is not None and self.pool is None:
+                            try:
+                                handle = await asyncio.to_thread(
+                                    global_user_state.
+                                    get_handle_from_cluster_name,
+                                    self.cluster_name)
+                                if (handle is not None and hasattr(
+                                        handle, 'cached_cluster_info') and
+                                        handle.cached_cluster_info is not None):
+                                    cluster_info = handle.cached_cluster_info
+                                    instance_links = (instance_links_utils.
+                                                      generate_instance_links(
+                                                          cluster_info,
+                                                          self.cluster_name))
+                                    if instance_links:
+                                        # Store instance links directly in
+                                        # database
+                                        await state.update_links_async(
+                                            self.job_id, self.task_id,
+                                            instance_links)
+                                        logger.debug(
+                                            f'Auto-populated instance links: '
+                                            f'{instance_links}')
+                                    else:
+                                        logger.debug('Failed to generate '
+                                                     'instance links')
+                                else:
+                                    logger.debug(
+                                        'Cluster handle not found or '
+                                        'cached cluster info is None so'
+                                        'not populating instance links')
+                            except Exception as e:  # pylint: disable=broad-except
+                                # Don't fail the launch if we can't generate
+                                # links
+                                logger.debug(
+                                    'Failed to auto-populate instance links: '
+                                    f'{e}')
+                        else:
+                            if self.pool:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster is for a pool')
+                            else:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster name is None')
                         job_submitted_at = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
@@ -583,7 +736,7 @@ class StrategyExecutor:
 
                     # If we get here, the launch did not succeed. Tear down the
                     # cluster and retry.
-                    await context_utils.to_thread(self._cleanup_cluster)
+                    await asyncio.to_thread(self._cleanup_cluster)
                     if max_retry is not None and retry_cnt >= max_retry:
                         # Retry forever if max_retry is None.
                         if raise_on_failure:
@@ -671,10 +824,12 @@ class FailoverStrategyExecutor(StrategyExecutor):
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         recover_on_exit_codes: Optional[List[int]] = None,
+        file_mounts_blob_id: Optional[str] = None,
     ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
                          job_id, task_id, pool, starting, starting_lock,
-                         starting_signal, recover_on_exit_codes)
+                         starting_signal, recover_on_exit_codes,
+                         file_mounts_blob_id)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
@@ -689,13 +844,31 @@ class FailoverStrategyExecutor(StrategyExecutor):
                                                  recovery)
         if job_submitted_at is not None and self.cluster_name is not None:
             # Only record the cloud/region if the launch is successful.
-            handle = await context_utils.to_thread(
+            handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name,
                 self.cluster_name)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), (
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
             self._launched_resources = launched_resources
+
+            # Persist infra info to database for sorting/filtering
+            if launched_resources is not None:
+                cloud = str(launched_resources.cloud
+                           ) if launched_resources.cloud else None
+                # Get current node names for lineage tracking
+                current_names = None
+                if handle.cached_cluster_info is not None:
+                    current_names = (
+                        handle.cached_cluster_info.get_node_names())
+                await asyncio.to_thread(
+                    state.set_job_infra,
+                    self.job_id,
+                    cloud=cloud,
+                    region=launched_resources.region,
+                    zone=launched_resources.zone,
+                    current_node_names=current_names,
+                )
         else:
             self._launched_resources = None
         return job_submitted_at
@@ -732,7 +905,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
             # Step 2
             logger.debug('Terminating unhealthy cluster and reset cloud '
                          'region.')
-            await context_utils.to_thread(self._cleanup_cluster)
+            await asyncio.to_thread(self._cleanup_cluster)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
@@ -791,7 +964,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
 
         # Step 1
         logger.debug('Terminating unhealthy cluster and reset cloud region.')
-        await context_utils.to_thread(self._cleanup_cluster)
+        await asyncio.to_thread(self._cleanup_cluster)
 
         # Step 2
         logger.debug('Relaunch the cluster skipping the previously launched '

@@ -1,0 +1,184 @@
+# RLHF Math Training with Job Groups - CPU Test Version
+#
+# This is a simplified CPU-only version for testing the job group functionality.
+# It demonstrates the service connectivity without requiring GPUs.
+#
+# Primary/Auxiliary Behavior:
+#   The test-client is the primary task. When tests complete, all auxiliary
+#   services are terminated after a 5-second grace period.
+#
+# Usage:
+#   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup-cpu.yaml
+---
+name: rlhf-math-cpu
+execution: parallel
+primary_tasks: [test-client]
+termination_delay: 5s
+
+---
+# Data Server: Serves math prompts from GSM8K dataset
+name: data-server
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn datasets
+
+run: |
+  echo "Starting data server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This server provides math prompts at http://data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+
+  cd /code
+  python data_server.py --port 8000
+
+---
+# Reward Server: Verifies math answers against ground truth
+name: reward-server
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn
+
+run: |
+  echo "Starting reward server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Reward API at http://reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  cd /code
+  python reward_server.py --port 8002
+
+---
+# Replay Buffer: Stores experience tuples for training
+name: replay-buffer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn
+
+run: |
+  echo "Starting replay buffer server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Replay Buffer API at http://replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
+
+  cd /code
+  python replay_buffer.py --port 8003 --capacity 1000
+
+---
+# Test Client: Verifies connectivity between services
+name: test-client
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+setup: |
+  pip install httpx
+
+run: |
+  echo "Starting test client..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+
+  # Service discovery via job group DNS
+  DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+  REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+  REPLAY_BUFFER="replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
+
+  echo "Data server: ${DATA_SERVER}"
+  echo "Reward server: ${REWARD_SERVER}"
+  echo "Replay buffer: ${REPLAY_BUFFER}"
+
+  # Wait for services to be ready
+  echo "Waiting for services to be available..."
+  sleep 30
+
+  # Test data server
+  echo "Testing data server..."
+  for i in {1..5}; do
+    if curl -s "http://${DATA_SERVER}/health" | grep -q "healthy"; then
+      echo "Data server is healthy!"
+      break
+    fi
+    echo "Waiting for data server... attempt $i"
+    sleep 5
+  done
+
+  # Fetch some prompts
+  echo "Fetching prompts..."
+  PROMPTS=$(curl -s "http://${DATA_SERVER}/prompts?batch_size=2")
+  echo "Prompts: ${PROMPTS}"
+
+  # Test reward server
+  echo "Testing reward server..."
+  for i in {1..5}; do
+    if curl -s "http://${REWARD_SERVER}/health" | grep -q "healthy"; then
+      echo "Reward server is healthy!"
+      break
+    fi
+    echo "Waiting for reward server... attempt $i"
+    sleep 5
+  done
+
+  # Test reward computation
+  echo "Testing reward computation..."
+  REWARD=$(curl -s -X POST "http://${REWARD_SERVER}/reward" \
+    -H "Content-Type: application/json" \
+    -d '{"prompt": "What is 2+2?", "response": "The answer is 4", "ground_truth": "4"}')
+  echo "Reward response: ${REWARD}"
+
+  # Test replay buffer
+  echo "Testing replay buffer..."
+  for i in {1..5}; do
+    if curl -s "http://${REPLAY_BUFFER}/health" | grep -q "healthy"; then
+      echo "Replay buffer is healthy!"
+      break
+    fi
+    echo "Waiting for replay buffer... attempt $i"
+    sleep 5
+  done
+
+  # Add experience to replay buffer
+  echo "Adding experience to replay buffer..."
+  ADD_RESULT=$(curl -s -X POST "http://${REPLAY_BUFFER}/add" \
+    -H "Content-Type: application/json" \
+    -d '{"experiences": [{"prompt": "What is 2+2?", "response": "The answer is 4", "reward": 1.0, "ground_truth": "4"}]}')
+  echo "Add result: ${ADD_RESULT}"
+
+  # Get replay buffer stats
+  echo "Getting replay buffer stats..."
+  STATS=$(curl -s "http://${REPLAY_BUFFER}/stats")
+  echo "Stats: ${STATS}"
+
+  # Sample from replay buffer
+  echo "Sampling from replay buffer..."
+  SAMPLE=$(curl -s -X POST "http://${REPLAY_BUFFER}/sample" \
+    -H "Content-Type: application/json" \
+    -d '{"batch_size": 1}')
+  echo "Sample: ${SAMPLE}"
+
+  echo ""
+  echo "=========================================="
+  echo "All services are working correctly!"
+  echo "=========================================="
+  echo ""
+  echo "Job group connectivity test complete."
+
+  # Keep running to allow inspection
+  sleep 300

@@ -243,7 +243,6 @@ def test_gcp_zone():
 @pytest.mark.no_shadeform  # Requires AWS
 @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
 @pytest.mark.no_dependency  # Requires full dependency installed
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
 @pytest.mark.parametrize(
     'image_id',
     [

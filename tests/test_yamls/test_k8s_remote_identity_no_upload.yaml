@@ -1,0 +1,13 @@
+config:
+  kubernetes:
+    remote_identity: NO_UPLOAD
+
+run: |
+  echo "Testing remote_identity override with NO_UPLOAD"
+  # Check if kubeconfig was NOT uploaded
+  if [ -f ~/.kube/config ]; then
+    echo "ERROR: ~/.kube/config should not exist with NO_UPLOAD"
+    exit 1
+  else
+    echo "SUCCESS: ~/.kube/config does not exist as expected"
+  fi

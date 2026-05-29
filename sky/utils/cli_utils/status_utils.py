@@ -16,9 +16,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
 
-if typing.TYPE_CHECKING:
-    from sky.provision.kubernetes import utils as kubernetes_utils
-
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
 
@@ -206,8 +203,12 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             autostop = controller_record.get('autostop', None)
             autostop_str = ''
             if autostop is not None:
+                if autostop > 0 and autostop % 60 == 0:
+                    idle_str = f'{autostop // 60}h'
+                else:
+                    idle_str = f'{autostop}min'
                 autostop_str = (f'{colorama.Style.DIM} (will be autostopped if '
-                                f'idle for {autostop}min)'
+                                f'idle for {idle_str})'
                                 f'{colorama.Style.RESET_ALL}')
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
@@ -225,8 +226,25 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # exist in those cases.
 _get_name = (lambda cluster_record, _: cluster_record['name'])
 _get_user_hash = (lambda cluster_record, _: cluster_record['user_hash'])
-_get_user_name = (
-    lambda cluster_record, _: cluster_record.get('user_name', '-'))
+
+
+def get_user_display_name(user_name: str, user_id: Optional[str] = None) -> str:
+    """ Appends SA to the user name if the user is a service account. """
+    if user_id and user_id.lower().startswith('sa-'):
+        return f'{user_name} (SA)'
+    return user_name
+
+
+def _get_user_name(cluster_record: _ClusterRecord,
+                   truncate: bool = True) -> str:
+    del truncate
+    user_name = cluster_record.get('user_name', '-')
+    if user_name == '-':
+        return user_name
+    user_hash = cluster_record.get('user_hash')
+    return get_user_display_name(user_name, user_hash)
+
+
 _get_launched = (lambda cluster_record, _: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
@@ -301,7 +319,11 @@ def _get_autostop(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     separation = ''
     if cluster_record['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
-        autostop_str = str(cluster_record['autostop']) + 'm'
+        autostop_minutes = cluster_record['autostop']
+        if autostop_minutes > 0 and autostop_minutes % 60 == 0:
+            autostop_str = f'{autostop_minutes // 60}h'
+        else:
+            autostop_str = f'{autostop_minutes}m'
         separation = ' '
 
     if cluster_record['to_down']:

@@ -281,6 +281,452 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         assert json.loads(result) == data
 
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_remote_version_28_keeps_is_cordoned_and_taints(
+            self, mock_get_version):
+        """Test that is_cordoned and taints are kept when remote_api_version >= 28."""
+        mock_get_version.return_value = 28
+        data = {
+            'node_info_dict': {
+                'node1': {
+                    'name': 'node1',
+                    'is_cordoned': True,
+                    'taints': ['NoSchedule']
+                },
+                'node2': {
+                    'name': 'node2',
+                    'is_cordoned': False,
+                    'taints': []
+                }
+            }
+        }
+        result = return_value_serializers.serialize_kubernetes_node_info(data)
+        parsed = json.loads(result)
+        # is_cordoned and taints should be preserved
+        assert parsed['node_info_dict']['node1']['is_cordoned'] is True
+        assert parsed['node_info_dict']['node1']['taints'] == ['NoSchedule']
+        assert parsed['node_info_dict']['node2']['is_cordoned'] is False
+        assert parsed['node_info_dict']['node2']['taints'] == []
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_remote_version_above_28_keeps_is_cordoned_and_taints(
+            self, mock_get_version):
+        """Test that is_cordoned and taints are kept when remote_api_version > 28."""
+        mock_get_version.return_value = 30
+        data = {
+            'node_info_dict': {
+                'node1': {
+                    'name': 'node1',
+                    'is_cordoned': True,
+                    'taints': ['NoSchedule', 'NoExecute']
+                }
+            }
+        }
+        result = return_value_serializers.serialize_kubernetes_node_info(data)
+        parsed = json.loads(result)
+        assert parsed['node_info_dict']['node1']['is_cordoned'] is True
+        assert parsed['node_info_dict']['node1']['taints'] == [
+            'NoSchedule', 'NoExecute'
+        ]
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_remote_version_below_28_removes_is_cordoned_and_taints(
+            self, mock_get_version):
+        """Test that is_cordoned and taints are removed when remote_api_version < 28."""
+        mock_get_version.return_value = 27
+        data = {
+            'node_info_dict': {
+                'node1': {
+                    'name': 'node1',
+                    'is_cordoned': True,
+                    'taints': ['NoSchedule'],
+                    'other_field': 'value'
+                },
+                'node2': {
+                    'name': 'node2',
+                    'is_cordoned': False,
+                    'taints': [],
+                    'other_field': 'value2'
+                }
+            }
+        }
+        result = return_value_serializers.serialize_kubernetes_node_info(data)
+        parsed = json.loads(result)
+        # is_cordoned and taints should be removed
+        assert 'is_cordoned' not in parsed['node_info_dict']['node1']
+        assert 'taints' not in parsed['node_info_dict']['node1']
+        assert 'is_cordoned' not in parsed['node_info_dict']['node2']
+        assert 'taints' not in parsed['node_info_dict']['node2']
+        # Other fields should remain
+        assert parsed['node_info_dict']['node1']['name'] == 'node1'
+        assert parsed['node_info_dict']['node1']['other_field'] == 'value'
+        assert parsed['node_info_dict']['node2']['name'] == 'node2'
+        assert parsed['node_info_dict']['node2']['other_field'] == 'value2'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_combined_version_compatibility_old_client(self, mock_get_version):
+        """Test combined version compatibility for old clients (API version < 25).
+
+        Old clients should not see any of the newer fields: is_ready,
+        cpu_count, memory_gb, cpu_free, memory_free_gb, is_cordoned, taints.
+        """
+        mock_get_version.return_value = 24
+        data = {
+            'node_info_dict': {
+                'node1': {
+                    'name': 'node1',
+                    'is_ready': True,
+                    'cpu_count': 8,
+                    'memory_gb': 32.0,
+                    'cpu_free': 4,
+                    'memory_free_gb': 16.0,
+                    'is_cordoned': False,
+                    'taints': [],
+                    'other_field': 'value'
+                }
+            }
+        }
+        result = return_value_serializers.serialize_kubernetes_node_info(data)
+        parsed = json.loads(result)
+        node = parsed['node_info_dict']['node1']
+        # All newer fields should be removed
+        assert 'is_ready' not in node
+        assert 'cpu_count' not in node
+        assert 'memory_gb' not in node
+        assert 'cpu_free' not in node
+        assert 'memory_free_gb' not in node
+        assert 'is_cordoned' not in node
+        assert 'taints' not in node
+        # Basic fields should remain
+        assert node['name'] == 'node1'
+        assert node['other_field'] == 'value'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_combined_version_compatibility_version_25(self, mock_get_version):
+        """Test combined version compatibility for API version 25 clients.
+
+        Version 25 clients should see is_ready but not cpu_count, memory_gb,
+        cpu_free, memory_free_gb, is_cordoned, taints.
+        """
+        mock_get_version.return_value = 25
+        data = {
+            'node_info_dict': {
+                'node1': {
+                    'name': 'node1',
+                    'is_ready': True,
+                    'cpu_count': 8,
+                    'memory_gb': 32.0,
+                    'cpu_free': 4,
+                    'memory_free_gb': 16.0,
+                    'is_cordoned': False,
+                    'taints': ['NoSchedule']
+                }
+            }
+        }
+        result = return_value_serializers.serialize_kubernetes_node_info(data)
+        parsed = json.loads(result)
+        node = parsed['node_info_dict']['node1']
+        # is_ready should be preserved
+        assert node['is_ready'] is True
+        # Resource fields should be removed
+        assert 'cpu_count' not in node
+        assert 'memory_gb' not in node
+        assert 'cpu_free' not in node
+        assert 'memory_free_gb' not in node
+        # Cordon/taint fields should be removed
+        assert 'is_cordoned' not in node
+        assert 'taints' not in node
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_combined_version_compatibility_version_26(self, mock_get_version):
+        """Test combined version compatibility for API version 26 clients.
+
+        Version 26 clients should see is_ready and resource fields but not
+        is_cordoned and taints.
+        """
+        mock_get_version.return_value = 26
+        data = {
+            'node_info_dict': {
+                'node1': {
+                    'name': 'node1',
+                    'is_ready': True,
+                    'cpu_count': 8,
+                    'memory_gb': 32.0,
+                    'cpu_free': 4,
+                    'memory_free_gb': 16.0,
+                    'is_cordoned': True,
+                    'taints': ['NoSchedule']
+                }
+            }
+        }
+        result = return_value_serializers.serialize_kubernetes_node_info(data)
+        parsed = json.loads(result)
+        node = parsed['node_info_dict']['node1']
+        # is_ready and resource fields should be preserved
+        assert node['is_ready'] is True
+        assert node['cpu_count'] == 8
+        assert node['memory_gb'] == 32.0
+        assert node['cpu_free'] == 4
+        assert node['memory_free_gb'] == 16.0
+        # Cordon/taint fields should be removed
+        assert 'is_cordoned' not in node
+        assert 'taints' not in node
+
+
+class TestSerializeStatus:
+    """Tests for the status serializer (AUTOSTOPPING -> UP mapping)."""
+
+    def test_none_return_value(self):
+        """Test that None return value is handled gracefully."""
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status')
+        result = json.loads(serializer(None))
+        assert result is None
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_old_client_maps_autostopping_to_init(self, mock_get_version):
+        """Test that AUTOSTOPPING is mapped to INIT for old clients (< 29)."""
+        mock_get_version.return_value = 28
+        data = [{
+            'name': 'test-cluster',
+            'status': 'AUTOSTOPPING',
+            'handle': 'abc123',
+        }]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'INIT'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_new_client_preserves_autostopping(self, mock_get_version):
+        """Test that AUTOSTOPPING is preserved for new clients (>= 29)."""
+        mock_get_version.return_value = 29
+        data = [{
+            'name': 'test-cluster',
+            'status': 'AUTOSTOPPING',
+            'handle': 'abc123',
+        }]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'AUTOSTOPPING'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_none_version_preserves_autostopping(self, mock_get_version):
+        """Test that AUTOSTOPPING is preserved when version is None."""
+        mock_get_version.return_value = None
+        data = [{
+            'name': 'test-cluster',
+            'status': 'AUTOSTOPPING',
+            'handle': 'abc123',
+        }]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'AUTOSTOPPING'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_other_statuses_unchanged_for_old_client(self, mock_get_version):
+        """Test that non-AUTOSTOPPING statuses are unchanged for old clients."""
+        mock_get_version.return_value = 28
+        data = [
+            {
+                'name': 'c1',
+                'status': 'UP',
+                'handle': 'h1',
+            },
+            {
+                'name': 'c2',
+                'status': 'INIT',
+                'handle': 'h2',
+            },
+            {
+                'name': 'c3',
+                'status': 'STOPPED',
+                'handle': 'h3',
+            },
+        ]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'UP'
+        assert result[1]['status'] == 'INIT'
+        assert result[2]['status'] == 'STOPPED'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_mixed_statuses_old_client(self, mock_get_version):
+        """Test mixed statuses with old client."""
+        mock_get_version.return_value = 28
+        data = [
+            {
+                'name': 'c1',
+                'status': 'AUTOSTOPPING',
+                'handle': 'h1',
+            },
+            {
+                'name': 'c2',
+                'status': 'UP',
+                'handle': 'h2',
+            },
+            {
+                'name': 'c3',
+                'status': 'AUTOSTOPPING',
+                'handle': 'h3',
+            },
+        ]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'INIT'
+        assert result[1]['status'] == 'UP'
+        assert result[2]['status'] == 'INIT'
+
+
+class TestSerializeStatusKubernetes:
+    """Tests for the status_kubernetes serializer."""
+
+    def test_none_return_value(self):
+        """Test that None return value is handled gracefully."""
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status_kubernetes')
+        result = json.loads(serializer(None))
+        assert result is None
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_old_client_maps_autostopping_in_both_lists(self, mock_get_version):
+        """Test AUTOSTOPPING -> INIT in both all_clusters and unmanaged."""
+        mock_get_version.return_value = 28
+        data = [
+            [{
+                'name': 'c1',
+                'status': 'AUTOSTOPPING',
+            }],
+            [{
+                'name': 'c2',
+                'status': 'AUTOSTOPPING',
+            }],
+            [{
+                'job_id': 1,
+                'status': 'RUNNING',
+            }],
+            'context-name',
+        ]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status_kubernetes')
+        result = json.loads(serializer(data))
+        assert result[0][0]['status'] == 'INIT'
+        assert result[1][0]['status'] == 'INIT'
+        # Jobs and context should be untouched
+        assert result[2][0]['status'] == 'RUNNING'
+        assert result[3] == 'context-name'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_new_client_preserves_autostopping(self, mock_get_version):
+        """Test AUTOSTOPPING is preserved for new clients."""
+        mock_get_version.return_value = 29
+        data = [
+            [{
+                'name': 'c1',
+                'status': 'AUTOSTOPPING',
+            }],
+            [{
+                'name': 'c2',
+                'status': 'AUTOSTOPPING',
+            }],
+            [],
+            None,
+        ]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'status_kubernetes')
+        result = json.loads(serializer(data))
+        assert result[0][0]['status'] == 'AUTOSTOPPING'
+        assert result[1][0]['status'] == 'AUTOSTOPPING'
+
+
+class TestSerializeCostReport:
+    """Tests for the cost_report serializer."""
+
+    def test_none_return_value(self):
+        """Test that None return value is handled gracefully."""
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'cost_report')
+        result = json.loads(serializer(None))
+        assert result is None
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_old_client_maps_autostopping_to_init(self, mock_get_version):
+        """Test AUTOSTOPPING -> INIT for old clients."""
+        mock_get_version.return_value = 28
+        data = [{
+            'name': 'c1',
+            'status': 'AUTOSTOPPING',
+            'cost': 1.0,
+        }]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'cost_report')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'INIT'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_new_client_preserves_autostopping(self, mock_get_version):
+        """Test AUTOSTOPPING is preserved for new clients."""
+        mock_get_version.return_value = 29
+        data = [{
+            'name': 'c1',
+            'status': 'AUTOSTOPPING',
+            'cost': 1.0,
+        }]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'cost_report')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] == 'AUTOSTOPPING'
+
+    @mock.patch(
+        'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
+    )
+    def test_null_status_preserved(self, mock_get_version):
+        """Test that null status is not touched."""
+        mock_get_version.return_value = 28
+        data = [{
+            'name': 'c1',
+            'status': None,
+            'cost': 1.0,
+        }]
+        serializer = return_value_serializers.get_serializer(
+            server_constants.REQUEST_NAME_PREFIX + 'cost_report')
+        result = json.loads(serializer(data))
+        assert result[0]['status'] is None
+
 
 class TestHandlersRegistration:
     """Tests to verify the handlers are registered correctly at import time."""
@@ -292,4 +738,20 @@ class TestHandlersRegistration:
     def test_kubernetes_node_info_handler_registered(self):
         """Test that the kubernetes_node_info handler is registered."""
         expected_key = server_constants.REQUEST_NAME_PREFIX + 'kubernetes_node_info'
+        assert expected_key in return_value_serializers.handlers
+
+    def test_status_handler_registered(self):
+        """Test that the status handler is registered."""
+        expected_key = server_constants.REQUEST_NAME_PREFIX + 'status'
+        assert expected_key in return_value_serializers.handlers
+
+    def test_status_kubernetes_handler_registered(self):
+        """Test that the status_kubernetes handler is registered."""
+        expected_key = (server_constants.REQUEST_NAME_PREFIX +
+                        'status_kubernetes')
+        assert expected_key in return_value_serializers.handlers
+
+    def test_cost_report_handler_registered(self):
+        """Test that the cost_report handler is registered."""
+        expected_key = server_constants.REQUEST_NAME_PREFIX + 'cost_report'
         assert expected_key in return_value_serializers.handlers

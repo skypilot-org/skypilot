@@ -115,12 +115,12 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
 
 These roles must apply to both the user account configured in the kubeconfig file and the service account used by SkyPilot (if configured).
 
-If you need to view real-time GPU availability with ``sky show-gpus``, your tasks use object store mounting or your tasks require access to ingress resources, you will need to grant additional permissions as described below.
+If you need to view real-time GPU availability with ``sky gpus list``, your tasks use object store mounting or your tasks require access to ingress resources, you will need to grant additional permissions as described below.
 
-Permissions for ``sky show-gpus``
+Permissions for ``sky gpus list``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``sky show-gpus`` needs to list all pods across all namespaces to calculate GPU availability. To do this, SkyPilot needs the ``get`` and ``list`` permissions for pods in a ``ClusterRole``:
+``sky gpus list`` needs to list all pods across all namespaces to calculate GPU availability. To do this, SkyPilot needs the ``get`` and ``list`` permissions for pods in a ``ClusterRole``:
 
 .. code-block:: yaml
 
@@ -136,7 +136,7 @@ Permissions for ``sky show-gpus``
 
 .. tip::
 
-    If this role is not granted to the service account, ``sky show-gpus`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
+    If this role is not granted to the service account, ``sky gpus list`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
 
 
 Permissions for object store mounting
@@ -192,6 +192,70 @@ If your tasks use :ref:`Ingress <kubernetes-ingress>` for exposing ports, you wi
       - apiGroups: [""]
         resources: ["services"]
         verbs: ["list", "get"]
+
+
+.. _k8s-workload-sa-permissions:
+
+Minimum permissions for the workload service account
+----------------------------------------------------
+
+When SkyPilot launches a pod on Kubernetes, it creates a service account
+(``skypilot-service-account``) that is mounted inside the head pod. This
+**workload service account** is used by the skylet process running inside the
+pod for operations such as autodown (automatically tearing down idle clusters).
+
+By default, this service account is granted broad namespace permissions.
+If you want to restrict the workload service account to the minimum permissions
+needed for autodown, you can create a custom service account with the
+following role and configure SkyPilot to use it via
+:code:`remote_identity` in :ref:`~/.sky/config.yaml <config-yaml>`.
+
+.. note::
+
+    These permissions are separate from the `Minimum Permissions Required for SkyPilot`_
+    described above, which apply to the service account used to *launch* clusters
+    (e.g., the API server SA or the user's kubeconfig). The workload SA permissions
+    below apply to the service account *inside* the head pod.
+
+.. code-block:: yaml
+
+    # Namespace role for the workload service account
+    # Only namespace-scoped permissions are needed (no ClusterRole required).
+    kind: Role
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+      name: sky-workload-sa-role  # Can be changed if needed
+      namespace: default  # Change to your namespace if using a different one.
+    rules:
+      # Required for listing and deleting pods during autodown
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["get", "list", "delete"]
+      # Required for listing and deleting services during autodown.
+      # "deletecollection" is needed for bulk service cleanup.
+      - apiGroups: [""]
+        resources: ["services"]
+        verbs: ["get", "list", "delete", "deletecollection"]
+      # Required for checking if the cluster uses a HA deployment
+      - apiGroups: ["apps"]
+        resources: ["deployments"]
+        verbs: ["get", "list"]
+
+To use a custom workload service account, create the service account and role
+above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      remote_identity: sky-workload-sa  # Your custom service account name
+
+.. note::
+
+    If your workload pods need to perform additional operations beyond autodown
+    (e.g., launching new SkyPilot clusters from within a pod, or running
+    ``sky`` commands inside the pod), the workload service account will need
+    broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
 
 
 .. _k8s-sa-example:
@@ -266,7 +330,6 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
       name: sky-sa-cluster-role  # Can be changed if needed
-      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     rules:
@@ -279,7 +342,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
         resources: ["ingressclasses"]
         verbs: ["get", "list", "watch"]
-      - apiGroups: [""]                 # Required for `sky show-gpus` command
+      - apiGroups: [""]                 # Required for `sky gpus list` command
         resources: ["pods"]
         verbs: ["get", "list"]
       - apiGroups: ["storage.k8s.io"]   # Required for using volumes
@@ -291,7 +354,6 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     kind: ClusterRoleBinding
     metadata:
       name: sky-sa-cluster-role-binding  # Can be changed if needed
-      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     subjects:
@@ -300,7 +362,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         namespace: default  # Change to your namespace if using a different one.
     roleRef:
       kind: ClusterRole
-      name: sky-sa-cluster-role  # Use the same name as the cluster role at line 43
+      name: sky-sa-cluster-role  # Use the same name as the cluster role at line 56
       apiGroup: rbac.authorization.k8s.io
     ---
     # Optional: If using object store mounting, create the skypilot-system namespace

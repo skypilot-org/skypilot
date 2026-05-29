@@ -76,5 +76,5 @@ resources:
 
 ## Learn more
 
-- [SkyPilot Documentation](https://skypilot.readthedocs.io/)
+- [SkyPilot Documentation](https://docs.skypilot.co/)
 - [Streamlit Documentation](https://docs.streamlit.io/)

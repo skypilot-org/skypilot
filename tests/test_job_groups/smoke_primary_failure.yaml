@@ -1,0 +1,37 @@
+# Primary Task Failure Smoke Test
+# Tests that when primary task fails, auxiliary tasks are terminated immediately
+# (without waiting for termination_delay)
+---
+name: {{name}}
+execution: parallel
+primary_tasks: [failing-trainer]
+termination_delay: 60s
+---
+name: failing-trainer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Primary failing-trainer task starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This task will fail after a short time"
+  sleep 5
+  echo "PRIMARY TRAINER ABOUT TO FAIL"
+  exit 1
+---
+name: replay-buffer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Auxiliary replay-buffer task starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This task should be terminated IMMEDIATELY when primary fails (no delay)"
+  iteration=0
+  while true; do
+    iteration=$((iteration + 1))
+    echo "Replay buffer heartbeat $iteration"
+    sleep 2
+  done

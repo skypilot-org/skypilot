@@ -162,11 +162,11 @@ gcloud container node-pools delete "largecpu" --region ${REGION} --cluster ${CLU
      eksctl create cluster -f tests/kubernetes/eks_test_cluster.yaml
      ```
 2. Verify by running `kubectl get nodes`. You should see your nodes.
-3. **If you want GPU support**, EKS clusters already come with GPU drivers setup. However, you'll need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
+3. **If you want GPU support**, EKS clusters already come with GPU drivers setup. However, you'll need to label the nodes with the GPU type. Use the SkyPilot node labelling command to do so:
    ```bash
-   python -m sky.utils.kubernetes.gpu_labeler
+   sky gpus label
    ```
-   This will create a job on each node to read the GPU type from `nvidia-smi` and assign the label to the node. You can check the status of these jobs by running:
+   Note: This command currently only supports NVIDIA GPUs. This will create a job on each node to read the GPU type from `nvidia-smi` and assign the label to the node. You can check the status of these jobs by running:
    ```bash
    kubectl get jobs -n kube-system
    ```
@@ -176,7 +176,7 @@ gcloud container node-pools delete "largecpu" --region ${REGION} --cluster ${CLU
    ```
    In case something goes wrong, you can clean up these jobs by running:
    ```bash
-   python -m sky.utils.kubernetes.gpu_labeler --cleanup
+   sky gpus label --cleanup
    ```
 5. Run `sky check`.
    ```bash

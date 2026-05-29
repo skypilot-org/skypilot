@@ -11,7 +11,7 @@ This example uses a remote SkyPilot API Server to manage shared state across inv
 </p>
 
 
-**💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#job-pipelines) for more information.
+**💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#job-pipelines) for more information.
 
 ## Why use SkyPilot with Airflow?
 In AI workflows, **the transition from development to production is hard**.
@@ -28,7 +28,7 @@ production Airflow cluster. Behind the scenes, SkyPilot handles environment setu
 
 Here's how you can use SkyPilot to take your dev workflows to production in Airflow:
 1. **Define and test your workflow as SkyPilot tasks**.
-    - Use `sky launch` and [Sky VSCode integration](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#dev-vscode) to run, debug and iterate on your code.
+    - Use `sky launch` and [Sky VSCode integration](https://docs.skypilot.co/en/latest/examples/interactive-development.html#dev-vscode) to run, debug and iterate on your code.
 2. **Orchestrate SkyPilot tasks in Airflow** by invoking `sky launch` on their YAMLs as a task in the Airflow DAG.
     - Airflow does the scheduling, logging, and monitoring, while SkyPilot handles the infra setup and task execution.
 
@@ -78,7 +78,7 @@ The train and eval step can be run in a similar way:
 sky launch -c train --env DATA_BUCKET_NAME=<bucket-name> --env DATA_BUCKET_STORE_TYPE=s3 train.yaml
 ```
 
-Hint: You can use `ssh` and VSCode to [interactively develop](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html) and debug the tasks.
+Hint: You can use `ssh` and VSCode to [interactively develop](https://docs.skypilot.co/en/latest/examples/interactive-development.html) and debug the tasks.
 
 Note: `eval` can be optionally run on the same cluster as `train` with `sky exec`.
 

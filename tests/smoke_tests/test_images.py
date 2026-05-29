@@ -141,12 +141,12 @@ def test_aws_image_id_dict_region():
         [
             # YAML has
             #   image_id:
-            #       us-west-2: skypilot:gpu-ubuntu-1804
-            #       us-east-2: skypilot:gpu-ubuntu-2004
+            #       us-east-1: skypilot:gpu-ubuntu-1804
+            #       us-west-2: skypilot:gpu-ubuntu-2004
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-1 examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-west-2 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
             f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
@@ -154,11 +154,11 @@ def test_aws_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-west-2',  # Ensure the region is correct.
             # Ensure exec works.
-            f'sky exec {name} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky exec {name} --infra aws/us-west-2 examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --infra aws/us-east-2 "ls ~"',
+            f'sky exec {name} --infra aws/us-west-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -211,12 +211,12 @@ def test_aws_image_id_dict_zone():
         [
             # YAML has
             #   image_id:
-            #       us-west-2: skypilot:gpu-ubuntu-1804
-            #       us-east-2: skypilot:gpu-ubuntu-2004
+            #       us-east-1: skypilot:gpu-ubuntu-1804
+            #       us-west-2: skypilot:gpu-ubuntu-2004
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --infra aws/*/us-east-1b {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --infra aws/*/us-east-2b {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --infra aws/*/us-east-2a {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --infra aws/*/us-west-2a {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
@@ -225,11 +225,11 @@ def test_aws_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status -v | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-west-2a',  # Ensure the zone is correct.
             # Ensure exec works.
-            f'sky exec {name} --infra aws/*/us-east-2a examples/per_region_images.yaml',
+            f'sky exec {name} --infra aws/*/us-west-2a examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --infra aws/us-east-2 "ls ~"',
+            f'sky exec {name} --infra aws/us-west-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -440,7 +440,7 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
@@ -448,13 +448,13 @@ def test_image_no_conda():
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,  # GPU stop/start cycle can be slow
     )
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
-@pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
@@ -463,6 +463,8 @@ def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
         timeout *= 3
+    elif generic_cloud == 'nebius':
+        timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
@@ -613,7 +615,7 @@ def private_docker_registry_setup(request):
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
 @pytest.mark.no_shadeform
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
+@pytest.mark.no_slurm  # Slurm does not support private docker registries yet
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
@@ -680,6 +682,87 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
+def test_docker_nonroot_user(generic_cloud: str):
+    """Test Docker image with non-root default user and ENV HOME override.
+
+    Tests that SkyPilot correctly handles Docker images where:
+    1. The default USER is non-root
+    2. ENV HOME is explicitly set to the non-root user's home directory
+
+    SkyPilot should:
+    - Detect the container's default user (not root)
+    - Place SSH keys in the correct home directory
+    - SSH as the default user successfully
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'docker_nonroot_user',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} --image-id docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-nonroot-home:latest tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            # Verify we're running as the non-root user
+            f'sky exec {name} "whoami | grep testuser"',
+            f'sky logs {name} 2 --status',
+            # Verify HOME is set correctly
+            f'sky exec {name} "echo \\$HOME | grep /home/testuser"',
+            f'sky logs {name} 3 --status',
+            # Test SSH works
+            f'ssh {name} -- "echo hello"',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_docker_image(generic_cloud: str):
+    """Test that docker images work on Nebius without permission denied errors.
+
+    Nebius GPU VMs use the ubuntu24.04-cuda12 image which has Docker
+    pre-installed, but the SSH user (ubuntu) is NOT in the docker group.
+    With the sudo fix, docker commands should succeed without triggering
+    the 'permission denied' retry path. (GH #8764)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'nebius_docker_image',
+        [
+            f'sky launch -y -c {name} --infra nebius '
+            f'--image-id docker:ubuntu:22.04 '
+            f'--gpus L40S:1 '
+            f'"echo hello from docker && whoami"',
+            f'sky logs {name} 1 --status',
+            # Verify provision log does NOT contain permission denied errors.
+            # With the sudo fix, docker commands run as root and never hit
+            # the permission denied + retry path.
+            f's=$(sky logs --provision {name}) && '
+            f'echo "$s" | grep -q "initialize_docker" && '
+            f'! echo "$s" | grep -q "permission denied"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_image_family(generic_cloud: str):
+    # Test that SkyPilot correctly handles image families as VM boot disks.
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'nebius_image_family',
+        [
+            f'sky launch -y -c {name} --infra nebius '
+            f'--image-id ubuntu22.04-driverless '
+            f'"echo hello from nebius && whoami"',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_helm_deploy_gke(request):
     if not request.config.getoption('--helm-package'):
@@ -724,5 +807,6 @@ def test_helm_deploy_eks(request):
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',
-    ])
+    ],
+                                  timeout=30 * 60)
     smoke_tests_utils.run_one_test(test)

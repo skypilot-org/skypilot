@@ -1,0 +1,16 @@
+name: cr-progress-bar
+
+# Emits 5 `\r`-terminated progress frames followed by a `\n`-terminated
+# summary line. Used by
+# tests/smoke_tests/test_basic.py::test_cli_logs_streaming_progress_bar to
+# verify that `sky logs` streams progress-bar-style output (tqdm / keras /
+# rich.progress) without buffering every frame until the final newline.
+run: |
+  python3 -c "
+  import sys
+  for i in range(5):
+      sys.stdout.write(f'\rprogress-frame-{i}')
+      sys.stdout.flush()
+  sys.stdout.write('\n')
+  print('PROGRESS_BAR_DONE')
+  "

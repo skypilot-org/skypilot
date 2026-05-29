@@ -11,7 +11,8 @@ from typing import Dict, List
 clouds_with_ray = ['ibm', 'docker', 'scp']
 
 install_requires = [
-    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
+    # wheel 0.46.2+ required for CVE-2026-24049
+    'wheel>=0.46.3',
     'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
     'pip',
     'cachetools',
@@ -36,8 +37,11 @@ install_requires = [
     'python-dotenv',
     'rich',
     'tabulate',
-    # Light weight requirement, can be replaced with "typing" once
-    # we deprecate Python 3.7 (this will take a while).
+    'tqdm',
+    # Light weight requirement, can be removed after we deprecate Python 3.9.
+    # ParamSpec is available in typing module starting from Python 3.10, so
+    # we can replace "from typing_extensions import ParamSpec" with
+    # "from typing import ParamSpec" once we require Python >= 3.10.
     'typing_extensions',
     # filelock 3.15.0 or higher is required for async file locking.
     'filelock >= 3.15.0',
@@ -55,7 +59,7 @@ install_requires = [
     # uvicorn, so we need to pin uvicorn version to avoid potential break
     # changes.
     # Notes for current version check:
-    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.9
     # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
     #   behavior.
     'uvicorn[standard] >=0.33.0, <0.36.0',
@@ -70,10 +74,15 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy',
+    # 2.0.16 introduced create_async_engine(async_creator=...), which we
+    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
+    'sqlalchemy>=2.0.16',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
+    # Required by sqlalchemy.ext.asyncio which is used in
+    # sky/utils/db/db_utils.py
+    'greenlet',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
     'casbin',
@@ -86,8 +95,9 @@ install_requires = [
     'gitpython',
     'paramiko',
     'types-paramiko',
-    'alembic',
-    'aiohttp',
+    'alembic>=1.8.0',
+    # aiohttp 3.13.3+ required for CVE-2025-69223
+    'aiohttp>=3.13.3',
     'anyio',
 ]
 
@@ -97,12 +107,13 @@ install_requires = [
 # The grpc version at runtime has to be newer than the version
 # used to generate the code.
 GRPC = 'grpcio>=1.63.0'
-# >= 5.26.1 because the runtime version can't be older than the version
-# used to generate the code.
+# >= 5.29.6 because the runtime version can't be older than the version
+# used to generate the code (see requirements-dev.txt). Bumped from 5.26.1
+# to close CVE-2025-4565 (DoS) and CVE-2026-0994 (JSON recursion bypass).
 # < 7.0.0 because code generated for a major version V will be supported by
 # protobuf runtimes of version V and V+1.
 # https://protobuf.dev/support/cross-version-runtime-guarantee
-PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+PROTOBUF = 'protobuf>=5.29.6, < 7.0.0'
 
 server_dependencies = [
     # TODO: Some of these dependencies are also specified in install_requires,
@@ -118,7 +129,6 @@ server_dependencies = [
     GRPC,
     PROTOBUF,
     'aiosqlite',
-    'greenlet',
 ]
 
 local_ray = [
@@ -144,15 +154,23 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    # NOTE: colorama is a dependency of awscli. We pin it to match the
+    # version constraint in awscli (<0.4.7) to prevent potential conflicts
+    # with other packages like ray, which might otherwise install a newer
+    # version.
+    'colorama<0.4.7',
 ]
 
 # Kubernetes 32.0.0 has an authentication bug:
 # https://github.com/kubernetes-client/python/issues/2333
+# Kubernetes 36.0.0 (released 2026-05-20) broke a number of things for us:
+# in-cluster auth (kubernetes-client/python#2584), bearer token handling
+# (kubernetes-client/python#2582), and a swagger regen that renamed
+# attributes (e.g. V1ServiceSpec.external_i_ps -> external_ips) and
+# changed dict openapi_types from 'dict(K, V)' to 'dict[K, V]'. Pin away
+# from 36.x until upstream resolves these.
 kubernetes_dependencies = [
-    'kubernetes>=20.0.0,!=32.0.0',
+    'kubernetes>=20.0.0,!=32.0.0,<36.0.0',
     'websockets',
     'python-dateutil',
 ]
@@ -170,6 +188,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     # timeout of AzureCliCredential.
     'azure': [
         AZURE_CLI,
+        # TODO(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
         'azure-core>=1.31.0',
         'azure-identity>=1.19.0',
         'azure-mgmt-network>=27.0.0',
@@ -186,7 +205,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         'google-cloud-storage',
         # see https://github.com/conda/conda/issues/13619
         # see https://github.com/googleapis/google-api-python-client/issues/2554
-        'pyopenssl >= 23.2.0, <24.3.0',
+        'pyopenssl >= 23.2.0',
     ],
     'ibm': [
         'ibm-cloud-sdk-core',
@@ -223,6 +242,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'primeintellect': [],  # No dependencies needed for primeintellect
+    # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
@@ -234,17 +254,21 @@ cloud_dependencies: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'vastdata': aws_dependencies,
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        'nebius>=0.3.12',
+        'nebius>=0.3.59',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
+    'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': [],  # No dependencies needed for slurm
+    'slurm': ['python-hostlist'],
+    'yotta': [],  # No dependencies needed for Yotta
+    'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
@@ -254,6 +278,9 @@ if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    # latest ibm-cloud-sdk-core installation fails on Python 3.9,
+    # so we remove it from the [all] installation.
+    clouds_for_all.remove('ibm')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds

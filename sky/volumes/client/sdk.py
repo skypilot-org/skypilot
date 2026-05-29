@@ -1,7 +1,7 @@
 """SDK functions for volumes."""
 import json
 import typing
-from typing import List
+from typing import List, Optional
 
 from sky import exceptions
 from sky import sky_logging
@@ -28,7 +28,10 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
+def apply(
+    volume: volume_lib.Volume,
+    creation_yaml: Optional[str] = None,
+) -> server_common.RequestId[None]:
     """Creates or registers a volume.
 
     Example:
@@ -61,6 +64,8 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
 
     Args:
         volume: The volume to apply.
+        creation_yaml: The original YAML content used to create the volume.
+            Stored in the database for display in the dashboard.
 
     Returns:
         The request ID of the apply request.
@@ -75,6 +80,7 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
         config=volume.config,
         labels=volume.labels,
         use_existing=volume.use_existing,
+        creation_yaml=creation_yaml,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/apply', json=json.loads(body.model_dump_json()))
@@ -118,15 +124,27 @@ def validate(volume: volume_lib.Volume) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
+def ls(
+    refresh: bool = False
+) -> server_common.RequestId[List[responses.VolumeRecord]]:
     """Lists all volumes.
+
+    Args:
+        refresh: If True, refresh volume state from cloud APIs before returning.
+            This makes the call slower but returns the most up-to-date data.
+            If False (default), return cached data from the database which is
+            updated periodically by the background daemon.
 
     Returns:
         The request ID of the list request.
     """
+    params = {}
+    if refresh:
+        params['refresh'] = 'true'
     response = server_common.make_authenticated_request(
         'GET',
         '/volumes',
+        params=params,
     )
     return server_common.get_request_id(response)
 

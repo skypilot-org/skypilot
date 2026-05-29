@@ -10,10 +10,12 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
                     Optional, Sequence, Set, Tuple, Union)
+from unittest.mock import patch
 import uuid
 
 import colorama
@@ -48,7 +50,8 @@ from sky.utils import yaml_utils
 # different job id.
 test_id = str(uuid.uuid4())[-2:]
 
-LAMBDA_TYPE = '--infra lambda --gpus A10'
+LAMBDA_GPU_TYPE = 'A100'
+LAMBDA_TYPE = f'--infra lambda --gpus {LAMBDA_GPU_TYPE}'
 FLUIDSTACK_TYPE = '--infra fluidstack --gpus RTXA4000'
 
 SCP_TYPE = '--infra scp'
@@ -292,15 +295,55 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
     'sky queue {cluster_name}', 'sky jobs queue').replace(
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+            _ALL_JOB_STATUSES,
+            _ALL_MANAGED_JOB_STATUSES).replace('sleep 10',
+                                               'sleep {gap_seconds}')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: Sequence[sky.ManagedJobStatus],
-        timeout: int):
+        job_name: str,
+        job_status: Sequence[sky.ManagedJobStatus],
+        timeout: int,
+        gap_seconds: int = 10):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
+        timeout=timeout,
+        gap_seconds=gap_seconds)
+
+
+_WAIT_UNTIL_PIPELINE_TASK_STATUS = (
+    # A while loop to wait until a pipeline task (identified by line number)
+    # reaches a certain status, with timeout.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for task {task_line} to be {expected_status}"; exit 1; '
+    'fi; '
+    's=$(sky jobs queue); echo "$s"; '
+    'task_status=$(echo "$s" | grep -A 4 {job_name} | sed -n {task_line}p); '
+    'if echo "$task_status" | grep -E -q "{expected_status}"; then '
+    '  echo "Task {task_line} reached status {expected_status}."; break; '
+    'fi; '
+    'echo "Waiting for task {task_line} to be {expected_status}, current: $task_status"; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_pipeline_task_status(job_name: str, task_line: int,
+                                            expected_status: str, timeout: int):
+    """Get a command that waits until a pipeline task reaches a certain status.
+
+    Args:
+        job_name: The name of the job
+        task_line: The line number in the pipeline output (2 = first task, 3 = second, etc.)
+        expected_status: The expected status string (e.g., "CANCELLING|CANCELLED")
+        timeout: Timeout in seconds
+    """
+    return _WAIT_UNTIL_PIPELINE_TASK_STATUS.format(
+        job_name=job_name,
+        task_line=task_line,
+        expected_status=expected_status,
         timeout=timeout)
 
 
@@ -397,6 +440,29 @@ def is_eks_cluster() -> bool:
     return result.returncode == 0
 
 
+def kubectl_for_cluster(cluster_name: str) -> str:
+    """``kubectl --context <ctx>`` with <ctx> resolved at *shell* runtime
+    to the kubeconfig context that contains a pod for ``cluster_name``.
+
+    Smoke pipelines fall into two shapes:
+
+    * Single-context (kind-based): only ``kind-skypilot`` exists, so the
+      discovery loop short-circuits on the first iteration.
+    * Multi-context (shared-GKE): the runner has the API server's
+      cluster as current-context and the workload cluster as a second
+      entry; the loop picks the one that actually owns the pod.
+
+    The returned string is meant to be interpolated into an f-string
+    command, e.g. ``f'{kubectl_for_cluster(name)} delete pod foo'``.
+    The context lookup runs at command-execution time (not test-collection
+    time), so it sees the pod created by an earlier ``sky launch`` step.
+    """
+    return (
+        f'kubectl --context "$(for c in $(kubectl config get-contexts -o name); '
+        f'do kubectl --context "$c" get pods -o name 2>/dev/null '
+        f'| grep -q {cluster_name} && echo "$c" && break; done)"')
+
+
 def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     return common_utils.make_cluster_name_on_cloud(
@@ -435,6 +501,12 @@ def override_sky_config(
     if config_dict is not None:
         override_sky_config_dict.update(config_dict)
 
+    # Collect env overrides that need to be set in real os.environ for SDK
+    # calls. When env_dict is a copy (passed from run_one_test), SDK calls
+    # read from real os.environ, not env_dict. We use patch.dict to properly
+    # manage these overrides with automatic cleanup.
+    env_overrides: Dict[str, str] = {}
+
     if is_remote_server_test():
         endpoint = get_api_server_url()
         override_sky_config_dict.set_nested(('api_server', 'endpoint'),
@@ -444,11 +516,7 @@ def override_sky_config(
         # before we override the environment, so we need to disabled the
         # lru_cache of get_server_url and set SKY_API_SERVER_URL_ENV_VAR
         # to make sure the new endpoint is used.
-        env_dict[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
-        # Clear the get_server_url cache
-        server_common.get_server_url.cache_clear()
-        # Clear the is_api_server_local cache
-        server_common.is_api_server_local.cache_clear()
+        env_overrides[constants.SKY_API_SERVER_URL_ENV_VAR] = endpoint
         echo(
             f'Overriding API server endpoint: '
             f'{override_sky_config_dict.get_nested(("api_server", "endpoint"), "UNKNOWN")}'
@@ -460,7 +528,7 @@ def override_sky_config(
                 ('api_server', 'service_account_token'), 'UNKNOWN')
             override_sky_config_dict.set_nested(
                 ('api_server', 'service_account_token'), service_account_token)
-            env_dict[
+            env_overrides[
                 constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR] = service_account_token
             echo(
                 f'Overriding service account token {service_account_token[:4]}...'
@@ -476,7 +544,7 @@ def override_sky_config(
             f'{override_sky_config_dict.get_nested(("jobs", "controller", "resources", "cloud"), "UNKNOWN")}'
         )
     if is_grpc_enabled_test():
-        env_dict[env_options.Options.ENABLE_GRPC.env_key] = '1'
+        env_overrides[env_options.Options.ENABLE_GRPC.env_key] = '1'
 
     if not override_sky_config_dict:
         yield None
@@ -488,19 +556,41 @@ def override_sky_config(
         original_config = skypilot_config.parse_and_validate_config_file(
             env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
     else:
-        original_config = skypilot_config.config_utils.Config()
+        original_config = skypilot_config.get_user_config()
     overlay_config = skypilot_config.overlay_skypilot_config(
         original_config, override_sky_config_dict)
     temp_config_file.write(yaml_utils.dump_yaml_str(dict(overlay_config)))
     temp_config_file.flush()
-    # Update the environment variable to use the temporary file
-    env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
+
+    # Add config file to env overrides
+    env_overrides[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
+
+    # Update env_dict for subprocess calls
+    env_dict.update(env_overrides)
     if (env_before_override is not None and
             skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_before_override):
         env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG +
                  '_ORIGINAL'] = env_before_override[
                      skypilot_config.ENV_VAR_GLOBAL_CONFIG]
-    yield temp_config_file
+
+    def _clear_caches():
+        """Clear caches so they pick up new/restored env vars."""
+        server_common.get_server_url.cache_clear()
+        server_common.is_api_server_local.cache_clear()
+        skypilot_config.reload_config()
+
+    # Use patch.dict to properly manage os.environ for SDK calls.
+    # This ensures env vars are set in real os.environ (not just env_dict)
+    # and automatically restored when the context exits.
+    with patch.dict(os.environ, env_overrides):
+        _clear_caches()
+        try:
+            yield temp_config_file
+        finally:
+            pass  # patch.dict handles os.environ restoration
+    # After patch.dict exits, clear caches again to pick up restored env
+    _clear_caches()
+
     if env_before_override is not None:
         os.environ.clear()
         os.environ.update(env_before_override)
@@ -1071,10 +1161,10 @@ def get_dashboard_cluster_status_request_id() -> str:
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
-    body = payloads.JobsQueueBody(all_users=True,)
+    body = payloads.JobsQueueV2Body(all_users=True, limit=1000)
     response = server_common.make_authenticated_request(
         'POST',
-        '/internal/dashboard/jobs/queue',
+        '/internal/dashboard/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         server_url=get_api_server_url())
     return server_common.get_request_id(response)
@@ -1141,20 +1231,39 @@ def kill_and_wait_controller(test_cluster_name: str,
 
 
 def server_side_is_consolidation_mode() -> bool:
-    """Returns whether the consolidation mode is enabled on the server side.
+    """Returns whether consolidation mode is active on the server side.
 
-    This is required because when --postgres and --jobs-consolidation specified
-    at the same time, the server side will have config for consolidation mode,
-    but the client side will only have a config to specify the db url for
-    postgres. Here we manually retrieve the config from the server side to
-    check if the consolidation mode is enabled.
+    Consolidation mode is determined by a signal file on the server, which
+    may be auto-enabled for deploy-mode servers. We detect this by checking
+    whether the server has any jobs controller clusters — if not, jobs are
+    running in consolidation mode.
+
+    For local (non-remote) servers without an existing jobs controller, we
+    also check the local signal file directly.
     """
     if is_remote_server_test():
-        # The buildkite pre_command setup does not affect the remote server
-        # config. So --postgres and --jobs-consolidation will not be enabled
-        # even if they are specified.
-        # (TODO: zeping) support this in the future.
-        return False
+        # For remote servers, we can't check the signal file directly.
+        # Instead, check if a jobs controller cluster exists. If it does,
+        # we're not in consolidation mode.
+        result = subprocess.run(
+            ['sky', 'status', '-u'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # If we see a jobs controller cluster, consolidation is off.
+        for line in result.stdout.splitlines():
+            if 'sky-jobs-controller-' in line:
+                return False
+        # No controller cluster found. Check if managed jobs work (i.e.
+        # consolidation mode is active) by checking if jobs queue succeeds.
+        result = subprocess.run(
+            ['sky', 'jobs', 'queue'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0
     response = server_common.make_authenticated_request(
         'GET', '/workspaces/config', server_url=get_api_server_url())
     request_id = server_common.get_request_id(response)
@@ -1179,7 +1288,7 @@ def get_available_gpus(default_gpu: str = 'T4',
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky show-gpus --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky gpus list --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,
@@ -1231,3 +1340,23 @@ def write_blob(file: BinaryIO, total_size: int):
     if remaining_size > 0:
         file.write(os.urandom(remaining_size))
     file.flush()
+
+
+def wait_for_managed_job_status_sdk(job_name: str,
+                                    target_statuses: list,
+                                    timeout: int = 360) -> dict:
+    """Wait for a managed job to reach one of the target statuses.
+
+    Returns the job record when the status is reached.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        for job in jobs_list:
+            if job['job_name'] == job_name:
+                if job['status'] in target_statuses:
+                    return job
+            print(f'Job {job_name} status: {job["status"]}')
+        time.sleep(5)
+    raise TimeoutError(
+        f'Timeout waiting for job {job_name} to reach {target_statuses}')

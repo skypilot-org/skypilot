@@ -2,9 +2,11 @@
 import os
 from typing import Any, Dict, Union
 
-from sky.skylet import constants as skylet_constants
+# Environment variable for JobGroup name, injected into all jobs in a JobGroup
+SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
+JOBS_CONTROLLER_PROVISION_TEMPLATE = 'jobs-controller-provision.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
 JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
@@ -19,6 +21,22 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # at the same time (e.g. during a rolling update), recovery can only happen once
 # the previous API server has exited.
 CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
+
+# Signal file indicating the API server has been restarted after enabling
+# consolidation mode. Written by setup_consolidation_mode_on_startup() in
+# sky/jobs/utils.py. It is the single source of truth for jobs-controller
+# consolidation state and is read via the helpers in
+# sky/utils/controller_utils.py:
+#   - is_jobs_consolidation_mode() — user-facing reader. Shared by both
+#     sky/jobs/utils.py::is_consolidation_mode() (managed jobs) and
+#     sky/serve/serve_utils.py::is_consolidation_mode(pool=True) (pools),
+#     which are thin wrappers. Pool and managed-jobs readers route through
+#     the same helper so they cannot diverge.
+#   - _is_consolidation_mode(pool=True) — sizing-only helper.
+# Reading config directly instead diverges under deploy-mode auto-enable
+# (config stays null while this file is written).
+JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
 # Resources as a dict for the jobs controller.
 # We use 50 GB disk size to reduce the cost.
@@ -54,26 +72,20 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 12
+MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
 
-# The command for setting up the jobs dashboard on the controller. It firstly
-# checks if the systemd services are available, and if not (e.g., Kubernetes
-# containers may not have systemd), it starts the dashboard manually.
-DASHBOARD_SETUP_CMD = (
-    'if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; '
-    'then '
-    '  systemctl --user daemon-reload; '
-    '  systemctl --user enable --now skypilot-dashboard; '
-    'else '
-    '  echo "Systemd services not found. Starting SkyPilot dashboard '
-    'manually."; '
-    # Kill any old dashboard processes;
-    '  ps aux | grep -v nohup | grep -v grep | '
-    '  grep -- \'-m sky.jobs.dashboard.dashboard\' | awk \'{print $2}\' | '
-    '  xargs kill > /dev/null 2>&1 || true;'
-    # Launch the dashboard in the background if not already running
-    '  (ps aux | grep -v nohup | grep -v grep | '
-    '  grep -q -- \'-m sky.jobs.dashboard.dashboard\') || '
-    f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
-    '>> ~/.sky/job-dashboard.log 2>&1 &); '
-    'fi')
+# Prefix used for service-account tokens issued to managed jobs that opt in
+# to api_server_access. The expired-token-cleanup daemon uses this prefix to
+# identify managed-job tokens that should be swept once their TTL passes.
+# Keep this in sync with the token name format in
+# sky/jobs/server/core.py::_create_job_api_token.
+MANAGED_JOB_TOKEN_NAME_PREFIX = 'managed-job-'
+
+# TTL for service-account tokens issued to managed jobs with
+# api_server_access. Kept short so any tokens that leak past the controller
+# cleanup are reaped quickly by the expired-token-cleanup daemon.
+# TODO(lloyd-brown): The controller does not renew this token while the job is
+# still running, so long-running jobs (e.g. multi-day training) can have their
+# api_server_access token expire mid-run. Add token renewal so the TTL only
+# bounds leaked-token lifetime, not in-use token lifetime.
+MANAGED_JOB_TOKEN_TTL_DAYS = 3

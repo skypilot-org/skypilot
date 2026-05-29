@@ -3,7 +3,8 @@ myst-parser==2.0.0
 sphinx==7.1.2
 sphinx-click==5.0.1
 sphinx-copybutton==0.5.2
-sphinxemoji==0.2.0
+# 0.3.2 fixes compatibility with Sphinx 7.2+ Path handling
+sphinxemoji==0.3.2
 sphinx-design==0.5.0
 pydata-sphinx-theme==0.14.4
 Pygments==2.16.1

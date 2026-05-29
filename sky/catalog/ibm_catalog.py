@@ -53,22 +53,27 @@ def get_instance_type_for_accelerator(
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
+    local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_df,
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    del local_disk  # unused
+    return common.get_instance_type_for_accelerator_impl(
+        df=_df,
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        region=region,
+        zone=zone,
+        max_hourly_cost=max_hourly_cost)
 
 
 def get_region_zones_for_instance_type(instance_type: str,
@@ -92,13 +97,16 @@ def list_accelerators(
                                          case_sensitive, all_regions)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
-    del disk_tier  # unused
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
+    del disk_tier, local_disk  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
 
@@ -110,7 +118,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     df = _df[_df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio,
-                                                      region, zone)
+                                                      region, zone, use_spot,
+                                                      max_hourly_cost)
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:

@@ -3,6 +3,10 @@
 Kubernetes Cluster Setup
 ========================
 
+.. tip::
+
+    Setting up Kubernetes and SkyPilot on reserved GPUs? The SkyPilot team is happy to help —
+    `fill out this form <https://forms.gle/4nMWXKFQP63EXCYz9>`_ to get in touch.
 
 .. note::
     This is a guide for cluster administrators on how to set up Kubernetes clusters
@@ -171,11 +175,11 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
 Automatically labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If none of the above labels are present on your cluster, we provide a convenience script that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
+If none of the above labels are present on your cluster, we provide a convenience command that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
 
 .. code-block:: console
 
- $ python -m sky.utils.kubernetes.gpu_labeler
+ $ sky gpus label
 
  Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
  Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
@@ -185,11 +189,11 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. note::
 
-    Automatically labelling AMD GPUs is not supported at this moment. Please follow the instructions in "Manually labelling nodes" section below.
+    This command currently only supports NVIDIA GPUs. AMD GPUs must be labeled manually. Please follow the instructions in "Manually labelling nodes" section below.
 
 .. note::
 
-    If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
+    If the GPU labelling process fails, you can run ``sky gpus label --cleanup`` to clean up the failed jobs.
 
 Manually labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -226,7 +230,7 @@ You can also check the GPUs available on your nodes by running:
 
 .. code-block:: console
 
-    $ sky show-gpus --infra k8s
+    $ sky gpus list --infra k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     L4    1, 2, 4                   12 of 12 free
@@ -254,248 +258,22 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-ports`
 * :ref:`kubernetes-setup-fuse`
 * :ref:`kubernetes-setup-proxy`
+* :ref:`kubernetes-setup-hostnetwork`
 
 .. _kubernetes-setup-volumes:
 
 Set up NFS and other volumes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
+* :ref:`Persistent volumes <volumes-quickstart>`: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These are backed by Kubernetes PVCs on block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
 
-Examples:
+* :ref:`Ephemeral volumes <ephemeral-volumes>`: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific. Also backed by Kubernetes PVCs.
 
-.. tab-set::
+* :ref:`Other volume types <advanced-mount-pvc-with-kubernetes-configs>`: Mount hostPath, NFS, and other Kubernetes volume types by overriding SkyPilot's ``pod_config``.
 
-    .. tab-item:: NFS using hostPath
-      :name: kubernetes-volumes-hostpath-nfs
-
-      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: my-host-nfs
-                   volumes:
-                     - name: my-host-nfs
-                       hostPath:
-                         path: /path/on/host/nfs
-                         type: Directory
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: my-host-nfs
-                 volumes:
-                   - name: my-host-nfs
-                     hostPath:
-                       path: /path/on/host/nfs
-                       type: Directory
-
-    .. tab-item:: NFS using native volume
-      :name: kubernetes-volumes-native-nfs
-
-      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                    containers:
-                      - volumeMounts:
-                          - mountPath: /mnt/nfs
-                            name: nfs-volume
-                    volumes:
-                      - name: nfs-volume
-                        nfs:
-                          server: nfs.example.com
-                          path: /shared
-                          readOnly: false
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: nfs-volume
-                 volumes:
-                   - name: nfs-volume
-                     nfs:
-                       server: nfs.example.com
-                       path: /shared
-                       readOnly: false
-
-    .. tab-item:: NVMe using hostPath
-      :name: kubernetes-volumes-hostpath-nvme
-
-      Mount local NVMe storage that's already mounted on the Kubernetes nodes.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nvme/hello.txt
-             ls -la /mnt/nvme
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                    containers:
-                      - volumeMounts:
-                          - mountPath: /mnt/nvme
-                            name: nvme
-                    volumes:
-                      - name: nvme
-                        hostPath:
-                          path: /path/on/host/nvme
-                          type: Directory
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nvme
-                         name: nvme
-                 volumes:
-                   - name: nvme
-                     hostPath:
-                       path: /path/on/host/nvme
-                       type: Directory
-
-    .. tab-item:: PersistentVolumeClaim
-      :name: kubernetes-volumes-pvc
-
-      You can mount an existing `PersistentVolumeClaim <https://kubernetes.io/docs/concepts/storage/persistent-volumes/>`_ to SkyPilot pods. This is useful for accessing persistent storage that survives pod restarts.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/storage/hello.txt
-             ls -la /mnt/storage
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/storage
-                           name: persistent-storage
-                   volumes:
-                     - name: persistent-storage
-                       persistentVolumeClaim:
-                         claimName: my-storage-pvc
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/storage
-                         name: persistent-storage
-                 volumes:
-                   - name: persistent-storage
-                     persistentVolumeClaim:
-                       claimName: my-storage-pvc
-
-    .. tab-item:: Nebius shared filesystem
-      :name: kubernetes-volumes-nebius-shared-filesystem
-
-      When creating a node group on the Nebius console, attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
-
-      * Ensure ``Auto mount`` is enabled.
-      * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
-
-      .. image:: ../../images/screenshots/nebius/nebius-k8s-attach-fs.png
-        :width: 50%
-        :align: center
-
-      Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: nebius-sharedfs
-                   volumes:
-                     - name: nebius-sharedfs
-                       hostPath:
-                         path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
-                         type: Directory
-
-
-.. note::
-
-  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.
-
-  For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
-
+For detailed information on configuring and using volumes, see :ref:`Volumes on Kubernetes <volumes-quickstart>`.
 
 .. _kubernetes-setup-priority:
 
@@ -606,6 +384,37 @@ Replace ``proxy-host:3128`` with your actual proxy server address and port.
 
 Both uppercase and lowercase versions of the proxy environment variables are included for maximum compatibility across different tools and libraries.
 
+.. _kubernetes-setup-hostnetwork:
+
+Set up host networking
+^^^^^^^^^^^^^^^^^^^^^^
+
+For workloads that need the node's network stack directly — for example, RDMA/InfiniBand for multi-node training, or to avoid CNI overhead for latency-sensitive jobs — you can run SkyPilot pods with host networking by setting ``hostNetwork: true`` in the pod spec:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          hostNetwork: true
+
+With ``hostNetwork: true``, a pod shares the node's network namespace instead of getting its own. Normally this would cause two SkyPilot pods scheduled to the same node to collide on Ray's default ports and on the node's SSH port. SkyPilot handles this automatically: before Ray starts, each pod probes a free port set on the node, the head publishes its chosen ports to a ``<cluster>-ray-ports`` ConfigMap for workers to discover, and each pod's in-container SSH server is rebound to a probed port. **No additional configuration beyond** ``hostNetwork: true`` **is required**, and multiple SkyPilot clusters can safely share a node.
+
+For a multi-node cluster, SkyPilot additionally enforces that **every pod of the same cluster is placed on a distinct Kubernetes node**. This is implemented as a required pod anti-affinity (per-cluster label selector, topology key ``kubernetes.io/hostname``) injected into every ``hostNetwork`` pod. One pod per node guarantees each pod has a unique, routable host IP — which is also exactly what lets a ``hostNetwork`` cluster span multiple Kubernetes nodes. The selector is scoped per cluster, so pods of *different* clusters can still co-locate on a node (their cross-cluster port collisions are resolved by the free-port probe described above).
+
+.. warning::
+
+    Because this anti-affinity is a *hard* scheduling constraint (``requiredDuringSchedulingIgnoredDuringExecution``), a multi-node ``hostNetwork`` cluster needs at least as many schedulable Kubernetes nodes as it has pods. If enough distinct nodes are not available, the cluster fails to schedule with a clear error rather than silently co-locating pods of the same cluster and racing on the shared host network.
+
+.. note::
+
+    The ConfigMap is created in the same namespace as the SkyPilot pods and is owned by the head pod, so it is garbage-collected by Kubernetes on ``sky down``. The SkyPilot service account must be able to create, get, and update ConfigMaps in that namespace (already covered by the :ref:`minimal permissions <cloud-permissions-kubernetes>`).
+
+.. note::
+
+    OCI OKE RoCE clusters (launched with ``network_tier: best`` on OCI bare-metal GPU shapes) require host networking to reach the RDMA fabric, so SkyPilot enables it for them automatically — you do **not** set ``hostNetwork: true`` yourself. The same probe and one-pod-per-node behavior described above (including the multi-node node-count requirement in the warning) applies to those clusters.
+
 .. _kubernetes-observability:
 
 Observability for administrators
@@ -621,33 +430,27 @@ Below, we provide tips on how to monitor SkyPilot resources on your Kubernetes c
 List SkyPilot resources across all users
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-We provide a convenience command, :code:`sky status --k8s`, to view the status of all SkyPilot resources in the cluster.
+When using the :ref:`SkyPilot API server <sky-api-server>`, you can use the :ref:`SkyPilot dashboard <dashboard>` to view SkyPilot resources across all users:
 
-Unlike :code:`sky status` which lists only the SkyPilot resources launched by the current user,
-:code:`sky status --k8s` lists all SkyPilot resources in the cluster across all users.
+
+.. image:: ../../images/dashboard-clusters.png
+    :width: 100%
+    :align: center
+    :alt: SkyPilot Dashboard
+
+|
+
+Or run :code:`sky status -u`:
 
 .. code-block:: console
 
-    $ sky status --k8s
-    Kubernetes cluster state (context: mycluster)
-    SkyPilot clusters
-    USER     NAME                           LAUNCHED    RESOURCES                                  STATUS
-    alice    infer-svc-1                    23 hrs ago  1x Kubernetes(cpus=1, mem=1, {'L4': 1})    UP
-    alice    sky-jobs-controller-80b50983   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
-    alice    sky-serve-controller-80b50983  23 hrs ago  1x Kubernetes(cpus=4, mem=4)               UP
-    bob      dev                            1 day ago   1x Kubernetes(cpus=2, mem=8, {'H100': 1})  UP
-    bob      multinode-dev                  1 day ago   2x Kubernetes(cpus=2, mem=2)               UP
-    bob      sky-jobs-controller-2ea485ea   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
-
-    Managed jobs
-    In progress tasks: 1 STARTING
-    USER     ID  TASK  NAME      RESOURCES   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-    alice    1   -     eval      1x[CPU:1+]  2 days ago  49s            8s            0            SUCCEEDED
-    bob      4   -     pretrain  1x[H100:4]  1 day ago   1h 1m 11s      1h 14s        0            SUCCEEDED
-    bob      3   -     bigjob    1x[CPU:16]  1 day ago   1d 21h 11m 4s  -             0            STARTING
-    bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
-    bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
-
+    $ sky status -u
+    Clusters
+    NAME                USER               WORKSPACE         INFRA                   RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED
+    training-multinode  alice@skypilot.co  ml-team           Kubernetes (nebius)     2x(gpus=H100:8, cpus=200, mem=800, ...)     RUNNING  60m       5d ago
+    dev-alice           alice@skypilot.co  research-private  Kubernetes (coreweave)  1x(gpus=H200:1, cpus=8, mem=32, ...)        RUNNING  -         6d ago
+    inference           mike@skypilot.co   default           AWS (us-west-2)         1x(gpus=L4:1, g6.2xlarge, ...)              RUNNING  30m       4d ago
+    dev-bob             bob@skypilot.co    default           GCP (us-west1)          1x(cpus=4, mem=15, n1-standard-4, ...)      STOPPED  -         6d ago
 
 .. _kubernetes-observability-dashboard:
 
@@ -661,6 +464,7 @@ SkyPilot resources on your cluster.
     :align: center
     :alt: Kubernetes dashboard
 
+|
 
 As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:
 

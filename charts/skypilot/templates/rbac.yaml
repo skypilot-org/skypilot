@@ -1,4 +1,5 @@
 {{- if .Values.rbac.create }}
+{{- $fullName := include "skypilot.fullname" . -}}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -13,7 +14,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Release.Name }}-api-role
+  name: {{ $fullName }}-api-role
 rules:
 {{ toYaml .Values.rbac.clusterRules | indent 2 }}
 {{- if .Values.rbac.manageRbacPolicies }}
@@ -28,14 +29,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ .Release.Name }}-api-role-binding
+  name: {{ $fullName }}-api-role-binding
 subjects:
 - kind: ServiceAccount
   name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: {{ .Release.Name }}-api-role
+  name: {{ $fullName }}-api-role
   apiGroup: rbac.authorization.k8s.io
 {{- $namespace := .Values.kubernetesCredentials.inclusterNamespace | default .Release.Namespace }}
 {{- if ne $namespace .Release.Namespace }}
@@ -46,7 +47,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ .Release.Name }}-api-role
+  name: {{ $fullName }}-api-role
   namespace: {{ $namespace }}
 rules:
 {{ toYaml .Values.rbac.namespaceRules | indent 2 }}
@@ -62,7 +63,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ .Release.Name }}-api-role-binding
+  name: {{ $fullName }}-api-role-binding
   namespace: {{ $namespace }}
 subjects:
 - kind: ServiceAccount
@@ -70,6 +71,6 @@ subjects:
   namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
-  name: {{ .Release.Name }}-api-role
+  name: {{ $fullName }}-api-role
   apiGroup: rbac.authorization.k8s.io
 {{- end }}

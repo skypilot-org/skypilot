@@ -1,0 +1,16 @@
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - name: sidecar
+          image: busybox:latest
+          command: ["sh", "-c", "while true; do echo 'sidecar running'; sleep 60; done"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+
+run: |
+  echo "Testing multi-container pod with sidecar"
+  echo "Hostname: $(hostname)"

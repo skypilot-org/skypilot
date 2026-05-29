@@ -2,19 +2,25 @@
 
 See `Stage` for a Task's life cycle.
 """
+import asyncio
 import enum
 import logging
+import os
+import tempfile
+import time
 import typing
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 
 from sky import admin_policy
 from sky import backends
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.server.requests import request_names
@@ -22,6 +28,7 @@ from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -102,6 +109,95 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     return task
 
 
+def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
+    """Resolve managed secret references for all tasks in the DAG."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import plugins
+
+    for task in dag.tasks:
+        if not task.managed_secret_refs:
+            continue
+
+        ext_ctx = plugins.get_extension_context()
+        if ext_ctx is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no plugin system '
+                'is available.')
+        provider = ext_ctx.managed_secrets_provider
+        if provider is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no managed secrets '
+                'provider is configured. Install a secrets management '
+                'plugin.')
+
+        # The provider.resolve() is async; run it from this sync context.
+        resolved = asyncio.run(
+            provider.resolve(
+                task.managed_secret_refs,
+                user_hash=common_utils.get_user_hash(),
+                workspace=skypilot_config.get_active_workspace(),
+            ))
+
+        # Merge resolved env vars into the task.
+        if resolved.env_vars:
+            task.update_envs(resolved.env_vars)
+
+        # Write resolved file mounts to temp files and add to task.
+        # Uses tempstore so files are cleaned up when the request ends.
+        if resolved.file_mounts:
+            secret_dir = tempstore.mkdtemp(prefix='skypilot-secrets-')
+            for fm in resolved.file_mounts:
+                tmp_fd, tmp_path = tempfile.mkstemp(prefix='secret-',
+                                                    dir=secret_dir)
+                with os.fdopen(tmp_fd, 'wb') as f:
+                    f.write(fm.content)
+                os.chmod(tmp_path, 0o600)
+                task.update_file_mounts({fm.mount_path: tmp_path})
+
+
+def _compute_set_autostop_args_for_hooks_only_relaunch(
+        cluster_name: str, hooks_payload: List[Dict[str,
+                                                    Any]]) -> Dict[str, Any]:
+    """Build set_autostop kwargs when a re-launch updates only hooks.
+
+    The `elif hooks_payload is not None:` branch in `_execute` updates
+    stored hooks on the skylet without the user re-passing
+    ``--idle-minutes-to-autostop`` (or YAML autostop) — for example,
+    re-launching a cluster with a new preemption hook. Previously this
+    path passed ``idle_minutes_to_autostop=-1`` (= "unset autostop"),
+    which silently wiped any prior autostop config.
+
+    We instead read the prior autostop value + ``to_down`` flag from
+    local state and pass them through, so re-launches that change only
+    hooks preserve the cluster's existing autostop. ``wait_for`` is not
+    persisted client-side; on this path it defaults back to
+    ``jobs_and_ssh`` (the documented default), which is the same value a
+    user would get on a fresh ``sky autostop``.
+
+    The helper is named ``set_autostop`` because the underlying RPC
+    that propagates hooks IS ``SetAutostop`` (hooks ride on it for
+    wire-compat reasons — see
+    ``sky/schemas/proto/autostopv1.proto``). If a future PR adds a
+    dedicated ``SetHooks`` RPC, this helper's name and call site can
+    track that rename.
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        prior_idle_minutes = -1
+        prior_to_down = False
+    else:
+        prior_idle_minutes = record.get('autostop', -1)
+        if prior_idle_minutes is None:
+            prior_idle_minutes = -1
+        prior_to_down = bool(record.get('to_down', False))
+    return dict(
+        idle_minutes_to_autostop=prior_idle_minutes,
+        wait_for=None,
+        down=prior_to_down,
+        hooks=hooks_payload,
+    )
+
+
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
@@ -125,6 +221,7 @@ def _execute(
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -183,6 +280,8 @@ def _execute(
         elif _is_launched_by_sky_serve_controller:
             _request_name = (
                 request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA)
+    if _extra_launch_context is None:
+        _extra_launch_context = {}
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         for resource in task.resources:
@@ -215,6 +314,7 @@ def _execute(
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
                     storage.construct()
+        _resolve_managed_secrets(dag)
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -233,6 +333,7 @@ def _execute(
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
             _is_launched_by_sky_serve_controller,
+            _extra_launch_context=_extra_launch_context,
             job_logger=job_logger)
 
 
@@ -254,6 +355,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    _extra_launch_context: Dict[str, Any],
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
@@ -437,7 +539,9 @@ def _execute_dag(
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
         is_managed=is_managed,
-        planner=planner)
+        planner=planner,
+        extra_launch_context=_extra_launch_context,
+        is_launched_by_jobs_controller=_is_launched_by_jobs_controller)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -507,12 +611,52 @@ def _execute_dag(
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
+            task_hooks = resources[0].hooks
+            # Hooks payload sent to skylet:
+            #   None  → "leave stored hooks alone" (first launch w/o hooks)
+            #   []    → "clear stored hooks" (re-launch dropping hooks)
+            #   [...] → "replace stored hooks"
+            if task_hooks is not None:
+                hooks_payload: Optional[List[Dict[str, Any]]] = task_hooks
+            elif cluster_exists:
+                hooks_payload = []
+            else:
+                hooks_payload = None
+            # Synthesize the legacy pre-v7 hook/hook_timeout pair from
+            # the new-style hooks list. Match the event equivalent for
+            # this launch: ``down`` for autodown, ``stop`` otherwise.
+            # AutostopCodeGen.set_autostop dual-emits both fields so
+            # pre-v7 skylets keep working until v0.15.0.
+            hook: Optional[str] = None
+            hook_timeout: Optional[int] = None
+            legacy_event = 'down' if down else 'stop'
+            for entry in (resources[0].hooks or []):
+                if legacy_event in entry.get('events', []):
+                    hook = entry['run']
+                    hook_timeout = entry.get('timeout')
+                    break
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
-                                     down)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     wait_for,
+                                     down,
+                                     hook=hook,
+                                     hook_timeout=hook_timeout,
+                                     hooks=hooks_payload)
+            elif hooks_payload is not None:
+                # Hooks can fire on preemption/down independent of
+                # autostop — persist them even when autostop is disabled.
+                # Re-launches with hooks dropped from YAML hit this with
+                # hooks_payload=[] so the skylet clears its stored hooks.
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                kwargs = _compute_set_autostop_args_for_hooks_only_relaunch(
+                    handle.cluster_name, hooks_payload)
+                backend.set_autostop(handle, **kwargs)
 
+        job_id = None
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
@@ -556,8 +700,10 @@ def launch(
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
+    _include_credentials: bool = False,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -654,10 +800,36 @@ def launch(
     handle = None
     stages = None
     skip_unnecessary_provisioning = False
-    # Check if cluster exists and we are doing fast provisioning
-    if fast and cluster_name is not None:
+
+    # Check for AUTOSTOPPING and wait with spinner (applies to all modes)
+    cluster_status = None
+    maybe_handle = None
+    if cluster_name is not None:
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            # Use spinner to show progress while waiting
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(
+                        f'Waiting for autostop to complete on {cluster_name!r}')
+            ):
+                while cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+                    time.sleep(
+                        backend_utils.CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+                    cluster_status, maybe_handle = (
+                        backend_utils.refresh_cluster_status_handle(
+                            cluster_name))
+            # Log final status after spinner completes
+            logger.info(
+                f'Autostop completed. Cluster status: '
+                f'{cluster_status.value if cluster_status else "TERMINATED"}')
+
+    # Check if cluster exists and we are doing fast provisioning
+    if fast and cluster_name is not None:
+        # Reuse cluster_status/maybe_handle if already fetched
+        if cluster_status is None:
+            cluster_status, maybe_handle = (
+                backend_utils.refresh_cluster_status_handle(cluster_name))
         if cluster_status == status_lib.ClusterStatus.INIT:
             # If the cluster is INIT, it may be provisioning. We want to prevent
             # concurrent calls from queueing up many sequential reprovision
@@ -704,6 +876,15 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
+    # ``_include_credentials`` is accepted unconditionally so the
+    # request payload's ``LaunchBody.to_kwargs`` mapping always type-
+    # checks against this signature. The in-tree implementation does
+    # not bundle credentials with the response; a downstream extension
+    # may override this function and re-register the ``launch``
+    # response encoder to return a 3-tuple when the flag is set.
+    # Without such an override, the client decodes the legacy 2-key
+    # response shape and falls back to the ``/status`` SSH-config path.
+    del _include_credentials
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
@@ -724,6 +905,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _extra_launch_context=_extra_launch_context,
         _request_name=_request_name,
         job_logger=job_logger)
 
@@ -797,6 +979,27 @@ def exec(  # pylint: disable=redefined-builtin
     entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
+    # File-mount secret refs are not supported with exec because exec skips
+    # the SYNC_FILE_MOUNTS stage.
+    tasks = ([entrypoint]
+             if isinstance(entrypoint, task_lib.Task) else entrypoint.tasks)
+    for t in tasks:
+        for ref in t.managed_secret_refs:
+            if ref.mount_path is not None:
+                raise ValueError(
+                    f'File-mount secret {ref.name!r} is not supported '
+                    'with `sky exec`. Use `sky launch` instead.')
+
+    # Check if cluster is autostopping - reject exec on autostopping clusters
+    if not dryrun:
+        cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+            cluster_name)
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            raise exceptions.ClusterNotUpError(
+                f'Cannot execute on cluster {cluster_name!r}: cluster is '
+                'autostopping. Please wait for autostop to complete, then use '
+                f'`sky start {cluster_name}` to restart.',
+                cluster_status=cluster_status)
 
     handle = backend_utils.check_cluster_available(
         cluster_name,

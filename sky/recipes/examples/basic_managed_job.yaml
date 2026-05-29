@@ -1,0 +1,12 @@
+# Basic Managed Job Template
+name: my-job
+
+# resources:
+#   accelerators: A10G:1
+
+setup: |
+  pip install torch
+
+run: |
+  echo "Running managed job..."
+  python train.py

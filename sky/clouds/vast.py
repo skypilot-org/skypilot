@@ -2,7 +2,7 @@
 
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
@@ -41,6 +41,8 @@ class Vast(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on Vast.'
             ),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     #
     # Vast doesn't have a max cluster name limit. This number
@@ -152,8 +154,11 @@ class Vast(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional[resources_utils.DiskTier] = None,
+            local_disk: Optional[str] = None,
             region: Optional[str] = None,
             zone: Optional[str] = None,
+            use_spot: bool = False,
+            max_hourly_cost: Optional[float] = None,
             datacenter_only: bool = False) -> Optional[str]:
         """Returns the default instance type for Vast."""
         # pylint: disable=import-outside-toplevel
@@ -162,8 +167,11 @@ class Vast(clouds.Cloud):
             cpus=cpus,
             memory=memory,
             disk_tier=disk_tier,
+            local_disk=local_disk,
             region=region,
             zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
             datacenter_only=datacenter_only)
 
     @classmethod
@@ -185,7 +193,7 @@ class Vast(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del zones, dryrun, cluster_name, num_nodes  # unused
 
         resources = resources.assert_launchable()
@@ -208,6 +216,13 @@ class Vast(clouds.Cloud):
             default_value=False,
             override_configs=resources.cluster_config_overrides,
         )
+        create_instance_kwargs = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('create_instance_kwargs',),
+            default_value={},
+            override_configs=resources.cluster_config_overrides,
+        )
 
         return {
             'instance_type': resources.instance_type,
@@ -215,6 +230,7 @@ class Vast(clouds.Cloud):
             'region': region.name,
             'image_id': image_id,
             'secure_only': secure_only,
+            'create_instance_kwargs': create_instance_kwargs or {},
         }
 
     def _get_feasible_launchable_resources(
@@ -254,8 +270,11 @@ class Vast(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost,
                 datacenter_only=datacenter_only)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
@@ -273,9 +292,11 @@ class Vast(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              memory=resources.memory,
+             max_hourly_cost=resources.max_hourly_cost,
              datacenter_only=datacenter_only)
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
@@ -301,7 +322,7 @@ class Vast(clouds.Cloud):
                 '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
-                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
+                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
             )
 
         return True, None

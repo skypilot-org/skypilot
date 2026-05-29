@@ -1,0 +1,19 @@
+name: pipeline
+---
+name: task-a
+resources:
+  cpus: 2+
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Task A start counting"
+  for i in $(seq 1 600); do echo "Task A: $i"; sleep 1; done
+---
+name: task-b
+resources:
+  cpus: 2+
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Task B start counting"
+  for i in $(seq 1 20); do echo "Task B: $i"; sleep 1; done

@@ -52,7 +52,7 @@ This can be launched as a pod in your Kubernetes cluster or a VM on any cloud.
 
 .. note::
 
-  View the supported GPUs with the :code:`sky show-gpus` command.
+  View the supported GPUs with the :code:`sky gpus list` command.
 
 .. _dev-autostop:
 
@@ -114,6 +114,13 @@ For more details, please refer to the `VSCode documentation <https://code.visual
 .. image:: https://i.imgur.com/8mKfsET.gif
   :align: center
   :alt: Connect to the cluster with VSCode
+
+
+.. tip::
+
+   **Windows (WSL) users**: SkyPilot automatically configures both WSL and Windows SSH
+   settings, so VSCode's Remote-SSH extension works out of the box with clusters launched
+   from WSL.
 
 .. _dev-notebooks:
 

@@ -3,6 +3,7 @@
 This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
+
 import asyncio
 import logging
 import os
@@ -20,9 +21,9 @@ from uvicorn.supervisors import multiprocess
 from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
-from sky.server import plugins
 from sky.server import state
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import storage as request_storage
 from sky.skylet import constants
 from sky.utils import context_utils
 from sky.utils import env_options
@@ -32,6 +33,8 @@ from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# A short wait for the endpoints update propagated to the ingress/LB
+_GRACE_WAIT_SECONDS = 5
 # File lock path for coordinating graceful shutdown across processes
 _GRACEFUL_SHUTDOWN_LOCK_PATH = '/tmp/skypilot_graceful_shutdown.lock'
 
@@ -106,7 +109,7 @@ class Server(uvicorn.Server):
         server will be forcefully shutdown.
         """
         if self.exiting and sig == signal.SIGINT:
-            # The server has been siganled to exit and recieved a SIGINT again,
+            # The server has been signaled to exit and received a SIGINT again,
             # do force shutdown.
             logger.info('Force shutdown.')
             self.should_exit = True
@@ -123,6 +126,7 @@ class Server(uvicorn.Server):
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
         """Perform graceful shutdown."""
+        time.sleep(_GRACE_WAIT_SECONDS)
         # Block new requests so that we can wait until all on-going requests
         # are finished. Note that /api/$verb operations are still allowed in
         # this stage to ensure the client can still operate the on-going
@@ -146,17 +150,10 @@ class Server(uvicorn.Server):
 
     def _wait_requests(self) -> None:
         """Wait until all on-going requests are finished or cancelled."""
-        start_time = time.time()
+        start_time = time.time() - _GRACE_WAIT_SECONDS
         while True:
-            statuses = [
-                requests_lib.RequestStatus.PENDING,
-                requests_lib.RequestStatus.RUNNING,
-            ]
-            requests = [(request_task.request_id, request_task.name)
-                        for request_task in requests_lib.get_request_tasks(
-                            req_filter=requests_lib.RequestTaskFilter(
-                                status=statuses, fields=['request_id', 'name']))
-                       ]
+            requests = (request_storage.get_request_backend().
+                        get_shutdown_active_requests())
             if not requests:
                 break
             logger.info(f'{len(requests)} on-going requests '
@@ -209,6 +206,11 @@ class Server(uvicorn.Server):
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
+        # Reap this worker's per-pid prometheus multiproc files at exit so
+        # that recycled workers do not leak stale liveall gauge values
+        # (e.g. event-loop-lag peaks recorded just before the worker died)
+        # to every subsequent /metrics scrape and liveall-based probe.
+        metrics_lib.register_multiproc_cleanup_atexit()
         lag_threshold = perf_utils.get_loop_lag_threshold()
         if lag_threshold is not None:
             event_loop = asyncio.get_event_loop()
@@ -216,9 +218,11 @@ class Server(uvicorn.Server):
             event_loop.set_debug(True)
             event_loop.slow_callback_duration = lag_threshold
         stop_monitor = threading.Event()
-        monitor = threading.Thread(target=metrics_lib.process_monitor,
-                                   args=('server', stop_monitor),
-                                   daemon=True)
+        monitor = threading.Thread(
+            target=metrics_lib.process_monitor,
+            args=('server', stop_monitor),
+            daemon=True,
+        )
         monitor.start()
         try:
             with self.capture_signals():
@@ -238,10 +242,6 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
-            # When workers > 1, uvicorn does not run server app in the main
-            # process. In this case, plugins are not loaded at this point, so
-            # load plugins here without uvicorn app.
-            plugins.load_plugins(plugins.ExtensionContext())
             sock = config.bind_socket()
             SlowStartMultiprocess(config, target=server.run,
                                   sockets=[sock]).run()

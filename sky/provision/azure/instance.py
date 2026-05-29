@@ -623,6 +623,8 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=inst.tags,
+                # Azure VM name is the instance_id
+                node_name=inst.name,
             )
         ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))

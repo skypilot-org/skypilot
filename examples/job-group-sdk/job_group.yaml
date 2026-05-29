@@ -1,0 +1,43 @@
+# Job Group: server-client networking example.
+#
+# This YAML defines the same Job Group that job_group_sdk.py builds
+# programmatically. It is provided for reference.
+#
+# Usage:
+#   sky jobs launch examples/job-group-sdk/job_group.yaml
+---
+name: server-client
+execution: parallel
+---
+name: server
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Server starting on port 8080"
+  python3 -m http.server 8080 &
+  SERVER_PID=$!
+  # Keep running until the client is done.
+  sleep 60
+  kill $SERVER_PID 2>/dev/null || true
+  echo "Server done"
+---
+name: client
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Client starting"
+  sleep 10
+  SERVER_HOST="server-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Connecting to $SERVER_HOST:8080"
+  for i in $(seq 1 10); do
+    if curl -s --connect-timeout 5 http://$SERVER_HOST:8080/ > /dev/null 2>&1; then
+      echo "SUCCESS: Connected to server"
+      exit 0
+    fi
+    echo "Attempt $i failed, retrying..."
+    sleep 3
+  done
+  echo "FAILED: Could not connect to server"
+  exit 1

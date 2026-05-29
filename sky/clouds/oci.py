@@ -86,6 +86,8 @@ class OCI(clouds.Cloud):
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
                 ('Customized multiple network interfaces are not supported on '
                  f'{cls._REPR}.'),
+            clouds.CloudImplementationFeatures.LOCAL_DISK:
+                (f'Local disk is not supported on {cls._REPR}'),
         }
         if resources.use_spot:
             unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
@@ -195,19 +197,27 @@ class OCI(clouds.Cloud):
         return (num_gigabytes - 10 * 1024) * 0.0085
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='oci')
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='oci')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -390,8 +400,11 @@ class OCI(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
 
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
@@ -409,8 +422,10 @@ class OCI(clouds.Cloud):
              use_spot=resources.use_spot,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='oci')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,

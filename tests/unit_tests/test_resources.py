@@ -1104,6 +1104,22 @@ def test_priority_yaml_serialization():
     assert loaded_resources.memory == '8'
 
 
+def test_priority_class_yaml_serialization():
+    """priority_class round-trips; construction allows both priority fields."""
+    r = Resources(priority_class='tier1')
+    assert r.priority is None
+    assert r.priority_class == 'tier1'
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['priority_class'] == 'tier1'
+    loaded = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded.priority_class == 'tier1'
+
+    r2 = Resources(priority=100, priority_class='tier1')
+    assert r2.priority == 100 and r2.priority_class == 'tier1'
+    y2 = r2.to_yaml_config()
+    assert y2['priority'] == 100 and y2['priority_class'] == 'tier1'
+
+
 def test_priority_copy():
     """Test priority preservation in copy operations."""
     r = Resources(priority=300, cpus=4)
@@ -1522,6 +1538,19 @@ def test_resources_add_subtract_with_none():
     assert result.cpus == '2'
     assert result.memory == '8'
     assert result.accelerators == {'V100': 1.0}
+
+
+def test_inferred_resource_not_copied():
+    """Test that when accelerator is None and only inferred by machine type,
+    the inferred accelerator values are not copied."""
+    r1 = Resources(instance_type='a2-highgpu-1g', cloud=clouds.GCP())
+    assert r1.accelerators == {'A100': 1}
+    assert r1._accelerators is None
+
+    override = {'instance_type': 'g2-standard-4'}
+    r2 = r1.copy(**override)
+    assert r2.accelerators == {'L4': 1}
+    assert r2._accelerators is None
 
 
 @mock.patch(

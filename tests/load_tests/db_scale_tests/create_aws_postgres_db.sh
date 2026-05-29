@@ -210,11 +210,24 @@ echo "Setting up parameter group with increased max_connections..." >&2
 if aws rds describe-db-parameter-groups --region "$RDS_REGION" --db-parameter-group-name "$PARAM_GROUP_NAME" >/dev/null 2>&1; then
     echo "Parameter group $PARAM_GROUP_NAME already exists, reusing it..." >&2
 else
-    echo "Creating parameter group: $PARAM_GROUP_NAME" >&2
+    # Look up the parameter group family for the default Postgres engine
+    # version, so we automatically track AWS's default (which gets bumped
+    # when new major Postgres versions are released).
+    PG_FAMILY=$(aws rds describe-db-engine-versions \
+        --region "$RDS_REGION" \
+        --engine postgres \
+        --default-only \
+        --query "DBEngineVersions[0].DBParameterGroupFamily" \
+        --output text)
+    if [ -z "$PG_FAMILY" ] || [ "$PG_FAMILY" = "None" ]; then
+        echo "ERROR: Failed to determine default Postgres parameter group family" >&2
+        exit 1
+    fi
+    echo "Creating parameter group: $PARAM_GROUP_NAME (family: $PG_FAMILY)" >&2
     aws rds create-db-parameter-group \
         --region "$RDS_REGION" \
         --db-parameter-group-name "$PARAM_GROUP_NAME" \
-        --db-parameter-group-family postgres17 \
+        --db-parameter-group-family "$PG_FAMILY" \
         --description "Custom parameter group for SkyPilot test RDS instance with increased max_connections" \
         $AWS_NO_PAGER >&2
 fi

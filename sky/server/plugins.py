@@ -1,9 +1,11 @@
 """Load plugins for the SkyPilot API server."""
 import abc
 import dataclasses
+import enum
 import importlib
 import os
-from typing import Dict, List, Optional, Tuple
+import typing
+from typing import Any, ClassVar, Dict, FrozenSet, List, Optional, Tuple
 
 from fastapi import FastAPI
 
@@ -13,11 +15,92 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
 
+if typing.TYPE_CHECKING:
+    from sky.server.blob import blob_storage as blob_storage_mod
+    from sky.server.requests import log_provider as log_provider_mod
+    from sky.server.requests import storage as storage_mod
+    from sky.server.requests.queues import base as queue_base_mod
+
 logger = sky_logging.init_logger(__name__)
 
+# Default paths for plugins configuration
 _DEFAULT_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
+# Default path for remote plugins configuration
+_DEFAULT_REMOTE_PLUGINS_CONFIG_PATH = '~/.sky/remote_plugins.yaml'
+# Remote path for plugins config on the cluster
+REMOTE_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
+
 _PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}PLUGINS_CONFIG')
+_REMOTE_PLUGINS_CONFIG_ENV_VAR = (
+    f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}REMOTE_PLUGINS_CONFIG')
+
+
+class PluginContext(enum.Enum):
+    """The process context in which plugins are being loaded.
+
+    Used by plugins to declare via ``BasePlugin.load_contexts`` which process
+    types they want to be installed in. Plugins that don't override
+    ``load_contexts`` load in every context (backward compatible).
+    """
+    # The API server's main process (the entrypoint that runs bootstrap:
+    # DB init, request reset, RBAC pre-load, then uvicorn.run). No FastAPI
+    # ``app`` is exposed here. Use this for plugins that need to register
+    # backends BEFORE main-process bootstrap consumes them.
+    MAIN = 'main'
+    # A uvicorn worker process (or the main process when uvicorn runs
+    # in-process with ``--deploy=false`` / single worker, on the second
+    # plugin load). Has the FastAPI ``app`` available; use this for
+    # registering routes / middleware.
+    UVICORN = 'uvicorn'
+    # A request executor worker subprocess that runs sky API request bodies.
+    EXECUTOR = 'executor'
+    # A jobs/serve controller process, including the codegen prefix that runs
+    # on the remote managed-jobs controller cluster.
+    CONTROLLER = 'controller'
+
+
+# All known contexts. Used as the default for ``BasePlugin.load_contexts`` so
+# that plugins which don't opt in stay loaded in every context.
+ALL_PLUGIN_CONTEXTS: FrozenSet[PluginContext] = frozenset(PluginContext)
+
+
+class ManagedSecretsProvider(abc.ABC):
+    """Abstract provider for resolving managed secret references."""
+
+    @abc.abstractmethod
+    async def resolve(
+        self,
+        secret_refs: list,
+        user_hash: str,
+        workspace: str,
+    ) -> 'ResolvedSecrets':
+        """Resolve secret references to env vars and file mounts.
+
+        Args:
+            secret_refs: List of ManagedSecretRef from the task YAML.
+            user_hash: The user hash for scoping.
+            workspace: The workspace name for scoping.
+
+        Returns:
+            ResolvedSecrets with env_vars and file_mounts populated.
+        """
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class ResolvedFileMount:
+    """A file mount resolved from a managed secret."""
+    mount_path: str
+    content: bytes
+
+
+@dataclasses.dataclass
+class ResolvedSecrets:
+    """Result of resolving managed secret references."""
+    env_vars: Dict[str, str] = dataclasses.field(default_factory=dict)
+    file_mounts: List[ResolvedFileMount] = dataclasses.field(
+        default_factory=list)
 
 
 class ExtensionContext:
@@ -33,9 +116,63 @@ class ExtensionContext:
         ]
     """
 
-    def __init__(self, app: Optional[FastAPI] = None):
+    def __init__(
+        self,
+        # Default exists for backward compatibility.
+        context: PluginContext = PluginContext.UVICORN,
+        app: Optional[FastAPI] = None,
+    ):
+        self.context = context
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
+        self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
+
+    def register_managed_secrets_provider(
+        self,
+        provider: ManagedSecretsProvider,
+    ) -> None:
+        """Register a provider for resolving managed secrets."""
+        self._managed_secrets_provider = provider
+
+    @property
+    def managed_secrets_provider(self,) -> Optional[ManagedSecretsProvider]:
+        return self._managed_secrets_provider
+
+    def register_request_storage(
+        self,
+        backend: 'storage_mod.RequestBackend',
+    ) -> None:
+        """Register a custom request backend."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import storage as rs
+        rs.set_request_backend(backend)
+
+    def register_queue_backend_factory(
+        self,
+        factory: 'queue_base_mod.QueueBackendFactory',
+    ) -> None:
+        """Register a custom queue backend factory."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests.queues import base as qb
+        qb.set_queue_backend_factory(factory)
+
+    def register_blob_storage(
+        self,
+        backend: 'blob_storage_mod.BlobStorage',
+    ) -> None:
+        """Register a custom blob storage backend."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.blob import blob_storage as bs
+        bs.set_blob_storage(backend)
+
+    def register_log_provider(
+        self,
+        log_provider: 'log_provider_mod.LogProvider',
+    ) -> None:
+        """Register a custom log provider."""
+        # pylint: disable=import-outside-toplevel
+        from sky.server.requests import log_provider as lp
+        lp.set_log_provider(log_provider)
 
     def register_rbac_rule(self,
                            path: str,
@@ -90,10 +227,107 @@ class RBACRule:
 class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
 
+    # Process contexts in which this plugin should be loaded. Defaults to all
+    # known contexts so existing plugins keep loading everywhere.
+    load_contexts: ClassVar[FrozenSet[PluginContext]] = ALL_PLUGIN_CONTEXTS
+
+    @classmethod
+    def should_load(cls, context: PluginContext) -> bool:
+        """Return whether this plugin should be loaded in the given context."""
+        return context in cls.load_contexts
+
+    @property
+    def name(self) -> Optional[str]:
+        """Plugin name for display purposes."""
+        return None
+
     @property
     def js_extension_path(self) -> Optional[str]:
         """Optional API route to the JavaScript extension to load."""
         return None
+
+    @property
+    def requires_early_init(self) -> bool:
+        """Whether this plugin needs to initialize before dashboard API calls.
+
+        Set to True if the plugin needs to intercept fetch requests or
+        otherwise must be ready before the dashboard makes API calls.
+        The dashboard will wait for window.__skyPluginsReady before
+        proceeding with API calls when this is True.
+        """
+        return False
+
+    @property
+    def version(self) -> Optional[str]:
+        """Plugin version."""
+        return None
+
+    @property
+    def commit(self) -> Optional[str]:
+        """Plugin git commit hash."""
+        return None
+
+    @property
+    def hidden_from_display(self) -> bool:
+        """Whether this plugin should be hidden from version display.
+
+        Set to True to exclude this plugin from appearing in the version
+        information tooltip. Defaults to False.
+        """
+        return False
+
+    @property
+    def rbac_rules(self) -> List[Tuple[str, 'RBACRule']]:
+        """RBAC rules for this plugin.
+
+        Override this property to declare RBAC rules that should be
+        enforced for plugin endpoints. Rules are collected during
+        server initialization before plugins are fully installed.
+
+        Returns:
+            List of (role, RBACRule) tuples. Rules added to 'user' role
+            block regular users but allow admins.
+
+        Example:
+            @property
+            def rbac_rules(self):
+                return [
+                    ('user', RBACRule(path='/plugins/api/foo/*',
+                      method='POST')),
+                    ('user', RBACRule(path='/plugins/api/foo/*',
+                      method='DELETE')),
+                ]
+        """
+        return []
+
+    @property
+    def viewer_allowlist(self) -> List['RBACRule']:
+        """Endpoints this plugin exposes to viewer-role users.
+
+        Override this property to opt the plugin's read endpoints in to
+        the strictly-read-only `viewer` role.  Endpoints NOT declared
+        here are denied for viewers by default.
+
+        Path patterns use the same Casbin `keyMatch2` syntax as
+        `rbac_rules` (e.g. `/plugins/api/foo/*`, `/plugins/api/foo/:id`).
+
+        Returns:
+            List of `RBACRule` instances (the same dataclass used by
+            `rbac_rules`).  The `description` field is optional; the
+            rule is interpreted as "allow viewers to call this
+            (path, method)".
+
+        Example:
+            @property
+            def viewer_allowlist(self):
+                return [
+                    RBACRule(path='/plugins/api/foo/list',
+                             method='GET'),
+                    RBACRule(path='/plugins/api/foo/status',
+                             method='POST'),
+                ]
+        """
+        return []
 
     @abc.abstractmethod
     def install(self, extension_context: ExtensionContext):
@@ -106,6 +340,46 @@ class BasePlugin(abc.ABC):
 
 
 def _config_schema():
+    """Schema for plugins.yaml (API server plugins only)."""
+    plugin_schema = {
+        'type': 'object',
+        'required': ['class'],
+        'additionalProperties': False,
+        'properties': {
+            'class': {
+                'type': 'string',
+            },
+            'parameters': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+            },
+        },
+    }
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'controller_wheel_path': {
+                # Path to a directory containing prebuilt
+                # plugin wheel files (.whl).
+                # All .whl files in this directory will be uploaded
+                # to controllers.
+                # The wheels will be uploaded to remote clusters and installed.
+                'type': 'string',
+            },
+            'plugins': {
+                'type': 'array',
+                'items': plugin_schema,
+                'default': [],
+            },
+        },
+    }
+
+
+def _remote_config_schema():
+    """Schema for remote_plugins.yaml (plugins for remote controllers)."""
     plugin_schema = {
         'type': 'object',
         'required': ['class'],
@@ -149,17 +423,88 @@ def _load_plugin_config() -> Optional[config_utils.Config]:
     return config_utils.Config.from_dict(config)
 
 
+def _load_remote_plugin_config() -> Optional[config_utils.Config]:
+    """Load remote plugin config from remote_plugins.yaml."""
+    config_path = os.getenv(_REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                            _DEFAULT_REMOTE_PLUGINS_CONFIG_PATH)
+    config_path = os.path.expanduser(config_path)
+    if not os.path.exists(config_path):
+        return None
+    config = yaml_utils.read_yaml(config_path) or {}
+    common_utils.validate_schema(
+        config,
+        _remote_config_schema(),
+        err_msg_prefix='Invalid remote plugins config: ')
+    return config_utils.Config.from_dict(config)
+
+
+def get_remote_plugin_packages() -> List[Dict[str, Any]]:
+    """Get the list of remote plugin packages with their configurations.
+
+    Returns:
+        A list of dictionaries containing plugin configurations from
+        remote_plugins.yaml, each with at least 'class' and
+        optionally 'parameters'.
+    """
+    config = _load_remote_plugin_config()
+    if not config:
+        return []
+
+    plugin_configs = config.get('plugins', [])
+    return [dict(p) for p in plugin_configs]
+
+
+def get_remote_controller_wheel_path() -> Optional[str]:
+    """Get the controller wheel path from the plugin config.
+
+    Returns:
+        The controller_wheel_path if specified in plugins.yaml,
+        None otherwise.
+    """
+    config = _load_plugin_config()
+    if not config:
+        return None
+    return config.get('controller_wheel_path')
+
+
+def get_remote_plugins_config_path() -> Optional[str]:
+    """Get the path to the remote plugins config file.
+
+    Returns:
+        The expanded path to remote_plugins.yaml if it exists,
+        None otherwise.
+    """
+    config_path = os.getenv(_REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                            _DEFAULT_REMOTE_PLUGINS_CONFIG_PATH)
+    config_path = os.path.expanduser(config_path)
+    if not os.path.exists(config_path):
+        return None
+    return config_path
+
+
 _PLUGINS: Dict[str, BasePlugin] = {}
 _EXTENSION_CONTEXT: Optional[ExtensionContext] = None
+
+# Whether plugins have finished loading. On the server, schema validation
+# should only enforce additionalProperties: False after plugins have had
+# a chance to register their extra properties. Before that, we allow
+# additional properties so that plugin-provided fields are not rejected.
+_plugins_loaded: bool = False
+
+
+def plugins_loaded() -> bool:
+    """Return whether plugins have finished loading."""
+    return _plugins_loaded
 
 
 def load_plugins(extension_context: ExtensionContext):
     """Load and initialize plugins from the config."""
-    global _EXTENSION_CONTEXT
+    global _EXTENSION_CONTEXT, _plugins_loaded
     _EXTENSION_CONTEXT = extension_context
 
     config = _load_plugin_config()
     if not config:
+        _plugins_loaded = True
         return
 
     for plugin_config in config.get('plugins', []):
@@ -182,10 +527,16 @@ def load_plugins(extension_context: ExtensionContext):
         if not issubclass(plugin_cls, BasePlugin):
             raise TypeError(
                 f'Plugin {class_path} must inherit from BasePlugin.')
+        if not plugin_cls.should_load(extension_context.context):
+            logger.debug(f'Skipping plugin {class_path}: not enabled for '
+                         f'context {extension_context.context.value}')
+            continue
         parameters = plugin_config.get('parameters') or {}
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
         _PLUGINS[class_path] = plugin
+
+    _plugins_loaded = True
 
 
 def get_plugins() -> List[BasePlugin]:
@@ -193,10 +544,64 @@ def get_plugins() -> List[BasePlugin]:
     return list(_PLUGINS.values())
 
 
+_PLUGIN_RBAC_RULES: Dict[str, List[Dict[str, str]]] = {}
+
+
+def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
+    """Load RBAC rules from plugins without calling install().
+
+    This is called in the main process before permission service
+    initialization to collect plugin RBAC rules. It instantiates
+    plugins and reads their rbac_rules property without calling
+    install(), avoiding side effects.
+
+    Returns:
+        Dictionary mapping role names to lists of blocklist rules.
+    """
+    global _PLUGIN_RBAC_RULES
+
+    config = _load_plugin_config()
+    if not config:
+        return {}
+
+    rules_by_role: Dict[str, List[Dict[str, str]]] = {}
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # in either API-server context, even if they declare rbac_rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            # Collect rules from the rbac_rules property
+            for role, rule in plugin.rbac_rules:
+                rules_by_role.setdefault(role, []).append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected RBAC rule from {class_path}: '
+                             f'{role} {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load RBAC rules from {class_path}: {e}')
+
+    _PLUGIN_RBAC_RULES = rules_by_role
+    return rules_by_role
+
+
 def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
     """Collect RBAC rules from all loaded plugins.
 
-    Collects rules from the ExtensionContext.
+    Returns rules collected by load_plugin_rbac_rules() which runs in the
+    main process before permission service initialization.
 
     Returns:
         Dictionary mapping role names to lists of blocklist rules.
@@ -208,16 +613,72 @@ def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
             ]
         }
     """
-    rules_by_role: Dict[str, List[Dict[str, str]]] = {}
+    return _PLUGIN_RBAC_RULES
 
-    # Collect rules registered via ExtensionContext
-    if _EXTENSION_CONTEXT:
-        for role, rule in _EXTENSION_CONTEXT.rbac_rules:
-            if role not in rules_by_role:
-                rules_by_role[role] = []
-            rules_by_role[role].append({
-                'path': rule.path,
-                'method': rule.method,
-            })
 
-    return rules_by_role
+_PLUGIN_VIEWER_ALLOWLIST: List[Dict[str, str]] = []
+
+
+def load_plugin_viewer_allowlist() -> List[Dict[str, str]]:
+    """Load viewer-allowlist entries from plugins without calling install().
+
+    Mirrors `load_plugin_rbac_rules`: instantiates each configured
+    plugin in API-server-loading contexts and reads its
+    `viewer_allowlist` property.  Side-effect-free.
+
+    Plugins that don't override `viewer_allowlist` inherit the
+    BasePlugin default (empty list), so default behaviour for any
+    plugin endpoint is "denied for viewer".
+
+    Returns:
+        Flat list of `{path, method}` records to add to the viewer
+        allowlist.
+    """
+    global _PLUGIN_VIEWER_ALLOWLIST
+
+    config = _load_plugin_config()
+    if not config:
+        return []
+
+    allowlist: List[Dict[str, str]] = []
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # in either API-server context, even if they declare viewer
+            # rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            for rule in plugin.viewer_allowlist:
+                allowlist.append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected viewer allowlist entry from '
+                             f'{class_path}: {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load viewer allowlist from '
+                           f'{class_path}: {e}')
+
+    _PLUGIN_VIEWER_ALLOWLIST = allowlist
+    return allowlist
+
+
+def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
+    """Return the cached viewer-allowlist entries collected from plugins."""
+    return _PLUGIN_VIEWER_ALLOWLIST
+
+
+def get_extension_context() -> Optional[ExtensionContext]:
+    """Return the extension context created during plugin loading."""
+    return _EXTENSION_CONTEXT

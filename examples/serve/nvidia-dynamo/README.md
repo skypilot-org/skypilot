@@ -19,8 +19,16 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 - **Disaggregated Prefill & Decode**: Separates inference phases for optimal resource utilization
 - **Dynamic GPU Scheduling**: Intelligent workload distribution across available GPUs
 - **LLM-Aware Request Routing**: Smart routing based on model characteristics and cache states
-- **Accelerated Data Transfer**: High-performance data movement between nodes
+- **Accelerated Data Transfer**: High-performance data movement between nodes via NIXL
 - **KV Cache Offloading**: Multi-tiered memory management for efficient cache utilization
+
+## Container Image
+
+These examples use the official NVIDIA Dynamo container images from NGC:
+- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1` - SGLang backend (used in these examples)
+- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1` - vLLM backend (alternative)
+
+The NGC images are freely accessible and include all necessary dependencies (NATS, etcd, NIXL, etc.).
 
 ## Launching Nvidia Dynamo with SkyPilot
 
@@ -29,6 +37,7 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 - ✅ **OpenAI-Compatible API**: Drop-in replacement for OpenAI endpoints
 - ✅ **Basic Load Balancing**: Round-robin request distribution
 - ✅ **Auto-Discovery**: Dynamic worker registration
+- ✅ **No etcd Required**: Uses file-based KV store for single-node simplicity
 
 ### Multi-Node Example (`nvidia-dynamo-multinode.sky.yaml`)
 - ✅ **KV-Aware Routing**: Intelligent cache-based request routing (`--router-mode kv`)
@@ -36,6 +45,7 @@ NVIDIA Dynamo is a high-performance inference framework designed for serving gen
 - ✅ **Data Parallel Attention**: DP=2 across nodes (`--enable-dp-attention`)
 - ✅ **Tensor Parallelism**: TP=8 per node for large model support
 - ✅ **Disaggregated Transfer**: NIXL backend for KV cache transfers
+- ✅ **Centralized Services**: NATS and etcd run on head node, workers connect automatically
 
 **Model**: `Qwen/Qwen3-8B` (8B parameter reasoning model)
 

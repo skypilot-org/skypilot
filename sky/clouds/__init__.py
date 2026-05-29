@@ -23,6 +23,7 @@ from sky.clouds.hyperbolic import Hyperbolic
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
+from sky.clouds.mithril import Mithril
 from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
@@ -34,7 +35,9 @@ from sky.clouds.shadeform import Shadeform
 from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
+from sky.clouds.verda import Verda
 from sky.clouds.vsphere import Vsphere
+from sky.clouds.yotta import Yotta
 
 __all__ = [
     'IBM',
@@ -54,6 +57,7 @@ __all__ = [
     'Shadeform',
     'Vast',
     'OCI',
+    'Verda',
     'Vsphere',
     'Kubernetes',
     'SSH',
@@ -65,7 +69,9 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Mithril',
     'Seeweb',
+    'Yotta',
     # Utility functions
     'cloud_in_iterable',
 ]

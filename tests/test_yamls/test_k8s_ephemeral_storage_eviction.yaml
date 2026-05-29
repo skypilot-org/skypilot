@@ -1,0 +1,30 @@
+# This task creates a pod with low ephemeral storage limits that will
+# intentionally exceed the limit and get evicted. Used to test that
+# SkyPilot correctly handles pods with terminated containers where
+# finishedAt is null.
+
+resources:
+  infra: kubernetes
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - name: ray-node
+            resources:
+              requests:
+                ephemeral-storage: "100Mi"
+              limits:
+                # Low limit triggers eviction; may produce ContainerStatusUnknown
+                # with null finished_at if kubelet can't track container
+                # See: https://github.com/kubernetes/kubernetes/issues/122160
+                ephemeral-storage: "200Mi"
+
+run: |
+  # Fill storage to trigger eviction
+  i=0
+  while true; do
+    dd if=/dev/zero of=/tmp/fill-$i bs=10M count=10 2>/dev/null
+    i=$((i+1))
+  done

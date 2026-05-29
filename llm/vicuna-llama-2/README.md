@@ -97,7 +97,7 @@ resources:
   disk_size: 1000
   use_spot: true
 ```
-However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, Lambda, and more. (Hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!)
+However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, Lambda, and more. (Hint: check out the handy outputs of `sky gpus list A100-80GB:8`!)
 
 To use those clouds, add the `--no-use-spot` flag to request on-demand instances:
 ```console

@@ -1,0 +1,35 @@
+name: llama3_2_1b@user
+base: llama3
+model_arch: llama3_2_1b
+checkpoint: "hg://meta-llama/Llama-3.2-1B"
+tokenizer: "hg://meta-llama/Llama-3.2-1B"
+---
+name: llama3_2_1b_instruct@user
+base: llama3_instruct
+model_arch: llama3_2_1b
+checkpoint: "hg://meta-llama/Llama-3.2-1B-Instruct"
+tokenizer: "hg://meta-llama/Llama-3.2-1B-Instruct"
+---
+name: llama3_1_8b@user
+base: llama3
+model_arch: llama3_1_8b
+checkpoint: "hg://meta-llama/Llama-3.1-8B"
+tokenizer: "hg://meta-llama/Llama-3.1-8B"
+---
+name: llama3_1_8b_instruct@user
+base: llama3_instruct
+model_arch: llama3_1_8b
+checkpoint: "hg://meta-llama/Llama-3.1-8B-Instruct"
+tokenizer: "hg://meta-llama/Llama-3.1-8B-Instruct"
+---
+name: llama3_1_70b@user
+base: llama3
+model_arch: llama3_1_70b
+checkpoint: "hg://meta-llama/Llama-3.1-70B"
+tokenizer: "hg://meta-llama/Llama-3.1-70B"
+---
+name: llama3_1_70b_instruct@user
+base: llama3_instruct
+model_arch: llama3_1_70b
+checkpoint: "hg://meta-llama/Llama-3.1-70B-Instruct"
+tokenizer: "hg://meta-llama/Llama-3.1-70B-Instruct"

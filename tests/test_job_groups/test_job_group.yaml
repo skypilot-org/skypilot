@@ -1,0 +1,19 @@
+---
+name: test-job-group
+execution: parallel
+---
+name: job-a
+resources:
+  cpus: 2
+run: |
+  echo "Job A running"
+  sleep 5
+  echo "Job A done"
+---
+name: job-b
+resources:
+  cpus: 2
+run: |
+  echo "Job B running"
+  sleep 5
+  echo "Job B done"

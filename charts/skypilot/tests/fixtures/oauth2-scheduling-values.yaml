@@ -1,0 +1,19 @@
+auth:
+  oauth:
+    enabled: true
+    oidc-issuer-url: "https://example.okta.com/oauth2/default"
+    client-id: "test-client-id"
+    client-secret: "test-client-secret"
+apiService:
+  nodeSelector:
+    pool: system
+  tolerations:
+    - key: components.gke.io/gke-managed-components
+      operator: Exists
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: skypilot-api
+          topologyKey: kubernetes.io/hostname

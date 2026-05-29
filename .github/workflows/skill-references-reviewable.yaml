@@ -1,0 +1,34 @@
+name: skill-references-reviewable
+
+on:
+    pull_request:
+      branches:
+        - master
+        - 'releases/**'
+      paths:
+        - 'skills/skypilot/scripts/generate_references.py'
+        - 'skills/skypilot/skills/skypilot/references/**'
+        - 'docs/source/reference/yaml-spec.rst'
+        - 'sky/client/cli/**'
+        - 'sky/client/sdk.py'
+
+jobs:
+  reviewable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[all]"
+      - name: Generate references
+        run: python agent/scripts/generate_references.py
+      - name: Check for diff
+        run: |
+          if ! git diff --exit-code agent/skills/skypilot/references/; then
+            echo "ERROR: Generated reference docs are out of date."
+            echo "Run 'python agent/scripts/generate_references.py' and commit the results."
+            exit 1
+          fi

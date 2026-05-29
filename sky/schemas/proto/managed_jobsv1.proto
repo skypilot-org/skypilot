@@ -30,6 +30,7 @@ enum ManagedJobStatus {
   MANAGED_JOB_STATUS_FAILED_PRECHECKS = 11;
   MANAGED_JOB_STATUS_FAILED_NO_RESOURCE = 12;
   MANAGED_JOB_STATUS_FAILED_CONTROLLER = 13;
+  MANAGED_JOB_STATUS_WINDING_DOWN = 14;
 }
 
 enum ManagedJobScheduleState {
@@ -87,6 +88,9 @@ message GetJobTableRequest {
   optional Statuses statuses = 10;
   bool show_jobs_without_user_hash = 11;
   optional Fields fields = 12;
+  // Sorting parameters, added in ManagedJobsService v14.
+  optional string sort_by = 13;
+  optional string sort_order = 14;
 }
 
 message ManagedJobInfo {
@@ -121,6 +125,38 @@ message ManagedJobInfo {
   // The `spot.job_id`, which can be used to identify different tasks
   // for the same job
   optional int64 _job_id = 29;
+  // Links (e.g., instance console URLs) as key-value pairs
+  map<string, string> links = 30;
+  // Whether this task is a primary task (true) or auxiliary task (false)
+  // within a job group. Auxiliary tasks are terminated when all primary tasks
+  // complete. NULL for non-job-group jobs (single jobs and pipelines).
+  optional bool is_primary_in_job_group = 31;
+  // Zone where the cluster is running (populated from cluster handle)
+  optional string zone = 32;
+  // Labels from the cluster resources (populated from cluster handle)
+  map<string, string> labels = 33;
+  // Name of the cluster on the cloud provider (populated from cluster handle)
+  optional string cluster_name_on_cloud = 34;
+  // Network endpoint information (replaces pickled handle)
+  // List of (internal_ip, external_ip) tuples for all nodes
+  repeated IpPair internal_external_ips = 35;
+  // K8s DNS entries mapping instance_id to internal_svc
+  // Only populated for Kubernetes clusters
+  map<string, string> internal_services = 36;
+  // Named priority class for job scheduling
+  optional string priority_class = 37;
+  // Whether this job is a batch coordinator (ds.map()).
+  optional bool is_batch = 38;
+  // Batch progress: total number of batches (NULL for non-batch jobs).
+  optional int32 batch_total_batches = 39;
+  // Batch progress: number of completed batches (NULL for non-batch jobs).
+  optional int32 batch_completed_batches = 40;
+}
+
+// A pair of internal and external IP addresses
+message IpPair {
+  string internal_ip = 1;
+  string external_ip = 2;
 }
 
 message GetJobTableResponse {
@@ -148,6 +184,9 @@ message CancelJobsRequest {
     string job_name = 5;
     string pool_name = 6;
   }
+
+  optional bool graceful = 7;
+  optional int64 graceful_timeout = 8;
 }
 
 message CancelJobsResponse {
