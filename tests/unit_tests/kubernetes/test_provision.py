@@ -416,6 +416,8 @@ def test_pod_termination_reason_start_error(monkeypatch):
     pod = mock.MagicMock()
     pod.metadata.name = 'test-pod'
     pod.status.start_time = now
+    pod.status.reason = None
+    pod.status.message = None
 
     # Ready condition showing PodFailed
     ready_condition = mock.MagicMock()
@@ -511,6 +513,8 @@ def test_pod_termination_reason_null_finished_at(monkeypatch):
     pod = mock.MagicMock()
     pod.metadata.name = 'test-pod'
     pod.status.start_time = now
+    pod.status.reason = None
+    pod.status.message = None
 
     # Ready condition
     ready_condition = mock.MagicMock()
@@ -1615,6 +1619,10 @@ def _make_mock_pod(phase='Failed',
     pod.status.conditions = conditions or []
     pod.status.container_statuses = container_statuses or []
     pod.status.init_container_statuses = init_container_statuses or []
+    # A real pod has no pod-level kubelet reason unless evicted/preempted;
+    # leave it unset so condition/container-derived reasons are exercised.
+    pod.status.reason = None
+    pod.status.message = None
     return pod
 
 

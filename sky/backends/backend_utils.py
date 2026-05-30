@@ -2904,6 +2904,32 @@ def _update_cluster_status(
                                                handle.launched_nodes,
                                                node_health)
 
+        # When the per-pod live status doesn't name a cause, recover it from a
+        # durable signal. Two races are covered:
+        # - Eviction (ephemeral-storage / disk / memory pressure) is emitted as
+        #   a kubelet event while the pod can still report Running/Ready and
+        #   pod.status.reason has not caught up -> read the events.
+        # - A run-phase OOMKilled lives in the container's last_state and
+        #   survives the restart, but the Ready condition flips back to True
+        #   once the container is running again, so a snapshot that raced the
+        #   restart misses it -> re-read the pods' current+previous states.
+        # Bounded: only on an abnormal k8s cluster with no status reason.
+        if not status_reason and isinstance(launched_resources.cloud,
+                                            clouds.Kubernetes):
+            try:
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                if ray_config and 'provider' in ray_config:
+                    pod_names = list(node_statuses.keys())
+                    status_reason = (
+                        k8s_instance.get_cluster_failure_reason_from_events(
+                            ray_config['provider'], pod_names) or
+                        k8s_instance.get_cluster_failure_reason_from_pods(
+                            ray_config['provider'], pod_names) or '')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get pod failure reason for '
+                             f'{cluster_name!r}: {e}')
+
         # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
         # be checked before some_nodes_not_stopped, which would otherwise
         # report the misleading "some but not all nodes are stopped" for

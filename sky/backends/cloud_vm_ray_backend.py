@@ -209,43 +209,35 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
-# Hints currently only cover Kubernetes failure modes. Scoped to k8s blocks
-# in _format_provision_failure_blocks to avoid false positives on cloud
-# error messages (e.g., AWS "InsufficientInstanceCapacity").
-_KUBERNETES_FAILURE_HINTS = [
-    (['ImagePullBackOff', 'ErrImagePull'],
-     'Verify the image tag exists and registry credentials are configured.'),
-    (['OOMKilled'], 'The container ran out of memory. '
-     'Try requesting more with `memory: <size>` in resources.'),
-    (['Insufficient'],
-     'The cluster does not have enough free resources. View node '
-     'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
-]
-
 
 def _get_kubernetes_hint(reason: str,
                          context: Optional[str] = None) -> Optional[str]:
     """Return a hint for the given Kubernetes failure reason, or None.
 
-    Hints may contain a literal `{dashboard_url}` token, which is replaced
-    with the SkyPilot dashboard infra page URL — scoped to the failing
-    context when one is available. If URL resolution fails for any reason,
-    the token is replaced with a generic fallback so we never raise from
-    failure-rendering code (which would mask the original provision error).
+    Sources the canonical hint table from
+    ``kubernetes_utils.KUBERNETES_FAILURE_HINTS``. Hints may contain a literal
+    `{dashboard_url}` token, which is replaced with the SkyPilot dashboard
+    infra page URL — scoped to the failing context when one is available. If
+    URL resolution fails for any reason, the token is replaced with a generic
+    fallback so we never raise from failure-rendering code (which would mask
+    the original provision error).
+
+    Only called from the Kubernetes branch of
+    ``_format_provision_failure_blocks`` to avoid false positives on other
+    clouds' error messages (e.g., AWS "InsufficientInstanceCapacity").
     """
-    for substrings, hint in _KUBERNETES_FAILURE_HINTS:
-        if any(s in reason for s in substrings):
-            if '{dashboard_url}' in hint:
-                try:
-                    starting_page = (f'infra/{context}' if context else 'infra')
-                    dashboard_url = server_common.get_dashboard_url(
-                        server_common.get_server_url(),
-                        starting_page=starting_page)
-                except Exception:  # pylint: disable=broad-except
-                    dashboard_url = 'the SkyPilot dashboard infra page'
-                hint = hint.replace('{dashboard_url}', dashboard_url)
-            return hint
-    return None
+    hint = kubernetes_utils.match_kubernetes_failure_hint(reason)
+    if hint is None:
+        return None
+    if '{dashboard_url}' in hint:
+        try:
+            starting_page = (f'infra/{context}' if context else 'infra')
+            dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=starting_page)
+        except Exception:  # pylint: disable=broad-except
+            dashboard_url = 'the SkyPilot dashboard infra page'
+        hint = hint.replace('{dashboard_url}', dashboard_url)
+    return hint
 
 
 def _format_provision_failure_blocks(
