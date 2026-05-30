@@ -1,0 +1,22 @@
+# Specifies both a cloud VM image (a SkyPilot-published AMI) and a Docker
+# image in the same image_id field (PR #9759). The VM should boot from the
+# given AMI and the job should run inside the Docker container.
+resources:
+  infra: aws/us-east-1
+  cpus: 2+
+  image_id:
+    us-east-1: skypilot:cpu-ubuntu-2004
+    docker: ubuntu:22.04
+
+run: |
+  # 1) Prove we are running inside the Docker container.
+  if [ -f /.dockerenv ]; then
+    echo "SKY_IN_CONTAINER=yes"
+  else
+    echo "SKY_IN_CONTAINER=no"
+  fi
+  # 2) Prove the VM booted from the requested AMI. The container runs with
+  #    --net=host, so the EC2 instance metadata service is reachable.
+  TOKEN=$(python3 -c "import urllib.request as u; print(u.urlopen(u.Request('http://169.254.169.254/latest/api/token', method='PUT', headers={'X-aws-ec2-metadata-token-ttl-seconds': '60'})).read().decode())")
+  AMI=$(python3 -c "import sys, urllib.request as u; t=sys.argv[1]; print(u.urlopen(u.Request('http://169.254.169.254/latest/meta-data/ami-id', headers={'X-aws-ec2-metadata-token': t})).read().decode())" "$TOKEN")
+  echo "SKY_BOOTED_AMI=$AMI"

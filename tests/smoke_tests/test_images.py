@@ -30,6 +30,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import catalog
 from sky import skypilot_config
 from sky.skylet import constants
 
@@ -110,6 +111,43 @@ def test_aws_image_id_dict():
             f'sky logs {name} 3 --status',
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_image_id_dict_with_docker():
+    """Specify both a cloud VM image (AMI) and a Docker image (PR #9759).
+
+    Regression test for the old behavior where specifying a Docker image
+    caused a custom cloud VM image to be ignored. The motivating case is a
+    too-old default AMI driver for new GPUs: users want to boot a custom AMI
+    (correct NVIDIA driver) and still run their own container on top.
+
+    Asserts both halves are honored: the job runs inside the container, and
+    the VM booted from the requested AMI (read from instance metadata, which
+    is reachable because the container runs with --net=host).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-east-1'
+    # Resolve the AMI that the SkyPilot CPU image tag maps to in this region,
+    # so we can assert the VM actually booted from the requested cloud image.
+    expected_ami = catalog.get_image_id_from_tag('skypilot:cpu-ubuntu-2004',
+                                                 region,
+                                                 clouds='aws')
+    test = smoke_tests_utils.Test(
+        'aws_image_id_dict_with_docker',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_aws_ami_and_docker.yaml',
+            f'sky logs {name} 1 --status',
+            # The job ran inside the Docker container.
+            f'sky logs {name} 1 --no-follow | grep "SKY_IN_CONTAINER=yes"',
+            # The VM booted from the requested AMI, not the default image.
+            f'sky logs {name} 1 --no-follow | grep "SKY_BOOTED_AMI={expected_ami}"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
