@@ -751,8 +751,23 @@ class VastDataCloudStorage(CloudStorage):
 class HFCloudStorage(CloudStorage):
     """Hugging Face Buckets and Hub repos."""
 
+    # huggingface_hub>=1.5 declares ``click>=8.4`` (via its core deps and
+    # typer), but the remote runtime pins ``ray==2.9.3``, whose CLI crashes at
+    # import under click>=8.3 (deepcopy of click Sentinel values; see
+    # https://github.com/ray-project/ray/issues/56747). When huggingface_hub is
+    # installed into the runtime venv it upgrades click past that bound and
+    # breaks ``ray status`` / ``sky status -r``, leaving the cluster stuck in
+    # INIT. The bucket API works fine with the older click, so we pass a uv
+    # override that keeps click below the ray-breaking version (matching the
+    # ``click<8.3.0`` pin used when installing ray) while still installing
+    # huggingface_hub's other dependencies. A plain ``click<8.3.0`` constraint
+    # would instead be unsatisfiable against the declared ``>=8.4``.
+    _HF_UV_OVERRIDE_FILE = '~/.sky/hf_uv_override.txt'
     _GET_HF_HUB = [
-        f'{constants.SKY_UV_PIP_CMD} install "huggingface_hub>=1.5"',
+        'mkdir -p ~/.sky',
+        f'printf "click<8.3.0\\n" > {_HF_UV_OVERRIDE_FILE}',
+        f'{constants.SKY_UV_PIP_CMD} install '
+        f'--overrides {_HF_UV_OVERRIDE_FILE} "huggingface_hub>=1.5"',
     ]
     _TOKEN_HELPER = """
 token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
