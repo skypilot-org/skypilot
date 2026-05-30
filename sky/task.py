@@ -206,7 +206,11 @@ def _with_docker_login_config(
                            'in `image_id`. The login configs will be '
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
-        # Already checked in extract_docker_image
+        # If docker image comes from the 'docker' key in image_id dict,
+        # don't overwrite image_id, just attach login config.
+        if resources._docker_image is not None:  # pylint: disable=protected-access
+            return resources.copy(_docker_login_config=docker_login_config)
+        # Legacy path: image_id contains docker: prefix
         assert resources.image_id is not None and len(
             resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
