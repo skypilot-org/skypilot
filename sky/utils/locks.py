@@ -269,9 +269,13 @@ class PostgresLock(DistributedLock):
             cursor.execute(f'SELECT {unlock_func}(%s)', (self._lock_key,))
             self._connection.commit()
             self._acquired = False
-        except psycopg2.OperationalError as e:
+        except psycopg2.DatabaseError as e:
             # Lost connection to the database, likely the lock is force unlocked
-            # by other routines.
+            # by other routines. Catch `DatabaseError` (parent of
+            # `OperationalError`) — psycopg2 raises bare `DatabaseError` for
+            # some connection-closed cases (`server closed the connection
+            # unexpectedly`) which a narrower `OperationalError` catch would
+            # miss.
             logger.debug(f'Failed to release postgres lock {self.lock_id}: {e}')
             connection_lost = True
         finally:
