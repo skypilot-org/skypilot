@@ -18,6 +18,7 @@ from sky import global_user_state
 from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import retries as db_retries
 
 logger = logging.getLogger(__name__)
 
@@ -202,13 +203,16 @@ class PostgresLock(DistributedLock):
         # Take first 8 bytes and convert to int, ensure positive 64-bit
         return int.from_bytes(hash_digest[:8], 'big') & ((1 << 63) - 1)
 
+    @db_retries.retry
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
         engine = global_user_state.initialize_and_get_db()
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
                              f'Current dialect: {engine.dialect.name}')
-        # Borrow a dedicated connection from the pool.
+        # Borrow a dedicated connection from the pool. Idempotent under
+        # retry: raw_connection() either returns a checked-out conn or
+        # raises with nothing taken — no partial state, no leak.
         return engine.raw_connection()
 
     def acquire(self, blocking: bool = True) -> AcquireReturnProxy:
