@@ -1385,6 +1385,20 @@ def read_provision_status_from_log(
     return pos, msg
 
 
+def _provision_status_headline(provision_msg: str) -> Optional[str]:
+    """Returns the blue headline of a provisioning spinner message.
+
+    Provisioning messages from the cluster launch look like
+    ``[bold cyan]Preparing SkyPilot runtime (1/3)[/]  [dim]<log hint>[/]``. We
+    keep only the colored (blue) headline and drop the trailing log-path hint,
+    so the caller can show it as a secondary detail under the "Waiting for task
+    to start" line. Returns ``None`` when the message has no blue headline, so
+    the caller can show nothing rather than a raw/unstyled message.
+    """
+    match = re.search(r'\[bold cyan\](.*?)\[/\]', provision_msg)
+    return match.group(1) if match else None
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -1720,9 +1734,13 @@ def stream_logs_by_id(
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
                     provision_msg = _latest_provision_status_msg()
-                    provision_str = (
-                        '' if provision_msg is None else
-                        f'\n  [dim]Launching cluster:[/] {provision_msg}')
+                    # Show only the blue headline of the cluster-launch status
+                    # as a secondary detail under the waiting line; show nothing
+                    # when there is no headline to display.
+                    headline = (None if provision_msg is None else
+                                _provision_status_headline(provision_msg))
+                    provision_str = (''
+                                     if headline is None else f'\n  {headline}')
                     msg = _JOB_WAITING_STATUS_MESSAGE.format(
                         status_str=status_str,
                         provision_str=provision_str,
