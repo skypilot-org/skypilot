@@ -55,6 +55,7 @@ from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server import common as server_common
@@ -6574,9 +6575,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 container_name = slurm_utils.pyxis_container_name(
                     handle.cluster_name_on_cloud)
 
+            # Resolve srun_options at exec time so changes in the user's
+            # config.yaml take effect without re-launching the cluster.
+            # Task-YAML overrides flow through the launched resources, same
+            # as sbatch_options. The merge uses the launch-time cluster /
+            # partition (region/zone on the resources object).
+            srun_options = clouds.slurm._merge_slurm_options(  # pylint: disable=protected-access
+                'srun_options',
+                handle.launched_resources.region,
+                handle.launched_resources.zone,
+                handle.launched_resources.cluster_config_overrides,
+            )
+            srun_extra_args = slurm_instance._build_custom_srun_args(  # pylint: disable=protected-access
+                srun_options)
+
             return task_codegen.SlurmCodeGen(
                 slurm_job_id,
                 container_name,
+                srun_extra_args=srun_extra_args,
             )
         else:
             return task_codegen.RayCodeGen()

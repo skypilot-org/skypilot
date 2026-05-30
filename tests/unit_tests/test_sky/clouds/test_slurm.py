@@ -805,6 +805,162 @@ class TestSbatchOptionsPrecedence:
         assert result == {'account': 'task-cluster-account'}
 
 
+class TestSrunOptionsPrecedence:
+    """Test 4-level srun_options merge in make_deploy_resources_variables.
+
+    Mirrors TestSbatchOptionsPrecedence — same precedence, same merge
+    semantics, just a different deploy_vars key.
+    """
+
+    FAKE_SSH_CONFIG = {
+        'hostname': '10.0.0.1',
+        'port': '22',
+        'user': 'slurm',
+        'identityfile': ['/home/user/.ssh/id_rsa'],
+    }
+
+    def _load_config_and_get_srun_options(self,
+                                          tmp_path,
+                                          skypilot_config_dict,
+                                          cluster_config_overrides=None):
+        from sky import skypilot_config
+        from sky.utils import yaml_utils
+
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text(yaml_utils.dump_yaml_str(skypilot_config_dict))
+
+        saved_global = skypilot_config._GLOBAL_CONFIG_PATH
+        saved_project = skypilot_config._PROJECT_CONFIG_PATH
+        saved_ctx = skypilot_config._global_config_context
+        try:
+            skypilot_config._GLOBAL_CONFIG_PATH = str(config_path)
+            skypilot_config._PROJECT_CONFIG_PATH = str(tmp_path /
+                                                       'nonexistent.yaml')
+            skypilot_config._global_config_context = (
+                skypilot_config.ConfigContext())
+            skypilot_config.reload_config()
+
+            cloud = slurm_cloud.Slurm()
+
+            mock_resources = mock.MagicMock(unsafe=True)
+            mock_resources.zone = 'gpu'
+            mock_resources.instance_type = '4CPU--16GB'
+            mock_resources.assert_launchable.return_value = mock_resources
+            mock_resources.extract_docker_image.return_value = None
+            mock_resources.cluster_config_overrides = (cluster_config_overrides
+                                                       or {})
+
+            region = mock.MagicMock()
+            region.name = 'mycluster'
+            zone_mock = mock.MagicMock()
+            zone_mock.name = 'gpu'
+
+            mock_ssh_config = mock.MagicMock()
+            mock_ssh_config.lookup.return_value = self.FAKE_SSH_CONFIG
+
+            with patch(
+                    'sky.clouds.slurm.slurm_utils.get_slurm_ssh_config',
+                    return_value=mock_ssh_config), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.get_partitions',
+                    return_value=['gpu', 'cpu']), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
+                    side_effect=lambda cluster, t, count=1, partition=None: t):
+                deploy_vars = cloud.make_deploy_resources_variables(
+                    resources=mock_resources,
+                    cluster_name=mock.MagicMock(),
+                    region=region,
+                    zones=[zone_mock],
+                    num_nodes=1,
+                )
+            return deploy_vars['srun_options']
+        finally:
+            skypilot_config._GLOBAL_CONFIG_PATH = saved_global
+            skypilot_config._PROJECT_CONFIG_PATH = saved_project
+            skypilot_config._global_config_context = saved_ctx
+
+    def test_global_only(self, tmp_path):
+        result = self._load_config_and_get_srun_options(tmp_path, {
+            'slurm': {
+                'srun_options': {
+                    'auto-resume': 1,
+                },
+            },
+        })
+        assert result == {'auto-resume': 1}
+
+    def test_cluster_overrides_global(self, tmp_path):
+        result = self._load_config_and_get_srun_options(
+            tmp_path, {
+                'slurm': {
+                    'srun_options': {
+                        'auto-resume': 1,
+                        'cpu-bind': 'cores',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'srun_options': {
+                                'auto-resume': 3,
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {'auto-resume': 3, 'cpu-bind': 'cores'}
+
+    def test_partition_overrides_cluster_and_global(self, tmp_path):
+        result = self._load_config_and_get_srun_options(
+            tmp_path, {
+                'slurm': {
+                    'srun_options': {
+                        'auto-resume': 1,
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'srun_options': {
+                                'auto-resume': 2,
+                            },
+                            'partition_configs': {
+                                'gpu': {
+                                    'srun_options': {
+                                        'auto-resume': 5,
+                                        'cpu-bind': 'cores',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {'auto-resume': 5, 'cpu-bind': 'cores'}
+
+    def test_task_overrides_all(self, tmp_path):
+        result = self._load_config_and_get_srun_options(
+            tmp_path,
+            skypilot_config_dict={
+                'slurm': {
+                    'srun_options': {
+                        'auto-resume': 1,
+                    },
+                },
+            },
+            cluster_config_overrides={
+                'slurm': {
+                    'srun_options': {
+                        'auto-resume': 10,
+                    },
+                },
+            },
+        )
+        assert result == {'auto-resume': 10}
+
+    def test_no_srun_options(self, tmp_path):
+        result = self._load_config_and_get_srun_options(tmp_path,
+                                                        skypilot_config_dict={})
+        assert result == {}
+
+
 class TestSlurmProvisionTimeout:
     """Test conditional provision timeout logic in make_deploy_resources_variables.
 
