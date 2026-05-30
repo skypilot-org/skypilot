@@ -1118,3 +1118,21 @@ class TestReadProvisionStatusFromLog:
             f.write('\n')
         _, msg2 = jobs_utils.read_provision_status_from_log(str(path), pos, msg)
         assert msg2 == 'half'
+
+
+class TestProvisionStatusHeadline:
+    """Tests for extracting the blue headline from a provisioning message."""
+
+    def test_extracts_blue_headline_and_drops_hint(self):
+        msg = ('[bold cyan]Preparing SkyPilot runtime (1/3)[/]  '
+               '[dim]View logs at: ~/sky_logs/x/provision.log[/]')
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Preparing SkyPilot runtime (1/3)')
+
+    def test_headline_without_hint(self):
+        msg = '[bold cyan]Launching[/]'
+        assert jobs_utils._provision_status_headline(msg) == 'Launching'
+
+    def test_returns_none_when_not_blue(self):
+        # No [bold cyan] wrapper: nothing should be displayed.
+        assert jobs_utils._provision_status_headline('Launching') is None
