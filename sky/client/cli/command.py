@@ -2403,8 +2403,11 @@ def cost_report(
         for record in all_records:
             r = dict(record)
             if r.get('resources') is not None:
-                r['resources'] = r['resources'].to_yaml_config()
-            r['status'] = r['status'].value if r.get('status') is not None else 'TERMINATED'
+                r['resources'] = r['resources'].to_yaml_config(
+                    redact_secrets=True)
+            record_status = r.get('status')
+            r['status'] = (record_status.value
+                           if record_status is not None else 'TERMINATED')
             json_records.append(r)
         click.echo(json.dumps(json_records, indent=2))
         return
