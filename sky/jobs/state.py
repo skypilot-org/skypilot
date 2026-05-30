@@ -530,8 +530,9 @@ class ManagedJobStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
     # FAILED: The job is finished with failure from the user's program.
     FAILED = 'FAILED'
-    # FAILED_SETUP: The job is finished with failure from the user's setup
-    # script.
+    # FAILED_SETUP: The job is finished with failure during setup -- either the
+    # user's setup script, or a deterministic cluster/runtime setup failure such
+    # as the job's pod being OOMKilled before the job started.
     FAILED_SETUP = 'FAILED_SETUP'
     # FAILED_PRECHECKS: the underlying `sky.launch` fails due to precheck
     # errors only. I.e., none of the failover exceptions, if any, is due to
@@ -3445,6 +3446,35 @@ def get_job_events(job_id: int,
         'reason': row[4],
         'timestamp': row[5],
     } for row in rows]
+
+
+def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
+    """Return {job_id: reason} for the most recent RECOVERING event per job.
+
+    Only jobs with a non-empty RECOVERING reason are included. Used to surface
+    why a job is currently recovering (e.g. an OOMKilled pod) in the
+    `details` column. A single batched query keeps this off the per-job path.
+    """
+    if not job_ids:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_events_table.c.spot_job_id,
+                job_events_table.c.reason,
+            ).where(
+                sqlalchemy.and_(
+                    job_events_table.c.spot_job_id.in_(job_ids),
+                    job_events_table.c.new_status ==
+                    ManagedJobStatus.RECOVERING.value,
+                )).order_by(job_events_table.c.timestamp.desc())).fetchall()
+    # rows are newest-first; keep the first (latest) non-empty reason per job.
+    reasons: Dict[int, str] = {}
+    for spot_job_id, reason in rows:
+        if spot_job_id not in reasons and reason:
+            reasons[spot_job_id] = reason
+    return reasons
 
 
 async def cleanup_job_events_with_retention_async(

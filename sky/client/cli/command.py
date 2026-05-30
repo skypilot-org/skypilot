@@ -4229,9 +4229,13 @@ def _show_gpus_impl(
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
-                node_taints = getattr(node_info, 'taints', None) or []
-                node_is_tainted = len(node_taints) > 0
-                if not node_is_ready or node_is_cordoned or node_is_tainted:
+                node_taints = getattr(node_info, 'taints', None)
+                # Only un-tolerated taints count toward the "not ready" GPU
+                # tally. Taints matched by `kubernetes.pod_config.spec
+                # .tolerations` arrive with `tolerated=True` and don't make
+                # the node unschedulable for the user's workloads.
+                if (not node_is_ready or node_is_cordoned or
+                        kubernetes_utils.has_untolerated_taint(node_taints)):
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -4470,22 +4474,28 @@ def _show_gpus_impl(
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
                 if node_is_cordoned:
                     status_info.append('Cordoned')
-                # Add taint info grouped by effect
-                taints = getattr(node_info, 'taints', None)
-                if taints:
+                # Add taint info grouped by effect. Only un-tolerated taints
+                # count toward node status — taints matched by the user's
+                # configured `kubernetes.pod_config.spec.tolerations` arrive
+                # with `tolerated=True` and don't make the node unhealthy.
+                untolerated_taints = [
+                    t for t in (getattr(node_info, 'taints', None) or [])
+                    if not t.get('tolerated', False)
+                ]
+                if untolerated_taints:
                     # Group taints by effect: 'NoSchedule Taint [key1, key2],
                     # NoExecute Taint [key3]'
                     taints_by_effect: Dict[str, List[str]] = {}
-                    for taint in taints:
+                    for taint in untolerated_taints:
                         effect = taint['effect']
                         key = taint['key']
                         if effect not in taints_by_effect:
                             taints_by_effect[effect] = []
                         taints_by_effect[effect].append(key)
-                    taints_strs = []
-                    for effect, keys in taints_by_effect.items():
-                        taints_strs.append(
-                            f'{effect} Taint [{", ".join(keys)}]')
+                    taints_strs = [
+                        f'{effect} Taint [{", ".join(keys)}]'
+                        for effect, keys in taints_by_effect.items()
+                    ]
                     if taints_strs:
                         status_info.append(', '.join(taints_strs))
 
