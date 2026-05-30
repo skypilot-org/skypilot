@@ -156,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 33  # add _hooks list + scrub AutostopConfig.hook/hook_timeout.
+    _VERSION = 34  # add _docker_image from image_id dict 'docker' key.
 
     def __init__(
         self,
@@ -374,16 +374,43 @@ class Resources:
             self._ephemeral_storage = None
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
+        self._docker_image: Optional[str] = None
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
-            if None in image_id:
+            image_id = dict(image_id)
+            # 'docker' is a reserved key for specifying a Docker image
+            # alongside a cloud VM image.
+            if 'docker' in image_id:
+                docker_val = image_id.pop('docker').strip()
+                if docker_val.startswith('docker:'):
+                    docker_val = docker_val[len('docker:'):]
+                self._docker_image = docker_val
+            if not image_id:
+                self._image_id = None
+            elif None in image_id:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
                     typing.cast(str, k).strip(): v.strip()
                     for k, v in image_id.items()
                 }
+            # Reject ambiguous specs: docker key + docker:-prefixed region
+            # values (e.g. {us-east-1: 'docker:img1', docker: 'img2'}).
+            if self._docker_image is not None and self._image_id is not None:
+                docker_prefixed = [
+                    f'{v} (region: {k})'
+                    for k, v in self._image_id.items()
+                    if v.startswith('docker:')
+                ]
+                if docker_prefixed:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'image_id has both a \'docker\' key and '
+                            'docker:-prefixed region values: '
+                            f'{", ".join(docker_prefixed)}. '
+                            'Please use only one mechanism to specify '
+                            'the Docker image.')
         else:
             self._image_id = image_id
         if isinstance(self._cloud, clouds.Kubernetes):
@@ -534,11 +561,16 @@ class Resources:
             use_spot = '[Spot]'
 
         image_id = ''
+        image_parts = []
         if self.image_id is not None:
             if None in self.image_id:
-                image_id = f', image_id={self.image_id[None]}'
+                image_parts.append(f'{self.image_id[None]}')
             else:
-                image_id = f', image_id={self.image_id}'
+                image_parts.append(f'{self.image_id}')
+        if self._docker_image is not None:
+            image_parts.append(f'docker:{self._docker_image}')
+        if image_parts:
+            image_id = f', image_id={" | ".join(image_parts)}'
 
         disk_tier = ''
         if self.disk_tier is not None:
@@ -1476,6 +1508,8 @@ class Resources:
                 raise
 
     def extract_docker_image(self) -> Optional[str]:
+        if self._docker_image is not None:
+            return self._docker_image
         if self.image_id is None:
             return None
         # Handle dict image_id
@@ -1487,6 +1521,24 @@ class Resources:
                 if image_id.startswith('docker:'):
                     return image_id[len('docker:'):]
         return None
+
+    def get_cloud_image_id(self) -> Optional[Dict[Optional[str], str]]:
+        """Returns the cloud VM image_id, or None if only a docker image.
+
+        When both a cloud image and a docker image are specified (via the
+        'docker' key), returns just the cloud image portion. For the legacy
+        'image_id: docker:xxx' format, returns None since there is no
+        separate cloud image.
+        """
+        if self._image_id is None:
+            return None
+        # Filter out any docker:-prefixed entries (legacy format).
+        cloud_only = {
+            k: v
+            for k, v in self._image_id.items()
+            if not v.startswith('docker:')
+        }
+        return cloud_only if cloud_only else None
 
     def _try_validate_image_id(self) -> None:
         """Try to validate the image_id attribute.
@@ -1526,14 +1578,25 @@ class Resources:
                             f'(prefix with "docker:"), or '
                             f'(2) leave image_id empty to use the default')
 
-        if self._image_id is None:
+        if self._image_id is None and self._docker_image is None:
             return
 
-        if self.extract_docker_image() is not None:
-            # TODO(tian): validate the docker image exists / of reasonable size
+        if self._docker_image is not None:
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
                     self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+            if self._image_id is None:
+                return
+
+        if self._image_id is not None and self.extract_docker_image() is not None:
+            # Legacy docker: prefix in image_id (no separate _docker_image)
+            if self._docker_image is None:
+                if self.cloud is not None:
+                    self.cloud.check_features_are_supported(
+                        self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+                return
+
+        if self._image_id is None:
             return
 
         if self.cloud is None:
@@ -2081,6 +2144,7 @@ class Resources:
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
+            self._docker_image is None,
             self._ports is None,
             self._docker_login_config is None,
         ])
@@ -2208,6 +2272,13 @@ class Resources:
             hooks_override)
 
         override_configs = dict(override_configs) if override_configs else None
+        # Reconstruct the 'docker' key in image_id so _docker_image is preserved
+        # across the copy, since self.image_id excludes the popped 'docker' key.
+        default_image_id = self.image_id
+        if self._docker_image is not None:
+            image_id_dict = dict(default_image_id) if default_image_id else {}
+            image_id_dict['docker'] = self._docker_image
+            default_image_id = image_id_dict
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -2226,7 +2297,7 @@ class Resources:
                                            self._ephemeral_storage),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
-            image_id=override.pop('image_id', self.image_id),
+            image_id=override.pop('image_id', default_image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             network_tier=override.pop('network_tier', self.network_tier),
             local_disk=override.pop('local_disk', self._local_disk),
@@ -2280,7 +2351,7 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
-        elif self.image_id is not None:
+        if self.get_cloud_image_id() is not None:
             features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
@@ -2638,7 +2709,12 @@ class Resources:
         add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('ephemeral_storage', self._ephemeral_storage)
-        add_if_not_none('image_id', self.image_id)
+        image_id_config = self.image_id
+        if self._docker_image is not None:
+            image_id_dict = dict(image_id_config) if image_id_config else {}
+            image_id_dict['docker'] = self._docker_image
+            image_id_config = image_id_dict
+        add_if_not_none('image_id', image_id_config)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
         if self.network_tier is not None:
@@ -2863,6 +2939,9 @@ class Resources:
 
         if version < 32:
             self._ephemeral_storage = None
+
+        if version < 34:
+            self._docker_image = None
 
         if version < 33:
             # Route legacy AutostopConfig.hook / hook_timeout attrs into the

@@ -608,13 +608,13 @@ class GCP(clouds.Cloud):
                         # CUDA driver version 535.86.10, CUDA Library 12.2
                         image_id = _DEFAULT_GPU_IMAGE_ID
 
-        if (resources.image_id is not None and
-                resources.extract_docker_image() is None):
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is not None:
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                assert region_name in resources.image_id, resources.image_id
-                image_id = resources.image_id[region_name]
+                assert region_name in cloud_image_id, cloud_image_id
+                image_id = cloud_image_id[region_name]
         if image_id.startswith('skypilot:'):
             image_id = catalog.get_image_id_from_tag(image_id, clouds='gcp')
 
