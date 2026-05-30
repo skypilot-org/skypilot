@@ -765,7 +765,13 @@ class HFCloudStorage(CloudStorage):
     _HF_UV_OVERRIDE_FILE = '~/.sky/hf_uv_override.txt'
     _GET_HF_HUB = [
         'mkdir -p ~/.sky',
-        f'printf "click<8.3.0\\n" > {_HF_UV_OVERRIDE_FILE}',
+        # Write the override file atomically (tmp file + mv) and only if it
+        # doesn't already exist, so parallel COPY syncs that run this command
+        # concurrently can't truncate it while another's uv install reads it.
+        f'[ -f {_HF_UV_OVERRIDE_FILE} ] || '
+        f'(tmpfile=$(mktemp {_HF_UV_OVERRIDE_FILE}.XXXXXX) && '
+        f'printf "click<8.3.0\\n" > "$tmpfile" && '
+        f'mv -f "$tmpfile" {_HF_UV_OVERRIDE_FILE})',
         f'{constants.SKY_UV_PIP_CMD} install '
         f'--overrides {_HF_UV_OVERRIDE_FILE} "huggingface_hub>=1.5"',
     ]

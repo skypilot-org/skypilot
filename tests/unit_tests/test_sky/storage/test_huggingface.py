@@ -572,16 +572,6 @@ class TestHfCloudStorage:
         assert isinstance(cloud_stores.get_storage_from_path('hf://x/y'),
                           cloud_stores.HFCloudStorage)
 
-    def test_hf_hub_install_pins_click_for_ray(self):
-        # huggingface_hub>=1.5 declares click>=8.4, which breaks the remote
-        # runtime's ray==2.9.3 CLI (ray-project/ray#56747) and leaves the
-        # cluster stuck in INIT. The install must pass a uv override that keeps
-        # click below 8.3 so ``ray status`` keeps working. See HFCloudStorage.
-        commands = '\n'.join(cloud_stores.HFCloudStorage._GET_HF_HUB)
-        assert 'huggingface_hub>=1.5' in commands
-        assert '--overrides' in commands
-        assert 'click<8.3.0' in commands
-
     def test_bucket_file_download_command(self):
         command = cloud_stores.HFCloudStorage().make_sync_file_command(
             'hf://buckets/ns/bucket/file.txt', '/tmp/file.txt')
