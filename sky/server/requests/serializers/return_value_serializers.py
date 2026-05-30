@@ -116,6 +116,33 @@ def serialize_cost_report(return_value: Any) -> str:
     return orjson.dumps(return_value).decode('utf-8')
 
 
+@register_serializer('jobs.pool_status')
+@register_serializer('serve.status')
+def serialize_serve_status(return_value: Any) -> str:
+    """Strip the bulky replica `handle` blob for new clients.
+
+    Replicas carry a base64-pickled ``CloudVmRayResourceHandle`` (~8 KB
+    each) that the dashboard/CLI never reads — they only need the small
+    pre-computed ``infra`` / ``resources_str`` / ``resources_str_full``
+    strings populated alongside it. For new clients (API_VERSION >=
+    MIN_LAZY_REPLICA_HANDLE_API_VERSION) we replace the handle with
+    ``None`` to keep the wire shape stable while cutting payload by ~99%
+    for replica-heavy pools.
+
+    Old clients still receive the full handle so SDK code that does
+    ``record['replica_info'][i]['handle'].external_ips()`` keeps working.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    if (return_value is not None and remote_api_version is not None and
+            remote_api_version >=
+            server_constants.MIN_LAZY_REPLICA_HANDLE_API_VERSION):
+        for service_status in return_value:
+            for replica_info in service_status.get('replica_info', []):
+                if 'handle' in replica_info:
+                    replica_info['handle'] = None
+    return orjson.dumps(return_value).decode('utf-8')
+
+
 @register_serializer('realtime_slurm_gpu_availability')
 def serialize_realtime_slurm_gpu_availability(return_value: List[Any]) -> str:
     """Serialize Slurm GPU availability with version compatibility.

@@ -320,3 +320,73 @@ def test_api_plugins_endpoint_includes_visible_plugins(monkeypatch):
     plugin_names = [p['name'] for p in plugin_list]
     assert 'VisiblePlugin1' in plugin_names
     assert 'VisiblePlugin2' in plugin_names
+
+
+def test_load_plugin_viewer_allowlist(monkeypatch, tmp_path):
+    """load_plugin_viewer_allowlist reads viewer_allowlist from each plugin."""
+    module_name = 'sky_test_viewer_allowlist_plugin'
+
+    class AllowlistPlugin(plugins.BasePlugin):
+
+        @property
+        def viewer_allowlist(self):
+            return [
+                plugins.RBACRule(path='/plugins/api/foo/list', method='GET'),
+                plugins.RBACRule(path='/plugins/api/foo/status', method='POST'),
+            ]
+
+        def install(self, extension_context):
+            pass
+
+    AllowlistPlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.AllowlistPlugin = AllowlistPlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = {
+        'plugins': [{
+            'class': f'{module_name}.AllowlistPlugin',
+        }],
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    # Reset the module-level cache so this test does not see leftover
+    # state from other tests.
+    monkeypatch.setattr(plugins, '_PLUGIN_VIEWER_ALLOWLIST', [])
+
+    result = plugins.load_plugin_viewer_allowlist()
+
+    assert {'path': '/plugins/api/foo/list', 'method': 'GET'} in result
+    assert {'path': '/plugins/api/foo/status', 'method': 'POST'} in result
+    assert len(result) == 2
+    # Cached for the getter.
+    assert plugins.get_plugin_viewer_allowlist() == result
+
+
+def test_load_plugin_viewer_allowlist_default_empty(monkeypatch, tmp_path):
+    """Plugins that do not override viewer_allowlist contribute nothing."""
+    module_name = 'sky_test_viewer_allowlist_default_plugin'
+
+    class NoOverridePlugin(plugins.BasePlugin):
+
+        def install(self, extension_context):
+            pass
+
+    NoOverridePlugin.__module__ = module_name
+    module = types.ModuleType(module_name)
+    module.NoOverridePlugin = NoOverridePlugin
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = {
+        'plugins': [{
+            'class': f'{module_name}.NoOverridePlugin',
+        }],
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    monkeypatch.setattr(plugins, '_PLUGIN_VIEWER_ALLOWLIST', [])
+
+    result = plugins.load_plugin_viewer_allowlist()
+    assert not result

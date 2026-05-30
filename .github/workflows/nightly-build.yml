@@ -1,8 +1,7 @@
 name: nightly-build
 on:
   schedule:
-    - cron: '35 8 * * *' # 08:35 UTC (01:35 PST / 04:35 EST) — original nightly
-    - cron: '0 0 * * *'  # 00:00 UTC (~5:00 PM PT during DST) — tests-only preflight
+    - cron: '0 0 * * *' # 00:00 UTC
   workflow_dispatch:
     inputs:
       skip_buildkite:
@@ -21,7 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.compute_should_run.outputs.should_run }}
-      is_preflight: ${{ steps.compute_should_run.outputs.is_preflight }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
       - name: print latest_commit
@@ -36,16 +34,9 @@ jobs:
             else
               echo "should_run=false" >> "$GITHUB_OUTPUT"
             fi
-            # The 0 0 * * * schedule is the tests-only preflight; it should not publish or release
-            if [[ "${{ github.event.schedule }}" == "0 0 * * *" ]]; then
-              echo "is_preflight=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "is_preflight=false" >> "$GITHUB_OUTPUT"
-            fi
           else
-            # For manual dispatches, always run and never treat as preflight
+            # For manual dispatches, always run
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "is_preflight=false" >> "$GITHUB_OUTPUT"
           fi
 
   gate-tests:
@@ -296,9 +287,8 @@ jobs:
 
   publish-and-validate-both:
     needs: [check-date, gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
-    # Allow publish/validate for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
     # Use always() so this job evaluates even if some test jobs were skipped when skip_buildkite is selected
-    if: ${{ always() && needs.check-date.outputs.is_preflight != 'true' && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-shared-gke-api-server.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
+    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-shared-gke-api-server.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
@@ -308,8 +298,7 @@ jobs:
 
   trigger-docker-and-helm-release:
     needs: [check-date, publish-and-validate-both]
-    # Allow helm release for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
-    if: ${{ always() && needs.check-date.outputs.is_preflight != 'true' && needs.publish-and-validate-both.result == 'success' }}
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
     uses: ./.github/workflows/helm-docker-release.yaml
     with:
       package_name: skypilot-nightly
@@ -397,14 +386,6 @@ jobs:
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           EMOJI="🚨"
-          PRECHECK_TAG=""
-          if [[ "${{ needs.check-date.outputs.is_preflight }}" == "true" ]]; then
-            PRECHECK_TAG="[Preflight check, won't release] "
-            EMOJI="🔔"
-          fi
-          if [[ -n "$PRECHECK_TAG" ]]; then
-            TITLE_TEXT="${PRECHECK_TAG}${TITLE_TEXT}"
-          fi
           BUILDKITE_MSG=""
           if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" || "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" || "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
             if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then

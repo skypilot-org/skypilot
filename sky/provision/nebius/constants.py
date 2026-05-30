@@ -3,6 +3,12 @@ import math
 
 VERSION = 'v1'
 
+# Naming convention for SkyPilot-managed security groups. Mirrors AWS's
+# `sky-sg-{cluster}` template (`USER_PORTS_SECURITY_GROUP_NAME` in
+# `sky.clouds.aws`). Suffixed with `cluster_name_on_cloud` so SGs are
+# unique per cluster within a project.
+SECURITY_GROUP_TEMPLATE = 'sky-sg-{}'
+
 # Nebius requires disk sizes to be a multiple of 93 GiB
 # (99857989632 bytes = 93 * 1024^3).
 NEBIUS_DISK_SIZE_STEP_GIB = 93

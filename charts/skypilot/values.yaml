@@ -69,6 +69,10 @@ apiService:
   # The default value is 60 seconds.
   terminationGracePeriodSeconds: 60
 
+  # Dev mode: do not start and probe the server automatically
+  devMode:
+    enabled: false
+
   # Liveness and readiness probe configuration for the API server container.
   # @schema type: [object, null]
   livenessProbe:
@@ -696,6 +700,8 @@ prometheus:
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
       honor_labels: true
+      scrape_interval: 30s
+      scrape_timeout: 20s
       kubernetes_sd_configs:
         - role: pod
           namespaces:

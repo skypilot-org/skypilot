@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import os
+import tempfile
 from unittest import mock
 
 import pytest
@@ -613,3 +614,191 @@ async def test_set_request_context_coroutine_is_context_safe():
     # Process-scope var should not be unchanged
     assert common_utils.get_current_user().name == original_user.name
     assert common_utils.get_current_user().id == original_user.id
+
+
+class TestAtomicWriteText:
+    """Tests for ``common_utils.atomic_write_text``."""
+
+    def test_writes_content_with_default_mode(self, tmp_path):
+        target = tmp_path / 'cluster-stanza'
+        common_utils.atomic_write_text(str(target), 'Host my-cluster\n')
+
+        assert target.read_text(encoding='utf-8') == 'Host my-cluster\n'
+        # Default mode is 0o644.
+        assert (target.stat().st_mode & 0o777) == 0o644
+
+    def test_writes_content_with_explicit_mode(self, tmp_path):
+        target = tmp_path / 'private-key'
+        common_utils.atomic_write_text(str(target),
+                                       'PRIVATE KEY CONTENT\n',
+                                       mode=0o600)
+
+        assert target.read_text(encoding='utf-8') == 'PRIVATE KEY CONTENT\n'
+        assert (target.stat().st_mode & 0o777) == 0o600
+
+    def test_overwrites_existing_file(self, tmp_path):
+        target = tmp_path / 'existing'
+        target.write_text('old content', encoding='utf-8')
+
+        common_utils.atomic_write_text(str(target), 'new content')
+
+        assert target.read_text(encoding='utf-8') == 'new content'
+
+    def test_unicode_content(self, tmp_path):
+        target = tmp_path / 'unicode'
+        # Mixed ASCII + non-ASCII, including a 4-byte emoji.
+        content = 'Host α-cluster 🚀\n  HostName 1.2.3.4\n'
+        common_utils.atomic_write_text(str(target), content)
+
+        assert target.read_text(encoding='utf-8') == content
+        # On disk the encoded bytes should be UTF-8.
+        assert target.read_bytes() == content.encode('utf-8')
+
+    def test_swap_to_new_inode(self, tmp_path):
+        """Atomic rename swaps the directory entry to a new inode.
+
+        This is the property that makes the write torn-read-safe on
+        shared filesystems: a reader holding an open fd on the old file
+        keeps reading the old content until it closes; the new content
+        appears at the path only after rename succeeds.
+        """
+        target = tmp_path / 'swap'
+        target.write_text('original', encoding='utf-8')
+        original_inode = target.stat().st_ino
+
+        common_utils.atomic_write_text(str(target), 'replaced')
+
+        new_inode = target.stat().st_ino
+        # mkstemp+rename always allocates a fresh inode for the
+        # replacement, so the inode must differ.
+        assert new_inode != original_inode
+        assert target.read_text(encoding='utf-8') == 'replaced'
+
+    def test_no_temp_files_left_behind_on_success(self, tmp_path):
+        target = tmp_path / 'clean'
+        common_utils.atomic_write_text(str(target), 'done')
+
+        # Only the target file should exist; no leftover .tmp sidecars.
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['clean']
+
+    def test_temp_file_is_dotfile(self, tmp_path, monkeypatch):
+        """Temp file basename must start with '.' so glob '*' skips it.
+
+        SkyPilot's ssh config uses ``Include ~/.sky/generated/ssh/*``;
+        a non-dot tmp file would be picked up while writes are in
+        flight, breaking ssh config parsing.
+        """
+        observed_tmp_names = []
+        real_mkstemp = tempfile.mkstemp
+
+        def spy_mkstemp(*args, **kwargs):
+            fd, path = real_mkstemp(*args, **kwargs)
+            observed_tmp_names.append(os.path.basename(path))
+            return fd, path
+
+        monkeypatch.setattr(common_utils.tempfile, 'mkstemp', spy_mkstemp)
+
+        target = tmp_path / 'stanza'
+        common_utils.atomic_write_text(str(target), 'data')
+
+        assert observed_tmp_names, 'mkstemp should have been called once'
+        for name in observed_tmp_names:
+            assert name.startswith('.'), (
+                f'tmp file {name!r} must start with "." so glob "*" '
+                'does not pick it up mid-write')
+
+    def test_cleanup_temp_on_chmod_failure(self, tmp_path, monkeypatch):
+        """If chmod fails (or any post-write step fails), the partially
+        written tmp file must be removed so it does not linger as a
+        dotfile in the destination directory.
+        """
+
+        def boom(*args, **kwargs):
+            raise PermissionError('simulated chmod failure')
+
+        monkeypatch.setattr(common_utils.os, 'chmod', boom)
+
+        target = tmp_path / 'never-renamed'
+        with pytest.raises(PermissionError, match='simulated chmod failure'):
+            common_utils.atomic_write_text(str(target), 'content')
+
+        # Target file must NOT exist (rename never happened).
+        assert not target.exists()
+        # And no tmp leftovers either.
+        assert list(tmp_path.iterdir()) == []
+
+    def test_cleanup_temp_on_write_failure(self, tmp_path, monkeypatch):
+        """If the write itself fails, the empty tmp file from mkstemp
+        must still be cleaned up.
+        """
+
+        class BoomFile:
+
+            def __init__(self, fd):
+                self._fd = fd
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                # Close the underlying fd so the tmp file is not held
+                # open when the cleanup tries to remove it.
+                os.close(self._fd)
+                return False
+
+            def write(self, *_args, **_kwargs):
+                raise IOError('disk full')
+
+        real_fdopen = os.fdopen
+
+        def fdopen_spy(fd, *args, **kwargs):
+            del args, kwargs
+            return BoomFile(fd)
+
+        monkeypatch.setattr(common_utils.os, 'fdopen', fdopen_spy)
+
+        target = tmp_path / 'never-written'
+        with pytest.raises(IOError, match='disk full'):
+            common_utils.atomic_write_text(str(target), 'content')
+
+        assert not target.exists()
+        assert list(tmp_path.iterdir()) == []
+        # Sanity: real_fdopen still callable (no global state leaked).
+        assert real_fdopen is os.fdopen or callable(real_fdopen)
+
+    def test_target_in_cwd_with_no_dirname(self, tmp_path, monkeypatch):
+        """When the path has no parent dir component, fall back to '.'.
+
+        Otherwise tempfile.mkstemp(dir='') would raise.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        common_utils.atomic_write_text('relative-file', 'content')
+
+        assert (tmp_path /
+                'relative-file').read_text(encoding='utf-8') == 'content'
+
+    def test_cleanup_temp_on_keyboard_interrupt(self, tmp_path, monkeypatch):
+        """``KeyboardInterrupt`` (and any ``BaseException``) during the
+        write must still trigger tmp cleanup -- otherwise a Ctrl-C
+        during ``atomic_write_text`` would leak a hidden ``.<rand>.tmp``
+        file into the destination directory, and successive interrupts
+        could pile up dotfiles.
+
+        Implementation note: the function uses ``try/finally`` with a
+        success flag (rather than ``except Exception``) precisely so
+        that ``BaseException`` subclasses do trigger cleanup.
+        """
+
+        def boom(*args, **kwargs):
+            raise KeyboardInterrupt('user pressed Ctrl-C')
+
+        monkeypatch.setattr(common_utils.os, 'chmod', boom)
+
+        target = tmp_path / 'interrupted'
+        with pytest.raises(KeyboardInterrupt):
+            common_utils.atomic_write_text(str(target), 'content')
+
+        assert not target.exists()
+        # Crucially: no hidden .tmp file left behind in the directory.
+        assert list(tmp_path.iterdir()) == []

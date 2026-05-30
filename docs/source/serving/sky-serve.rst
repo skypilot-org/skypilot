@@ -3,14 +3,24 @@
 Serving Models
 ==============
 
+.. note::
+
+    We're building the next generation of SkyServe focused on production-readiness:
+
+    - **High-performance:** prefill–decode disaggregation, cache-aware routing, TP/DP/PP/Wide-EP, vLLM and SGlang supported
+    - **Multi-cluster by design:** run replicas across all your clusters
+    - **Built-in observability:** metrics, logs, traces
+    - **Flexible autoscaling:** autoscale on custom metrics, scale-to-zero and rolling updates
+    - **Security:** limit access to VPC-only, TLS support, API key auth
+
+    If you are interested, `sign up for early access <https://forms.gle/u2UvPDLvQq1JLP1J6>`_ or `reach out <mailto:hello@skypilot.co>`_.
+
 SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. warning::
    
    SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not yet recommended for external/production serving. Expect rough edges.
-   
-   As we actively develop SkyServe, we welcome `feedback <https://slack.skypilot.co>`_ and `contributions <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md>`_.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 

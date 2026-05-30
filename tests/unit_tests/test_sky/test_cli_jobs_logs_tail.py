@@ -18,20 +18,24 @@ class TestJobsLogsTailCli:
         # Patch the module-level `managed_jobs` alias (= sky.jobs) in
         # command.py. Don't mock sys.exit — click's UsageError handler
         # raises SystemExit, and CliRunner captures it into exit_code.
+        # Mock download_logs_streaming to return None so the CLI's
+        # streaming-first sync-down branch falls through to the legacy
+        # download_logs (which we also mock).
         with mock.patch.object(command.managed_jobs, 'tail_logs') as tail_mock, \
              mock.patch.object(command.managed_jobs,
-                               'download_logs') as download_mock:
+                               'download_logs') as download_mock, \
+             mock.patch.object(
+                 command.managed_jobs,
+                 'download_logs_streaming') as stream_mock:
             tail_mock.return_value = 0
             download_mock.return_value = {}
+            stream_mock.return_value = None
             result = self.runner.invoke(command.jobs_logs, args)
             return result, tail_mock, download_mock
 
-    def test_tail_negative_rejected(self):
-        result, _, _ = self._invoke(['--tail', '-1', '1'])
-        assert result.exit_code != 0
-        assert 'non-negative' in result.output.lower()
-
-    def test_sync_down_with_tail_rejected(self):
+    def test_sync_down_with_explicit_tail_rejected(self):
+        # Explicit --tail with --sync-down still rejected so users get
+        # a clear error instead of silently truncating the saved log.
         result, _, _ = self._invoke(['-s', '--tail', '100', '1'])
         assert result.exit_code != 0
         assert '--tail is not supported with --sync-down' in result.output
@@ -43,18 +47,58 @@ class TestJobsLogsTailCli:
         _, kwargs = tail_mock.call_args
         assert kwargs.get('tail') == 100
 
-    def test_tail_default_is_none_at_sdk(self):
-        """Default `--tail 0` means 'all lines' at CLI, None at SDK."""
+    def test_tail_default_follow_truncates_at_1000(self):
+        """Default --tail (no explicit flag) in follow mode is 1000
+        lines — speed-up for multi-GB logs. Users opt back into 'all'
+        via --tail 0.
+        """
+        # follow=True is the default; pass no --no-follow.
         result, tail_mock, _ = self._invoke(['1'])
+        assert tail_mock.called, result.output
+        _, kwargs = tail_mock.call_args
+        assert kwargs.get('tail') == 1000
+
+    def test_tail_default_no_follow_means_all(self):
+        """Default --tail with --no-follow is 'all lines' — preserves
+        pre-PR behavior so scripts that grep for early markers (e.g.
+        'sky jobs logs --no-follow | grep <marker>') keep working.
+        """
+        result, tail_mock, _ = self._invoke(['--no-follow', '1'])
         assert tail_mock.called, result.output
         _, kwargs = tail_mock.call_args
         assert kwargs.get('tail') is None
 
+    def test_tail_zero_means_all_at_sdk(self):
+        """--tail 0 explicitly opts into 'all lines' (None at the SDK)."""
+        result, tail_mock, _ = self._invoke(['--tail', '0', '1'])
+        assert tail_mock.called, result.output
+        _, kwargs = tail_mock.call_args
+        assert kwargs.get('tail') is None
+
+    def test_tail_negative_means_all_at_sdk(self):
+        """--tail with a negative count is also "all lines" — but is
+        also the same value Click uses as the no-flag sentinel, so
+        passing -1 explicitly is indistinguishable from omitting the
+        flag (both apply the 1000-line default in the interactive
+        path; both mean "all" with --sync-down)."""
+        # Sync-down path is unambiguous: -1 / no-flag both mean "all".
+        result, _, download_mock = self._invoke(['-s', '--tail', '-1', '1'])
+        assert download_mock.called, result.output
+
+    def test_tail_invalid_value_rejected(self):
+        # Click's int parser rejects non-numeric values.
+        result, _, _ = self._invoke(['--tail', 'wat', '1'])
+        assert result.exit_code != 0
+        assert 'is not a valid integer' in result.output
+
     def test_sync_down_without_tail_still_works(self):
+        # Default --tail with --sync-down silently means "all" so
+        # existing scripts (sky jobs logs --sync-down <id>) keep
+        # working after the default flip.
         result, _, download_mock = self._invoke(['-s', '1'])
         assert download_mock.called, result.output
         _, kwargs = download_mock.call_args
-        # download_logs signature no longer accepts tail
+        # download_logs signature does not accept tail
         assert 'tail' not in kwargs
 
 

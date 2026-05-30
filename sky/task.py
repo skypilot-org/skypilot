@@ -30,6 +30,19 @@ from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_task_validators: List[Callable[['Task'], None]] = []
+
+
+def register_task_validator(fn: Callable[['Task'], None]) -> None:
+    """Register a plugin-provided task validator.
+
+    Registered functions are called during ``Task.validate()``.
+    Each receives the task and should raise ``ValueError`` on
+    invalid configurations.
+    """
+    _task_validators.append(fn)
+
+
 _VALID_NAME_REGEX = '[a-zA-Z0-9]+(?:[._-]{1,2}[a-zA-Z0-9]+)*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
@@ -515,6 +528,8 @@ class Task:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()
+        for validator_fn in _task_validators:
+            validator_fn(self)
 
     def validate_name(self):
         """Validates if the task name is valid."""
@@ -576,6 +591,19 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Mount paths cannot end with a slash '
                                  f'Found: {path} in {location}')
+
+    def _validate_mount_dest_is_absolute(self, path: str, location: str):
+        if data_utils.is_cloud_store_url(path):
+            return
+        # Explicitly use POSIX semantics — `os.path.isabs` treats e.g.
+        # 'C:/foo' as absolute on Windows, but the remote side is always
+        # POSIX. Tilde is allowed as a common shorthand for the remote
+        # home directory (see Task docstring examples).
+        if not (path.startswith('/') or path.startswith('~')):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'File mount destination must be an absolute path '
+                    f'(start with "/" or "~"). Got: {path!r} in {location}.')
 
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
@@ -873,13 +901,36 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         # Handle the top-level config field
-        config_override = config.pop('config', None)
+        config_override = config.pop('config', None) or {}
+        # Lifecycle hooks live under `config.hooks:` but they are not a
+        # SkyPilot-config override — they are task lifecycle metadata.
+        # Pull them out of the override block and forward to Resources
+        # via the same path master's `resources.hooks:` used (kept for
+        # backward compat — see below).
+        config_hooks = config_override.pop('hooks', None)
 
-        # Store the final config override for use in resource setup
-        cluster_config_override = config_override
+        # Store the final config override for use in resource setup.
+        # Restore None semantics if the override block was hooks-only.
+        cluster_config_override = config_override or None
 
-        # Parse resources field.
-        resources_config = config.pop('resources', {})
+        # Parse resources field. Coerce `resources: null` / `resources:`
+        # (empty value) to {} so the assignment below doesn't fail.
+        resources_config = config.pop('resources', None) or {}
+        # `resources.hooks:` was an in-flight rename during PR1 review;
+        # it never landed in master. Reject the form explicitly so users
+        # write `config.hooks:` (the canonical placement) instead of
+        # discovering the rename via Resources-internal silent acceptance.
+        if 'hooks' in resources_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Lifecycle hooks live under top-level `config.hooks:`, '
+                    'not `resources.hooks:`. Move the list to '
+                    '`config.hooks` at the top level of the task YAML.')
+        # Forward task.config.hooks into the resources block so the
+        # Resources constructor can pick it up via the same key the
+        # internal API uses.
+        if config_hooks is not None:
+            resources_config['hooks'] = config_hooks
         if cluster_config_override is not None:
             assert resources_config.get('_cluster_config_overrides') is None, (
                 'Cannot set _cluster_config_overrides in both resources and '
@@ -946,9 +997,6 @@ class Task:
             if there are any other parsing errors.
         """
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
             return Task.from_yaml_str(user_specified_yaml)
 
@@ -961,6 +1009,8 @@ class Task:
 
                 task = sky.Task.from_yaml_str('yaml_str')
         """
+        with ux_utils.print_exception_no_traceback():
+            yaml_utils.check_no_duplicate_keys(yaml_str)
         config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
@@ -991,6 +1041,7 @@ class Task:
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             self._validate_mount_path(dst_path, location='volumes')
+            self._validate_mount_dest_is_absolute(dst_path, location='volumes')
             # Shortcut for `dst_path: volume_name` (external persistent volume)
             if isinstance(vol, str):
                 volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
@@ -1894,6 +1945,21 @@ class Task:
             self.resources, redact_secrets=redact_secrets)
 
         add_if_not_none('resources', tmp_resource_config)
+
+        # Lifecycle hooks are stored on each Resources instance (the
+        # internal API replicates them across all resources), but their
+        # canonical YAML placement is the task-level ``config.hooks:``.
+        # Lift the list off any Resources that carries one and emit
+        # under ``config.hooks`` so round-trips through to_yaml/from_yaml
+        # don't trip the rejection that catches a misplaced
+        # ``resources.hooks`` in user YAML.
+        task_hooks: Optional[List[Dict[str, Any]]] = None
+        for r in self.resources:
+            if r.hooks:
+                task_hooks = [dict(h) for h in r.hooks]
+                break
+        if task_hooks:
+            config.setdefault('config', {})['hooks'] = task_hooks
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())

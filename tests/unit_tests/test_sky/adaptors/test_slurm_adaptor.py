@@ -452,6 +452,69 @@ class TestParseMaxtime:
         assert result is None
 
 
+class TestParseDefaultTime:
+    """Test _parse_default_time()."""
+
+    def test_parse_default_time_none(self):
+        """DefaultTime=NONE returns None."""
+        line = 'PartitionName=dev DefaultTime=NONE MaxTime=UNLIMITED'
+        result = slurm._parse_default_time(line)
+        assert result is None
+
+    def test_parse_default_time_unlimited(self):
+        """DefaultTime=UNLIMITED returns None (no useful default)."""
+        line = 'PartitionName=dev DefaultTime=UNLIMITED MaxTime=UNLIMITED'
+        result = slurm._parse_default_time(line)
+        assert result is None
+
+    def test_parse_default_time_hms(self):
+        """Returns the raw hh:mm:ss string verbatim."""
+        line = 'PartitionName=dev DefaultTime=01:00:00 MaxTime=12:00:00'
+        result = slurm._parse_default_time(line)
+        assert result == '01:00:00'
+
+    def test_parse_default_time_with_days(self):
+        line = 'PartitionName=dev DefaultTime=2-00:00:00 MaxTime=7-00:00:00'
+        result = slurm._parse_default_time(line)
+        assert result == '2-00:00:00'
+
+    def test_parse_default_time_no_match(self):
+        line = 'PartitionName=dev MaxTime=12:00:00'
+        result = slurm._parse_default_time(line)
+        assert result is None
+
+
+class TestGetPartitionsInfoDefaultTime:
+    """Verify get_partitions_info() populates the default_time field."""
+
+    def test_populates_default_time(self):
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = ('PartitionName=cpu Default=YES DefaultTime=01:00:00 '
+                       'MaxTime=UNLIMITED\n'
+                       'PartitionName=gpu Default=NO DefaultTime=NONE '
+                       'MaxTime=02:00:00')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_partitions_info()
+
+        assert len(result) == 2
+        assert result[0].name == 'cpu'
+        assert result[0].is_default is True
+        assert result[0].maxtime is None  # UNLIMITED
+        assert result[0].default_time == '01:00:00'
+        assert result[1].name == 'gpu'
+        assert result[1].is_default is False
+        assert result[1].maxtime == 7200
+        assert result[1].default_time is None
+
+
 class TestGetProctrackType:
     """Test SlurmClient.get_proctrack_type()."""
 

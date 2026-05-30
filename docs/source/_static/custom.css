@@ -193,6 +193,89 @@ active tab to be moved up. */
   border-bottom: none;
 }
 
+/* Avoid layout shifts in the right-hand navbar block during the first
+   ~150ms of page load. Four post-paint events would otherwise reflow
+   the search button + icons + kbd shortcut and visibly jiggle
+   Slack/Twitter/GitHub:
+
+   (a) The pydata theme's inline <head> script sets html[data-mode] to ""
+       when localStorage has no "mode" entry. The theme CSS only shows a
+       theme-switch icon when data-mode equals light/dark/auto, so the
+       button collapses to ~2px until the theme JS resets data-mode to
+       "auto" post-DCL — at which point the auto icon snaps in and pushes
+       the icon links right by ~32px.
+
+   (b) On Mac, the same theme JS swaps the search-button modifier kbd
+       from "Ctrl" to "⌘", which is ~22px narrower and shrinks the
+       search button.
+
+   (c) FontAwesome's all.min.js replaces <i class="fa-…"> placeholders
+       with inline <svg> elements whose intrinsic widths don't match the
+       <i>'s ::before fallback-font codepoint glyph — so the magnifying
+       glass icon resizes when the JS replacement runs.
+
+   (d) The pydata theme renders the navbar external-link icon ("Case
+       Studies", "Blog") via .nav-link.nav-external::after whose content
+       is a PUA codepoint rendered in the FA font; while FA is still
+       loading the codepoint renders in a fallback glyph with different
+       metrics, causing a few-px shift on font-ready.
+
+   Fix each by reserving the final width up-front. */
+
+/* (a) */
+html[data-mode=""] .theme-switch-button span[data-mode=auto] {
+  display: flex;
+}
+
+/* (b) Strip the kbd shortcut from the navbar search button — pydata's
+   post-DCL "Ctrl"→"⌘" swap on Mac would otherwise shrink the search
+   button by ~22px. Pin the button to its original width with the icon
+   and "Search" label centered together. The keyboard binding still
+   works; pydata's Cmd+K / Ctrl+K listener doesn't depend on the
+   indicator. Scoped to the navbar so the hidden search modal in
+   .bd-search is left alone. */
+.navbar-header-items__end .search-button__kbd-shortcut,
+.navbar-persistent--mobile .search-button__kbd-shortcut {
+  display: none;
+}
+.navbar-header-items__end .search-button-field,
+.navbar-persistent--mobile .search-button-field {
+  min-width: 183px;
+  justify-content: center;
+}
+/* Match the visual weight of the navbar nav-links — the pill background
+   makes the default 16px feel heavier than its peers. */
+.navbar-header-items__end .search-button-field .search-button__default-text,
+.navbar-persistent--mobile .search-button-field .search-button__default-text {
+  font-size: 0.875rem;
+}
+
+/* (c) Lock every FontAwesome icon to a fixed-width box regardless of
+   whether it's currently the <i> placeholder (rendered via the FA
+   webfont's ::before codepoint) or the inline <svg> that FA's
+   all.min.js inserts to replace it. The two have different intrinsic
+   widths (e.g., fa-list <i>=19px vs <svg>=14px), so without this lock
+   text next to the icon shifts when the JS replacement runs. Applies
+   site-wide because the same flicker is visible in the secondary
+   sidebar ("On this page", "Edit on GitHub") as well as the navbar. */
+i[class*="fa-"]:not(.fa-stack-1x):not(.fa-stack-2x),
+svg.svg-inline--fa:not(.fa-stack-1x):not(.fa-stack-2x) {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+}
+i[class*="fa-"].fa-lg,
+svg.svg-inline--fa.fa-lg {
+  width: 1.25em;
+}
+
+/* (d) */
+.nav-link.nav-external::after {
+  display: inline-block;
+  width: 0.75em;
+  text-align: center;
+}
+
 /* Index page hero title — shrunk slightly so the long title fits beside the
    copy-page button on a full-width laptop viewport. */
 .hero-title h1 {

@@ -1277,66 +1277,10 @@ In addition to basic HTTP authentication, SkyPilot also supports using OAuth2 to
 
 Refer to :ref:`Setup OAuth for SkyPilot API Server <api-server-oauth>` for detailed instructions on common OAuth2 providers, such as :ref:`Okta <oauth-okta>` or Google Workspace.
 
-.. _api-server-persistence-db:
+Optional: High availability
+---------------------------
 
-Optional: Back the API server with a persistent database
---------------------------------------------------------
-
-The API server can optionally be configured with a PostgreSQL database to persist state. It can be an externally managed database.
-
-If a persistent DB is not specified, the API server uses a Kubernetes persistent volume to persist state.
-
-.. note::
-
-  Database configuration must be set in the Helm deployment.
-
-.. dropdown:: Configure PostgreSQL with Helm deployment during the first deployment
-
-    **Option 1: Set the DB connection URI in helm values**
-
-    Set :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` to ``postgresql://<username>:<password>@<host>:<port>/<database>`` in the helm values:
-
-
-    .. code-block:: bash
-
-        # --reuse-values keeps the Helm chart values set in the previous step
-        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-        --namespace $NAMESPACE \
-        --reuse-values \
-        --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
-
-    **Option 2: Set the DB connection URI via Kubernetes secret**
-
-    (available on nightly version 20250626 and later)
-
-    Create a Kubernetes secret that contains the DB connection URI:
-
-    .. code-block:: bash
-
-        kubectl create secret generic skypilot-db-connection-uri \
-          --namespace $NAMESPACE \
-          --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
-
-
-    When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
-
-    .. code-block:: bash
-
-        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
-          --namespace $NAMESPACE \
-          --reuse-values \
-          --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
-
-    You can also directly set this value in the ``values.yaml`` file, e.g.:
-
-    .. code-block:: yaml
-
-        apiService:
-          dbConnectionSecretName: skypilot-db-connection-uri
-
-    .. note::
-
-        Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`.
+For production deployments, the API server can be configured for high availability by backing it with an external PostgreSQL database. See :ref:`api-server-ha` for details.
 
 .. _sky-api-server-config:
 
@@ -1776,7 +1720,6 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 
     API server metrics monitoring <examples/api-server-metrics-setup>
     GPU metrics monitoring <examples/api-server-gpu-metrics-setup>
-    Advanced: Cross-Cluster State Persistence <examples/api-server-persistence>
     Example: Deploy on GKE, GCP, and Nebius with Okta <examples/example-deploy-gke-nebius-okta>
     Example: Deploy SkyPilot API Server in Docker <examples/api-server-in-docker>
     Example: Deploy on GKE with Cloud SQL <examples/example-deploy-gcp-cloud-sql>

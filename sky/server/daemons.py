@@ -197,6 +197,21 @@ def refresh_volume_status_event():
 
 
 _managed_job_consolidation_mode_lock = None
+_pool_consolidation_mode_lock = None
+_serve_consolidation_mode_lock = None
+
+# Module-scoped SkyletEvent instances. `SkyletEvent.run()` relies on the
+# internal `_n` counter accumulating across calls to throttle the heavy
+# `_run()` work to once per EVENT_INTERVAL_SECONDS. Recreating the event
+# inside each daemon iteration would reset `_n` to 0 every call, run()
+# would advance it only to 1, the `_n == 0` trigger would never fire,
+# and the throttled work (update_service_status / managed_job_utils
+# update) would NEVER execute. The outer `while True` in
+# InternalRequestDaemon.run_event re-invokes the event_fn, so these
+# instances must outlive a single iteration.
+_managed_job_event = None
+_pool_status_update_event = None
+_serve_status_update_event = None
 
 
 # Attempt to gracefully release the lock when the process exits.
@@ -208,7 +223,18 @@ def _release_managed_job_consolidation_mode_lock() -> None:
         _managed_job_consolidation_mode_lock = None
 
 
+def _release_serve_and_pool_consolidation_mode_locks() -> None:
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if _pool_consolidation_mode_lock is not None:
+        _pool_consolidation_mode_lock.release()
+        _pool_consolidation_mode_lock = None
+    if _serve_consolidation_mode_lock is not None:
+        _serve_consolidation_mode_lock.release()
+        _serve_consolidation_mode_lock = None
+
+
 atexit.register(_release_managed_job_consolidation_mode_lock)
+atexit.register(_release_serve_and_pool_consolidation_mode_locks)
 
 
 def managed_job_status_refresh_event():
@@ -260,11 +286,16 @@ def managed_job_status_refresh_event():
         # ready to update the job statuses.
         signal_file.unlink()
 
-    # After recovery, we start the event loop.
+    # After recovery, we start the event loop. The event instance is
+    # cached at module scope so its internal throttling counter
+    # accumulates across daemon iterations (see comment near
+    # _managed_job_event declaration).
     from sky.skylet import events
-    refresh_event = events.ManagedJobEvent()
+    global _managed_job_event
+    if _managed_job_event is None:
+        _managed_job_event = events.ManagedJobEvent()
     logger.info('=== Running managed job event ===')
-    refresh_event.run()
+    _managed_job_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
@@ -278,15 +309,49 @@ def should_skip_managed_job_status_refresh():
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
+    from sky.serve import constants as serve_constants
     from sky.serve import serve_utils
+
+    # Acquire an advisory lock so that only one pod runs the recovery /
+    # controller-startup path at a time.
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if pool:
+        if _pool_consolidation_mode_lock is None:
+            _pool_consolidation_mode_lock = locks.get_lock(
+                serve_constants.POOL_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _pool_consolidation_mode_lock
+        lock_label = 'pool consolidation mode lock'
+    else:
+        if _serve_consolidation_mode_lock is None:
+            _serve_consolidation_mode_lock = locks.get_lock(
+                serve_constants.SERVE_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _serve_consolidation_mode_lock
+        lock_label = 'serve consolidation mode lock'
+
+    if not lock.is_locked():
+        logger.info(f'Acquiring the {lock_label}: {lock}')
+        lock.acquire()
+        logger.info(f'{lock_label} acquired')
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
     serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
-    # After recovery, we start the event loop.
+    # After recovery, we start the event loop. The event instance is
+    # cached at module scope so its internal throttling counter
+    # accumulates across daemon iterations (see comment near
+    # _pool_status_update_event / _serve_status_update_event
+    # declarations).
     from sky.skylet import events
-    event = events.ServiceUpdateEvent(pool=pool)
+    global _pool_status_update_event, _serve_status_update_event
+    if pool:
+        if _pool_status_update_event is None:
+            _pool_status_update_event = events.ServiceUpdateEvent(pool=True)
+        event = _pool_status_update_event
+    else:
+        if _serve_status_update_event is None:
+            _serve_status_update_event = events.ServiceUpdateEvent(pool=False)
+        event = _serve_status_update_event
     noun = 'pool' if pool else 'serve'
     logger.info(f'=== Running {noun} status refresh event ===')
     event.run()
@@ -322,6 +387,23 @@ def should_skip_server_heartbeat():
         # We are running as a controller.
         return True
     return False
+
+
+def expired_token_cleanup_event():
+    """Periodically remove expired managed-job API access tokens."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    logger.info('=== Cleaning up expired managed-job API access tokens ===')
+    removed = managed_job_utils.cleanup_expired_api_access_tokens()
+    # Read the interval from config on every iteration so operators can
+    # lower it (e.g., for testing) without restarting the API server.
+    interval = skypilot_config.get_nested(
+        ('daemons', 'expired-token-cleanup-daemon', 'interval_seconds'),
+        server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+    logger.info(f'Expired token cleanup removed {removed} token(s). '
+                f'Sleeping {interval} seconds for the next sweep...\n')
+    time.sleep(interval)
 
 
 def server_heartbeat_event():
@@ -387,6 +469,10 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
         event_fn=server_heartbeat_event,
         should_skip=should_skip_server_heartbeat),
+    InternalRequestDaemon(
+        id='expired-token-cleanup-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
+        event_fn=expired_token_cleanup_event),
 ]
 
 HIDDEN_REQUEST_NAMES = [

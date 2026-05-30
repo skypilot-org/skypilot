@@ -2,6 +2,9 @@
 import os
 import sys
 import tempfile
+from unittest import mock
+
+import pytest
 
 from sky import skypilot_config
 from sky.server import daemons
@@ -201,3 +204,111 @@ class TestDaemonLogRotation:
             os.close(saved_stdout_fd)
             os.close(saved_stderr_fd)
             os.unlink(tmp_path)
+
+
+class TestConsolidationEventInstancePersistence:
+    """The consolidation-mode refresh daemons must reuse a single
+    SkyletEvent instance across iterations.
+
+    Background: SkyletEvent.run() throttles its expensive `_run()`
+    callback via a per-instance counter `_n` that accumulates across
+    calls. The outer InternalRequestDaemon loop re-invokes the
+    daemon's event_fn repeatedly; if the event is freshly instantiated
+    on every call, `_n` resets to 0, run() only advances it to 1,
+    `_n == 0` never re-fires, and the throttled work
+    (update_service_status / managed-job status refresh) is silently
+    skipped forever.
+
+    These tests assert the instance is created once and reused so the
+    counter persists. With the bug, the constructor is invoked on
+    every iteration; with the fix, exactly once."""
+
+    # Attribute names the fix introduces. Use getattr/setattr so that if
+    # the fix is reverted the fixture still runs cleanly; the actual test
+    # assertions (call_count) then become the failure signal.
+    _EVENT_ATTRS = ('_pool_status_update_event', '_serve_status_update_event',
+                    '_managed_job_event')
+
+    @pytest.fixture(autouse=True)
+    def _reset_module_state(self):
+        # Pre-populate the consolidation locks with mocks that look
+        # already-locked so the daemon never tries to acquire a real
+        # advisory lock during the test.
+        fake_lock = mock.MagicMock()
+        fake_lock.is_locked.return_value = True
+        prior_locks = (daemons._pool_consolidation_mode_lock,
+                       daemons._serve_consolidation_mode_lock,
+                       daemons._managed_job_consolidation_mode_lock)
+        prior_events = {
+            name: getattr(daemons, name, None) for name in self._EVENT_ATTRS
+        }
+        daemons._pool_consolidation_mode_lock = fake_lock
+        daemons._serve_consolidation_mode_lock = fake_lock
+        daemons._managed_job_consolidation_mode_lock = fake_lock
+        for name in self._EVENT_ATTRS:
+            setattr(daemons, name, None)
+        yield
+        (daemons._pool_consolidation_mode_lock,
+         daemons._serve_consolidation_mode_lock,
+         daemons._managed_job_consolidation_mode_lock) = prior_locks
+        for name, value in prior_events.items():
+            setattr(daemons, name, value)
+
+    def test_serve_event_instance_is_reused_across_iterations(self):
+        with mock.patch(
+                'sky.serve.serve_utils.ha_recovery_for_consolidation_mode'), \
+             mock.patch('sky.skylet.events.ServiceUpdateEvent') as mock_event, \
+             mock.patch.object(daemons.time, 'sleep'):
+            for _ in range(3):
+                daemons._serve_status_refresh_event(pool=False)
+            # Without the fix this would be 3 (one ctor per iteration).
+            # With the fix the cached instance is reused.
+            mock_event.assert_called_once_with(pool=False)
+            # run() is invoked on the SAME instance once per iteration,
+            # so its internal `_n` counter accumulates as designed.
+            assert mock_event.return_value.run.call_count == 3
+
+    def test_pool_event_instance_is_reused_across_iterations(self):
+        with mock.patch(
+                'sky.serve.serve_utils.ha_recovery_for_consolidation_mode'), \
+             mock.patch('sky.skylet.events.ServiceUpdateEvent') as mock_event, \
+             mock.patch.object(daemons.time, 'sleep'):
+            for _ in range(3):
+                daemons._serve_status_refresh_event(pool=True)
+            mock_event.assert_called_once_with(pool=True)
+            assert mock_event.return_value.run.call_count == 3
+
+    def test_serve_and_pool_use_independent_instances(self):
+        # Serve (pool=False) and pool (pool=True) must each get their own
+        # cached event — otherwise pool=True daemon iterations would call
+        # run() on the pool=False event (or vice versa).
+        with mock.patch(
+                'sky.serve.serve_utils.ha_recovery_for_consolidation_mode'), \
+             mock.patch('sky.skylet.events.ServiceUpdateEvent') as mock_event, \
+             mock.patch.object(daemons.time, 'sleep'):
+            daemons._serve_status_refresh_event(pool=False)
+            daemons._serve_status_refresh_event(pool=True)
+            daemons._serve_status_refresh_event(pool=False)
+            daemons._serve_status_refresh_event(pool=True)
+            # Exactly two ctor calls: one per pool flag.
+            assert mock_event.call_count == 2
+            assert mock.call(pool=False) in mock_event.call_args_list
+            assert mock.call(pool=True) in mock_event.call_args_list
+
+    def test_managed_job_event_instance_is_reused_across_iterations(self):
+        # signal_file path is real disk I/O in the original function;
+        # patch pathlib.Path directly (daemons.pathlib is a LazyImport
+        # wrapper that proxies to the real pathlib module, so patching
+        # at the module level reaches both lookup paths).
+        fake_signal_file = mock.MagicMock()
+        fake_signal_file.expanduser.return_value = fake_signal_file
+        with mock.patch('pathlib.Path',
+                        return_value=fake_signal_file), \
+             mock.patch(
+                 'sky.jobs.utils.ha_recovery_for_consolidation_mode'), \
+             mock.patch('sky.skylet.events.ManagedJobEvent') as mock_event, \
+             mock.patch.object(daemons.time, 'sleep'):
+            for _ in range(3):
+                daemons.managed_job_status_refresh_event()
+            mock_event.assert_called_once_with()
+            assert mock_event.return_value.run.call_count == 3

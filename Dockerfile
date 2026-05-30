@@ -3,14 +3,22 @@
 # Stage 1: Install Google Cloud SDK using APT
 FROM python:3.10.19-slim AS gcloud-apt-install
 
+# Keep in sync with _GCLOUD_VERSION in sky/clouds/gcp.py. Pinned so the apt
+# install layer doesn't bake in a stale version via buildx registry caching
+# (the RUN command's hash is the cache key, so without a version specifier
+# the layer is reused indefinitely from whatever apt resolved at first build).
+# 567.0.0 ships gsutil 5.37, which replaced OpenSSL.crypto.sign with the
+# cryptography library — required after pyopenssl 24.3 dropped that API (#8070).
+ARG GCLOUD_VERSION=567.0.0-0
+
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list && \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
     apt-get update && \
     apt-get install --no-install-recommends -y \
-        google-cloud-cli \
-        google-cloud-cli-gke-gcloud-auth-plugin && \
+        google-cloud-cli=${GCLOUD_VERSION} \
+        google-cloud-cli-gke-gcloud-auth-plugin=${GCLOUD_VERSION} && \
     apt-get clean && rm -rf /usr/lib/google-cloud-sdk/platform/bundledpythonunix \
     /var/lib/apt/lists/*
 

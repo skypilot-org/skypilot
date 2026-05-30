@@ -1,7 +1,7 @@
 .. _batch-processing:
 
-Sky Batch
-=========
+Batch inference with Sky Batch
+==============================
 
 .. tip::
 

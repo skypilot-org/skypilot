@@ -65,6 +65,9 @@ services_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('hash', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
+    # Pod IP where the controller process is running.
+    # Written by the sky.serve.service process at startup.
+    sqlalchemy.Column('controller_ip', sqlalchemy.Text, server_default=None),
 )
 
 replicas_table = sqlalchemy.Table(
@@ -252,7 +255,12 @@ class ServiceStatus(enum.Enum):
         return [cls.CONTROLLER_FAILED, cls.FAILED_CLEANUP]
 
     @classmethod
-    def refuse_to_terminate_statuses(cls) -> List['ServiceStatus']:
+    def terminal_statuses(cls) -> List['ServiceStatus']:
+        """States in which the service is either dying or already broken
+        and cannot accept new operations like update/apply. SHUTTING_DOWN
+        is included because it's a transient state that the service may
+        never leave on its own (the previous cleanup may have died
+        mid-flight, leaving a zombie row — see _cleanup)."""
         return [cls.CONTROLLER_FAILED, cls.FAILED_CLEANUP, cls.SHUTTING_DOWN]
 
     def colored_str(self) -> str:
@@ -287,10 +295,17 @@ _SERVICE_STATUS_TO_COLOR = {
 }
 
 
-def add_service(name: str, controller_job_id: int, policy: str,
-                requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus, tls_encrypted: bool, pool: bool,
-                controller_pid: int, entrypoint: str) -> bool:
+def add_service(name: str,
+                controller_job_id: int,
+                policy: str,
+                requested_resources_str: str,
+                load_balancing_policy: str,
+                status: ServiceStatus,
+                tls_encrypted: bool,
+                pool: bool,
+                controller_pid: int,
+                entrypoint: str,
+                controller_ip: Optional[str] = None) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -318,6 +333,7 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 tls_encrypted=int(tls_encrypted),
                 pool=int(pool),
                 controller_pid=controller_pid,
+                controller_ip=controller_ip,
                 hash=str(uuid.uuid4()),
                 entrypoint=entrypoint)
             session.execute(insert_stmt)
@@ -345,6 +361,44 @@ def update_service_controller_pid(service_name: str,
         session.commit()
 
 
+def update_service_controller_pid_ip_and_port(service_name: str,
+                                              controller_pid: int,
+                                              controller_ip: Optional[str],
+                                              controller_port: int) -> None:
+    """Atomically updates controller pid + IP + port for a service.
+
+    Used during HA recovery: the controller subprocess on the new pod must be
+    listening on the chosen port before we flip DB to point requests at it.
+    By updating all three fields in one statement, clients never see a
+    half-flipped row (e.g. new pid + old ip, or new ip + stale port that
+    points at a different service's listener on the new pod).
+
+    Recovery picks the port locally (find_free_port on the recovery pod) —
+    it must NOT reuse the previous pod's port — so the port change has to
+    propagate to DB together with the pid/ip flip.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update({
+                services_table.c.controller_pid: controller_pid,
+                services_table.c.controller_ip: controller_ip,
+                services_table.c.controller_port: controller_port,
+            })
+        session.commit()
+
+
+def set_service_controller_ip(service_name: str,
+                              controller_ip: Optional[str]) -> None:
+    """Sets the controller IP of a service."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.query(services_table).filter(
+            services_table.c.name == service_name).update(
+                {services_table.c.controller_ip: controller_ip})
+        session.commit()
+
+
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
     engine = _db_manager.get_engine()
@@ -352,6 +406,34 @@ def remove_service(service_name: str) -> None:
         session.execute(
             sqlalchemy.delete(services_table).where(
                 services_table.c.name == service_name))
+        session.commit()
+
+
+def remove_service_completely(service_name: str) -> None:
+    """Atomically remove the service-level DB state for a service.
+
+    Deletes from `services`, `version_specs`, and
+    `serve_ha_recovery_script` in a single transaction. These were the
+    three tables whose sequential teardown left orphan rows when a
+    subprocess died mid-cleanup.
+
+    Replicas are intentionally NOT touched here. Both callers
+    (`_cleanup` success path in `_start`, and `_terminate_failed_services`
+    on the `--purge` path) iterate replicas one-by-one before this call
+    so they can run per-replica logic (cluster-existence probes for
+    leak reporting, terminate-thread join, failure marking).
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(services_table).where(
+                services_table.c.name == service_name))
+        session.execute(
+            sqlalchemy.delete(version_specs_table).where(
+                version_specs_table.c.service_name == service_name))
+        session.execute(
+            sqlalchemy.delete(serve_ha_recovery_script_table).where(
+                serve_ha_recovery_script_table.c.service_name == service_name))
         session.commit()
 
 
@@ -429,6 +511,7 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'tls_encrypted': bool(r['tls_encrypted']),
         'pool': bool(r['pool']),
         'controller_pid': r['controller_pid'],
+        'controller_ip': r['controller_ip'],
         'hash': r['hash'],
         'entrypoint': r['entrypoint'],
         'yaml_content': r.get('yaml_content'),

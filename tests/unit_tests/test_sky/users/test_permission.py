@@ -160,6 +160,17 @@ class TestPermissionService:
             mock_enforcer.add_grouping_policy.assert_any_call(
                 user.id, rbac.get_default_role())
 
+        # Verify built-in system users are seeded with the expected roles:
+        # the existing system user + SERVER_ID are admin; the new
+        # system-viewer is viewer.
+        mock_enforcer.add_grouping_policy.assert_any_call(
+            common.SERVER_ID, rbac.RoleName.ADMIN.value)
+        mock_enforcer.add_grouping_policy.assert_any_call(
+            constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value)
+        mock_enforcer.add_grouping_policy.assert_any_call(
+            constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+            rbac.RoleName.VIEWER.value)
+
         # Verify policy was saved
         mock_enforcer.save_policy.assert_called()
 
@@ -401,9 +412,12 @@ class TestPermissionService:
         mock_enforcer.get_roles_for_user.assert_called_once_with('user1')
 
     def test_check_endpoint_permission(self):
-        """Test checking endpoint permissions."""
+        """Test checking endpoint permissions (admin/user blocklist path)."""
         mock_enforcer = mock.Mock()
         mock_enforcer.enforce.return_value = True
+        # New dispatch reads roles first; return a non-viewer role so the
+        # call falls through to the Casbin blocklist check.
+        mock_enforcer.get_roles_for_user.return_value = ['user']
 
         service = permission.PermissionService()
         service.enforcer = mock_enforcer
@@ -413,6 +427,79 @@ class TestPermissionService:
         assert result is True
         mock_enforcer.enforce.assert_called_once_with('user1', '/api/test',
                                                       'GET')
+
+    def test_check_endpoint_permission_viewer_allowed(self):
+        """Viewer role: allowlist hit returns False (request not blocked)."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._viewer_allowlist = [('/status', 'POST')]
+
+        result = service.check_endpoint_permission('user1', '/status', 'POST')
+
+        assert result is False
+        # When the viewer dispatch handles the request, the underlying
+        # blocklist enforce() must NOT be called.
+        mock_enforcer.enforce.assert_not_called()
+
+    def test_check_endpoint_permission_viewer_denied(self):
+        """Viewer role: no allowlist hit returns True (request blocked)."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._viewer_allowlist = [('/status', 'POST')]
+
+        result = service.check_endpoint_permission('user1', '/launch', 'POST')
+
+        assert result is True
+        mock_enforcer.enforce.assert_not_called()
+
+    def test_check_endpoint_permission_viewer_keymatch2(self):
+        """Viewer allowlist uses Casbin keyMatch2 path patterns."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._viewer_allowlist = [
+            ('/ssh_node_pools/:pool_name/status', 'GET'),
+            ('/plugins/api/foo/*', 'POST'),
+        ]
+
+        # Placeholder match.
+        assert service.check_endpoint_permission(
+            'u', '/ssh_node_pools/myPool/status', 'GET') is False
+        # Wildcard match.
+        assert service.check_endpoint_permission('u', '/plugins/api/foo/bar',
+                                                 'POST') is False
+        # Method mismatch -> denied.
+        assert service.check_endpoint_permission(
+            'u', '/ssh_node_pools/myPool/status', 'POST') is True
+        # Sibling path -> denied.
+        assert service.check_endpoint_permission(
+            'u', '/ssh_node_pools/myPool/keys', 'GET') is True
+
+    def test_check_endpoint_permission_admin_wins_over_viewer(self):
+        """A user with both admin and viewer roles uses admin semantics."""
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['viewer', 'admin']
+        # enforce returns False (allowed) for admin under blocklist semantics.
+        mock_enforcer.enforce.return_value = False
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        # Empty allowlist would deny everything if viewer semantics applied.
+        service._viewer_allowlist = []
+
+        # /launch is not on any allowlist; viewer-only would block it,
+        # but admin+viewer must fall through to enforce() -> allowed.
+        assert service.check_endpoint_permission('u', '/launch',
+                                                 'POST') is False
+        mock_enforcer.enforce.assert_called_once_with('u', '/launch', 'POST')
 
     def test_check_workspace_permission_non_server(self):
         """Test workspace permission check when not on API server."""
@@ -1137,6 +1224,40 @@ class TestPermissionService:
 
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
+    def test_sa_token_permission_viewer_denied_for_own(self):
+        """Viewers cannot manage even their own SA tokens."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['viewer'])
+
+        # Viewer attempting to delete a token they own:
+        assert service.check_service_account_token_permission(
+            'viewer-bob', 'viewer-bob', 'delete') is False
+
+    def test_sa_token_permission_user_can_manage_own(self):
+        """Regular user can still manage their own SA tokens."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['user'])
+
+        assert service.check_service_account_token_permission(
+            'alice', 'alice', 'delete') is True
+
+    def test_sa_token_permission_admin_can_manage_others(self):
+        """Admins can manage anyone's tokens."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['admin'])
+
+        assert service.check_service_account_token_permission(
+            'eve', 'someone-else', 'delete') is True
+
+    def test_sa_token_permission_admin_wins_over_viewer(self):
+        """A user holding both admin and viewer can manage any token."""
+        service = permission.PermissionService()
+        service.get_user_roles = mock.Mock(return_value=['admin', 'viewer'])
+
+        # Without admin precedence, the viewer rule would deny this.
+        assert service.check_service_account_token_permission(
+            'dual', 'someone-else', 'delete') is True
+
 
 @pytest.mark.usefixtures("reset_permission_singleton", "cleanup_env_vars")
 class TestPermissionServiceMultiProcess:
@@ -1242,13 +1363,16 @@ class TestPermissionServiceMultiProcess:
                                  ('user2', 'workspace1', '*')}
 
         # Should have one grouping policy call per user (for default role assignment)
-        # plus system users (SERVER_ID and SKYPILOT_SYSTEM_USER_ID) with admin role
-        expected_grouping_policy_calls = {('user1', rbac.get_default_role()),
-                                          ('user2', rbac.get_default_role()),
-                                          ('user3', rbac.get_default_role()),
-                                          (common.SERVER_ID, 'admin'),
-                                          (constants.SKYPILOT_SYSTEM_USER_ID,
-                                           'admin')}
+        # plus the three built-in system users — SERVER_ID and the system
+        # admin user with admin role, and the system viewer user with viewer.
+        expected_grouping_policy_calls = {
+            ('user1', rbac.get_default_role()),
+            ('user2', rbac.get_default_role()),
+            ('user3', rbac.get_default_role()),
+            (common.SERVER_ID, 'admin'),
+            (constants.SKYPILOT_SYSTEM_USER_ID, 'admin'),
+            (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'),
+        }
 
         assert unique_policy_calls == expected_policy_calls
         assert unique_grouping_policy_calls == expected_grouping_policy_calls
@@ -1294,6 +1418,8 @@ class TestPermissionServiceMultiProcess:
                 ]
                 result.append([common.SERVER_ID, 'admin'])
                 result.append([constants.SKYPILOT_SYSTEM_USER_ID, 'admin'])
+                result.append(
+                    [constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'])
                 return result
 
         def get_roles_for_user_side_effect(user_id):
@@ -1333,12 +1459,13 @@ class TestPermissionServiceMultiProcess:
         service._maybe_initialize_policies()
         service._maybe_initialize_policies()
 
-        # Each user should only be added once (3 mock users + 2 system users)
+        # Each user should only be added once (3 mock users + 3 system users)
         expected_calls = {
             (user.id, rbac.get_default_role()) for user in mock_users
         }
         expected_calls.add((common.SERVER_ID, 'admin'))
         expected_calls.add((constants.SKYPILOT_SYSTEM_USER_ID, 'admin'))
+        expected_calls.add((constants.SKYPILOT_SYSTEM_VIEWER_USER_ID, 'viewer'))
         assert len(grouping_policy_calls) == len(expected_calls)
 
         # Verify each user was added exactly once

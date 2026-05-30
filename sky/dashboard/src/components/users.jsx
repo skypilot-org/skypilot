@@ -20,7 +20,12 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getUsers, getServiceAccountTokens } from '@/data/connectors/users';
+import {
+  getUsers,
+  getServiceAccountTokens,
+  getServiceAccountTokensPaginated,
+  isServiceAccountTokensPaginationAvailable,
+} from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
@@ -1402,8 +1407,8 @@ function UsersTable({
   const [isLoading, setIsLoading] = useState(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [sortConfig, setSortConfig] = useState({
-    key: 'username',
-    direction: 'ascending',
+    key: 'default',
+    direction: 'descending',
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
@@ -1992,6 +1997,24 @@ function UsersTable({
       filtered = Object.values(deduped);
     }
 
+    if (sortConfig.key === 'default') {
+      // Default sort: GPUs desc, then Joined (most recent first), then Name asc.
+      const cmpStr = (a, b) => {
+        const sa = (a ?? '').toString().toLowerCase();
+        const sb = (b ?? '').toString().toLowerCase();
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return 0;
+      };
+      const cmpNum = (a, b) => (a ?? 0) - (b ?? 0);
+      return [...filtered].sort((a, b) => {
+        const byGpu = cmpNum(b.gpuCount, a.gpuCount);
+        if (byGpu !== 0) return byGpu;
+        const byJoined = cmpNum(b.created_at, a.created_at);
+        if (byJoined !== 0) return byJoined;
+        return cmpStr(a.usernameDisplay, b.usernameDisplay);
+      });
+    }
     return sortData(filtered, sortConfig.key, sortConfig.direction);
   }, [usersWithCounts, sortConfig, filters, deduplicateUsers, combinedLookup]);
 
@@ -2098,295 +2121,307 @@ function UsersTable({
   }
 
   return (
-    <Card>
-      <div className="overflow-x-auto rounded-lg">
-        <Table className="min-w-full">
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                onClick={() => requestSort('usernameDisplay')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Name{getSortDirection('usernameDisplay')}
-              </TableHead>
-              {!deduplicateUsers && (
+    <>
+      {filteredAndSortedUsers.length > 0 && (
+        <div className="text-sm text-gray-500 mb-2">
+          {filteredAndSortedUsers.length}{' '}
+          {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
+        </div>
+      )}
+      <Card>
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>
                 <TableHead
-                  onClick={() => requestSort('fullEmailID')}
+                  onClick={() => requestSort('usernameDisplay')}
                   className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
                 >
-                  User ID{getSortDirection('fullEmailID')}
+                  Name{getSortDirection('usernameDisplay')}
                 </TableHead>
-              )}
-              {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                <TableHead
-                  onClick={() => requestSort('role')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-                >
-                  Role{getSortDirection('role')}
-                </TableHead>
-              )}
-              {!deduplicateUsers &&
-                !ingressBasicAuthEnabled &&
-                !externalProxyAuthEnabled && (
+                {!deduplicateUsers && (
                   <TableHead
-                    onClick={() => requestSort('userType')}
+                    onClick={() => requestSort('fullEmailID')}
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
                   >
-                    Type{getSortDirection('userType')}
+                    User ID{getSortDirection('fullEmailID')}
                   </TableHead>
                 )}
-              <TableHead
-                onClick={() => requestSort('created_at')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Joined{getSortDirection('created_at')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('gpuCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                GPUs{getSortDirection('gpuCount')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('clusterCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Clusters{getSortDirection('clusterCount')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('jobCount')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Jobs{getSortDirection('jobCount')}
-              </TableHead>
-              {/* Show Actions column if basicAuthEnabled and not deduplicating */}
-              {!deduplicateUsers &&
-                (basicAuthEnabled || currentUserRole === 'admin') && (
-                  <TableHead className="whitespace-nowrap w-1/7">
-                    Actions
+                {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                  <TableHead
+                    onClick={() => requestSort('role')}
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  >
+                    Role{getSortDirection('role')}
                   </TableHead>
                 )}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredAndSortedUsers.map((user) => {
-              const isSystemUser = user.userType === 'system';
-              const isBasicUser = user.userType === 'basic';
-              const canResetPassword =
-                isBasicUser &&
-                (currentUserRole === 'admin' || user.userId === currentUserId);
-              return (
-                <TableRow key={user.userId}>
-                  <TableCell className="truncate" title={user.username}>
-                    {user.usernameDisplay}
-                  </TableCell>
-                  {!deduplicateUsers && (
-                    <TableCell className="truncate" title={user.fullEmailID}>
-                      {user.fullEmailID}
-                    </TableCell>
+                {!deduplicateUsers &&
+                  !ingressBasicAuthEnabled &&
+                  !externalProxyAuthEnabled && (
+                    <TableHead
+                      onClick={() => requestSort('userType')}
+                      className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                    >
+                      Type{getSortDirection('userType')}
+                    </TableHead>
                   )}
-                  {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                    <TableCell className="truncate" title={user.role}>
-                      <div className="flex items-center gap-2">
-                        {editingUserId === user.userId ? (
-                          <>
-                            <select
-                              value={currentEditingRole}
-                              onChange={(e) =>
-                                setCurrentEditingRole(e.target.value)
-                              }
-                              aria-label="Select user role"
-                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                            >
-                              <option value="admin">Admin</option>
-                              <option value="user">User</option>
-                            </select>
-                            <button
-                              onClick={() => handleSaveEdit(user.userId)}
-                              className="text-green-600 hover:text-green-800 p-1"
-                              title="Save"
-                            >
-                              <CheckIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={handleCancelEdit}
-                              className="text-gray-500 hover:text-gray-700 p-1"
-                              title="Cancel"
-                            >
-                              <XIcon className="h-4 w-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="capitalize">{user.role}</span>
-                            {/* Only show edit role button if admin and not a system user */}
-                            {currentUserRole === 'admin' && (
-                              <button
-                                onClick={
-                                  !isSystemUser
-                                    ? () =>
-                                        handleEditClick(user.userId, user.role)
-                                    : undefined
-                                }
-                                className={
-                                  !isSystemUser
-                                    ? 'text-blue-600 hover:text-blue-700 p-1'
-                                    : 'text-gray-300 cursor-not-allowed p-1'
-                                }
-                                title={
-                                  !isSystemUser
-                                    ? 'Edit role'
-                                    : 'Cannot edit role for system users'
-                                }
-                                disabled={isSystemUser}
-                              >
-                                <PenIcon className="h-3 w-3" />
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
+                <TableHead
+                  onClick={() => requestSort('created_at')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Joined{getSortDirection('created_at')}
+                </TableHead>
+                <TableHead
+                  onClick={() => requestSort('gpuCount')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  GPUs{getSortDirection('gpuCount')}
+                </TableHead>
+                <TableHead
+                  onClick={() => requestSort('clusterCount')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Clusters{getSortDirection('clusterCount')}
+                </TableHead>
+                <TableHead
+                  onClick={() => requestSort('jobCount')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Jobs{getSortDirection('jobCount')}
+                </TableHead>
+                {/* Show Actions column if basicAuthEnabled and not deduplicating */}
+                {!deduplicateUsers &&
+                  (basicAuthEnabled || currentUserRole === 'admin') && (
+                    <TableHead className="whitespace-nowrap w-1/7">
+                      Actions
+                    </TableHead>
                   )}
-                  {!deduplicateUsers &&
-                    !ingressBasicAuthEnabled &&
-                    !externalProxyAuthEnabled && (
-                      <TableCell className="truncate" title={user.userType}>
-                        <span className="capitalize">
-                          {user.userType === 'sso' ? 'SSO' : user.userType}
-                        </span>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredAndSortedUsers.map((user) => {
+                const isSystemUser = user.userType === 'system';
+                const isBasicUser = user.userType === 'basic';
+                const canResetPassword =
+                  isBasicUser &&
+                  (currentUserRole === 'admin' ||
+                    user.userId === currentUserId);
+                return (
+                  <TableRow key={user.userId}>
+                    <TableCell className="truncate" title={user.username}>
+                      {user.usernameDisplay}
+                    </TableCell>
+                    {!deduplicateUsers && (
+                      <TableCell className="truncate" title={user.fullEmailID}>
+                        {user.fullEmailID}
                       </TableCell>
                     )}
-                  <TableCell className="truncate">
-                    {user.created_at ? (
-                      <TimestampWithTooltip
-                        date={new Date(user.created_at * 1000)}
-                      />
-                    ) : (
-                      '-'
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {user.gpuCount === -1 ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                        <CircularProgress size={12} />
-                      </span>
-                    ) : (
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          user.gpuCount > 0
-                            ? 'bg-purple-100 text-purple-600'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}
-                        title={`Total GPUs: ${user.gpuCount}`}
-                      >
-                        {user.gpuCount}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {user.clusterCount === -1 ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                        <CircularProgress size={12} />
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                          user.clusterCount > 0
-                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                        }`}
-                        title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                      >
-                        {user.clusterCount}
-                      </Link>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {user.jobCount === -1 ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                        <CircularProgress size={12} />
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                          user.jobCount > 0
-                            ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                        }`}
-                        title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                      >
-                        {user.jobCount}
-                      </Link>
-                    )}
-                  </TableCell>
-                  {/* Actions cell logic - hide when deduplicating */}
-                  {!deduplicateUsers &&
-                    (basicAuthEnabled || currentUserRole === 'admin') && (
-                      <TableCell className="relative">
+                    {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                      <TableCell className="truncate" title={user.role}>
                         <div className="flex items-center gap-2">
-                          {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
-                          {basicAuthEnabled && (
-                            <button
-                              onClick={
-                                canResetPassword
-                                  ? async () => {
-                                      onResetPassword(user);
-                                    }
-                                  : undefined
-                              }
-                              className={
-                                canResetPassword
-                                  ? 'text-blue-600 hover:text-blue-700 p-1'
-                                  : 'text-gray-300 cursor-not-allowed p-1'
-                              }
-                              title={
-                                !isBasicUser
-                                  ? 'Password reset only available for basic auth users'
-                                  : canResetPassword
-                                    ? 'Reset Password'
-                                    : 'You can only reset your own password'
-                              }
-                              disabled={!canResetPassword}
-                            >
-                              <KeyRoundIcon className="h-4 w-4" />
-                            </button>
-                          )}
-                          {/* Delete button - only show for admin, disabled for system users */}
-                          {currentUserRole === 'admin' && (
-                            <button
-                              onClick={
-                                !isSystemUser
-                                  ? () => onDeleteUser(user)
-                                  : undefined
-                              }
-                              className={
-                                !isSystemUser
-                                  ? 'text-red-600 hover:text-red-700 p-1'
-                                  : 'text-gray-300 cursor-not-allowed p-1'
-                              }
-                              title={
-                                !isSystemUser
-                                  ? 'Delete User'
-                                  : 'Cannot delete system users'
-                              }
-                              disabled={isSystemUser}
-                            >
-                              <Trash2Icon className="h-4 w-4" />
-                            </button>
+                          {editingUserId === user.userId ? (
+                            <>
+                              <select
+                                value={currentEditingRole}
+                                onChange={(e) =>
+                                  setCurrentEditingRole(e.target.value)
+                                }
+                                aria-label="Select user role"
+                                className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                              >
+                                <option value="admin">Admin</option>
+                                <option value="user">User</option>
+                              </select>
+                              <button
+                                onClick={() => handleSaveEdit(user.userId)}
+                                className="text-green-600 hover:text-green-800 p-1"
+                                title="Save"
+                              >
+                                <CheckIcon className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                className="text-gray-500 hover:text-gray-700 p-1"
+                                title="Cancel"
+                              >
+                                <XIcon className="h-4 w-4" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="capitalize">{user.role}</span>
+                              {/* Only show edit role button if admin and not a system user */}
+                              {currentUserRole === 'admin' && (
+                                <button
+                                  onClick={
+                                    !isSystemUser
+                                      ? () =>
+                                          handleEditClick(
+                                            user.userId,
+                                            user.role
+                                          )
+                                      : undefined
+                                  }
+                                  className={
+                                    !isSystemUser
+                                      ? 'text-blue-600 hover:text-blue-700 p-1'
+                                      : 'text-gray-300 cursor-not-allowed p-1'
+                                  }
+                                  title={
+                                    !isSystemUser
+                                      ? 'Edit role'
+                                      : 'Cannot edit role for system users'
+                                  }
+                                  disabled={isSystemUser}
+                                >
+                                  <PenIcon className="h-3 w-3" />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </TableCell>
                     )}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
+                    {!deduplicateUsers &&
+                      !ingressBasicAuthEnabled &&
+                      !externalProxyAuthEnabled && (
+                        <TableCell className="truncate" title={user.userType}>
+                          <span className="capitalize">
+                            {user.userType === 'sso' ? 'SSO' : user.userType}
+                          </span>
+                        </TableCell>
+                      )}
+                    <TableCell className="truncate">
+                      {user.created_at ? (
+                        <TimestampWithTooltip
+                          date={new Date(user.created_at * 1000)}
+                        />
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {user.gpuCount === -1 ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                          <CircularProgress size={12} />
+                        </span>
+                      ) : (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            user.gpuCount > 0
+                              ? 'bg-purple-100 text-purple-600'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                          title={`Total GPUs: ${user.gpuCount}`}
+                        >
+                          {user.gpuCount}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {user.clusterCount === -1 ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                          <CircularProgress size={12} />
+                        </span>
+                      ) : (
+                        <Link
+                          href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                            user.clusterCount > 0
+                              ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                          }`}
+                          title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                        >
+                          {user.clusterCount}
+                        </Link>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {user.jobCount === -1 ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                          <CircularProgress size={12} />
+                        </span>
+                      ) : (
+                        <Link
+                          href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                            user.jobCount > 0
+                              ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                          }`}
+                          title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                        >
+                          {user.jobCount}
+                        </Link>
+                      )}
+                    </TableCell>
+                    {/* Actions cell logic - hide when deduplicating */}
+                    {!deduplicateUsers &&
+                      (basicAuthEnabled || currentUserRole === 'admin') && (
+                        <TableCell className="relative">
+                          <div className="flex items-center gap-2">
+                            {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
+                            {basicAuthEnabled && (
+                              <button
+                                onClick={
+                                  canResetPassword
+                                    ? async () => {
+                                        onResetPassword(user);
+                                      }
+                                    : undefined
+                                }
+                                className={
+                                  canResetPassword
+                                    ? 'text-blue-600 hover:text-blue-700 p-1'
+                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                }
+                                title={
+                                  !isBasicUser
+                                    ? 'Password reset only available for basic auth users'
+                                    : canResetPassword
+                                      ? 'Reset Password'
+                                      : 'You can only reset your own password'
+                                }
+                                disabled={!canResetPassword}
+                              >
+                                <KeyRoundIcon className="h-4 w-4" />
+                              </button>
+                            )}
+                            {/* Delete button - only show for admin, disabled for system users */}
+                            {currentUserRole === 'admin' && (
+                              <button
+                                onClick={
+                                  !isSystemUser
+                                    ? () => onDeleteUser(user)
+                                    : undefined
+                                }
+                                className={
+                                  !isSystemUser
+                                    ? 'text-red-600 hover:text-red-700 p-1'
+                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                }
+                                title={
+                                  !isSystemUser
+                                    ? 'Delete User'
+                                    : 'Cannot delete system users'
+                                }
+                                disabled={isSystemUser}
+                              >
+                                <Trash2Icon className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -2450,90 +2485,163 @@ function ServiceAccountTokensView({
   // Enhanced tokens with cluster/job counts
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
 
+  // Server-side pagination state (used only when the pagination plugin
+  // exposes window.__skyServiceAccountTokensPaginationFetch). Defer the
+  // window check to a mount effect so that the statically-exported
+  // initial render and the post-hydration render agree.
+  const [serverPaginated, setServerPaginated] = useState(false);
+  useEffect(() => {
+    setServerPaginated(isServiceAccountTokensPaginationAvailable());
+  }, []);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrev, setHasPrev] = useState(false);
+  // Debounce search input to avoid hammering the server on every keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery || '');
+  useEffect(() => {
+    if (!serverPaginated) return undefined;
+    const t = setTimeout(() => setDebouncedSearch(searchQuery || ''), 250);
+    return () => clearTimeout(t);
+  }, [searchQuery, serverPaginated]);
+  // Reset to first page whenever the active search changes.
+  useEffect(() => {
+    if (!serverPaginated) return;
+    setPage(1);
+  }, [debouncedSearch, serverPaginated]);
+
   // Fetch tokens and related data
-  const fetchTokensAndCounts = async (forceRefresh = false) => {
-    try {
-      setLoading(true);
+  const fetchTokensAndCounts = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        setLoading(true);
 
-      // Invalidate cache if force refresh requested (after mutations)
-      if (forceRefresh) {
-        dashboardCache.invalidate(getServiceAccountTokens);
-      }
+        if (serverPaginated) {
+          // Server-paginated path: skip client-side cluster/job count
+          // fan-out. Counts are deliberately omitted here because
+          // computing them requires loading all clusters + jobs across
+          // all SAs, which is the bottleneck this pagination flow
+          // exists to avoid. Counts will be surfaced per-row via
+          // dedicated drill-ins later.
+          if (forceRefresh) {
+            dashboardCache.invalidate(getServiceAccountTokensPaginated);
+          }
+          const resp = await dashboardCache.get(
+            getServiceAccountTokensPaginated,
+            [
+              {
+                page,
+                limit,
+                search: debouncedSearch,
+                sortBy: 'created_at',
+                sortOrder: 'desc',
+              },
+            ]
+          );
+          const items = resp.items || [];
+          setTokens(items);
+          setTotal(resp.total ?? items.length);
+          setTotalPages(resp.total_pages ?? resp.totalPages ?? 1);
+          setHasNext(resp.has_next ?? resp.hasNext ?? false);
+          setHasPrev(resp.has_prev ?? resp.hasPrev ?? false);
+          const enhanced = items.map((token) => ({
+            ...token,
+            clusterCount: undefined,
+            jobCount: undefined,
+            gpuCount: undefined,
+            primaryRole:
+              token.service_account_roles &&
+              token.service_account_roles.length > 0
+                ? token.service_account_roles[0]
+                : 'user',
+          }));
+          setTokensWithCounts(enhanced);
+          return;
+        }
 
-      // Step 1: Fetch service account tokens (using cache)
-      const tokensData = await dashboardCache.get(getServiceAccountTokens);
-      setTokens(tokensData || []);
+        // Invalidate cache if force refresh requested (after mutations)
+        if (forceRefresh) {
+          dashboardCache.invalidate(getServiceAccountTokens);
+        }
 
-      // Step 2: Fetch clusters and jobs data in parallel
-      const { clustersData, jobsResponse } = await fetchClustersAndJobs();
-      const jobsData = jobsResponse?.jobs || [];
+        // Step 1: Fetch service account tokens (using cache)
+        const tokensData = await dashboardCache.get(getServiceAccountTokens);
+        setTokens(tokensData || []);
 
-      // Step 3: Calculate counts for each service account
-      const enhancedTokens = (tokensData || []).map((token) => {
-        const serviceAccountId = token.service_account_user_id;
-        let clusterCount = 0;
-        let clusterGPUCount = 0;
-        let jobCount = 0;
-        let jobGPUCount = 0;
+        // Step 2: Fetch clusters and jobs data in parallel
+        const { clustersData, jobsResponse } = await fetchClustersAndJobs();
+        const jobsData = jobsResponse?.jobs || [];
 
-        // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
-        for (const cluster of clustersData) {
-          if (cluster.user_hash === serviceAccountId) {
-            clusterCount++;
-            // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+        // Step 3: Calculate counts for each service account
+        const enhancedTokens = (tokensData || []).map((token) => {
+          const serviceAccountId = token.service_account_user_id;
+          let clusterCount = 0;
+          let clusterGPUCount = 0;
+          let jobCount = 0;
+          let jobGPUCount = 0;
+
+          // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
+          for (const cluster of clustersData) {
+            if (cluster.user_hash === serviceAccountId) {
+              clusterCount++;
+              // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+              if (
+                cluster.status !== 'STOPPED' &&
+                cluster.status !== 'TERMINATED'
+              ) {
+                clusterGPUCount += getGPUCount(
+                  cluster.gpus,
+                  `Cluster ${cluster.cluster}`
+                );
+              }
+            }
+          }
+
+          // Count active jobs and sum GPUs in one pass
+          for (const job of jobsData) {
             if (
-              cluster.status !== 'STOPPED' &&
-              cluster.status !== 'TERMINATED'
+              job.user_hash === serviceAccountId &&
+              ACTIVE_JOB_STATUSES.has(job.status)
             ) {
-              clusterGPUCount += getGPUCount(
-                cluster.gpus,
-                `Cluster ${cluster.cluster}`
+              jobCount++;
+              jobGPUCount += getGPUCount(
+                job.accelerators,
+                `Job ${job.job_name || job.job_id}`
               );
             }
           }
-        }
 
-        // Count active jobs and sum GPUs in one pass
-        for (const job of jobsData) {
-          if (
-            job.user_hash === serviceAccountId &&
-            ACTIVE_JOB_STATUSES.has(job.status)
-          ) {
-            jobCount++;
-            jobGPUCount += getGPUCount(
-              job.accelerators,
-              `Job ${job.job_name || job.job_id}`
-            );
-          }
-        }
+          return {
+            ...token,
+            clusterCount,
+            jobCount,
+            gpuCount: clusterGPUCount + jobGPUCount,
+            // Extract primary role
+            primaryRole:
+              token.service_account_roles &&
+              token.service_account_roles.length > 0
+                ? token.service_account_roles[0]
+                : 'user',
+          };
+        });
 
-        return {
-          ...token,
-          clusterCount,
-          jobCount,
-          gpuCount: clusterGPUCount + jobGPUCount,
-          // Extract primary role
-          primaryRole:
-            token.service_account_roles &&
-            token.service_account_roles.length > 0
-              ? token.service_account_roles[0]
-              : 'user',
-        };
-      });
-
-      setTokensWithCounts(enhancedTokens);
-    } catch (error) {
-      console.error('Error fetching tokens and counts:', error);
-      setTokens([]);
-      setTokensWithCounts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+        setTokensWithCounts(enhancedTokens);
+      } catch (error) {
+        console.error('Error fetching tokens and counts:', error);
+        setTokens([]);
+        setTokensWithCounts([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [page, limit, debouncedSearch, serverPaginated]
+  );
 
   useEffect(() => {
     fetchTokensAndCounts();
-  }, []);
+  }, [fetchTokensAndCounts]);
 
   // Role editing functions
   const handleEditClick = async (tokenId, currentRole) => {
@@ -2697,18 +2805,23 @@ function ServiceAccountTokensView({
     }
   };
 
-  // Filter tokens based on search query
-  const filteredTokens = tokensWithCounts.filter((token) => {
-    if (!searchQuery?.trim()) return true;
+  // Filter tokens based on search query.
+  // Server-paginated mode pushes search to the backend, so the client list
+  // is already filtered — do not double-filter, which would hide rows that
+  // matched on backend-only fields (e.g. service_account_user_id).
+  const filteredTokens = serverPaginated
+    ? tokensWithCounts
+    : tokensWithCounts.filter((token) => {
+        if (!searchQuery?.trim()) return true;
 
-    const query = searchQuery.toLowerCase();
-    return (
-      token.token_name?.toLowerCase().includes(query) ||
-      token.creator_name?.toLowerCase().includes(query) ||
-      token.service_account_name?.toLowerCase().includes(query) ||
-      token.primaryRole?.toLowerCase().includes(query)
-    );
-  });
+        const query = searchQuery.toLowerCase();
+        return (
+          token.token_name?.toLowerCase().includes(query) ||
+          token.creator_name?.toLowerCase().includes(query) ||
+          token.service_account_name?.toLowerCase().includes(query) ||
+          token.primaryRole?.toLowerCase().includes(query)
+        );
+      });
 
   if (loading && tokensWithCounts.length === 0) {
     return (
@@ -2738,6 +2851,12 @@ function ServiceAccountTokensView({
         </div>
       ) : (
         <>
+          <div className="text-sm text-gray-500 mb-2">
+            {filteredTokens.length}{' '}
+            {filteredTokens.length === 1
+              ? 'service account'
+              : 'service accounts'}
+          </div>
           <Card>
             <Table>
               <TableHeader>
@@ -2826,42 +2945,69 @@ function ServiceAccountTokensView({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Link
-                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                          token.clusterCount > 0
-                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                        }`}
-                        title={`View ${token.clusterCount} cluster${token.clusterCount !== 1 ? 's' : ''} for ${token.token_name}`}
-                      >
-                        {token.clusterCount}
-                      </Link>
+                      {token.clusterCount === undefined ? (
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400"
+                          title="Counts hidden in server-paginated view"
+                        >
+                          —
+                        </span>
+                      ) : (
+                        <Link
+                          href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                            token.clusterCount > 0
+                              ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                          }`}
+                          title={`View ${token.clusterCount} cluster${token.clusterCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                        >
+                          {token.clusterCount}
+                        </Link>
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Link
-                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                          token.jobCount > 0
-                            ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                        }`}
-                        title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
-                      >
-                        {token.jobCount}
-                      </Link>
+                      {token.jobCount === undefined ? (
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400"
+                          title="Counts hidden in server-paginated view"
+                        >
+                          —
+                        </span>
+                      ) : (
+                        <Link
+                          href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                            token.jobCount > 0
+                              ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                          }`}
+                          title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                        >
+                          {token.jobCount}
+                        </Link>
+                      )}
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          token.gpuCount > 0
-                            ? 'bg-purple-100 text-purple-600'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}
-                        title={`Total GPUs: ${token.gpuCount}`}
-                      >
-                        {token.gpuCount}
-                      </span>
+                      {token.gpuCount === undefined ? (
+                        <span
+                          className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400"
+                          title="Counts hidden in server-paginated view"
+                        >
+                          —
+                        </span>
+                      ) : (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            token.gpuCount > 0
+                              ? 'bg-purple-100 text-purple-600'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                          title={`Total GPUs: ${token.gpuCount}`}
+                        >
+                          {token.gpuCount}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="truncate">
                       {token.created_at ? (
@@ -2947,6 +3093,48 @@ function ServiceAccountTokensView({
               </TableBody>
             </Table>
           </Card>
+          {serverPaginated && (
+            <div className="flex items-center justify-between mt-3 text-sm text-gray-600">
+              <div>
+                Showing {(page - 1) * limit + 1}-{Math.min(page * limit, total)}{' '}
+                of {total}
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={limit}
+                  onChange={(e) => {
+                    setLimit(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="h-7 px-2 border border-gray-300 rounded text-sm"
+                  disabled={loading}
+                >
+                  {[10, 20, 50, 100, 200].map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt} / page
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={!hasPrev || loading}
+                  className="h-7 px-3 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={!hasNext || loading}
+                  className="h-7 px-3 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

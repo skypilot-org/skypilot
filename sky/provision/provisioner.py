@@ -81,30 +81,36 @@ def _bulk_provision(
                                                cluster_name.name_on_cloud,
                                                config=config)
 
-    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-    logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
-    rich_utils.force_update_status(
-        ux_utils.spinner_message('Launching - Checking instance status',
-                                 str(provision_logging.config.log_path),
-                                 cluster_name=str(cluster_name)))
-    # AWS would take a very short time (<<1s) updating the state of the
-    # instance.
-    time.sleep(1)
-    for retry_cnt in range(_MAX_RETRY):
-        try:
-            provision.wait_instances(provider_name,
-                                     region_name,
-                                     cluster_name.name_on_cloud,
-                                     state=status_lib.ClusterStatus.UP)
-            break
-        except (aws.botocore_exceptions().WaiterError, RuntimeError):
-            time.sleep(backoff.current_backoff())
-    else:
-        raise RuntimeError(
-            f'Failed to wait for instances of {cluster_name!r} to be '
-            f'ready on the cloud provider after max retries {_MAX_RETRY}.')
-    logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-                 'retries.')
+    # Kubernetes-based clouds' run_instances already synchronously wait for all
+    # pods to be scheduled and running, and their wait_instances is a no-op,
+    # so skip the post-run wait/retry loop entirely.
+    if provider_name.lower() not in provision_constants.K8S_BASED_CLOUDS:
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
+        logger.debug(
+            f'\nWaiting for instances of {cluster_name!r} to be ready...')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching - Checking instance status',
+                                     str(provision_logging.config.log_path),
+                                     cluster_name=str(cluster_name)))
+        # AWS would take a very short time (<<1s) updating the state of the
+        # instance.
+        time.sleep(1)
+        for retry_cnt in range(_MAX_RETRY):
+            try:
+                provision.wait_instances(provider_name,
+                                         region_name,
+                                         cluster_name.name_on_cloud,
+                                         state=status_lib.ClusterStatus.UP)
+                break
+            except (aws.botocore_exceptions().WaiterError, RuntimeError):
+                time.sleep(backoff.current_backoff())
+        else:
+            raise RuntimeError(
+                f'Failed to wait for instances of {cluster_name!r} to be '
+                f'ready on the cloud provider after max retries {_MAX_RETRY}.')
+        logger.debug(
+            f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+            'retries.')
 
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '

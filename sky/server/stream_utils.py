@@ -433,8 +433,13 @@ def stream_response(
         # https://fastapi.tiangolo.com/tutorial/background-tasks/
         background_tasks.add_task(on_disconnect)
 
+    # Route through LogProvider.
+    # pylint: disable=import-outside-toplevel
+    from sky.server.requests import log_provider as lp
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, logs_path, polling_interval=polling_interval),
+        lp.get_log_provider().log_stream(request_id=request_id,
+                                         log_path=logs_path,
+                                         polling_interval=polling_interval),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',

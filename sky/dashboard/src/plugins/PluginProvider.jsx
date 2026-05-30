@@ -907,6 +907,12 @@ export function PluginProvider({ children }) {
         // Signal that all plugin scripts have finished loading.
         // layout.jsx listens for this to avoid showing the fallback top bar
         // before the sidebar plugin has had a chance to register.
+        // Also set a synchronously-readable global flag so pages that
+        // mount AFTER this event has fired can detect that state without
+        // waiting on a 2-second safety-net timeout. Without this, every
+        // navigation to a plugin-aware page paid an unconditional 2s
+        // gate before rendering anything.
+        window.__skyDashboardPluginsLoaded = true;
         window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
       }
     };
@@ -1061,6 +1067,20 @@ export function useTableColumns(tableName, context = {}) {
 export function useDataProvider(id) {
   const { dataProviders } = usePluginState();
   return dataProviders[id] || null;
+}
+
+/**
+ * Hook to access all registered data providers as an array.
+ *
+ * Used by host pages that want to discover plugins exposing a particular
+ * hook by name (e.g., looking for any provider with a `useExtraInfraRows`
+ * hook) without knowing any specific plugin id.
+ *
+ * @returns {Array} All registered data provider configs
+ */
+export function useAllDataProviders() {
+  const { dataProviders } = usePluginState();
+  return Object.values(dataProviders);
 }
 
 /**

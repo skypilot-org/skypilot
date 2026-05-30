@@ -15,6 +15,11 @@ import { usePluginComponents } from './PluginProvider';
  *     <Layout><Component /></Layout>
  *   </PluginWrapperSlot>
  *
+ * Per-instance context (e.g. row id) can be passed via the `context` prop;
+ * each wrapper receives those keys as props alongside `children`. A
+ * `fallback` element renders when no plugins are registered (defaults to
+ * `children`).
+ *
  * A plugin registers a wrapper via:
  *   api.registerComponent({
  *     id: 'my-provider',
@@ -24,20 +29,28 @@ import { usePluginComponents } from './PluginProvider';
  *   });
  *
  * @param {string} name - The slot name to look up registered wrappers
+ * @param {object} context - Optional per-instance props passed to each wrapper
+ * @param {React.ReactNode} fallback - Optional element rendered when no
+ *   wrapper plugins are registered (defaults to children)
  * @param {React.ReactNode} children - The tree to wrap
  */
-export function PluginWrapperSlot({ name, children }) {
+export function PluginWrapperSlot({ name, context = {}, fallback, children }) {
   const wrappers = usePluginComponents(name);
 
   if (wrappers.length === 0) {
-    return children;
+    return fallback !== undefined ? fallback : children;
   }
 
-  // Nest wrappers: first registered (lowest order) is outermost
+  // Nest wrappers: first registered (lowest order) is outermost.
+  // Each wrapper receives context spread as props, in addition to children.
   let result = children;
   for (let i = wrappers.length - 1; i >= 0; i--) {
     const Wrapper = wrappers[i].component;
-    result = <Wrapper key={wrappers[i].id}>{result}</Wrapper>;
+    result = (
+      <Wrapper key={wrappers[i].id} {...context}>
+        {result}
+      </Wrapper>
+    );
   }
   return result;
 }

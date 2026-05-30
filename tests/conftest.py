@@ -285,6 +285,13 @@ def pytest_addoption(parser):
         'Use existing cluster for backend integration tests instead of creating a new one',
     )
     parser.addoption(
+        '--concurrency',
+        type=int,
+        default=None,
+        help=('Buildkite concurrency limit per build (configured in pipeline '
+              'generator; has no effect when running locally)'),
+    )
+    parser.addoption(
         '--dependency',
         type=str,
         nargs='?',

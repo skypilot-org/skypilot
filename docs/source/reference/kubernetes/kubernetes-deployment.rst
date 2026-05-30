@@ -159,9 +159,35 @@ Deploying on Google Cloud GKE
        my-cluster-2               A100      2 of 2 free
        my-cluster-3               A100      0 of 2 free
 
-.. note::
-    GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
+.. _kubernetes-setup-gke-autopilot:
 
+Using SkyPilot on GKE Autopilot
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GKE Autopilot scales to zero when idle, so SkyPilot must defer node-fit decisions to
+Autopilot. Set this in your config:
+
+.. code-block:: yaml
+
+    kubernetes:
+      autoscaler: gke
+      provision_timeout: 600
+
+**Limitations:**
+
+- **Object storage mounts via SkyPilot's bundled FUSE** (``file_mounts`` with cloud
+  storage URIs in ``MOUNT`` mode) — uses a privileged DaemonSet and ``hostPath``,
+  which Autopilot rejects. Instead, mount a GCS bucket through a :ref:`SkyPilot volume
+  <volumes-all>` backed by the
+  `GCS FUSE CSI driver <https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver>`_.
+- **Privileged or host-namespace features:** Docker-in-Docker, GPUDirect TCPX/TCPXO,
+  BuildKit image builds, RDMA (``IPC_LOCK``), and SSH node pools.
+- **Mounting a directory from the Kubernetes node** (via SkyPilot's ``k8s-hostpath``
+  volume type or ``hostPath`` in ``pod_config`` overrides). Autopilot does not allow
+  workloads to access the node filesystem directly.
+- **Pod preemption.** Autopilot may evict pods to consolidate workloads. For
+  long-running work, use :code:`sky jobs launch` so SkyPilot's managed jobs
+  automatically recover from preemption.
 
 .. _kubernetes-setup-eks:
 

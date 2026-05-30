@@ -29,6 +29,7 @@ import uuid
 
 import colorama
 import filelock
+import requests
 
 from sky import clouds
 from sky import exceptions
@@ -314,11 +315,22 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
     #   on GKE.
     pod_name = config['cluster_name'] + '-head'
+    # combine_pod_config_fields_and_metadata() has already folded the
+    # user's kubernetes.pod_config (incl. spec.hostNetwork) into
+    # node_config by the time auth runs, so this is the resolved value.
+    # Pass it as a flag to the proxy script so the common path makes no
+    # extra `kubectl get pod` call per connection.
+    head_node_config = config.get('available_node_types',
+                                  {}).get('ray_head_default',
+                                          {}).get('node_config', {})
+    host_network = bool(
+        head_node_config.get('spec', {}).get('hostNetwork', False))
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
         pod_name,
         private_key_path=private_key_path,
         context=context,
-        namespace=namespace)
+        namespace=namespace,
+        host_network=host_network)
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 
@@ -348,10 +360,19 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
-        # Only add an ssh key if it hasn't already been added
-        if not any(x['public_key'] == public_key for x in current_key_list):
-            vast.vast().create_ssh_key(ssh_key=public_key)
+        try:
+            current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
+            # Only add an ssh key if it hasn't already been added
+            if not any(x['public_key'] == public_key for x in current_key_list):
+                vast.vast().create_ssh_key(ssh_key=public_key)
+        except requests.HTTPError as e:
+            # Team-scoped Vast keys can't register account SSH keys;
+            # onstart_cmd injection in vast/utils.py handles SSH access.
+            body = e.response.text if e.response is not None else ''
+            if 'team_ssh_keys_not_supported' not in body:
+                raise
+            logger.debug('Skipping Vast account SSH key registration: '
+                         'team API key context.')
 
     config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

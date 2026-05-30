@@ -105,6 +105,10 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
                 az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             return None
+        # get_catalog_path() is now a pure path getter; create the
+        # parent dirs explicitly before writing.
+        os.makedirs(os.path.dirname(az_mapping_path), exist_ok=True)
+        os.makedirs(os.path.dirname(az_mapping_md5_path), exist_ok=True)
         az_mappings.to_csv(az_mapping_path, index=False)
         # Write md5 of the az_mapping file to a file so we can check it for
         # any changes when uploading to the controller

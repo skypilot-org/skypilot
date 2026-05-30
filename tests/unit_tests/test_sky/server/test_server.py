@@ -755,3 +755,37 @@ class TestResolveDynamicRoute:
             result = server._resolve_dynamic_route(str(d), 'cron')
         assert result is not None
         assert result.endswith('[...path].html')
+
+
+# --- Tests for serve_dashboard _next/ asset handling ---
+
+
+@pytest.mark.asyncio
+async def test_serve_dashboard_missing_next_asset_returns_404_no_store(
+        tmp_path):
+    """Missing _next/ asset 404s with Cache-Control: no-store, not index.html."""
+    d = _build_dashboard_tree(tmp_path)
+    request = mock.MagicMock(spec=fastapi.Request)
+
+    with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)):
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            await server.serve_dashboard(
+                request, full_path='_next/static/chunks/missing-abc123.js')
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.headers.get('Cache-Control') == 'no-store'
+
+
+@pytest.mark.asyncio
+async def test_serve_dashboard_client_route_falls_back_to_index(tmp_path):
+    """Client-side routes (no extension) fall through to index.html, not 404."""
+    d = _build_dashboard_tree(tmp_path)
+    request = mock.MagicMock(spec=fastapi.Request)
+
+    with mock.patch.object(server_constants, 'DASHBOARD_DIR', str(d)), \
+         mock.patch('sky.server.server._serve_html_with_nonce',
+                    return_value=fastapi.responses.HTMLResponse(
+                        content='<html/>', status_code=200)):
+        response = await server.serve_dashboard(request, full_path='clusters')
+
+    assert response.status_code == 200

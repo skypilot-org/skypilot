@@ -53,10 +53,11 @@ import copy
 import json
 import os
 import pathlib
+import re
 import tempfile
 import threading
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
 import sqlalchemy
@@ -487,6 +488,31 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
+    _validate_dashboard_external_links(config, config_source)
+
+
+def _validate_dashboard_external_links(config: Dict[str, Any],
+                                       config_source: str) -> None:
+    """Ensures every dashboard.external_links regex is compilable."""
+    dashboard = config.get('dashboard') if isinstance(config, dict) else None
+    if not isinstance(dashboard, dict):
+        return
+    external_links = dashboard.get('external_links')
+    if not isinstance(external_links, list):
+        return
+    for idx, entry in enumerate(external_links):
+        if not isinstance(entry, dict):
+            continue
+        regex = entry.get('regex')
+        if not isinstance(regex, str):
+            continue
+        try:
+            re.compile(regex)
+        except re.error as e:
+            raise ValueError(
+                f'Invalid config YAML from ({config_source}). '
+                f'dashboard.external_links[{idx}].regex is not a valid regex: '
+                f'{regex!r} ({e}).') from e
 
 
 def overlay_skypilot_config(
@@ -831,18 +857,49 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+_NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
 
-def get_effective_queue_name(
+# Hooks invoked at the end of `update_api_server_config_no_lock`, after the
+# new config has been persisted and reloaded in-process. Plugins use this to
+# invalidate caches that were derived from the config (e.g. a request that
+# memoized the result of `get_nested(...)` for a TTL). Registered at server
+# startup during single-threaded plugin loading, so no lock is needed.
+_CONFIG_UPDATE_HOOKS: List[Callable[[], None]] = []
+
+
+def register_config_update_hook(fn: Callable[[], None]) -> None:
+    """Register a callback to be invoked when the API server config is updated.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. The callback runs after the new config has been
+    persisted and reloaded; exceptions are caught and logged so a misbehaving
+    hook cannot fail the config update.
+    """
+    if fn not in _CONFIG_UPDATE_HOOKS:
+        _CONFIG_UPDATE_HOOKS.append(fn)
+
+
+def _get_effective_k8s_config_value(
         cloud: str,
+        property_keys: List[Tuple[str, ...]],
         region: Optional[str] = None,
         workspace: Optional[str] = None,
         override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Returns the effective Kueue local queue name from config.
+    """Generic Kubernetes config-value resolver.
 
-    Supports two equivalent spellings, ``kueue.local_queue_name`` and
-    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
-    takes priority over spelling; within the same scope, ``quota.queue``
-    wins over ``kueue.local_queue_name`` when both are set.
+    Resolution precedence (most specific first):
+
+    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.<property>``
+    2. ``workspaces.<workspace>.<cloud>.<property>``
+    3. ``<cloud>.context_configs.<region>.<property>``
+    4. ``<cloud>.<property>``
+    5. ``None`` — caller is responsible for any default.
+
+    Within a scope, ``property_keys`` are tried in order; the first non-None
+    hit wins. For single-spelling fields pass ``[('namespace',)]``; for
+    multi-spelling fields pass e.g. ``[('quota', 'queue'),
+    ('kueue', 'local_queue_name')]`` to express "quota.queue wins over
+    kueue.local_queue_name when both are set at the same scope".
     """
     if workspace is None:
         workspace = get_active_workspace()
@@ -867,18 +924,59 @@ def get_effective_queue_name(
                                         default_value={},
                                         override_configs=override_configs))
         if region is not None:
-            for queue_keys in _QUEUE_NAME_KEYS:
+            for property_key in property_keys:
                 value = scope_config.get_nested(
-                    keys=(cloud, 'context_configs', region) + queue_keys,
+                    keys=(cloud, 'context_configs', region) + property_key,
                     default_value=None)
                 if value is not None:
                     return value
-        for queue_keys in _QUEUE_NAME_KEYS:
-            value = scope_config.get_nested(keys=(cloud,) + queue_keys,
+        for property_key in property_keys:
+            value = scope_config.get_nested(keys=(cloud,) + property_key,
                                             default_value=None)
             if value is not None:
                 return value
     return None
+
+
+def get_effective_queue_name(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kueue local queue name from config.
+
+    Supports two equivalent spellings, ``kueue.local_queue_name`` and
+    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
+    takes priority over spelling; within the same scope, ``quota.queue``
+    wins over ``kueue.local_queue_name`` when both are set.
+    """
+    return _get_effective_k8s_config_value(cloud=cloud,
+                                           property_keys=_QUEUE_NAME_KEYS,
+                                           region=region,
+                                           workspace=workspace,
+                                           override_configs=override_configs)
+
+
+def get_effective_namespace(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kubernetes namespace from config.
+
+    Resolution precedence, most specific first:
+
+    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.namespace``
+    2. ``workspaces.<workspace>.<cloud>.namespace``
+    3. ``<cloud>.context_configs.<region>.namespace``
+    4. ``<cloud>.namespace``
+    5. ``None`` — caller is responsible for the kubeconfig-default fallback.
+    """
+    return _get_effective_k8s_config_value(cloud=cloud,
+                                           property_keys=_NAMESPACE_KEYS,
+                                           region=region,
+                                           workspace=workspace,
+                                           override_configs=override_configs)
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:
@@ -1041,3 +1139,9 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                 config, global_config_path)
 
     reload_config()
+    for hook in list(_CONFIG_UPDATE_HOOKS):
+        try:
+            hook()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Config-update hook {hook!r} raised: {e}',
+                           exc_info=True)

@@ -159,7 +159,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
+          "expr": "sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -289,7 +289,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
+          "expr": "sum(max by (cluster, namespace, pod, container) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\", namespace!=\"cw-hpc-verification\"})) / sum(max by (cluster, node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\", cluster=~\"$cluster\"})) * 100",
           "instant": false,
           "legendFormat": "GPU Allocation",
           "range": true,

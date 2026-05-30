@@ -82,6 +82,7 @@ class ManagedJobRunner(Protocol):
         follow: bool,
         controller: bool,
         tail: Optional[int],
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]],
     ) -> int:
         ...

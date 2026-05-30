@@ -32,7 +32,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_JOB_CANCEL = 'cancel'
     CLUSTER_JOB_LOGS = 'logs'
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
-    CLUSTER_AUTOSTOP_LOGS = 'autostop_logs'
+    CLUSTER_HOOK_LOGS = 'hook_logs'
     CLUSTER_COST_REPORT = 'cost_report'
     CLUSTER_EVENTS = 'cluster_events'
     # Storage requests
@@ -96,6 +96,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH = 'sky-serve-status-refresh'
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
     REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
+    REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP = 'expired-token-cleanup'
 
     def __repr__(self):
         return self.value

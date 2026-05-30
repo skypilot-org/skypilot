@@ -81,7 +81,7 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.cancel': (),
     'sky.logs': (),
     'sky.download_logs': (),
-    'sky.autostop_logs': (),
+    'sky.hook_logs': (),
     'sky.jobs.queue': (),
     'sky.jobs.queue_v2': (),
     'sky.jobs.cancel': (),
@@ -132,6 +132,7 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.sky-serve-status-refresh': (),
     'sky.pool-status-refresh': (),
     'sky.server-heartbeat': (),
+    'sky.expired-token-cleanup': (),
     # Category 2: redact task/dag YAML fields before including
     'sky.launch': ('task',),
     'sky.exec': ('task',),

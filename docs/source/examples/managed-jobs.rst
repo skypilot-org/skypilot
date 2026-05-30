@@ -3,9 +3,13 @@
 Managed Jobs
 ============
 
-.. tip::
+SkyPilot **managed jobs** (:code:`sky jobs`) manage the full lifecycle of a user job:
 
-  Use managed jobs for auto-recovery when scaling out --- running a single job for long durations, or running many jobs in parallel.
+* **Provisioning and managing the resources**, on either reserved clusters or elastic instances.
+* **Automatically recovering from failures** (job preemptions, GPU errors, node crashes, etc.) and retrying application errors.
+* **Cleaning up the resources** when done.
+
+Use managed jobs for scaling out --- running a single job for long durations, or running many jobs in parallel.
 
 .. seealso::
 
@@ -13,14 +17,6 @@ Managed Jobs
 
    :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
    can communicate with each other (e.g., RL workloads).
-
-SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically
-recover from failures (job preemptions, GPU errors, node crashes, etc.), retry
-application errors, and clean up resources when done.
-
-The benefits above apply to both reserved clusters or elastic instances.
-If you use the latter, managed jobs also support
-cost-saving spot instances with automatic preemption recovery.
 
 To start a managed job, use :code:`sky jobs launch`:
 
@@ -75,11 +71,11 @@ A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`. For e
 
 .. code-block:: yaml
 
-  # bert_qa.yaml
-  name: bert-qa
+  # qwen_finetune.yaml
+  name: qwen-finetune
 
   resources:
-    accelerators: V100:1
+    accelerators: B200:8
 
   envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
@@ -89,29 +85,30 @@ A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`. For e
 
   # Assume your working directory is under `~/transformers`.
   # To get the code for this example, run:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
+  # git clone https://github.com/huggingface/transformers.git ~/transformers
   workdir: ~/transformers
 
   setup: |
     pip install -e .
-    cd examples/pytorch/question-answering/
-    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    cd examples/pytorch/language-modeling/
+    pip install -r requirements.txt
     pip install wandb
 
   run: |
-    cd examples/pytorch/question-answering/
-    python run_qa.py \
-      --model_name_or_path bert-base-uncased \
-      --dataset_name squad \
+    cd examples/pytorch/language-modeling/
+    torchrun --nproc_per_node=8 run_clm.py \
+      --model_name_or_path Qwen/Qwen3-8B \
+      --dataset_name wikitext \
+      --dataset_config_name wikitext-2-raw-v1 \
       --do_train \
       --do_eval \
-      --per_device_train_batch_size 12 \
-      --learning_rate 3e-5 \
-      --num_train_epochs 50 \
-      --max_seq_length 384 \
-      --doc_stride 128 \
+      --per_device_train_batch_size 1 \
+      --gradient_accumulation_steps 8 \
+      --learning_rate 2e-5 \
+      --num_train_epochs 3 \
+      --bf16 \
       --report_to wandb \
-      --output_dir /tmp/bert_qa/
+      --output_dir /tmp/qwen_finetune/
 
 .. note::
 
@@ -122,7 +119,7 @@ To launch this YAML as a managed job, use :code:`sky jobs launch`:
 
 .. code-block:: console
 
-  $ sky jobs launch -n bert-qa-job bert_qa.yaml
+  $ sky jobs launch -n qwen-finetune qwen_finetune.yaml
 
 To see all flags, you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
 
@@ -171,9 +168,9 @@ See a list of managed jobs:
 
   Fetching managed jobs...
   Managed jobs:
-  ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-  2  roberta  1x [A100:8]         2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
-  1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+  ID  NAME           RESOURCES    SUBMITTED  TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  2   qwen-rl        1x [H200:8]  2 hrs ago  2h 47m 18s     2h 36m 18s    0            RUNNING
+  1   qwen-finetune  1x [B200:8]  4 hrs ago  4h 24m 26s     4h 17m 54s    0            RUNNING
 
 This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
 
@@ -181,14 +178,14 @@ Stream the logs of a running managed job:
 
 .. code-block:: console
 
-  $ sky jobs logs -n bert-qa  # by name
+  $ sky jobs logs -n qwen-finetune  # by name
   $ sky jobs logs 2           # by job ID
 
 Cancel a managed job:
 
 .. code-block:: console
 
-  $ sky jobs cancel -n bert-qa  # by name
+  $ sky jobs cancel -n qwen-finetune  # by name
   $ sky jobs cancel 2           # by job ID
 
 .. note::
@@ -364,11 +361,11 @@ Any spot preemptions are automatically handled by SkyPilot without user interven
    To avoid redoing work after recovery, implement :ref:`checkpointing <checkpointing>`.
    Your application code can checkpoint its progress periodically to persistent storage (a :ref:`Kubernetes volume <volumes-on-kubernetes>` or :ref:`cloud bucket <sky-storage>`). The program can then reload the latest checkpoint when restarted.
 
-Here is :ref:`an example of a training job <bert>` failing over different regions across AWS and GCP.
+Here is :ref:`an example of a training job <qwen>` failing over different regions across AWS and GCP.
 
 .. image:: https://i.imgur.com/Vteg3fK.gif
   :width: 600
-  :alt: GIF for BERT training on Spot V100
+  :alt: GIF for managed job auto-recovery across regions
   :align: center
 
 Quick comparison between *managed spot jobs* vs. *launching unmanaged spot clusters*:
@@ -671,6 +668,10 @@ you can still tear it down manually with
 High availability controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. warning::
+
+    **Deprecated.** HA mode for the remote jobs controller is deprecated. By default, the API server runs the jobs controller directly via :ref:`consolidation mode <jobs-consolidation-mode>`, which already provides resilience through the Kubernetes Deployment and persistent database — no separate HA controller is needed.
+
 High availability mode ensures the remote controller cluster remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
 
 To enable high availability for Managed Jobs, set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
@@ -685,7 +686,7 @@ To enable high availability for Managed Jobs, set the ``high_availability`` flag
           cloud: kubernetes
         high_availability: true
 
-This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures.
 
 .. _managed-jobs-creds:
 
