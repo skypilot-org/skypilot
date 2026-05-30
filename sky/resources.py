@@ -399,8 +399,7 @@ class Resources:
             # values (e.g. {us-east-1: 'docker:img1', docker: 'img2'}).
             if self._docker_image is not None and self._image_id is not None:
                 docker_prefixed = [
-                    f'{v} (region: {k})'
-                    for k, v in self._image_id.items()
+                    f'{v} (region: {k})' for k, v in self._image_id.items()
                     if v.startswith('docker:')
                 ]
                 if docker_prefixed:
@@ -1588,7 +1587,8 @@ class Resources:
             if self._image_id is None:
                 return
 
-        if self._image_id is not None and self.extract_docker_image() is not None:
+        if (self._image_id is not None and
+                self.extract_docker_image() is not None):
             # Legacy docker: prefix in image_id (no separate _docker_image)
             if self._docker_image is None:
                 if self.cloud is not None:
