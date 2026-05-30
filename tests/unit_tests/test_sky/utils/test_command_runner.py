@@ -723,3 +723,83 @@ class TestProxyJumpToProxyCommand:
                 port_forward=None,
                 connect_timeout=None,
             )
+
+
+def test_kubernetes_runner_diagnose_dead_pod_surfaces_oom() -> None:
+    """A 'pod gone' exec error triggers a pod-termination diagnosis."""
+    oom_msg = 'Pod pod terminated: OOMKilled (exit code 137).\nHint: ...'
+    with mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod',
+                    return_value=oom_msg) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        result = runner._diagnose_dead_pod(
+            'error: cannot exec into a container in a completed pod; '
+            'current phase is Failed')
+    assert result == oom_msg
+    mock_diagnose.assert_called_once_with('ctx', 'ns', 'pod')
+
+
+def test_kubernetes_runner_diagnose_dead_pod_ignores_unrelated_stderr() -> None:
+    """Ordinary command failures (e.g. exit 127) don't query the pod."""
+    with mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod'
+                   ) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        result = runner._diagnose_dead_pod(
+            '/bin/bash: line 1: conda: command not found')
+    assert result is None
+    mock_diagnose.assert_not_called()
+
+
+def test_kubernetes_runner_diagnose_dead_pod_skips_deployment() -> None:
+    """Deployment targets have no single pod_name to diagnose."""
+    with mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod'
+                   ) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'),
+                                                        deployment='dep')
+        result = runner._diagnose_dead_pod(
+            'cannot exec into a container in a completed pod')
+    assert result is None
+    mock_diagnose.assert_not_called()
+
+
+def test_kubernetes_runner_run_enriches_stderr_on_oom() -> None:
+    """run() appends the OOM diagnosis to stderr on a failed exec."""
+    pod_gone_stderr = ('error: cannot exec into a container in a completed '
+                       'pod; current phase is Failed')
+    oom_msg = 'Pod pod terminated: OOMKilled (exit code 137).'
+
+    def fake_run_with_log(*args, **kwargs):
+        return 1, '', pod_gone_stderr
+
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=fake_run_with_log), \
+         mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod',
+                    return_value=oom_msg):
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        returncode, _, stderr = runner.run('echo hi',
+                                           require_outputs=True,
+                                           stream_logs=False)
+
+    assert returncode == 1
+    assert pod_gone_stderr in stderr
+    assert oom_msg in stderr
+
+
+def test_kubernetes_runner_run_does_not_enrich_on_success() -> None:
+    """A successful exec is returned unchanged, with no pod query."""
+
+    def fake_run_with_log(*args, **kwargs):
+        return 0, 'ok', ''
+
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=fake_run_with_log), \
+         mock.patch('sky.provision.kubernetes.utils.diagnose_terminated_pod'
+                   ) as mock_diagnose:
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        returncode, stdout, stderr = runner.run('echo hi',
+                                                require_outputs=True,
+                                                stream_logs=False)
+
+    assert (returncode, stdout, stderr) == (0, 'ok', '')
+    mock_diagnose.assert_not_called()

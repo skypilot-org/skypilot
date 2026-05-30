@@ -1620,14 +1620,64 @@ class KubernetesCommandRunner(CommandRunner):
             # immediately at EOF, making it impossible to detect
             # disconnection.
             kwargs.setdefault('stdin', subprocess.PIPE)
-        return log_lib.run_with_log(' '.join(command),
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable=executable,
-                                    **kwargs)
+        result = log_lib.run_with_log(' '.join(command),
+                                      log_path,
+                                      require_outputs=require_outputs,
+                                      stream_logs=stream_logs,
+                                      process_stream=process_stream,
+                                      shell=True,
+                                      executable=executable,
+                                      **kwargs)
+        # When `kubectl exec` fails because the target pod is already gone
+        # (e.g. it was OOMKilled), the bare kubectl error ("cannot exec into a
+        # container in a completed pod") hides the real cause. Enrich stderr
+        # with the pod's termination reason so callers (setup/run failure
+        # messages) surface OOMKilled etc. Only possible when outputs were
+        # captured.
+        if require_outputs and isinstance(result, tuple):
+            returncode, stdout, stderr = result
+            if returncode != 0:
+                diagnosis = self._diagnose_dead_pod(stderr)
+                if diagnosis is not None:
+                    stderr = f'{stderr}\n{diagnosis}'
+            return returncode, stdout, stderr
+        return result
+
+    # kubectl exec/attach errors that indicate the target pod is terminal (and
+    # so its container exit reason is worth surfacing). Matched case-
+    # insensitively against stderr. Kept specific to kubectl phrasings to avoid
+    # firing on ordinary command failures (e.g. "command not found", exit 127).
+    _POD_GONE_EXEC_SIGNATURES = (
+        'cannot exec into a container in a completed pod',
+        'current phase is failed',
+        'current phase is succeeded',
+        'unable to upgrade connection',
+        'container not found',
+    )
+
+    def _diagnose_dead_pod(self, stderr: str) -> Optional[str]:
+        """Return a termination reason for this runner's pod if `stderr`
+        indicates the exec target pod is gone, else None.
+
+        Purely additive diagnostics; never raises. Skipped for deployment
+        targets, where ``pod_name`` does not identify a specific live pod.
+        """
+        if self.deployment is not None:
+            return None
+        lowered = stderr.lower()
+        if not any(sig in lowered for sig in self._POD_GONE_EXEC_SIGNATURES):
+            return None
+        try:
+            # In-function import: `sky.provision.kubernetes` imports `instance`,
+            # which imports this module at top level, so a module-level import
+            # here forms a circular dependency. By call time the package is
+            # fully initialized.
+            # pylint: disable-next=import-outside-toplevel
+            from sky.provision.kubernetes import utils as kubernetes_utils
+            return kubernetes_utils.diagnose_terminated_pod(
+                self.context, self.namespace, self.pod_name)
+        except Exception:  # pylint: disable=broad-except
+            return None
 
     @timeline.event
     def rsync(
