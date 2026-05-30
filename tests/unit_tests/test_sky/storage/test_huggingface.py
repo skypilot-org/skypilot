@@ -577,6 +577,21 @@ class TestHfCloudStorage:
             'hf://buckets/ns/bucket/file.txt', '/tmp/file.txt')
         assert 'huggingface_hub' in command
         assert 'download_bucket_files' in command
+        # A COPY of a missing bucket file must fail loud rather than silently
+        # producing nothing (``download_bucket_files`` defaults to
+        # ``raise_on_missing_files=False``).
+        assert 'raise_on_missing_files=True' in command
+
+    def test_repo_file_download_command_cleans_up_temp_dir(self):
+        # The repo file-download path stages into a temp dir; it must remove
+        # it in a ``finally`` so repeated COPYs don't leak temp dirs on the VM
+        # (mirrors the dir-download path).
+        command = cloud_stores.HFCloudStorage().make_sync_file_command(
+            'hf://ns/model/config.json', '/tmp/config.json')
+        assert 'hf_hub_download' in command
+        assert 'tempfile.mkdtemp' in command
+        assert 'finally:' in command
+        assert 'shutil.rmtree' in command
 
     def test_repo_dir_download_command(self):
         command = cloud_stores.HFCloudStorage().make_sync_dir_command(

@@ -893,7 +893,8 @@ if not token:
                 self._TOKEN_HELPER,
                 f'dest = os.path.expanduser({destination!r})',
                 (f'HfApi().download_bucket_files({bucket_id!r}, '
-                 f'files=[({path!r}, dest)], token=token)'),
+                 f'files=[({path!r}, dest)], raise_on_missing_files=True, '
+                 f'token=token)'),
             ])
             return self._python_command(code)
 
@@ -907,11 +908,14 @@ if not token:
             self._TOKEN_HELPER,
             f'dest = os.path.expanduser({destination!r})',
             'tmp_dir = tempfile.mkdtemp()',
-            (f'downloaded = hf_hub_download(repo_id={repo_id!r}, '
+            'try:',
+            (f'    downloaded = hf_hub_download(repo_id={repo_id!r}, '
              f'repo_type={repo_type!r}, revision={revision!r}, '
              f'filename={path!r}, local_dir=tmp_dir, token=token)'),
-            'os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)',
-            'shutil.copy2(downloaded, dest)',
+            '    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)',
+            '    shutil.copy2(downloaded, dest)',
+            'finally:',
+            '    shutil.rmtree(tmp_dir, ignore_errors=True)',
         ])
         return self._python_command(code)
 

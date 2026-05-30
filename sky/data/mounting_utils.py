@@ -339,9 +339,10 @@ def get_hf_mount_install_cmd() -> str:
 
 def get_hf_mount_version_check_cmd() -> str:
     """Returns a command that succeeds iff the installed hf-mount matches."""
-    # ``hf-mount --version`` prints e.g. ``hf-mount 0.3.1``.
+    # ``hf-mount --version`` prints e.g. ``hf-mount 0.6.5``.
     version = HF_MOUNT_VERSION.lstrip('v')
-    return f'hf-mount --version 2>/dev/null | grep -q "{version}"'
+    # ``-F``: match the version literally (the ``.`` separators are not regex).
+    return f'hf-mount --version 2>/dev/null | grep -qF "{version}"'
 
 
 def get_hf_mount_cmd(hf_id: str,

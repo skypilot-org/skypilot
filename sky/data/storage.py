@@ -5377,10 +5377,13 @@ class HuggingFaceStore(AbstractStore):
                     self.source)
                 if sub_path and getattr(self, '_bucket_sub_path', None) is None:
                     self._bucket_sub_path = sub_path
-                assert self.name == source_bucket_id, (
-                    f'HF bucket is specified as path ({self.source}); '
-                    f'storage name ({self.name!r}) must match the bucket id '
-                    f'({source_bucket_id!r}).')
+                if self.name != source_bucket_id:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            f'HF bucket is specified as path '
+                            f'({self.source}); storage name '
+                            f'({self.name!r}) must match the bucket id '
+                            f'({source_bucket_id!r}).')
             elif re.search(r'^\w+://', self.source):
                 # A non-HF cloud URI; we don't support cross-cloud upload into
                 # HF Buckets in v1 (server-side Xet copy is HF<->HF only).
