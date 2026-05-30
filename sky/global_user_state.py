@@ -3071,6 +3071,7 @@ def rotate_service_account_token(token_id: str,
         raise ValueError(f'Service account token {token_id} not found.')
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.
