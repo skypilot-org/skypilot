@@ -4983,3 +4983,289 @@ def test_v1node_get_taints_mixed_tolerated_and_untolerated():
     out = node.get_taints(tolerations=tols)
     by_key = {t['key']: t['tolerated'] for t in out}
     assert by_key == {'workload_pool': True, 'dangerous': False}
+
+
+# ---------------------------------------------------------------------------
+# Pod termination reason / OOM diagnosis helpers
+# (get_condensed_pod_reason, pod_terminated_abnormally,
+#  diagnose_terminated_pod)
+# ---------------------------------------------------------------------------
+
+
+def _make_container_status(*,
+                           terminated_reason=None,
+                           terminated_exit_code=None,
+                           last_terminated_reason=None,
+                           last_terminated_exit_code=None,
+                           waiting_reason=None,
+                           waiting_message=None):
+    """Build a V1ContainerStatus with the given current/last/waiting state."""
+    state = kubernetes.client.V1ContainerState()
+    if terminated_reason is not None or terminated_exit_code is not None:
+        state.terminated = kubernetes.client.V1ContainerStateTerminated(
+            exit_code=terminated_exit_code or 0, reason=terminated_reason)
+    if waiting_reason is not None:
+        state.waiting = kubernetes.client.V1ContainerStateWaiting(
+            reason=waiting_reason, message=waiting_message)
+    last_state = kubernetes.client.V1ContainerState()
+    if last_terminated_reason is not None or last_terminated_exit_code is not None:
+        last_state.terminated = kubernetes.client.V1ContainerStateTerminated(
+            exit_code=last_terminated_exit_code or 0,
+            reason=last_terminated_reason)
+    return kubernetes.client.V1ContainerStatus(name='c',
+                                               image='img',
+                                               image_id='',
+                                               ready=False,
+                                               restart_count=0,
+                                               state=state,
+                                               last_state=last_state)
+
+
+def _make_pod(*,
+              phase=None,
+              conditions=None,
+              container_statuses=None,
+              reason=None,
+              message=None):
+    return kubernetes.client.V1Pod(status=kubernetes.client.V1PodStatus(
+        phase=phase,
+        conditions=conditions,
+        container_statuses=container_statuses,
+        reason=reason,
+        message=message))
+
+
+def test_get_condensed_pod_reason_oomkilled():
+    pod = _make_pod(phase='Failed',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='OOMKilled',
+                                               terminated_exit_code=137)
+                    ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
+
+
+def test_get_condensed_pod_reason_uses_last_state():
+    # OOMKilled recorded only in last_state (e.g. mid-restart).
+    pod = _make_pod(phase='Running',
+                    container_statuses=[
+                        _make_container_status(
+                            last_terminated_reason='OOMKilled',
+                            last_terminated_exit_code=137)
+                    ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
+
+
+def test_get_condensed_pod_reason_no_reason_has_exit_code():
+    pod = _make_pod(
+        phase='Failed',
+        container_statuses=[_make_container_status(terminated_exit_code=1)])
+    assert utils.get_condensed_pod_reason(pod) == 'Terminated with exit code 1'
+
+
+def test_get_condensed_pod_reason_kueue_preemption_wins():
+    cond = kubernetes.client.V1PodCondition(type='TerminationTarget',
+                                            status='True',
+                                            reason='Preempted',
+                                            message='by higher priority')
+    pod = _make_pod(phase='Failed',
+                    conditions=[cond],
+                    container_statuses=[
+                        _make_container_status(terminated_reason='OOMKilled',
+                                               terminated_exit_code=137)
+                    ])
+    assert utils.get_condensed_pod_reason(pod) == (
+        'Preempted by Kueue: Preempted (by higher priority)')
+
+
+def test_get_condensed_pod_reason_fallback():
+    pod = _make_pod(phase='Failed', container_statuses=[])
+    assert utils.get_condensed_pod_reason(pod) == 'Terminated unexpectedly'
+
+
+def test_get_condensed_pod_reason_evicted_ephemeral():
+    # Ephemeral-storage eviction is recorded at the pod level, not in
+    # container statuses.
+    pod = _make_pod(
+        phase='Failed',
+        reason='Evicted',
+        message='Pod ephemeral local storage usage exceeds the total limit '
+        'of containers 1Gi.',
+        container_statuses=[])
+    reason = utils.get_condensed_pod_reason(pod)
+    assert reason.startswith('Evicted: ')
+    assert 'ephemeral' in reason
+
+
+def test_get_condensed_pod_reason_oomkilled_not_masked_by_pod_reason():
+    # Container OOMKilled (no pod-level reason set) still wins.
+    pod = _make_pod(phase='Failed',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='OOMKilled',
+                                               terminated_exit_code=137)
+                    ])
+    assert utils.get_condensed_pod_reason(pod) == 'OOMKilled (exit code 137)'
+
+
+def test_get_condensed_pod_reason_status_none():
+    # A pod with no status (e.g. not yet scheduled) must not crash.
+    pod = kubernetes.client.V1Pod(status=None)
+    assert utils.get_condensed_pod_reason(pod) == 'Terminated unexpectedly'
+
+
+def test_pod_terminated_abnormally_failed_phase():
+    assert utils.pod_terminated_abnormally(_make_pod(phase='Failed')) is True
+
+
+def test_pod_terminated_abnormally_nonzero_container_exit():
+    pod = _make_pod(phase='Running',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='OOMKilled',
+                                               terminated_exit_code=137)
+                    ])
+    assert utils.pod_terminated_abnormally(pod) is True
+
+
+def test_pod_terminated_abnormally_crashloopbackoff():
+    pod = _make_pod(
+        phase='Running',
+        container_statuses=[
+            _make_container_status(waiting_reason='CrashLoopBackOff')
+        ])
+    assert utils.pod_terminated_abnormally(pod) is True
+
+
+def test_pod_terminated_abnormally_clean_success():
+    pod = _make_pod(phase='Succeeded',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='Completed',
+                                               terminated_exit_code=0)
+                    ])
+    assert utils.pod_terminated_abnormally(pod) is False
+
+
+def test_pod_terminated_abnormally_status_none():
+    # A pod with no status must not crash and is not considered abnormal.
+    pod = kubernetes.client.V1Pod(status=None)
+    assert utils.pod_terminated_abnormally(pod) is False
+
+
+def _patch_read_pod(monkeypatch, pod=None, side_effect=None):
+    core_api = mock.MagicMock()
+    if side_effect is not None:
+        core_api.read_namespaced_pod.side_effect = side_effect
+    else:
+        core_api.read_namespaced_pod.return_value = pod
+    monkeypatch.setattr(utils.kubernetes, 'core_api', lambda context: core_api)
+    return core_api
+
+
+def test_diagnose_terminated_pod_oom_includes_reason_and_hint(monkeypatch):
+    pod = _make_pod(phase='Failed',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='OOMKilled',
+                                               terminated_exit_code=137)
+                    ])
+    _patch_read_pod(monkeypatch, pod=pod)
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert 'OOMKilled (exit code 137)' in msg
+    assert 'mypod' in msg
+    assert 'Hint:' in msg
+    assert 'ran out of memory' in msg
+
+
+def test_diagnose_terminated_pod_healthy_returns_none(monkeypatch):
+    pod = _make_pod(phase='Running',
+                    container_statuses=[_make_container_status()])
+    _patch_read_pod(monkeypatch, pod=pod)
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
+
+
+def test_diagnose_terminated_pod_read_error_returns_none(monkeypatch):
+    _patch_read_pod(monkeypatch, side_effect=RuntimeError('api down'))
+    assert utils.diagnose_terminated_pod('ctx', 'ns', 'mypod') is None
+
+
+def test_diagnose_terminated_pod_non_oom_has_no_hint(monkeypatch):
+    pod = _make_pod(phase='Failed',
+                    container_statuses=[
+                        _make_container_status(terminated_reason='Error',
+                                               terminated_exit_code=1)
+                    ])
+    _patch_read_pod(monkeypatch, pod=pod)
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert 'Error (exit code 1)' in msg
+    assert 'Hint:' not in msg
+
+
+def test_diagnose_terminated_pod_evicted_ephemeral(monkeypatch):
+    pod = _make_pod(
+        phase='Failed',
+        reason='Evicted',
+        message='Pod ephemeral local storage usage exceeds the total limit '
+        'of containers 1Gi.',
+        container_statuses=[])
+    _patch_read_pod(monkeypatch, pod=pod)
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert 'Evicted' in msg
+    assert 'ephemeral' in msg
+    assert 'Hint:' in msg
+
+
+def test_match_kubernetes_failure_hint_oom():
+    assert 'ran out of memory' in utils.match_kubernetes_failure_hint(
+        'OOMKilled (exit code 137)')
+
+
+def test_match_kubernetes_failure_hint_multi_substring():
+    # ErrImagePull is one of two substrings mapped to the image hint.
+    assert 'image tag' in utils.match_kubernetes_failure_hint('ErrImagePull')
+
+
+def test_match_kubernetes_failure_hint_no_match_returns_none():
+    assert utils.match_kubernetes_failure_hint('SomeUnknownReason') is None
+
+
+def test_match_kubernetes_failure_hint_ephemeral_precedes_evicted():
+    # An ephemeral-storage eviction reason contains both substrings; the more
+    # specific 'ephemeral' hint must win.
+    hint = utils.match_kubernetes_failure_hint(
+        'Evicted: Pod ephemeral local storage usage exceeds the total limit')
+    assert hint is not None
+    assert 'ephemeral' in hint
+
+
+def test_match_kubernetes_failure_hint_generic_eviction():
+    # A non-ephemeral eviction falls to the general eviction hint.
+    hint = utils.match_kubernetes_failure_hint(
+        'Evicted: The node was low on resource: memory')
+    assert hint is not None
+    assert hint.startswith(
+        'The pod was evicted by the node under resource pressure.')
+
+
+def test_get_failure_hint_reasons_flattens_table():
+    reasons = utils.get_failure_hint_reasons()
+    # Every reason with a hint must report as a specific cause; otherwise each
+    # reason has a match_kubernetes_failure_hint hit.
+    for reason in reasons:
+        assert utils.match_kubernetes_failure_hint(reason) is not None
+    assert 'OOMKilled' in reasons and 'Evicted' in reasons
+
+
+def test_diagnose_terminated_pod_substitutes_dashboard_url_token(monkeypatch):
+    # A matched hint containing {dashboard_url} is rendered with a generic
+    # phrase, since this module can't resolve the real URL.
+    pod = _make_pod(phase='Failed',
+                    container_statuses=[
+                        _make_container_status(
+                            terminated_reason='Insufficient memory',
+                            terminated_exit_code=1)
+                    ])
+    _patch_read_pod(monkeypatch, pod=pod)
+    msg = utils.diagnose_terminated_pod('ctx', 'ns', 'mypod')
+    assert msg is not None
+    assert '{dashboard_url}' not in msg
+    assert 'the SkyPilot dashboard infra page' in msg
