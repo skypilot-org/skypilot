@@ -129,10 +129,11 @@ def test_aws_image_id_dict_with_docker():
     is reachable because the container runs with --net=host).
     """
     name = smoke_tests_utils.get_cluster_name()
-    region = 'us-east-1'
-    # Resolve the AMI that the SkyPilot CPU image tag maps to in this region,
-    # so we can assert the VM actually booted from the requested cloud image.
-    expected_ami = catalog.get_image_id_from_tag('skypilot:cpu-ubuntu-2004',
+    region = 'us-west-2'
+    # Resolve the AMI that the SkyPilot image tag maps to in this region, so
+    # we can assert the VM actually booted from the requested cloud image.
+    # Must match tests/test_yamls/test_aws_ami_and_docker.yaml.
+    expected_ami = catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004',
                                                  region,
                                                  clouds='aws')
     test = smoke_tests_utils.Test(

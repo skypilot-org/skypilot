@@ -1,11 +1,15 @@
 # Specifies both a cloud VM image (a SkyPilot-published AMI) and a Docker
 # image in the same image_id field (PR #9759). The VM should boot from the
 # given AMI and the job should run inside the Docker container.
+#
+# skypilot:gpu-ubuntu-2004 in us-west-2 is a known-valid AWS image tag (also
+# used by test_aws_image_id_dict_region); it is docker-ready. We run it on a
+# cheap CPU instance, the point is the AMI, not the GPU.
 resources:
-  infra: aws/us-east-1
+  infra: aws/us-west-2
   cpus: 2+
   image_id:
-    us-east-1: skypilot:cpu-ubuntu-2004
+    us-west-2: skypilot:gpu-ubuntu-2004
     docker: ubuntu:22.04
 
 run: |
