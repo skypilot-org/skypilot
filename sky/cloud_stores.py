@@ -751,23 +751,21 @@ class VastDataCloudStorage(CloudStorage):
 class HFCloudStorage(CloudStorage):
     """Hugging Face Buckets and Hub repos."""
 
-    # huggingface_hub>=1.5 declares ``click>=8.4`` (via its core deps and
-    # typer), but the remote runtime pins ``ray==2.9.3``, whose CLI crashes at
-    # import under click>=8.3 (deepcopy of click Sentinel values; see
-    # https://github.com/ray-project/ray/issues/56747). When huggingface_hub is
-    # installed into the runtime venv it upgrades click past that bound and
-    # breaks ``ray status`` / ``sky status -r``, leaving the cluster stuck in
-    # INIT. The bucket API works fine with the older click, so we pass a uv
-    # override that keeps click below the ray-breaking version (matching the
-    # ``click<8.3.0`` pin used when installing ray) while still installing
-    # huggingface_hub's other dependencies. A plain ``click<8.3.0`` constraint
-    # would instead be unsatisfiable against the declared ``>=8.4``.
+    # huggingface_hub>=1.5 needs click>=8.4, but the runtime's pinned
+    # ray==2.9.3 crashes its CLI under click>=8.3 (ray-project/ray#56747), so
+    # `ray status` fails and the cluster gets stuck in INIT. We use only the
+    # huggingface_hub SDK (its `hf` CLI is the sole click user), so older click
+    # is fine -- cap it with a uv override. Not the simpler forms because:
+    #   - `install "huggingface_hub>=1.5" "click<8.3.0"` makes click a co-req
+    #     conflicting with click>=8.4, so uv downgrades huggingface_hub instead.
+    #   - installing huggingface_hub then a separate `install "click<8.3.0"`
+    #     leaves click at 8.4.x between the commands, racing `ray status`.
+    # An override caps click in one resolution (never installed at >=8.3) and
+    # keeps huggingface_hub latest. uv's --overrides takes a file only.
     _HF_UV_OVERRIDE_FILE = '~/.sky/hf_uv_override.txt'
     _GET_HF_HUB = [
         'mkdir -p ~/.sky',
-        # Write the override file atomically (tmp file + mv) and only if it
-        # doesn't already exist, so parallel COPY syncs that run this command
-        # concurrently can't truncate it while another's uv install reads it.
+        # Write atomically + only if absent so parallel COPY syncs don't race.
         f'[ -f {_HF_UV_OVERRIDE_FILE} ] || '
         f'(tmpfile=$(mktemp {_HF_UV_OVERRIDE_FILE}.XXXXXX) && '
         f'printf "click<8.3.0\\n" > "$tmpfile" && '
