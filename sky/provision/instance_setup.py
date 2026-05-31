@@ -4,9 +4,11 @@ from concurrent import futures
 import functools
 import gzip
 import hashlib
+import inspect
 import json
 import os
 import shlex
+import textwrap
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -26,6 +28,7 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import source_utils
 from sky.utils import subprocess_utils
@@ -130,11 +133,34 @@ _READ_RAY_PORT_PY = (
     f'\'{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}\', \'~\')); '
     'print(json.load(open(os.path.join(d, '
     f'\'{constants.SKY_REMOTE_RAY_PORT_FILE}\')))[\'ray_port\'])')
+
+
+def _build_inlined_encode_payload_script() -> str:
+    """Build a stdlib-only python script that encodes ``{'ray_port': $RAY_PORT}``
+    using the same payload format as ``message_utils.encode_payload``.
+
+    Importing ``sky.utils.message_utils`` on the remote head pulls in the full
+    ``sky`` package (~2s cold start). The function itself is stdlib-only (json
+    + a string format), so we copy its source via ``inspect`` and inline it,
+    keeping the wire format coupled to the real implementation. A drift-guard
+    test (``tests/unit_tests/test_ray_port_inline_encode.py``) executes this
+    script in a fresh interpreter and compares against ``encode_payload``.
+    """
+    encode_src = textwrap.dedent(inspect.getsource(message_utils.encode_payload))
+    return (f'_PAYLOAD_STR = {message_utils._PAYLOAD_STR!r}\n'  # pylint: disable=protected-access
+            f'from typing import Any, Optional\n'
+            f'import json\n'
+            f'import os\n'
+            f'{encode_src}\n'
+            f'print(encode_payload({{"ray_port": int(os.environ["RAY_PORT"])}}))')
+
+
+_RAY_PORT_ENCODE_SCRIPT = _build_inlined_encode_payload_script()
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c "{_READ_RAY_PORT_PY}" '
-    f'2> /dev/null || echo {constants.SKY_REMOTE_RAY_PORT});'
-    f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
-    'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
+    f'2> /dev/null || echo {constants.SKY_REMOTE_RAY_PORT}); '
+    f'RAY_PORT=$RAY_PORT {constants.SKY_PYTHON_CMD} -c '
+    f'{shlex.quote(_RAY_PORT_ENCODE_SCRIPT)}')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
