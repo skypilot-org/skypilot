@@ -80,3 +80,38 @@ export function canonicalizeGpuName(rawName) {
       .trim() || 'Unknown'
   );
 }
+
+/**
+ * Check whether a cluster or managed-job task has any accelerator requested.
+ *
+ * Accepts the structured `accelerators` field SkyPilot exposes on both
+ * clusters and managed jobs. The value can be:
+ *   - An object: {"A100": 4}, {"H100-80GB": 8}, or {} for none
+ *   - A Python-repr string: "{'A100': 4}" or "None" or ""
+ *   - null / undefined
+ *
+ * Used to decide whether to render GPU telemetry panels; CPU-only resources
+ * should suppress GPU panels to avoid empty charts.
+ *
+ * @param {Object|string|null} accelerators - The accelerators field
+ * @returns {boolean} True if any accelerator is requested.
+ */
+export function hasAccelerator(accelerators) {
+  if (accelerators == null) return false;
+  let parsed = accelerators;
+  // Handle Python-repr strings like "{'A100': 4}" or "None".
+  if (typeof accelerators === 'string') {
+    const trimmed = accelerators.trim();
+    if (!trimmed || trimmed === 'None' || trimmed === 'null') return false;
+    try {
+      parsed = JSON.parse(trimmed.replace(/'/g, '"').replace(/None/g, 'null'));
+    } catch {
+      return false;
+    }
+  }
+  if (typeof parsed === 'object' && parsed !== null) {
+    // Any entry with a non-zero count means an accelerator is requested.
+    return Object.values(parsed).some((v) => Number(v) > 0);
+  }
+  return false;
+}

@@ -751,8 +751,10 @@ class TestGetAllVolumesUsedBy:
             'test-pvc', [])
         assert pods_list == ['running-pod']
         # used_by_clusters is keyed by cluster_name
-        assert 'cluster-1' in used_by_clusters['my-context']['my-namespace']
-        assert 'cluster-2' not in used_by_clusters['my-context']['my-namespace']
+        assert 'cluster-1' in used_by_clusters['my-context']['my-namespace'][
+            'test-pvc']
+        assert 'cluster-2' not in used_by_clusters['my-context'][
+            'my-namespace']['test-pvc']
 
     @patch('sky.provision.kubernetes.volume.kubernetes')
     @patch(
@@ -1138,6 +1140,82 @@ class TestPopulateConfigFromPVC:
 
         assert config.config.get('storage_class_name') == 'fast-ssd'
         assert config.size == '100'  # Converted from '100Gi' to string
+        assert config.config.get('access_mode') == 'ReadWriteOnce'
+
+    def test_populate_access_mode_inferred(self):
+        """Test access_mode is inferred from PVC when not set in config."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteMany'])
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteMany'
+
+    def test_populate_access_mode_override_with_warning(self):
+        """Test access_mode is overridden when PVC differs from config."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={'access_mode': 'ReadWriteOnce'},
+        )
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteMany'])
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteMany'
+
+    def test_populate_access_mode_matching(self):
+        """Test no change when PVC access_mode matches config."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={'access_mode': 'ReadWriteOnce'},
+        )
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteOnce'])
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteOnce'
+
+    def test_populate_access_mode_empty(self):
+        """Test no change when PVC has no access_modes."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={'access_mode': 'ReadWriteOnce'},
+        )
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.spec.access_modes = None
+        k8s_volume._populate_config_from_pvc(config, mock_pvc)
+        assert config.config.get('access_mode') == 'ReadWriteOnce'
 
     def test_populate_config_from_pvc_preserve_existing(self):
         """Test that existing config values are not overwritten."""
@@ -1533,10 +1611,14 @@ class MockPV:
 class TestRefreshVolumeConfig:
     """Tests for refresh_volume_config function."""
 
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
+           'is_incluster_config_available')
     @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
-    def test_refresh_volume_config_region_none(self, mock_in_cluster_context):
-        """When region is None, it should be set from in-cluster context."""
+    def test_refresh_volume_config_region_none_incluster(
+            self, mock_in_cluster_context, mock_is_incluster):
+        """region=None + in-cluster auth available: rewrite to in-cluster name."""
         mock_in_cluster_context.return_value = 'in-cluster-context'
+        mock_is_incluster.return_value = True
 
         config = models.VolumeConfig(
             _version=1,
@@ -1557,6 +1639,72 @@ class TestRefreshVolumeConfig:
         # The original object should also be updated in place
         assert config.region == 'in-cluster-context'
         mock_in_cluster_context.assert_called_once()
+
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
+           'is_incluster_config_available')
+    @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
+    def test_refresh_volume_config_region_none_kubeconfig_only(
+            self, mock_in_cluster_context, mock_is_incluster):
+        """region=None + no in-cluster auth: must NOT rewrite to 'in-cluster'.
+
+        Regression test for the race surfaced by build #10973
+        (test_hostpath_volume_on_kubernetes). Mechanism:
+
+        1. ``sky volumes apply`` (no ``infra:`` field) inserts a row with
+           region=None.
+        2. The 60s volume-refresh daemon ticks (sky/server/daemons.py:182,
+           VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS=60).
+        3. The unfixed ``refresh_volume_config`` unconditionally rewrites
+           region=None to ``kubernetes.in_cluster_context_name()``, which
+           returns the literal string ``'in-cluster'`` when
+           SKYPILOT_IN_CLUSTER_CONTEXT_NAME is unset (the default).
+        4. On the next ``sky launch``, Task topology forces
+           ``task.resources.region = volume.region`` (sky/task.py:1122-1134),
+           and the optimizer's ``_check_specified_regions`` rejects
+           ``'in-cluster'`` because it isn't in the kubeconfig contexts
+           (sky/optimizer.py:1647-1668) -> raises
+           ``ResourcesUnavailableError: ... requires volume X with infra
+           Kubernetes/in-cluster which is not enabled``.
+
+        Pass-then-fail-then-pass-on-retry pattern in the wild is purely the
+        60s daemon-tick race: if the tick fires in the window between
+        ``apply`` and ``launch``, the row is poisoned. The fix is to NOT
+        rewrite when in-cluster auth isn't actually available — leaving
+        region=None lets the launch resolve the context from ``--infra``.
+        """
+        mock_is_incluster.return_value = False
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+
+        need_refresh, new_config = k8s_volume.refresh_volume_config(config)
+
+        # If these assertions ever fail, the production bug is back:
+        # any sky launch referencing this volume on a kubeconfig-only host
+        # will raise ResourcesUnavailableError after the next daemon tick.
+        assert need_refresh is False, (
+            'refresh_volume_config rewrote region=None to '
+            f'{new_config.region!r} even though in-cluster auth is '
+            'unavailable. Production effect: every subsequent sky launch '
+            'referencing this volume on a kubeconfig-only host '
+            '(e.g. kind buildkite agent) will raise '
+            'ResourcesUnavailableError: "requires volume X with infra '
+            'Kubernetes/in-cluster which is not enabled" once the 60s '
+            'volume-refresh daemon ticks.')
+        assert new_config.region is None, (
+            f'Expected region to stay None; got {new_config.region!r}.')
+        assert config.region is None, (
+            f'Expected in-place region to stay None; got {config.region!r}.')
+        mock_in_cluster_context.assert_not_called()
 
     def test_refresh_volume_config_region_set(self):
         """When region is already set, it should be kept and no refresh needed."""

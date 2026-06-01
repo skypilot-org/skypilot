@@ -29,7 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
-    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
+    :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 720
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
     :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
 
@@ -72,6 +72,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`namespace <config-yaml-kubernetes-namespace>`: my-namespace
+    :ref:`allowed_nodes <config-yaml-kubernetes-allowed-nodes>`:
+      names:
+        - gpu-node-01
     :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
       labels:
         mylabel: myvalue
@@ -85,6 +89,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
     :ref:`dws <config-yaml-kubernetes-dws>`:
@@ -97,6 +102,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         A100: 3.50     # $/accelerator/hr
+    :ref:`apt_mirrors <config-yaml-kubernetes-apt-mirrors>`:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -136,12 +144,18 @@ Below is the configuration syntax and some example values. See detailed explanat
       memory: 0.01     # $/GB/hr
       accelerators:
         V100: 2.50     # $/accelerator/hr
+    :ref:`gpu_partition_map <config-yaml-slurm-gpu-partition-map>`:
+      H100: h100-partition
+    :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
+        gpu_partition_map:
+          H100: h100-custom
+        cpu_partition: cpu-only
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -150,6 +164,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
+    :ref:`subnet_names <config-yaml-aws-subnet-names>`:
+      - skypilot-subnet-1
+      - skypilot-subnet-2
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
     :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -170,6 +187,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
       my-label: my-value
     :ref:`vpc_name <config-yaml-gcp-vpc-name>`: skypilot-vpc
+    :ref:`subnet_names <config-yaml-gcp-subnet-names>`:
+      - skypilot-subnet
     :ref:`use_internal_ips <config-yaml-gcp-use-internal-ips>`: true
     :ref:`force_enable_external_ips <config-yaml-gcp-force-enable-external-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-gcp-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -226,6 +245,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
+    :ref:`security_group_name <config-yaml-nebius-security-group-name>`: my-sg
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
@@ -310,7 +330,7 @@ Retention period for cluster events in hours (optional). Set to a negative value
 
 Cluster event GC will remove cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
 
-Default: ``24.0`` (1 day).
+Default: ``720.0`` (30 days).
 
 Example:
 
@@ -366,6 +386,9 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
+.. note::
+  For :ref:`remote API servers <sky-api-server-remote>`, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default, which means the API server manages jobs directly. In this mode, ``controller.resources`` and ``controller.autostop`` settings are ignored.
+
 For more information about managed jobs, see :ref:`managed-jobs`.
 
 
@@ -416,9 +439,9 @@ Example:
 ``jobs.controller.consolidation_mode``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the API server, rather than on a :ref:`remote controller cluster <jobs-controller-remote>`. Don't enable unless you are using a remotely-deployed API server.
 
-Default: ``false``.
+Default: when unset, automatically enabled for :ref:`remote API servers <sky-api-server-remote>`. Otherwise disabled. Changes require an API server restart to take effect.
 
 Example:
 
@@ -434,7 +457,7 @@ Example:
 ``jobs.controller.resources``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure resources for the managed jobs controller.
+Configure resources for the remote managed jobs controller. Ignored when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for remote API servers); in that case, tune the API server's resources instead (see :ref:`sky-api-server-resources-tuning`).
 
 For more details about tuning the jobs controller resources, see :ref:`jobs-controller-sizing`.
 
@@ -457,7 +480,7 @@ Example:
 ``jobs.controller.autostop``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
+Configure :ref:`autostop <auto-stop>` for the remote managed jobs controller. Not applicable when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for remote API servers), since the controller lifecycle is tied to the API server.
 
 By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically restarted when a new job is launched.
 
@@ -748,6 +771,36 @@ It is possible to set either a ``string`` (one VPC), or a ``list`` (multiple
 target VPCs).
 
 Default: ``null`` (use the default VPC in each region).
+
+.. _config-yaml-aws-subnet-names:
+
+``aws.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use in each region (optional).
+
+If set, SkyPilot will only use the specified subnets when launching instances.
+Subnets are matched by their ``Name`` tag. Multiple subnets can be specified
+for failover across availability zones. The subnets must all belong to the
+same VPC.
+
+If ``vpc_names`` is also set, the specified subnets must belong to the
+specified VPC. If ``vpc_names`` is not set, the VPC is automatically inferred
+from the specified subnets.
+
+It is possible to set either a ``string`` (one subnet name) or a ``list``
+(multiple subnet names).
+
+Default: ``null`` (automatically select subnets from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    subnet_names:
+      - skypilot-subnet-1
+      - skypilot-subnet-2
 
 .. _config-yaml-aws-use-internal-ips:
 
@@ -1086,14 +1139,49 @@ By default, only VPCs from the current project are used.
 .. code-block:: yaml
 
   gcp:
-    vpc-name: my-vpc
+    vpc_name: my-vpc
 
 To use a shared VPC from another GCP project, specify the name as ``<project ID>/<vpc name>``. For example:
 
 .. code-block:: yaml
 
   gcp:
-    vpc-name: my-project-123456/default
+    vpc_name: my-project-123456/default
+
+.. _config-yaml-gcp-subnet-names:
+
+``gcp.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use within the selected GCP VPC (optional).
+
+If set, SkyPilot will only consider subnets whose names match the provided
+string or list of strings. This can be used together with ``vpc_name`` to pick
+one specific subnet inside a custom VPC. If ``vpc_name`` is not set, SkyPilot
+will infer the VPC from the matching subnet. The matched subnets must belong to
+the same VPC.
+
+For shared VPCs, ``vpc_name`` must be set to ``<project ID>/<vpc name>`` when
+using ``subnet_names``. The subnet-only inference path only searches the
+current project and will not find subnets in a shared VPC host project.
+
+When ``subnet_names`` is set, SkyPilot uses the selected VPC/subnet as-is.
+Make sure the chosen VPC already has the
+:ref:`necessary firewall rules <gcp-minimum-firewall-rules>`.
+
+Because each GCP VM interface uses a single subnet, SkyPilot uses the first
+matching subnet in the order provided.
+
+Default: ``null`` (automatically select a subnet from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc_name: my-vpc
+    subnet_names:
+      - train-subnet-a
 
 .. _config-yaml-gcp-use-internal-ips:
 
@@ -1524,6 +1612,91 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
 
+.. _config-yaml-kubernetes-namespace:
+
+``kubernetes.namespace``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Kubernetes namespace SkyPilot pods are launched into (optional).
+
+If unset, SkyPilot uses the namespace from the active kubeconfig context (or
+``default``), preserving the historical behavior. Setting this value lets you
+target a specific namespace without modifying your kubeconfig.
+
+.. code-block:: yaml
+
+  kubernetes:
+    namespace: my-namespace
+
+You can also set this per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        namespace: prod-workloads
+      dev-cluster:
+        namespace: dev-workloads
+
+When set, the namespace is used for both pod creation and resource discovery
+(e.g., listing pods to count used resources), so quotas and visibility line up
+with the chosen namespace.
+
+For per-workspace overrides — e.g. sharing a single cluster context across
+teams, with each team scoped to its own namespace — see
+:ref:`Workspaces <workspaces>`.
+
+.. _config-yaml-kubernetes-allowed-nodes:
+
+``kubernetes.allowed_nodes``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restrict which Kubernetes nodes SkyPilot can use within a cluster (optional).
+
+This filters nodes from both resource discovery (e.g., ``sky gpus list``) and pod
+scheduling. It is the node-level equivalent of ``allowed_contexts``.
+
+All criteria are OR'd: a node is allowed if it matches **any** label key-value pair,
+**any** name, or **any** IP address. If ``allowed_nodes`` is not set, all nodes in
+the cluster are available.
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_nodes:
+      # Label selectors: each key-value pair is OR'd.
+      # A node matching pool=gpu OR team=research is allowed.
+      label_selector:
+        pool: gpu
+        team: research
+      # Explicit node names:
+      names:
+        - gpu-node-01
+        - gpu-node-02
+      # Explicit IPs (internal or external):
+      ips:
+        - 10.0.1.5
+        - 10.0.1.6
+
+You can also set this per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        allowed_nodes:
+          label_selector:
+            pool: production-gpu
+
+.. note::
+
+  When using only ``label_selector`` (no ``names`` or ``ips``), new nodes that
+  match the labels are automatically eligible (autoscaler-friendly). When
+  ``names`` or ``ips`` are configured, the allowed node set is resolved at
+  pod creation time.
+
 .. _config-yaml-kubernetes-custom-metadata:
 
 ``kubernetes.custom_metadata``
@@ -1627,6 +1800,51 @@ By default, SkyPilot automatically creates a single container named ``ray-node``
         containers:
           - name: ray-node
             ...
+
+.. _config-yaml-kubernetes-enable-docker:
+
+``kubernetes.enable_docker``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable Docker inside SkyPilot pods (optional, default: disabled).
+
+Set this to make the ``docker`` CLI available inside the pod. SkyPilot
+automatically injects a sidecar container with the appropriate runtime and
+installs the ``docker`` CLI and ``docker buildx`` plugin.
+
+Accepted values:
+
+- ``true`` or ``ALL`` — Full Docker access (build, push, and ``docker run``).
+  Requires ``privileged: true`` permission on the cluster.
+- ``BUILD`` — Build and push images only (via ``docker buildx build``). Does
+  not require privileged permissions.
+- ``false`` (default) — Docker is not injected.
+
+Simple form:
+
+.. code-block:: yaml
+
+   kubernetes:
+     enable_docker: true   # or ALL / BUILD
+
+Detailed form with a persistent cache volume:
+
+.. code-block:: yaml
+
+   kubernetes:
+     enable_docker:
+       mode: ALL            # or BUILD
+       cache_volume: my-builder-cache  # SkyPilot volume name
+
+This can also be set per-task in the task YAML's ``config`` field:
+
+.. code-block:: yaml
+
+   config:
+     kubernetes:
+       enable_docker: true
+
+See :ref:`use-docker-in-pod` for a full guide.
 
 .. _config-yaml-kubernetes-kueue:
 
@@ -1809,6 +2027,27 @@ keys you specify are overridden, and unmentioned accelerators are inherited.
           # inherited from the cloud-level pricing above.
           cpu: 0.08
 
+.. _config-yaml-kubernetes-apt-mirrors:
+
+``kubernetes.apt_mirrors``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Override the APT mirrors tried when installing packages on a pod (optional).
+Hostnames only (no scheme/path); tried in order. Set to ``[]`` to disable
+fallback mirrors entirely. When unset, SkyPilot uses a built-in fallback list
+(``mirrors.wikimedia.org``, ``mirror.umd.edu``).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    apt_mirrors:
+      - mirror.math.princeton.edu
+      - mirrors.kernel.org
+
+Can also be set per-context via ``context_configs``.
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -1957,6 +2196,72 @@ Example:
 Pricing can also be set per-cluster and per-partition using
 :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
 
+.. _config-yaml-slurm-gpu-partition-map:
+
+``slurm.gpu_partition_map``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Mapping of GPU types to Slurm partition names (optional).
+
+Some Slurm clusters configure
+`GRES <https://slurm.schedmd.com/gres.html>`_ without a GPU type
+(e.g., ``--gres=gpu:8`` instead of ``--gres=gpu:h100:8``), and rely on
+partitions to select the correct node type. By default, SkyPilot generates
+typed GRES directives (``--gres=gpu:<type>:<count>``), which will fail on
+these clusters.
+
+``gpu_partition_map`` tells SkyPilot which partitions correspond to which GPU
+types. When a GPU type is found in the map, SkyPilot will:
+
+1. Narrow the list of candidate partitions to those in the map.
+2. Generate GRES **without** a GPU type (``--gres=gpu:<count>``).
+
+Each key is a GPU type (case-insensitive) and each value is either a single
+partition name or a list of partition names.
+
+Default: not set.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    gpu_partition_map:
+      H100: h100-partition
+      A100:
+        - a100-train
+        - a100-dev
+
+``gpu_partition_map`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. Per-cluster
+values override global values for the same GPU type.
+
+.. _config-yaml-slurm-cpu-partition:
+
+``slurm.cpu_partition``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Slurm partition to use for CPU-only tasks (optional).
+
+When ``--gpus`` is not provided (i.e., no accelerators are requested),
+SkyPilot will use this partition instead of the cluster's default partition.
+This is useful when your Slurm cluster has separate partitions for CPU-only
+and GPU workloads.
+
+Default: not set (uses the cluster's default partition).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    cpu_partition: cpu-batch
+
+``cpu_partition`` can also be set per-cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`, or per-task
+using the ``config:`` block in a task YAML. Per-cluster values override
+global values.
+
 .. _config-yaml-slurm-cluster-configs:
 
 ``slurm.cluster_configs``
@@ -1980,6 +2285,15 @@ Supported fields:
   accelerators are inherited. The merge order is::
 
       cloud-level  <  cluster-level  <  partition-level
+
+- ``gpu_partition_map``:
+  :ref:`GPU partition map <config-yaml-slurm-gpu-partition-map>` overrides at
+  the cluster level. Per-cluster values override global values for the same
+  GPU type.
+
+- ``cpu_partition``:
+  :ref:`CPU partition <config-yaml-slurm-cpu-partition>` override at the
+  cluster level. Per-cluster values override the global value.
 
 Example:
 
@@ -2011,6 +2325,13 @@ Example:
         workdir: /home/$USER
         pricing:
           cpu: 0.03
+        # Map GPU types to partitions for clusters with GRES
+        # without a GPU type.
+        gpu_partition_map:
+          H100: h100-partition
+          A100:
+            - a100-train
+            - a100-dev
         partition_configs:
           gpu-partition:
             # Override accelerator rate for this partition; other values
@@ -2209,6 +2530,63 @@ Example:
 
   nebius:
     domain: api.nebius.cloud:443
+
+.. _config-yaml-nebius-security-group-name:
+
+``nebius.security_group_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Security group (optional).
+
+Name of an existing Nebius security group to attach to launched VMs. If not
+specified, SkyPilot creates and manages a per-cluster security group named
+``sky-sg-<cluster-name-on-cloud>``.
+
+Note: the user-supplied security group must already exist in the **same Nebius
+network** as the subnet SkyPilot uses for the cluster. SkyPilot will not create
+the security group on your behalf when this option is set. You can check a
+security group's network in the Nebius console under VPC > Security Groups.
+
+The security group must already have at least one rule before launch. SkyPilot
+deliberately does not modify a user-managed security group — silently adding
+default rules (e.g., SSH from anywhere) would conflict with the "you own the
+rules" intent of BYO. Pre-configure at minimum:
+
+- An ingress rule allowing your operator CIDR to reach SSH on ports 22 and 10022
+- A self-referencing ingress rule for intra-cluster traffic (head/worker Ray
+  on 6379, 8265, 52365, the worker port range, etc.)
+- Any application ports your task declares via ``ports:``
+
+When ``security_group_name`` is set and the task declares ``ports:``, SkyPilot
+will warn at launch and skip ``open_ports`` — adding the matching ingress rules
+is the user's responsibility.
+
+Some example use cases are shown below.
+
+- ``<string>``: Use the named security group for all clusters.
+
+- ``<list of single-element dict>``: A list of single-element dictionaries
+  mapping from the cluster name (pattern) to the security group name to use.
+  The matching is done in the same order as the list.
+
+  NOTE: If none of the wildcard expressions match the cluster name, SkyPilot
+  will fall back to creating its own security group named
+  ``sky-sg-<cluster-name-on-cloud>``. To specify a default, use ``*`` as the
+  wildcard expression.
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    # Format 1 — single SG for all clusters
+    security_group_name: my-sg
+
+    # Format 2 — per-cluster pattern matching
+    security_group_name:
+      - my-training-*: my-training-sg
+      - sky-serve-controller-*: my-serving-sg
+      - "*": my-default-sg
 
 .. _config-yaml-vast:
 

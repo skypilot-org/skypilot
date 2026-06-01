@@ -56,7 +56,28 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         try:
             result = fn(*args, **kwargs)
             fut.set_result(result)
-        except (Exception, asyncio.exceptions.CancelledError) as e:  # pylint: disable=broad-except
+        except asyncio.CancelledError:
+            # Cancellation is an expected terminal state, not an error.
+            # Put the future into CANCELLED state instead of FINISHED with a
+            # CancelledError exception, so that the asyncio-side future (via
+            # asyncio.wrap_future / loop.run_in_executor) is also cancelled
+            # and does not trigger the "Future exception was never retrieved"
+            # warning when the awaiter was itself cancelled and never consumes
+            # the exception.
+            logger.debug(f'Executor [{self.name}] cancelled {fn}')
+            if not fut.cancelled():
+                # fut.cancel() succeeds only when the future is in PENDING
+                # state. OnDemandThreadExecutor does not call
+                # set_running_or_notify_cancel(), so the future stays PENDING
+                # here. If a future refactor changes that, fall back to
+                # set_exception to preserve the cancellation signal.
+                # Also guard with fut.done() in case of a race where the future
+                # transitioned to a terminal state between our cancelled() check
+                # and cancel() call — set_exception on a done future raises
+                # InvalidStateError.
+                if not fut.cancel() and not fut.done():
+                    fut.set_exception(asyncio.CancelledError())
+        except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             if not fut.cancelled():
                 # Only set the exception if the future is not cancelled to avoid

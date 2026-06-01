@@ -6,6 +6,8 @@ from click import testing as cli_testing
 import pytest
 
 from sky import clouds as sky_clouds
+from sky import exceptions
+from sky import models
 import sky.check as sky_check
 from sky.client.cli import command
 from sky.clouds import cloud as sky_cloud
@@ -231,8 +233,10 @@ def _mock_k8s_env(monkeypatch,
         lambda: False)
 
     # Mock per-context credential checks as enabled
-    def mock_check_credentials(context, run_optional_checks=True):
-        del run_optional_checks
+    def mock_check_credentials(context,
+                               run_optional_checks=True,
+                               cloud='kubernetes'):
+        del run_optional_checks, cloud
         return True, check_note
 
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_credentials',
@@ -585,3 +589,25 @@ class TestCheckJsonOutput:
 
         assert result.exit_code == 0
         assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+
+class TestCheckWorkspacePermission:
+    """Tests for workspace permission check in sky.check.check."""
+
+    @mock.patch('sky.check.check_capabilities', return_value={})
+    @mock.patch('sky.workspaces.core.check_workspace_permission')
+    def test_rejects_unauthorized_workspace(self, mock_check, _):
+        mock_check.side_effect = exceptions.PermissionDeniedError('no access')
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.check.common_utils.get_current_user',
+                        return_value=mock_user):
+            with pytest.raises(exceptions.PermissionDeniedError,
+                               match='no access'):
+                sky_check.check(workspace='restricted')
+        mock_check.assert_called_once_with(mock_user, 'restricted')
+
+    @mock.patch('sky.check.check_capabilities', return_value={})
+    @mock.patch('sky.workspaces.core.check_workspace_permission')
+    def test_skips_check_when_workspace_is_none(self, mock_check, _):
+        sky_check.check(workspace=None)
+        mock_check.assert_not_called()

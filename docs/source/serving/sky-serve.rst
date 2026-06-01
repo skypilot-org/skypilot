@@ -3,14 +3,24 @@
 Serving Models
 ==============
 
+.. note::
+
+    We're building the next generation of SkyServe focused on production-readiness:
+
+    - **High-performance:** prefill–decode disaggregation, cache-aware routing, TP/DP/PP/Wide-EP, vLLM and SGlang supported
+    - **Multi-cluster by design:** run replicas across all your clusters
+    - **Built-in observability:** metrics, logs, traces
+    - **Flexible autoscaling:** autoscale on custom metrics, scale-to-zero and rolling updates
+    - **Security:** limit access to VPC-only, TLS support, API key auth
+
+    If you are interested, `sign up for early access <https://forms.gle/u2UvPDLvQq1JLP1J6>`_ or `reach out <mailto:hello@skypilot.co>`_.
+
 SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. warning::
    
    SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not yet recommended for external/production serving. Expect rough edges.
-   
-   As we actively develop SkyServe, we welcome `feedback <https://slack.skypilot.co>`_ and `contributions <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md>`_.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 
@@ -547,3 +557,85 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   These settings will not take effect if you have an existing controller (either
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all services to be terminated.
+
+.. _sky-serve-max-services-calculation:
+
+How the maximum number of services is calculated
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The maximum number of concurrent services is determined by the available memory on the controller. Each service monitoring process requires approximately 512MB of memory.
+
+**Non-consolidation mode** (dedicated controller VM):
+
+1. **Total usable memory** = system memory - 2GB (reserved for controller overhead).
+2. Each service additionally needs memory for its local API server workers (4 concurrent launches per service).
+3. **Max services** = ``usable_memory / (512MB + worker_memory_per_service)``.
+
+**Consolidation mode** (controller running on the API server pod):
+
+When consolidation mode is enabled (``serve.controller.consolidation_mode: true``), the controller shares the API server pod. The calculation changes:
+
+1. **Total usable memory** = pod memory - 2GB controller overhead - API server worker memory.
+2. Since the API server manages request scheduling, no additional worker memory is needed per service.
+3. **Max services** = ``usable_memory / 512MB``.
+
+The following tables show the approximate minimum memory required for different numbers of concurrent services.
+
+**Non-consolidation mode** (dedicated controller VM):
+
+.. list-table::
+   :header-rows: 1
+
+   * - Max Concurrent Services
+     - Min Memory Required (GB)
+   * - 1
+     - 1
+   * - 2
+     - 19
+   * - 4
+     - 34
+   * - 8
+     - 64
+   * - 12
+     - 93
+   * - 16
+     - 123
+   * - 24
+     - 182
+   * - 32
+     - 241
+   * - 64
+     - 478
+
+**Consolidation mode** (controller running on the API server pod):
+
+.. list-table::
+   :header-rows: 1
+
+   * - Max Concurrent Services
+     - Min Memory Required (GB)
+   * - 1
+     - 1
+   * - 2
+     - 9
+   * - 4
+     - 11
+   * - 8
+     - 17
+   * - 12
+     - 31
+   * - 16
+     - 44
+   * - 24
+     - 71
+   * - 32
+     - 97
+   * - 64
+     - 204
+
+If you encounter the "Max number of services reached" error, you can increase the limit by:
+
+- **Non-consolidation mode**: Configuring a controller VM with more memory via ``serve.controller.resources``;
+  see :ref:`Customizing SkyServe controller resources <customizing-sky-serve-controller-resources>`.
+- **Consolidation mode**: Increasing the API server pod memory;
+  see :ref:`Tuning API server resources <sky-api-server-resources-tuning>`.

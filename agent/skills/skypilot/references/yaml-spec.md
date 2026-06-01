@@ -37,8 +37,10 @@ resources:
   instance_type: p3.8xlarge
   use_spot: false
   disk_size: 256
+  ephemeral_storage: 50
   disk_tier: medium
   network_tier: best
+  max_hourly_cost: 10.0
 
   # Config.
   image_id: ami-0868a20f5a3bf9702
@@ -48,12 +50,6 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none
-    hook: |
-      cd my-code-base
-      git add .
-      git commit -m "Auto-commit before shutdown"
-      git push
-    hook_timeout: 300
 
   any_of:
     - infra: aws/us-west-2
@@ -76,6 +72,8 @@ secrets:
   MY_HF_TOKEN: my-secret-value
   WANDB_API_KEY: my-secret-value-2
 
+api_server_access: true
+
 volumes:
   /mnt/data: volume-name
   /mnt/cache:
@@ -88,6 +86,11 @@ file_mounts:
   /checkpoints:
     source: s3://existing-bucket
     mode: MOUNT
+  # Mount with VFS caching and a pre-tuned workload type
+  /data:
+    source: s3://my-model-data
+    mode: MOUNT_CACHED
+    type: DATASET_RO
   /datasets-s3: s3://my-awesome-dataset
 
 setup: |
@@ -263,12 +266,10 @@ Format:
     - `jobs_and_ssh` (default): Wait for in‑progress jobs and SSH connections to finish
     - `jobs`: Only wait for in‑progress jobs
     - `none`: Wait for nothing; autostop right after `idle_minutes`
-  - `hook`: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
-    See Autostop hooks for detailed explanation and examples.
-
-  - `hook_timeout`: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
-    If the hook exceeds this timeout, it will be terminated and autostop continues.
+To run a script before autostop, see Lifecycle hooks
+(under `config.hooks` with `events: [stop]` for autostop, or
+`events: [down]` for autodown — `autostop: {down: true}`).
 
 `<unit>` can be one of:
 - `m`: minutes (default if not specified)
@@ -314,20 +315,6 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
-```
-
-OR
-
-```yaml
-resources:
-  autostop:
-    idle_minutes: 10
-    hook: |
-      cd my-code-base
-      git add .
-      git commit -m "Auto-commit before shutdown"
-      git push
-    hook_timeout: 300
 
 ```
 
@@ -536,6 +523,48 @@ resources:
 ```
 
 
+### ``resources.ephemeral_storage``
+
+Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., `50GB`).
+
+This sets the `resources.requests.ephemeral-storage` field in the Kubernetes pod spec.
+When set_pod_resource_limits is configured in the SkyPilot config, it also sets
+`resources.limits.ephemeral-storage` using the multiplier defined there.
+
+This field is **only effective on Kubernetes**. It is ignored on other clouds.
+
+Increase this if your tasks download large datasets or produce significant temporary files that
+could exhaust the node's ephemeral storage and trigger pod evictions.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+> **WARNING**:
+>
+> The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50
+```
+
+OR
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50GB
+
+
+```
+
+
 ### ``resources.disk_tier``
 Disk tier to use for OS (optional).
 
@@ -573,15 +602,52 @@ Could be one of `'standard'` or `'best'` (default: `'standard'`).
 
 If `'best'` is specified, use the best network tier available on the specified infra. This currently supports:
 
-- `infra: gcp`: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
-- `infra: nebius`: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+**VM-based:**
+
+- `infra: aws`: Enable Elastic Fabric Adapter (EFA) for high-performance inter-node communication on EFA-supported instance types (e.g., p4d, p5, p5e, p5en, p6-b200, p6-b300, etc.).
+- `infra: gcp`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance node-to-node GPU communication on supported instance types (A3 High, A3 Edge, A3 Mega, A3 Ultra, A4).
+- `infra: nebius`: Enable InfiniBand for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+
+**Kubernetes-based:**
+
+- `infra: k8s/my-eks-or-hyperpod-cluster`: Enable EFA for high-performance inter-node communication across pods on AWS EKS/HyperPod clusters.
+- `infra: k8s/my-gke-cluster`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 - `infra: k8s/my-coreweave-cluster`: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - `infra: k8s/my-nebius-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
-- `infra: k8s/my-gke-cluster`: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
+- `infra: k8s/my-together-cluster`: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+- `infra: k8s/my-oke-cluster`: Enable RoCEv2 for high-performance GPU communication across pods on Oracle OKE clusters with bare-metal GPU shapes (BM.GPU.*.8) provisioned via dedicated RDMA capacity pools.
+
+**Slurm-based:**
+
+- `infra: slurm`: On AWS HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.), EFA is available by default. No `network_tier` setting is needed.
 
 ```yaml
 resources:
   network_tier: best
+
+```
+
+
+### ``resources.max_hourly_cost``
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When `use_spot` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+```yaml
+resources:
+  accelerators: A100
+  max_hourly_cost: 10.0
+```
+
+```yaml
+# Combined with spot instances: filters by spot price
+resources:
+  use_spot: true
+  max_hourly_cost: 5.0
 
 ```
 
@@ -641,7 +707,7 @@ resources:
 ### ``resources.image_id``
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -764,7 +830,18 @@ resources:
   image_id:
     us-east-1: ami-123
     us-west-2: ami-456
+```
 
+**Nebius**
+
+The `image_id` parameter supports specifying an image by ID, or by image family.
+
+```yaml
+resources:
+  # Specify an image by ID
+  image_id: computeimage-e00d6q343kqz6ayd63
+  # Or use the latest image from a family
+  image_id: ubuntu24.04-cuda13.0
 ```
 
 **RunPod**
@@ -978,6 +1055,20 @@ secrets:
 ```
 
 
+### ``api_server_access``
+
+Whether to inject API server credentials into the task's environment so that it can call `sky` CLI/SDK to launch nested SkyPilot operations. Defaults to `true`. Set to `false` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+```yaml
+# Opt out of API server access injection
+api_server_access: false
+```
+
+See Nested SkyPilot from managed jobs for details.
+
+
 ### ``volumes``
 
 SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to volumes on Kubernetes for more details.
@@ -1026,6 +1117,20 @@ file_mounts:
     persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
     mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
+  # Mount with VFS caching and a pre-tuned workload type for model checkpoints.
+  /checkpoints:
+    source: s3://my-checkpoint-bucket
+    mode: MOUNT_CACHED
+    type: MODEL_CHECKPOINT_RW  # Pre-tuned workload type. Optional.
+
+  # Mount a bucket as read-only to prevent accidental writes.
+  /readonly-data:
+    source: s3://my-dataset-bucket
+    mode: MOUNT
+    config:
+      mount:
+        read_only: true
+
   # Copies a cloud object store URI to the cluster. Can be private buckets.
   /datasets-s3: s3://my-awesome-dataset
 
@@ -1040,14 +1145,26 @@ OR
 
 ```yaml
 file_mounts:
-  /remote/data: ./local_data  # Local to remote
+  /remote/config: ./local_config  # Local to remote
   /remote/output: s3://my-bucket/outputs  # Cloud storage
   /remote/models:
     name: my-models-bucket
     source: ~/local_models
     store: gcs
     mode: MOUNT
+  /remote/data:
+    source: gs://my-data-bucket
+    mode: MOUNT_CACHED
+    type: DATASET_RO
 ```
+
+The `type` field specifies a pre-tuned workload type for `MOUNT_CACHED` mode.
+Available types: `MODEL_CHECKPOINT_RO`, `MODEL_CHECKPOINT_RW`, `DATASET_RO`, `DATASET_RW`.
+See mount_cached_workload_types for details on workload types and `config.mount_cached` parameters.
+
+The `config.mount` section supports parameters for `MOUNT` mode.
+Setting `read_only: true` mounts the bucket as read-only, preventing accidental writes.
+See storage-yaml-reference for all available parameters.
 
 
 ### ``setup``
@@ -1125,7 +1242,17 @@ config:
     managed_instance_group: ...
   nvidia_gpus:
     disable_ecc: ...
+  hooks:
+    - run: |
+        cd my-code-base
+        git add . && git commit -m "Auto-commit" && git push
+      events: [stop, preemption, down]  # optional; defaults to all three
+      timeout: 300                      # optional; default 3600s
 ```
+
+The `hooks` field lists scripts to run on the cluster on lifecycle events
+(`stop`, `preemption`, `down`). See :ref:`Lifecycle hooks
+<lifecycle-hooks>` for the full reference.
 
 
 # SkyServe Service
@@ -1141,6 +1268,11 @@ service:
     post_data: {'model_name': 'model'}
     initial_delay_seconds: 1200
     timeout_seconds: 15
+    endpoint_probe_interval_seconds: 10
+    consecutive_failure_threshold_timeout: 180
+
+  load_balancer:
+    stream_timeout_seconds: 120
 
   readiness_probe: /v1/models
 
@@ -1185,6 +1317,11 @@ service:
     post_data: '{"model_name": "my_model"}'
     initial_delay_seconds: 600
     timeout_seconds: 10
+    endpoint_probe_interval_seconds: 10
+    consecutive_failure_threshold_timeout: 180
+
+  load_balancer:
+    stream_timeout_seconds: 120
 
 ```
 
@@ -1249,6 +1386,66 @@ Note, having a too high timeout will delay the detection of a real failure of yo
   service:
     readiness_probe:
       timeout_seconds: 10
+
+```
+
+
+### ``service.readiness_probe.endpoint_probe_interval_seconds``
+
+Time between readiness probe attempts (default: 10).
+
+SkyServe probes each replica endpoint at this interval to update readiness and
+detect unhealthy replicas.
+
+```yaml
+  service:
+    readiness_probe:
+      endpoint_probe_interval_seconds: 5
+
+```
+
+
+### ``service.readiness_probe.consecutive_failure_threshold_timeout``
+
+Maximum consecutive probe failure window before tearing down a ready replica.
+
+If omitted, SkyServe keeps the existing defaults: `10` seconds for pools and
+`180` seconds for regular services.
+
+```yaml
+  service:
+    readiness_probe:
+      consecutive_failure_threshold_timeout: 30
+
+```
+
+
+### ``service.load_balancer``
+
+Load balancer configuration (optional).
+
+Controls request proxy behavior for the SkyServe load balancer.
+
+```yaml
+  service:
+    load_balancer:
+      stream_timeout_seconds: 300
+
+```
+
+
+### ``service.load_balancer.stream_timeout_seconds``
+
+Maximum time the load balancer waits for a proxied response stream (default:
+120).
+
+This controls the timeout for requests forwarded by the SkyServe load balancer
+to a ready replica.
+
+```yaml
+  service:
+    load_balancer:
+      stream_timeout_seconds: 300
 
 ```
 

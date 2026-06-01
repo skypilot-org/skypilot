@@ -2,7 +2,9 @@
 
 import React from 'react';
 import CodeMirror from '@uiw/react-codemirror';
+import { EditorView } from '@codemirror/view';
 import { yaml } from '@codemirror/lang-yaml';
+import { getNonce } from '@/utils/csp';
 
 /**
  * YAML Editor component with syntax highlighting.
@@ -28,7 +30,11 @@ export function YamlEditor({
       <CodeMirror
         value={value}
         onChange={onChange}
-        extensions={[yaml()]}
+        extensions={[
+          yaml(),
+          // Pass CSP nonce so CodeMirror's injected <style> tags are allowed.
+          ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
+        ]}
         editable={!disabled}
         basicSetup={{
           lineNumbers: true,

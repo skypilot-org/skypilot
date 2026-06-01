@@ -1,11 +1,16 @@
 """Unit tests for sbatch_options support in Slurm provisioner."""
 
 import subprocess
+import unittest.mock as mock
 
 import jsonschema
 import pytest
 
+from sky.adaptors import slurm as slurm_adaptor
+from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm.instance import _build_custom_sbatch_directives
+from sky.provision.slurm.instance import _build_sbatch_directives
+from sky.provision.slurm.instance import _compute_time_directive
 from sky.provision.slurm.instance import _SBATCH_PROTECTED_OPTIONS
 from sky.utils.schemas import get_config_schema
 
@@ -142,6 +147,149 @@ class TestBuildCustomSbatchDirectives:
         result = _build_custom_sbatch_directives(allowed_options)
         for key, value in allowed_options.items():
             assert f'#SBATCH --{key}={value}' in result
+
+    def test_time_no_longer_protected(self):
+        """`time` is now user-overridable (issue #9370)."""
+        assert 'time' not in _SBATCH_PROTECTED_OPTIONS
+        result = _build_custom_sbatch_directives({'time': '2:00:00'})
+        assert result == '\n#SBATCH --time=2:00:00'
+
+    def test_time_short_form_allowed(self):
+        result = _build_custom_sbatch_directives({'t': '5'})
+        assert result == '\n#SBATCH --t=5'
+
+    def test_time_validator_wired(self):
+        """Smoke test that validate_sbatch_time runs when key is 'time'.
+
+        Exhaustive accepted/rejected format coverage lives in
+        TestValidateSbatchTime (test_slurm_utils.py); this test only
+        verifies the validator is called from the build path.
+        """
+        # Accepted format passes through.
+        result = _build_custom_sbatch_directives({'time': '4:00:00'})
+        assert result == '\n#SBATCH --time=4:00:00'
+        # Rejected format raises with our error message.
+        with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
+            _build_custom_sbatch_directives({'time': 'garbage'})
+
+    def test_time_short_form_invalid_raises(self):
+        """Validator is also wired for the short form 't'."""
+        with pytest.raises(ValueError, match='Invalid slurm.sbatch_options'):
+            _build_custom_sbatch_directives({'t': 'bogus'})
+
+
+class TestComputeTimeDirective:
+    """Test _compute_time_directive() fallback dispatch."""
+
+    @staticmethod
+    def _partition(maxtime=None, default_time=None):
+        return slurm_adaptor.SlurmPartition(
+            name='cpu',
+            is_default=True,
+            maxtime=maxtime,
+            default_time=default_time,
+        )
+
+    def test_user_supplied_time_skips_auto_directive(self):
+        """User-supplied --time wins; auto-generated directive omitted."""
+        partition = self._partition(maxtime=3600, default_time='01:00:00')
+        result = _compute_time_directive({'time': '4:00:00'}, partition, 'cpu')
+        assert result == ''
+
+    def test_user_supplied_short_form_skips_auto_directive(self):
+        partition = self._partition(maxtime=3600, default_time='01:00:00')
+        result = _compute_time_directive({'t': '5'}, partition, 'cpu')
+        assert result == ''
+
+    def test_default_time_used_only_when_maxtime_unset(self):
+        """Partition has DefaultTime but no MaxTime; omit --time so Slurm applies it.
+
+        This is the #9370 fix: pre-existing code would emit
+        --time=UNLIMITED here, which the backfill scheduler refuses to
+        schedule ahead of maintenance reservations.
+        """
+        partition = self._partition(maxtime=None, default_time='01:00:00')
+        result = _compute_time_directive({}, partition, 'cpu')
+        assert result == ''
+
+    def test_maxtime_wins_when_both_set(self):
+        """When both MaxTime and DefaultTime are set, MaxTime wins.
+
+        Preserves SkyPilot's longstanding behavior of always emitting
+        --time=MaxTime. See `TODO(kevin)` in `_compute_time_directive`
+        for arguments to reconsider this priority later.
+        """
+        partition = self._partition(maxtime=3600, default_time='00:15:00')
+        result = _compute_time_directive({}, partition, 'cpu')
+        # MaxTime (1h), not DefaultTime (15min).
+        assert result == '#SBATCH --time=0-01:00:00'
+
+    def test_no_maxtime_no_default_warns_and_emits_nothing(self, monkeypatch):
+        """No MaxTime and no DefaultTime — warn and emit nothing."""
+        partition = self._partition()
+        # The `sky` logger has propagate=False, so caplog cannot observe
+        # it. Mock the module logger's `warning` directly.
+        warning_mock = mock.MagicMock()
+        monkeypatch.setattr(slurm_instance.logger, 'warning', warning_mock)
+        result = _compute_time_directive({}, partition, 'gpu')
+        assert result == ''
+        warning_mock.assert_called_once()
+        msg = warning_mock.call_args.args[0]
+        assert 'no MaxTime or DefaultTime' in msg
+        assert 'gpu' in msg
+
+    def test_explicit_null_time_treated_as_unset(self):
+        """sbatch_options.time=null behaves the same as not setting it."""
+        partition = self._partition(maxtime=3600)
+        result = _compute_time_directive({'time': None}, partition, 'cpu')
+        # MaxTime fallback kicks in because user did not actually supply time.
+        assert result == '#SBATCH --time=0-01:00:00'
+
+    def test_false_time_falls_through_to_auto(self):
+        """sbatch_options.time=False is equivalent to not setting the key.
+
+        Mirrors _build_custom_sbatch_directives, which skips None/False
+        values. Without this alignment, `time: false` would silently
+        bypass both the user directive and the auto fallback.
+        """
+        partition = self._partition(maxtime=3600)
+        result = _compute_time_directive({'time': False}, partition, 'cpu')
+        assert result == '#SBATCH --time=0-01:00:00'
+
+
+class TestBuildSbatchDirectives:
+    """Test _build_sbatch_directives() combines auto --time + user options."""
+
+    @staticmethod
+    def _partition(maxtime=None, default_time=None):
+        return slurm_adaptor.SlurmPartition(name='cpu',
+                                            is_default=True,
+                                            maxtime=maxtime,
+                                            default_time=default_time)
+
+    def test_only_auto_time(self):
+        """Partition has MaxTime, user has no options."""
+        result = _build_sbatch_directives({}, self._partition(maxtime=3600),
+                                          'cpu')
+        assert result == '\n#SBATCH --time=0-01:00:00'
+
+    def test_only_user_options(self):
+        """No auto --time, user supplies other options."""
+        result = _build_sbatch_directives(
+            {'qos': 'high'}, self._partition(default_time='01:00:00'), 'cpu')
+        assert result == '\n#SBATCH --qos=high'
+
+    def test_both_auto_time_and_user_options(self):
+        """Auto --time and user options both present, no double newline."""
+        result = _build_sbatch_directives({'qos': 'high'},
+                                          self._partition(maxtime=3600), 'cpu')
+        assert result == '\n#SBATCH --time=0-01:00:00\n#SBATCH --qos=high'
+
+    def test_user_time_replaces_auto_time(self):
+        """User-supplied time wins; only the user's --time appears."""
+        result = _build_sbatch_directives({'time': '2:00:00'},
+                                          self._partition(maxtime=3600), 'cpu')
+        assert result == '\n#SBATCH --time=2:00:00'
 
 
 class TestSbatchConfigSchema:

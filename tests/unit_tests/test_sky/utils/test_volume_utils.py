@@ -524,3 +524,184 @@ class TestVolumeMount:
         assert volume_mount.volume_name == 'test-volume'
         assert volume_mount.volume_config == mock_volume_config
         assert volume_mount.is_ephemeral is False
+
+
+PVC_TYPE = 'k8s-pvc'
+HOSTPATH_TYPE = 'k8s-hostpath'
+
+
+def _pvc(name, path, pvc_name):
+    return volume.VolumeInfo(name=name,
+                             path=path,
+                             volume_name_on_cloud=pvc_name,
+                             volume_type=PVC_TYPE)
+
+
+def _hostpath(name, path, host_path):
+    return volume.VolumeInfo(name=name,
+                             path=path,
+                             host_path=host_path,
+                             volume_type=HOSTPATH_TYPE)
+
+
+def _ephemeral(name, path):
+    return volume.VolumeInfo(name=name, path=path, volume_type=PVC_TYPE)
+
+
+class TestVolumeMountConflictChecker:
+    """Tests for VolumeMountConflictChecker."""
+
+    # -- Check 1: Mount path uniqueness --
+
+    def test_mount_path_conflict_persistent_vs_automount(self):
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('my-vol', '/mnt/data', 'my-pvc'),
+                      'task YAML volumes', 'volume my-vol')
+        with pytest.raises(ValueError, match='mount path conflict'):
+            checker.check(_pvc('auto-mount-shared', '/mnt/data', 'shared-pvc'),
+                          'auto_mounts config', 'auto-mount volume shared')
+
+    def test_mount_path_conflict_ephemeral_vs_persistent(self):
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_ephemeral('eph-123', '/mnt/data'),
+                      'task YAML volumes (ephemeral)', 'ephemeral volume')
+        with pytest.raises(ValueError, match='mount path conflict'):
+            checker.check(_pvc('my-vol', '/mnt/data', 'my-pvc'),
+                          'task YAML volumes', 'volume my-vol')
+
+    def test_mount_path_conflict_ephemeral_vs_automount(self):
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_ephemeral('eph-123', '/mnt/data'),
+                      'task YAML volumes (ephemeral)', 'ephemeral volume')
+        with pytest.raises(ValueError, match='mount path conflict'):
+            checker.check(_pvc('auto-mount-shared', '/mnt/data', 'shared-pvc'),
+                          'auto_mounts config', 'auto-mount volume shared')
+
+    # -- Check 2: Volume name consistency --
+
+    def test_name_conflict_different_pvc(self):
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('shared-name', '/mnt/a', 'pvc-a'),
+                      'task YAML volumes', 'volume vol-a')
+        with pytest.raises(ValueError, match='Volume name conflict'):
+            checker.check(_pvc('shared-name', '/mnt/b', 'pvc-b'),
+                          'auto_mounts config', 'auto-mount volume vol-b')
+
+    def test_name_conflict_ephemeral_vs_persistent(self):
+        """Ephemeral and persistent share a name but different PVCs."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_ephemeral('vol-x', '/mnt/a'),
+                      'task YAML volumes (ephemeral)', 'ephemeral vol')
+        with pytest.raises(ValueError, match='Volume name conflict'):
+            checker.check(_pvc('vol-x', '/mnt/b', 'different-pvc'),
+                          'task YAML volumes', 'volume vol-x')
+
+    def test_name_conflict_ephemeral_vs_ephemeral(self):
+        """Two ephemeral volumes with hash-colliding names."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_ephemeral('cluster-abc123', '/mnt/a'),
+                      'task YAML volumes (ephemeral)', 'ephemeral vol 1')
+        with pytest.raises(ValueError, match='Volume name conflict'):
+            checker.check(_ephemeral('cluster-abc123', '/mnt/b'),
+                          'task YAML volumes (ephemeral)', 'ephemeral vol 2')
+
+    def test_name_same_pvc_ok(self):
+        """Auto-mount multiple mount_paths: same name, same PVC."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('auto-mount-shared', '/mnt/a', 'shared-pvc'),
+                      'auto_mounts config', 'auto-mount volume shared')
+        checker.check(_pvc('auto-mount-shared', '/mnt/b', 'shared-pvc'),
+                      'auto_mounts config', 'auto-mount volume shared')
+
+    def test_name_same_hostpath_ok(self):
+        """Same hostPath volume at different mount paths."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_hostpath('auto-mount-hv', '/mnt/a', '/data/shared'),
+                      'auto_mounts config', 'auto-mount volume hv')
+        checker.check(_hostpath('auto-mount-hv', '/mnt/b', '/data/shared'),
+                      'auto_mounts config', 'auto-mount volume hv')
+
+    # -- Check 3: Same PVC from different volume entries --
+
+    def test_pvc_conflict_different_names(self):
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('vol-a', '/mnt/a', 'shared-pvc'),
+                      'task YAML volumes', 'volume vol-a')
+        with pytest.raises(ValueError, match='PVC conflict'):
+            checker.check(_pvc('auto-mount-vol-b', '/mnt/b', 'shared-pvc'),
+                          'auto_mounts config', 'auto-mount volume vol-b')
+
+    def test_pvc_conflict_two_automounts(self):
+        """Two different auto_mount entries referencing the same PVC."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('auto-mount-vol-a', '/mnt/a', 'shared-pvc'),
+                      'auto_mounts config', 'auto-mount volume vol-a')
+        with pytest.raises(ValueError, match='PVC conflict'):
+            checker.check(_pvc('auto-mount-vol-b', '/mnt/b', 'shared-pvc'),
+                          'auto_mounts config', 'auto-mount volume vol-b')
+
+    # -- No conflict scenarios --
+
+    def test_no_conflict_different_volumes_different_paths(self):
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('vol-a', '/mnt/a', 'pvc-a'), 'task YAML volumes',
+                      'volume vol-a')
+        checker.check(_pvc('auto-mount-vol-b', '/mnt/b', 'pvc-b'),
+                      'auto_mounts config', 'auto-mount volume vol-b')
+
+    def test_no_conflict_automount_multiple_paths(self):
+        """One auto_mount volume at three different mount paths."""
+        checker = volume.VolumeMountConflictChecker()
+        for path in ['/mnt/a', '/mnt/b', '/mnt/c']:
+            checker.check(_pvc('auto-mount-shared', path, 'shared-pvc'),
+                          'auto_mounts config', 'auto-mount volume shared')
+
+    def test_no_conflict_mixed_types(self):
+        """PVC, hostPath, and ephemeral at different paths."""
+        checker = volume.VolumeMountConflictChecker()
+        checker.check(_pvc('pvc-vol', '/mnt/pvc', 'my-pvc'),
+                      'task YAML volumes', 'volume pvc-vol')
+        checker.check(_hostpath('auto-mount-hv', '/mnt/host', '/data/host'),
+                      'auto_mounts config', 'auto-mount volume hv')
+        checker.check(_ephemeral('cluster-eph1', '/mnt/eph'),
+                      'task YAML volumes (ephemeral)', 'ephemeral vol')
+
+    # -- _get_vol_source_identity --
+
+    def test_vol_source_identity_pvc(self):
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            PVC_TYPE, vol_name_on_cloud='my-pvc')
+        assert identity == 'pvc:my-pvc'
+
+    def test_vol_source_identity_hostpath(self):
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            HOSTPATH_TYPE, vol_host_path='/data/dir')
+        assert identity == 'hostpath:/data/dir'
+
+    def test_vol_source_identity_unknown(self):
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            None)
+        assert identity is None
+
+    def test_vol_source_identity_empty(self):
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            '')
+        assert identity is None
+
+    def test_vol_source_identity_pvc_none_cloud_name(self):
+        """PVC type but vol_name_on_cloud is None should return None."""
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            PVC_TYPE, vol_name_on_cloud=None)
+        assert identity is None
+
+    def test_vol_source_identity_hostpath_none_path(self):
+        """hostPath type but vol_host_path is None should return None."""
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            HOSTPATH_TYPE, vol_host_path=None)
+        assert identity is None
+
+    def test_vol_source_identity_runpod_returns_none(self):
+        """RunPod network volume returns None (not supported yet)."""
+        identity = volume.VolumeMountConflictChecker._get_vol_source_identity(
+            'runpod-network-volume')
+        assert identity is None

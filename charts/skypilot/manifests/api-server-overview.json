@@ -1742,10 +1742,10 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by(le, pid) (rate(sky_apiserver_event_loop_lag_seconds_bucket{app=\"$app\"}[2m])))",
+          "expr": "histogram_quantile(0.99, sum by(le) (rate(sky_apiserver_event_loop_lag_seconds_bucket{app=\"$app\"}[2m])))",
           "hide": false,
           "instant": false,
-          "legendFormat": "{{pid}}",
+          "legendFormat": "p99",
           "range": true,
           "refId": "A"
         }
@@ -1841,7 +1841,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(1, sum by(le, pid) (rate(sky_apiserver_event_loop_lag_seconds_bucket{app=\"$app\"}[2m])))",
+          "expr": "max by(pid) (sky_apiserver_event_loop_lag_max_seconds{app=\"$app\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "{{pid}}",
@@ -2264,10 +2264,10 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by(le, pid) (rate(sky_apiserver_event_loop_lag_seconds_bucket{app=\"$app\"}[2m])))",
+          "expr": "histogram_quantile(0.95, sum by(le) (rate(sky_apiserver_event_loop_lag_seconds_bucket{app=\"$app\"}[2m])))",
           "hide": false,
           "instant": false,
-          "legendFormat": "{{pid}}",
+          "legendFormat": "p95",
           "range": true,
           "refId": "A"
         }

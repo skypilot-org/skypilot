@@ -224,6 +224,36 @@ class TestNormalizeLocalDisk:
         with pytest.raises(ValueError, match='Invalid local_disk'):
             resources_utils.normalize_local_disk('fakessd')
 
+    def test_non_numeric_size_suppresses_chained_exception(self):
+        """The user-facing ValueError should not be chained from the
+        internal float() ValueError. Previously the traceback printed both
+        'could not convert string to float' and the user-friendly message.
+        """
+        with pytest.raises(ValueError) as e:
+            resources_utils.normalize_local_disk('foo')
+        assert e.value.__suppress_context__ is True
+
+
+class TestParseMemoryResource:
+    """Tests for parse_memory_resource error message quality."""
+
+    def test_invalid_input_has_readable_error(self):
+        """Error for invalid memory input should be human-readable.
+
+        Previously the message concatenated the raw regex pattern and a
+        stray '+?,' suffix, yielding
+        '"memory" field should be a ^[0-9]+(kb|ki|...)?$+?, got xyz'.
+        """
+        with pytest.raises(ValueError) as e:
+            resources_utils.parse_memory_resource('xyz', 'memory')
+        msg = str(e.value)
+        # The garbled '+?' suffix should not appear in the user-facing error.
+        assert '?$+?' not in msg
+        assert '?$' not in msg
+        # The field name and the offending value should both be named.
+        assert 'memory' in msg
+        assert 'xyz' in msg
+
 
 class TestParseLocalDiskStr:
     """Tests for parse_local_disk_str function."""

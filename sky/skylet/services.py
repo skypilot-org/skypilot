@@ -1,5 +1,6 @@
 """gRPC service implementations for skylet."""
 
+import json
 import os
 from typing import List, Optional
 
@@ -33,13 +34,28 @@ DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.05
 
 
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
-    """Implementation of the AutostopService gRPC service."""
+    """Implementation of the AutostopService gRPC service.
+
+    Naming note: ``AutostopService`` predates the generalized
+    lifecycle-hooks framework — it is logically a "cluster metadata"
+    service now (autostop config + hooks list). The class name is
+    bound to the proto service name for gRPC framework dispatch, so
+    it stays autostop-named until the proto is renamed via a parallel
+    ``SetHooks`` RPC. See the proto file for the migration plan.
+    """
 
     def SetAutostop(  # type: ignore[return]
             self, request: autostopv1_pb2.SetAutostopRequest,
             context: grpc.ServicerContext
     ) -> autostopv1_pb2.SetAutostopResponse:
-        """Sets autostop configuration for the cluster."""
+        """Sets autostop configuration AND the lifecycle-hooks list.
+
+        Naming wart: the method is named ``SetAutostop`` for wire
+        compat but handles both the autostop config (idle_minutes /
+        wait_for / down) AND the cluster's lifecycle-hooks list
+        (request.hooks / request.clear_hooks). Renaming requires a
+        parallel ``SetHooks`` RPC in a future PR; see the proto file.
+        """
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
@@ -54,6 +70,17 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 down=request.down,
                 hook=hook,
                 hook_timeout=hook_timeout)
+            # v7+: full hooks list carried inline on the same RPC.
+            # `clear_hooks=True` means "drop any stored hooks" — needed
+            # because proto3 `repeated` has no presence, so an empty
+            # list on the wire is otherwise indistinguishable from
+            # "field omitted". Without this, a re-launch with no
+            # hooks would leave stale stored hooks firing forever.
+            if request.clear_hooks:
+                autostop_lib.set_hooks([])
+            elif request.hooks:
+                autostop_lib.set_hooks(
+                    autostop_lib.hooks_from_protobuf(request.hooks))
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
@@ -225,6 +252,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 'pool_hash') else None
             user_hash = request.user_hash if request.HasField(
                 'user_hash') else None
+            # Detect batch coordinator jobs from task metadata so the
+            # scheduler can serialize them one-at-a-time per pool.
+            is_batch = any(
+                json.loads(md).get('batch_coordinator', False)
+                for md in request.metadata_jsons)
             job_ids = []
             execution = request.execution
             for i in range(request.num_jobs):
@@ -236,7 +268,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     pool=pool,
                     pool_hash=pool_hash,
                     user_hash=user_hash,
-                    execution=execution)
+                    execution=execution,
+                    is_batch=is_batch)
                 job_ids.append(job_id)
                 # Set pending state for all tasks
                 for task_id, task_name, metadata_json in zip(
@@ -315,7 +348,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             for line in log_lib.buffered_iter_with_timeout(
                     buffer,
                     log_lib.tail_logs_iter(job_id, log_dir, managed_job_id,
-                                           request.follow, request.tail),
+                                           request.follow, request.tail,
+                                           request.tail_offset),
                     DEFAULT_LOG_CHUNK_FLUSH_INTERVAL):
                 yield jobsv1_pb2.TailLogsResponse(log_line=line)
 
@@ -530,7 +564,12 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                                                   external_ip=ip_pair[1])
                         for ip_pair in (job.get('internal_external_ips') or [])
                     ],
-                    internal_services=job.get('internal_services') or {})
+                    internal_services=job.get('internal_services') or {},
+                    priority_class=job.get('priority_class'),
+                    # Batch progress fields
+                    is_batch=job.get('is_batch'),
+                    batch_total_batches=job.get('batch_total_batches'),
+                    batch_completed_batches=job.get('batch_completed_batches'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

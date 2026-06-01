@@ -88,6 +88,8 @@ class APIHealthResponse(ResponseBaseModel):
     latest_version: Optional[str] = None
     # Whether external proxy auth is enabled
     external_proxy_auth_enabled: bool = False
+    # Whether telemetry/usage collection is enabled
+    telemetry_enabled: bool = True
 
 
 class StatusResponse(ResponseBaseModel):
@@ -117,6 +119,11 @@ class StatusResponse(ResponseBaseModel):
     last_creation_command: Optional[str] = None
     is_managed: bool
     last_event: Optional[str] = None
+    # Latest LAUNCH_PROGRESS event reason for clusters in INIT status
+    # (rendered as LAUNCHING on the dashboard). None for all other
+    # statuses and for clusters that have not yet emitted a
+    # launch-progress event.
+    launch_status_reason: Optional[str] = None
     resources_str: Optional[str] = None
     resources_str_full: Optional[str] = None
     # credentials is a JSON, so we use Any here.
@@ -130,6 +137,12 @@ class StatusResponse(ResponseBaseModel):
     labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
     node_names: Optional[str] = None
+    priority: Optional[int] = None
+    priority_class: Optional[str] = None
+    # External links surfaced on the dashboard's cluster detail page.
+    # Currently populated with cloud-provider instance console URLs at launch
+    # time (mirrors ManagedJobRecord.links). Shape: {label: url}.
+    links: Optional[Dict[str, str]] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
@@ -203,6 +216,7 @@ class ManagedJobRecord(ResponseBaseModel):
     last_recovered_at: Optional[float] = None
     run_timestamp: Optional[str] = None
     priority: Optional[int] = None
+    priority_class: Optional[str] = None
     original_user_yaml_path: Optional[str] = None
     pool: Optional[str] = None
     pool_hash: Optional[str] = None
@@ -222,6 +236,11 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Whether this job is a batch coordinator (ds.map())
+    is_batch: Optional[bool] = None
+    # Batch progress fields (NULL for non-batch jobs)
+    batch_total_batches: Optional[int] = None
+    batch_completed_batches: Optional[int] = None
     # Network endpoint information (extracted from cluster handle)
     # List of (internal_ip, external_ip) tuples for all nodes
     internal_external_ips: Optional[List[Tuple[str, str]]] = None
@@ -254,3 +273,5 @@ class VolumeRecord(ResponseBaseModel):
     # Error message for volume in ERROR state (e.g., PVC pending due to
     # access mode mismatch)
     error_message: Optional[str] = None
+    # YAML configuration used to create the volume
+    creation_yaml: Optional[str] = None

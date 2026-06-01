@@ -20,6 +20,7 @@ import {
   REFRESH_INTERVAL,
   TimestampWithTooltip,
   LastUpdatedTimestamp,
+  formatAutostop,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -63,6 +64,7 @@ import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { evaluateCondition } from '@/components/shared/FilterSystem';
+import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -100,27 +102,6 @@ const PROPERTY_OPTIONS = [
     value: 'labels',
   },
 ];
-
-// Helper function to format autostop information, similar to _get_autostop in CLI utils
-const formatAutostop = (autostop, toDown) => {
-  let autostopStr = '';
-  let separation = '';
-
-  if (autostop >= 0) {
-    autostopStr = autostop + 'm';
-    separation = ' ';
-  }
-
-  if (toDown) {
-    autostopStr += `${separation}(down)`;
-  }
-
-  if (autostopStr === '') {
-    autostopStr = '-';
-  }
-
-  return autostopStr;
-};
 
 // Helper function to format username for display (reuse from users.jsx)
 const formatUserDisplay = (username, userId) => {
@@ -465,7 +446,7 @@ export function Clusters() {
             Sky Clusters
           </Link>
         </div>
-        <div className="w-full sm:w-auto">
+        <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
             valueList={optionValues}
@@ -477,7 +458,10 @@ export function Clusters() {
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <div className="flex items-center gap-2">
-            <label className="flex items-center cursor-pointer">
+            <label
+              className="flex items-center cursor-pointer"
+              title="Toggle cluster history"
+            >
               <input
                 type="checkbox"
                 checked={showHistory}
@@ -1308,6 +1292,7 @@ export function Status2Actions({
   const isMobile = useMobile();
 
   const handleActionClick = (actionName) => {
+    trackClusterAction(actionName, { status });
     switch (actionName) {
       case 'connect':
         handleConnect(cluster, onOpenSSHModal);
@@ -1504,6 +1489,7 @@ const FilterDropdown = ({
   };
 
   const handleOptionSelect = (option) => {
+    trackFilterUsed('cluster', { property: propertyValue, value: option });
     setFilters((prevFilters) => {
       const updatedFilters = [
         ...prevFilters,
@@ -1564,7 +1550,7 @@ const FilterDropdown = ({
           </SelectContent>
         </Select>
       </div>
-      <div className="relative flex-1">
+      <div className="relative flex-1 sm:flex-none">
         <input
           type="text"
           ref={inputRef}

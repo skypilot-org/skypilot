@@ -17,7 +17,7 @@ result = sky.get(request_id)
 ### `sky.launch`
 
 ```python
-sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
+sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
 ```
 
 Launches a cluster or task.
@@ -450,7 +450,7 @@ last setting takes precedence.
         hook fails, autostop will still proceed but a warning will be
         logged.
     hook_timeout: timeout in seconds for hook execution. If None, uses
-        DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+        DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
         be terminated if it exceeds this timeout.
 
 **Returns:**
@@ -721,32 +721,23 @@ Tails the provisioning logs (provision.log) for a cluster.
 **Returns:**
     Exit code 0 on streaming success; raises on HTTP error.
 
-### `sky.tail_autostop_logs`
+### `sky.tail_hook_logs`
 
 ```python
-sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
+sky.tail_hook_logs(cluster_name: str, event: Optional[str] = None, follow: bool = True, tail: int = 0) -> int
 ```
 
-Tails the autostop hook logs (autostop_hook.log) for a cluster.
+Tails a per-event lifecycle-hook log on the cluster.
 
 **Args:**
     cluster_name: name of the cluster.
+    event: one of ``stop``, ``preemption``, ``down``. When None,
+        auto-selects whichever log exists on the cluster.
     follow: whether to follow the logs.
     tail: number of lines to display from the end of the log file.
 
 **Returns:**
     Exit code 0 on streaming success; non-zero on failure.
-
-**Request Raises:**
-    ValueError: if arguments are invalid or the cluster is not supported.
-    sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-    sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-    sky.exceptions.NotSupportedError: if the cluster is not based on
-      CloudVmRayBackend.
-    sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-      not the same as the user who created the cluster.
-    sky.exceptions.CloudUserIdentityError: if we fail to get the current
-      user identity.
 
 ### `sky.download_logs`
 
@@ -1106,7 +1097,7 @@ Streams the API server logs.
 ### `sky.api_login`
 
 ```python
-sky.api_login(endpoint: Optional[str] = None, relogin: bool = False, service_account_token: Optional[str] = None) -> None
+sky.api_login(endpoint: Optional[str] = None, relogin: bool = False, service_account_token: Optional[str] = None, no_browser: bool = False) -> None
 ```
 
 Logs into a SkyPilot API server.
@@ -1122,6 +1113,9 @@ To temporarily override the endpoint, use the environment variable
         http://1.2.3.4:46580 or https://skypilot.mydomain.com.
     relogin: Whether to force relogin with OAuth2 when enabled.
     service_account_token: Service account token for authentication.
+    no_browser: If True, do not attempt to open a browser locally; print
+        the auth URL and let the user open it themselves. Skips the
+        localhost-callback flow, which requires a local browser.
 
 **Returns:**
     None
@@ -1214,6 +1208,48 @@ sky.workspaces() -> server_common.RequestId[Dict[str, Any]]
 Gets the workspaces.
 
 ## Other Functions
+
+### `sky.create_debug_dump`
+
+```python
+sky.create_debug_dump(request_ids: Optional[List[str]] = None, cluster_names: Optional[List[str]] = None, managed_job_ids: Optional[List[int]] = None, recent_minutes: Optional[float] = None) -> server_common.RequestId[str]
+```
+
+Create a debug dump for troubleshooting.
+
+At least one of ``request_ids``, ``cluster_names``, ``managed_job_ids``,
+or ``recent_minutes`` must be provided.
+
+**Args:**
+    request_ids: List of request IDs or prefixes to include in the
+        dump. Prefixes are resolved to all matching request IDs on
+        the server.
+    cluster_names: List of cluster names to include in the dump.
+    managed_job_ids: List of managed job IDs to include in the dump.
+    recent_minutes: If specified, include all resources active within
+        this many minutes.
+
+**Returns:**
+    The request ID of the debug dump creation request.
+
+**Request Returns:**
+    Path to the created zip file on the server.
+
+### `sky.download_debug_dump`
+
+```python
+sky.download_debug_dump(dump_filename: str, local_path: Optional[str] = None) -> str
+```
+
+Download a debug dump from the server.
+
+**Args:**
+    dump_filename: The filename of the dump to download.
+    local_path: Local path to save the dump. If None, saves to
+        current directory with the original filename.
+
+**Returns:**
+    Path to the downloaded file.
 
 ### `sky.kubernetes_label_gpus`
 
@@ -1388,3 +1424,16 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
+
+### `sky.tail_autostop_logs`
+
+```python
+sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
+```
+
+[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+The autostop event was renamed to ``stop`` in the generalized
+lifecycle-hooks framework. This shim emits a one-line stderr
+deprecation warning and delegates to :func:`tail_hook_logs` so
+master-version code keeps working through the v0.15.0 grace window.

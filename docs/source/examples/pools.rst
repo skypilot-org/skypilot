@@ -464,6 +464,13 @@ To download all logs locally for offline analysis, use :code:`--sync-down`:
 
   If workers are stuck in a provisioning state, :code:`sky jobs pool logs --controller <pool-name>` is the best place to start debugging. The controller logs show the full provisioning lifecycle for each worker.
 
+If you encounter a "Max number of services reached" error when submitting jobs to a pool, the jobs controller has reached its concurrency limit. For details on how this limit is calculated, see :ref:`How the maximum number of services is calculated <sky-serve-max-services-calculation>`.
+
+To increase the limit:
+
+- **Non-consolidation mode**: Configure a jobs controller with more memory; see :ref:`Customizing jobs controller resources <jobs-controller-custom-resources>`.
+- **Consolidation mode**: Increase the API server pod memory; see :ref:`Tuning API server resources <sky-api-server-resources-tuning>`.
+
 .. admonition:: Coming Soon
 
   Some improved features are under development and will be available soon:

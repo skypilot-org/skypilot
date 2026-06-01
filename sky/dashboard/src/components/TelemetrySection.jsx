@@ -7,11 +7,14 @@ import {
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { getGrafanaUrl, buildGrafanaUrl } from '@/utils/grafana';
 
-// Grafana configuration constants
+// All Telemetry panels — GPU (DCGM) and per-pod CPU/Memory (cAdvisor) — live
+// in the same SkyPilot cluster-filter dashboard so a single var-cluster
+// (the SkyPilot cluster_name_on_cloud) filters all of them via the standard
+// kube_pod_labels join.
 const GRAFANA_DASHBOARD_SLUG = 'skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
 const GRAFANA_ORG_ID = '1';
 
-// Time range presets for GPU metrics
+// Time range presets
 const TIME_RANGE_PRESETS = [
   { label: '15m', value: '15m' },
   { label: '1h', value: '1h' },
@@ -20,18 +23,37 @@ const TIME_RANGE_PRESETS = [
   { label: '7d', value: '7d' },
 ];
 
-// GPU panels configuration
-const GPU_PANELS = [
-  { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
-  { id: '2', title: 'GPU Memory Utilization', keyPrefix: 'gpu-memory' },
-  { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
-  { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
+// Telemetry panels — all live in the same skypilot-dcgm-gpu dashboard,
+// pre-scoped to a single SkyPilot cluster via var-cluster. The `family`
+// field lets consumers hide GPU panels when the underlying cluster/job
+// is CPU-only.
+const TELEMETRY_PANELS = [
+  { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util', family: 'gpu' },
+  {
+    id: '2',
+    title: 'GPU Memory Utilization',
+    keyPrefix: 'gpu-memory',
+    family: 'gpu',
+  },
+  { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp', family: 'gpu' },
+  { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power', family: 'gpu' },
+  {
+    id: '6',
+    title: 'CPU Usage (cores)',
+    keyPrefix: 'cpu-usage',
+    family: 'host',
+  },
+  { id: '7', title: 'Memory Usage', keyPrefix: 'mem-usage', family: 'host' },
 ];
 
 /**
- * Build Grafana panel URL with filters
+ * Build Grafana panel URL with filters. All panels live in the same
+ * SkyPilot cluster-filter dashboard and share var-cluster, so the same
+ * `cluster_name_on_cloud` filter scopes both GPU (DCGM) and per-pod
+ * CPU/Memory (cAdvisor) panels via the kube_pod_labels join in each
+ * panel's PromQL.
  */
-const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
+const buildGrafanaPanelUrl = (panel, clusterNameOnCloud, timeRange) => {
   const grafanaUrl = getGrafanaUrl();
   const params = new URLSearchParams({
     orgId: GRAFANA_ORG_ID,
@@ -42,30 +64,36 @@ const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
     'var-node': '$__all',
     'var-gpu': '$__all',
     theme: 'light',
-    panelId: panelId,
+    panelId: panel.id,
   });
   return `${grafanaUrl}/d-solo/${GRAFANA_DASHBOARD_SLUG}?${params.toString()}&__feature.dashboardSceneSolo`;
 };
 
 /**
- * Reusable GPU Metrics Section component
+ * Reusable Telemetry section that embeds Grafana panels for GPU metrics
+ * (utilization, memory, temperature, power) and host-level CPU/Memory.
  *
  * @param {Object} props
- * @param {string} props.clusterNameOnCloud - The cluster name for filtering metrics
+ * @param {string} props.clusterNameOnCloud - The SkyPilot cluster name (drives var-cluster on every panel)
  * @param {string} props.displayName - The name to show in the "Showing:" text
  * @param {number} props.refreshTrigger - Increment to trigger iframe refresh
  * @param {string} props.storageKey - LocalStorage key for expanded state
  * @param {React.ReactNode} props.headerExtra - Optional extra content for header (e.g., task selector)
  * @param {string} props.noMetricsMessage - Custom message when no metrics available
+ * @param {boolean} props.hasGpu - When false, hide GPU panels and only show CPU/Memory.
  */
-export function GPUMetricsSection({
+export function TelemetrySection({
   clusterNameOnCloud,
   displayName,
   refreshTrigger = 0,
-  storageKey = 'skypilot-gpu-metrics-expanded',
+  storageKey = 'skypilot-telemetry-expanded',
   headerExtra = null,
-  noMetricsMessage = 'No GPU metrics available.',
+  noMetricsMessage = 'No telemetry available.',
+  hasGpu = true,
 }) {
+  const visiblePanels = hasGpu
+    ? TELEMETRY_PANELS
+    : TELEMETRY_PANELS.filter((p) => p.family !== 'gpu');
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [isExpanded, setIsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -122,7 +150,7 @@ export function GPUMetricsSection({
               ) : (
                 <ChevronRightIcon className="w-5 h-5 mr-2" />
               )}
-              <h3 className="text-lg font-semibold">GPU Metrics</h3>
+              <h3 className="text-lg font-semibold">Telemetry</h3>
             </button>
             {headerExtra}
           </div>
@@ -173,16 +201,16 @@ export function GPUMetricsSection({
             </div>
 
             {clusterNameOnCloud ? (
-              <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-                {GPU_PANELS.map((panel) => (
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {visiblePanels.map((panel) => (
                   <div
                     key={panel.id}
                     className="bg-white rounded-md border border-gray-200 shadow-sm"
                   >
                     <div className="p-2">
                       <iframe
-                        src={buildGrafanaMetricsUrl(
-                          panel.id,
+                        src={buildGrafanaPanelUrl(
+                          panel,
                           clusterNameOnCloud,
                           timeRange
                         )}
@@ -209,4 +237,4 @@ export function GPUMetricsSection({
   );
 }
 
-export default GPUMetricsSection;
+export default TelemetrySection;

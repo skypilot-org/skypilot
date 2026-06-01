@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
@@ -10,6 +16,8 @@ import { Card } from '@/components/ui/card';
 import {
   useClusterDetails,
   getClusterHistory,
+  streamClusterProvisionLogs,
+  streamClusterJobLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
 import {
@@ -24,8 +32,15 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   formatFullTimestamp,
+  formatAutostop,
+  LogFilter,
 } from '@/components/utils';
 import { checkGrafanaAvailability } from '@/utils/grafana';
+import {
+  extractLinksFromLogs,
+  normalizeUrl,
+  useCustomUrlPatterns,
+} from '@/utils/externalLinks';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -36,28 +51,17 @@ import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { GPUMetricsSection } from '@/components/GPUMetricsSection';
-
-// Helper function to format autostop information, similar to _get_autostop in CLI utils
-const formatAutostop = (autostop, toDown) => {
-  let autostopStr = '';
-  let separation = '';
-
-  if (autostop >= 0) {
-    autostopStr = autostop + 'm';
-    separation = ' ';
-  }
-
-  if (toDown) {
-    autostopStr += `${separation}(down)`;
-  }
-
-  if (autostopStr === '') {
-    autostopStr = '-';
-  }
-
-  return autostopStr;
-};
+import { TelemetrySection } from '@/components/TelemetrySection';
+import { hasAccelerator } from '@/utils/gpuUtils';
+import { trackClusterAction } from '@/lib/analytics';
+import { useLogStreamer } from '@/hooks/useLogStreamer';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 function ClusterDetails() {
   const router = useRouter();
@@ -70,9 +74,9 @@ function ClusterDetails() {
   const [historyData, setHistoryData] = useState(null);
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // Counter incremented on refresh to force telemetry iframes to reload.
   // When this value changes, the iframe key changes, causing React to remount the iframe.
-  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const [telemetryRefreshTrigger, setTelemetryRefreshTrigger] = useState(0);
   const isMobile = useMobile();
   const {
     clusterData,
@@ -84,7 +88,7 @@ function ClusterDetails() {
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
 
-  // GPU metrics state
+  // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
 
   // Check Grafana availability on mount
@@ -110,12 +114,24 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
+        // The URL parameter may be either a cluster hash (when navigated
+        // from the historical clusters list) or a cluster name (when the
+        // user opened the active cluster page and the cluster was later
+        // torn down via `sky down`). Send both filters; the server returns
+        // rows matching either, which resolves the cluster in a single
+        // round trip without fetching the entire history (which can
+        // contain tens of thousands of rows).
         const historyData = await dashboardCache.get(getClusterHistory, [
           cluster,
+          30,
+          cluster,
         ]);
-        const foundHistoryCluster = historyData.find(
-          (c) => c.cluster_hash === cluster || c.cluster === cluster
-        );
+        // Prefer an exact hash match; otherwise fall back to a name match.
+        // A reused cluster name can produce multiple history rows, in which
+        // case the most recent (server-ordered by launched_at desc) wins.
+        const foundHistoryCluster =
+          historyData.find((c) => c.cluster_hash === cluster) ||
+          historyData.find((c) => c.cluster === cluster);
         if (foundHistoryCluster) {
           setHistoryData(foundHistoryCluster);
           setIsHistoricalCluster(true);
@@ -136,16 +152,18 @@ function ClusterDetails() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await refreshData();
-    // Increment GPU metrics refresh trigger to force iframe reload
-    setGpuMetricsRefreshTrigger((prev) => prev + 1);
+    // Increment telemetry refresh trigger to force iframe reload
+    setTelemetryRefreshTrigger((prev) => prev + 1);
     setIsRefreshing(false);
   };
 
   const handleConnectClick = () => {
+    trackClusterAction('connect');
     setIsSSHModalOpen(true);
   };
 
   const handleVSCodeClick = () => {
+    trackClusterAction('vscode');
     setIsVSCodeModalOpen(true);
   };
 
@@ -228,7 +246,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={isVSCodeModalOpen}
             setIsVSCodeModalOpen={setIsVSCodeModalOpen}
             isGrafanaAvailable={isGrafanaAvailable}
-            gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+            telemetryRefreshTrigger={telemetryRefreshTrigger}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -240,7 +258,7 @@ function ClusterDetails() {
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
             isGrafanaAvailable={false}
-            gpuMetricsRefreshTrigger={0}
+            telemetryRefreshTrigger={0}
             isHistoricalCluster={true}
           />
         ) : (
@@ -277,12 +295,44 @@ function ActiveTab({
   isVSCodeModalOpen,
   setIsVSCodeModalOpen,
   isGrafanaAvailable,
-  gpuMetricsRefreshTrigger,
+  telemetryRefreshTrigger,
   isHistoricalCluster = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isCommandCopied, setIsCommandCopied] = useState(false);
+
+  // Links extracted from provision logs and the latest job's tail logs,
+  // matched against built-in plus admin-configured `dashboard.external_links`.
+  const [clusterExtractedLinks, setClusterExtractedLinks] = useState({});
+  const handleClusterLinksExtracted = useCallback((links) => {
+    if (!links || Object.keys(links).length === 0) return;
+    setClusterExtractedLinks((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [label, url] of Object.entries(links)) {
+        if (next[label] !== url) {
+          next[label] = url;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // Persisted DB-backed links take priority over the live-scanned ones, same
+  // merge semantics the managed-job page uses (sky/dashboard/src/pages/jobs/
+  // [job].js: combinedLinks). DB links currently come from
+  // instance_links.generate_instance_links() at launch time.
+  const combinedClusterLinks = useMemo(() => {
+    const combined = { ...(clusterData?.links || {}) };
+    for (const [label, url] of Object.entries(clusterExtractedLinks)) {
+      if (!(label in combined)) {
+        combined[label] = url;
+      }
+    }
+    return combined;
+  }, [clusterData?.links, clusterExtractedLinks]);
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
@@ -384,7 +434,12 @@ function ActiveTab({
                   <PluginSlot
                     name="clusters.detail.status.badge"
                     context={clusterData}
-                    fallback={<StatusBadge status={clusterData.status} />}
+                    fallback={
+                      <StatusBadge
+                        status={clusterData.status}
+                        statusTooltip={clusterData.statusTooltip}
+                      />
+                    }
                   />
                 </div>
               </div>
@@ -521,6 +576,40 @@ function ActiveTab({
                 </div>
               )}
 
+              {/* External Links section: persisted DB links (e.g., cloud
+                  instance console URLs from
+                  instance_links.generate_instance_links() at launch time)
+                  plus live regex matches against the admin-configured
+                  `dashboard.external_links` allowlist and built-in patterns
+                  (e.g., W&B). Only renders once at least one link is known. */}
+              {Object.keys(combinedClusterLinks).length > 0 && (
+                <div className="col-span-2">
+                  <div className="text-gray-600 font-medium text-base">
+                    External Links
+                  </div>
+                  <div className="text-base mt-1">
+                    <div className="flex flex-wrap gap-4">
+                      {Object.entries(combinedClusterLinks).map(
+                        ([label, url]) => {
+                          const normalizedUrl = normalizeUrl(url);
+                          return (
+                            <a
+                              key={label}
+                              href={normalizedUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {label}
+                            </a>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Queue Details section - right column */}
               {clusterData.details && (
                 <PluginSlot
@@ -642,6 +731,23 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Telemetry Section (GPU + CPU/Memory) - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
+      {clusterData &&
+        clusterData.full_infra &&
+        clusterData.full_infra.toLowerCase().includes('kubernetes') &&
+        !clusterData.full_infra.toLowerCase().includes('ssh') &&
+        isGrafanaAvailable && (
+          <div className="mb-6">
+            <TelemetrySection
+              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
+              displayName={clusterData?.cluster}
+              refreshTrigger={telemetryRefreshTrigger}
+              storageKey="skypilot-clusters-telemetry-expanded"
+              hasGpu={hasAccelerator(clusterData?.gpus)}
+            />
+          </div>
+        )}
+
       {/* Plugin Slot: Cluster Infra Nodes */}
       <PluginSlot
         name="clusters.detail.nodes"
@@ -670,23 +776,6 @@ function ActiveTab({
         </div>
       )}
 
-      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
-      {clusterData &&
-        clusterData.full_infra &&
-        clusterData.full_infra.includes('Kubernetes') &&
-        !clusterData.full_infra.includes('SSH') &&
-        !clusterData.full_infra.includes('ssh') &&
-        isGrafanaAvailable && (
-          <div className="mb-6">
-            <GPUMetricsSection
-              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
-              displayName={clusterData?.cluster}
-              refreshTrigger={gpuMetricsRefreshTrigger}
-              storageKey="skypilot-gpu-metrics-expanded"
-            />
-          </div>
-        )}
-
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot
         name="clusters.detail.events"
@@ -695,8 +784,276 @@ function ActiveTab({
         }}
         wrapperClassName="mb-8"
       />
+
+      {/* Provision Logs - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ProvisionLogs
+            clusterName={clusterData.cluster}
+            numNodes={clusterData.num_nodes}
+            onLinksExtracted={handleClusterLinksExtracted}
+          />
+        </div>
+      )}
+
+      {/* Background scan of the most-recent cluster job's tail logs for
+          external-link matches. User observability URLs typically appear in
+          job run output, not provision logs, so this is the primary source
+          of links on the cluster page. Renders nothing visible. */}
+      {!isHistoricalCluster &&
+        clusterData.cluster &&
+        Array.isArray(clusterJobData) &&
+        clusterJobData.length > 0 && (
+          <LatestJobLogLinkScanner
+            clusterName={clusterData.cluster}
+            jobs={clusterJobData}
+            workspace={clusterData.workspace}
+            onLinksExtracted={handleClusterLinksExtracted}
+          />
+        )}
     </div>
   );
+}
+
+function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+
+  const streamArgs = useMemo(
+    () => ({
+      clusterName,
+      worker: selectedWorker,
+    }),
+    [clusterName, selectedWorker]
+  );
+
+  const handleStreamError = useCallback((error) => {
+    console.error('Error streaming provision logs:', error);
+  }, []);
+
+  const { lines: displayLines, isLoading } = useLogStreamer({
+    streamFn: streamClusterProvisionLogs,
+    streamArgs,
+    enabled: isExpanded && Boolean(clusterName),
+    refreshTrigger: logsRefreshToken,
+    onError: handleStreamError,
+  });
+
+  // Scan provision logs against the merged built-in plus admin-configured
+  // URL patterns. Matches are reported up to the parent so the Details Card
+  // can render a "Links" row.
+  const urlPatterns = useCustomUrlPatterns();
+  const extractedLinksRef = useRef({});
+  useEffect(() => {
+    if (!displayLines || displayLines.length === 0) return;
+    const extracted = extractLinksFromLogs(
+      displayLines,
+      urlPatterns,
+      extractedLinksRef.current
+    );
+    extractedLinksRef.current = extracted;
+    if (onLinksExtracted && Object.keys(extracted).length > 0) {
+      onLinksExtracted(extracted);
+    }
+  }, [displayLines, urlPatterns, onLinksExtracted]);
+
+  const handleRefreshLogs = () => {
+    setLogsRefreshToken((t) => t + 1);
+  };
+
+  const handleWorkerChange = (val) => {
+    setSelectedWorker(val === 'head' ? null : Number(val));
+  };
+
+  // Build worker options: Head, Worker1 .. WorkerN-1
+  const workerOptions = useMemo(() => {
+    const opts = [{ label: 'Head', value: 'head' }];
+    if (numNodes > 1) {
+      for (let i = 1; i < numNodes; i++) {
+        opts.push({ label: `Worker${i}`, value: String(i) });
+      }
+    }
+    return opts;
+  }, [numNodes]);
+
+  return (
+    <Card>
+      <div
+        className={`flex items-center justify-between px-4 pt-4 ${!isExpanded ? 'pb-4' : ''}`}
+      >
+        <div className="flex items-center">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+          >
+            {isExpanded ? (
+              <ChevronDownIcon className="w-5 h-5 mr-2" />
+            ) : (
+              <ChevronRightIcon className="w-5 h-5 mr-2" />
+            )}
+            <h2 className="text-lg font-semibold">Provision Logs</h2>
+          </button>
+          {isExpanded && (
+            <>
+              {numNodes > 1 && (
+                <Select
+                  value={
+                    selectedWorker === null ? 'head' : String(selectedWorker)
+                  }
+                  onValueChange={handleWorkerChange}
+                >
+                  <SelectTrigger
+                    aria-label="Node"
+                    className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[120px] text-sm ml-3"
+                  >
+                    <SelectValue placeholder="Head" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workerOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <span className="ml-2 text-xs text-gray-500">
+                (Logs are not streaming; click refresh to fetch the latest
+                logs.)
+              </span>
+            </>
+          )}
+        </div>
+        {isExpanded && (
+          <div className="flex items-center space-x-3">
+            <Tooltip content="Refresh logs" className="text-muted-foreground">
+              <button
+                onClick={handleRefreshLogs}
+                disabled={isLoading}
+                className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+              >
+                <RotateCwIcon
+                  className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
+                />
+              </button>
+            </Tooltip>
+          </div>
+        )}
+      </div>
+      {isExpanded && (
+        <div className="p-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <CircularProgress size={20} className="mr-2" />
+              <span>Loading...</span>
+            </div>
+          ) : displayLines.length === 0 ? (
+            <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+              <span>No provision logs available.</span>
+            </div>
+          ) : (
+            <div className="max-h-[50vh] min-h-[200px] overflow-y-auto">
+              <LogFilter logs={displayLines} />
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Invisible component that streams the tail of the most-recent cluster
+ * job's logs once and reports any matching external-link URLs to the
+ * parent via onLinksExtracted. Re-runs when the latest job id changes
+ * (e.g., a new job is submitted to the cluster).
+ */
+function LatestJobLogLinkScanner({
+  clusterName,
+  jobs,
+  workspace,
+  onLinksExtracted,
+}) {
+  const urlPatterns = useCustomUrlPatterns();
+  const extractedLinksRef = useRef({});
+
+  // Pick the latest job by max numeric id. Job ids are monotonically
+  // increasing per cluster, so this is the most recently submitted job.
+  const latestJobId = useMemo(() => {
+    if (!Array.isArray(jobs) || jobs.length === 0) return null;
+    let maxId = null;
+    for (const j of jobs) {
+      const n = Number(j?.id);
+      if (Number.isFinite(n) && (maxId === null || n > maxId)) {
+        maxId = n;
+      }
+    }
+    return maxId;
+  }, [jobs]);
+
+  useEffect(() => {
+    if (!clusterName || latestJobId === null) return;
+
+    const controller = new AbortController();
+    let pendingLines = [];
+    let buffered = '';
+
+    const flush = () => {
+      if (pendingLines.length === 0) return;
+      const extracted = extractLinksFromLogs(
+        pendingLines,
+        urlPatterns,
+        extractedLinksRef.current
+      );
+      extractedLinksRef.current = extracted;
+      pendingLines = [];
+      if (onLinksExtracted && Object.keys(extracted).length > 0) {
+        onLinksExtracted(extracted);
+      }
+    };
+
+    const onNewLog = (chunk) => {
+      buffered += chunk;
+      const parts = buffered.split('\n');
+      buffered = parts.pop() || '';
+      if (parts.length > 0) {
+        pendingLines.push(...parts);
+      }
+    };
+
+    (async () => {
+      try {
+        // Match the bound that streamManagedJobLogs uses for its log viewer
+        // (sky/dashboard/src/data/connectors/jobs.jsx) so the cluster page's
+        // proactive scan sees the same window the managed-job page sees.
+        await streamClusterJobLogs({
+          clusterName,
+          jobId: latestJobId,
+          workspace,
+          onNewLog,
+          signal: controller.signal,
+          tail: 5000,
+        });
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          console.debug('LatestJobLogLinkScanner stream failed:', error);
+        }
+      } finally {
+        if (buffered) {
+          pendingLines.push(buffered);
+          buffered = '';
+        }
+        flush();
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [clusterName, latestJobId, workspace, urlPatterns, onLinksExtracted]);
+
+  return null;
 }
 
 export default ClusterDetails;

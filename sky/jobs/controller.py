@@ -12,7 +12,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import dotenv
 import filelock
@@ -26,12 +26,14 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.batch import coordinator as batch_coordinator
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
 from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -129,6 +131,22 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
 
     # Set the new resources back to the task
     task.set_resources(new_resources_list)
+
+
+def _build_task_specs(
+    executor: 'recovery_strategy.StrategyExecutor',) -> Dict[str, Any]:
+    """Merge base and strategy-specific task specs with collision detection."""
+    base_specs: Dict[str, Any] = {
+        'max_restarts_on_errors': executor.max_restarts_on_errors,
+        'recover_on_exit_codes': executor.recover_on_exit_codes,
+    }
+    strategy_specs = executor.task_specs()
+    overlap = set(base_specs) & set(strategy_specs)
+    if overlap:
+        raise ValueError(f'Strategy task_specs() conflicts with base spec '
+                         f'keys: {overlap}')
+    base_specs.update(strategy_specs)
+    return base_specs
 
 
 class JobController:
@@ -237,6 +255,7 @@ class JobController:
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
+            task_envs[constants.MANAGED_JOB_ID_ENV_VAR] = str(self._job_id)
             # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
             # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
             if self._rank is not None:
@@ -265,12 +284,18 @@ class JobController:
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs',
                                             f'job-id-{self._job_id}')
-        log_file = controller_utils.download_and_stream_job_log(
-            self._backend,
-            handle,
-            managed_job_logs_dir,
-            job_ids=[str(job_id_on_pool_cluster)]
-            if job_id_on_pool_cluster is not None else None)
+
+        log_file = None
+        if managed_job_runtime.is_registered():
+            log_file = managed_job_runtime.download_logs(
+                handle, self._job_id, task_id)
+        if log_file is None:
+            log_file = controller_utils.download_and_stream_job_log(
+                self._backend,
+                handle,
+                managed_job_logs_dir,
+                job_ids=[str(job_id_on_pool_cluster)]
+                if job_id_on_pool_cluster is not None else None)
         if log_file is not None:
             # Set the path of the log file for the current task, so it can
             # be accessed even after the job is finished
@@ -303,6 +328,10 @@ class JobController:
         Returns:
             List of exit codes, or None if not available.
         """
+        if managed_job_runtime.is_registered():
+            exit_codes = managed_job_runtime.get_exit_codes(handle)
+            if exit_codes is not None:
+                return exit_codes
         try:
             # Try gRPC first if enabled
             if handle.is_grpc_enabled_with_flag:
@@ -400,6 +429,12 @@ class JobController:
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
 
+        if task.metadata.get('batch_coordinator'):
+            return await self._run_batch_coordinator_task(task_id,
+                                                          task,
+                                                          callback_func,
+                                                          is_resume=is_resume)
+
         if task.run is None:
             logger.info(f'Skip running task {task_id} ({task.name}) due to its '
                         'run commands being empty.')
@@ -428,8 +463,17 @@ class JobController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id) if self._pool is None else None
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id,
-            self._pool, self.starting, self.starting_lock, self.starting_signal)
+            cluster_name,
+            self._backend,
+            task,
+            self._job_id,
+            task_id,
+            self._pool,
+            self.starting,
+            self.starting_lock,
+            self.starting_signal,
+            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
+                self._job_id))
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -451,12 +495,7 @@ class JobController:
                 self._backend.run_timestamp,
                 submitted_at,
                 resources_str=resources_str,
-                specs={
-                    'max_restarts_on_errors':
-                        self._strategy_executor.max_restarts_on_errors,
-                    'recover_on_exit_codes':
-                        self._strategy_executor.recover_on_exit_codes
-                },
+                specs=_build_task_specs(self._strategy_executor),
                 callback_func=callback_func,
                 full_resources_json=full_resources_json)
             logger.info(f'Submitted managed job {self._job_id} '
@@ -550,7 +589,24 @@ class JobController:
             if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
                 force_transit_to_recovering = True
 
+            await self._strategy_executor.on_resume(cluster_name)
+
         logger.info('Started monitoring.')
+        # TODO(kevin): If StrategyExecutor grew pluggable detection methods
+        # (check_status, get_recovery_targets), this two-path dispatch could
+        # become a single generic monitor loop on the controller. See the
+        # TODO on StrategyExecutor.monitor_task().
+        result = await self._strategy_executor.monitor_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            job_id_on_pool_cluster=job_id_on_pool_cluster,
+            callback_func=callback_func,
+            cleanup_cluster_on_success=True,
+            force_transit_to_recovering=force_transit_to_recovering,
+        )
+        if result is not None:
+            return result
         return await self._monitor_one_task(
             task_id=task_id,
             task=task,
@@ -561,6 +617,93 @@ class JobController:
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
         )
+
+    async def _run_batch_coordinator_task(
+        self,
+        task_id: int,
+        task: 'sky.Task',
+        callback_func: typing.Callable,
+        is_resume: bool = False,
+    ) -> bool:
+        """Run the BatchCoordinator inline on the controller.
+
+        The coordinator is lightweight orchestration (count items, split
+        batches, dispatch via ``sdk.exec()``).  Running it here avoids
+        provisioning a separate CPU cluster.
+
+        When ``is_resume=True``, the coordinator reloads persisted batch
+        state from the DB and resumes dispatch from where it left off.
+        """
+        if is_resume:
+            # Check if the previous run already reached a terminal status.
+            _, prev_status = (await
+                              managed_job_state.get_latest_task_id_status_async(
+                                  self._job_id))
+            if (prev_status is not None and prev_status.is_terminal()):
+                logger.info(f'Batch task {task_id} already in terminal status '
+                            f'{prev_status.value}, skipping.')
+                return prev_status == (
+                    managed_job_state.ManagedJobStatus.SUCCEEDED)
+            if prev_status == managed_job_state.ManagedJobStatus.CANCELLING:
+                raise asyncio.CancelledError(
+                    'Batch coordinator resuming into CANCELLING state')
+
+        metadata = task.metadata
+
+        coordinator = batch_coordinator.BatchCoordinator(
+            dataset_path=metadata['batch_dataset_path'],
+            output_path=metadata['batch_output_path'],
+            batch_size=metadata['batch_size'],
+            pool_name=metadata['batch_pool_name'],
+            serialized_fn=metadata['batch_serialized_fn'],
+            activate_env=metadata.get('batch_activate_env', ''),
+            job_id=self._job_id,
+            is_resume=is_resume,
+            input_format_dict=metadata['batch_input_format'],
+            output_formats_dict=metadata['batch_output_formats'],
+        )
+
+        if not is_resume:
+            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                self._backend.run_timestamp) if task_id == 0 else time.time()
+
+            await managed_job_state.set_starting_async(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str='-',
+                specs={
+                    'max_restarts_on_errors': 0,
+                    'recover_on_exit_codes': []
+                },
+                callback_func=callback_func)
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=time.time(),
+                callback_func=callback_func)
+
+        try:
+            await asyncio.to_thread(coordinator.run)
+            await managed_job_state.set_succeeded_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                end_time=time.time(),
+                callback_func=callback_func)
+            return True
+        except asyncio.CancelledError:
+            coordinator.cancel()
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Batch coordinator failed: {e}', exc_info=True)
+            await managed_job_state.set_failed_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                failure_type=managed_job_state.ManagedJobStatus.FAILED,
+                failure_reason=str(e),
+                callback_func=callback_func)
+            return False
 
     async def _monitor_one_task(
         self,
@@ -1026,18 +1169,36 @@ class JobController:
         # - If we block in setup, it times out before Phase 3 can run
         wait_script = job_group_networking.generate_wait_for_networking_script(
             job_group_name, other_job_names)
-        if wait_script:
-            # Prepend wait script to task run
+        # When non-empty, this prelude is prepended to the task's run
+        # section to start the JobGroup DNS updater from there. Phase 3
+        # below does the same delivery via SSH for tasks not covered here.
+        inline_networking_setup_script = (
+            job_group_networking.generate_inline_networking_setup_script(
+                job_group_name, self._dag.tasks, self._job_id))
+        run_prefixes = [
+            script for script in (inline_networking_setup_script, wait_script)
+            if script
+        ]
+        if run_prefixes:
             current_run = task.run or ''
-            task.run = wait_script + '\n\n' + current_run
+            task.run = '\n\n'.join(run_prefixes + [current_run])
 
         # JobGroups don't support pools, so cluster name is always deterministic
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task_name, self._job_id)
 
         executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id, None,
-            self.starting, self.starting_lock, self.starting_signal)
+            cluster_name,
+            self._backend,
+            task,
+            self._job_id,
+            task_id,
+            None,
+            self.starting,
+            self.starting_lock,
+            self.starting_signal,
+            file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
+                self._job_id))
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -1049,10 +1210,7 @@ class JobController:
             self._backend.run_timestamp,
             time.time(),
             resources_str=resources_str,
-            specs={
-                'max_restarts_on_errors': executor.max_restarts_on_errors,
-                'recover_on_exit_codes': executor.recover_on_exit_codes
-            },
+            specs=_build_task_specs(executor),
             callback_func=callback_func)
 
         return cluster_name, executor
@@ -1087,7 +1245,12 @@ class JobController:
         """
 
         async def on_recovery() -> None:
-            """Re-setup networking after recovery (new node may have new IP)."""
+            """Re-setup networking after recovery (new node may have new IP).
+
+            Unlike Phase 3, we do NOT skip tasks that inline the DNS
+            mapping — a recovered peer may have a new IP, so every
+            task's /etc/hosts needs refreshing.
+            """
             updated_handles = []
             for t, _ in all_tasks_handles:
                 t_name = t.name
@@ -1102,6 +1265,21 @@ class JobController:
             await job_group_networking.setup_job_group_networking(
                 job_group_name, updated_handles)
 
+        # Mirror the dispatch in `_run_one_task`: give the recovery
+        # strategy first refusal at owning the per-task monitor loop so
+        # both code paths behave consistently. Strategies that return
+        # None fall through to `_monitor_one_task` below unchanged.
+        result = await executor.monitor_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            job_id_on_pool_cluster=None,
+            cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
+            force_transit_to_recovering=force_transit_to_recovering,
+            on_recovery=on_recovery,
+        )
+        if result is not None:
+            return result
         return await self._monitor_one_task(
             task_id=task_id,
             task=task,
@@ -1133,10 +1311,17 @@ class JobController:
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
+        runtime_envs: Dict[str, str] = {}
+        if managed_job_runtime.is_registered():
+            extra_envs = await asyncio.to_thread(
+                managed_job_runtime.job_group_envs, tasks, self._job_id)
+            if extra_envs:
+                runtime_envs = extra_envs
         for task in tasks:
             task_envs = task.envs or {}
             task_envs[jobs_constants.SKYPILOT_JOBGROUP_NAME_ENV_VAR] = (
                 job_group_name)
+            task_envs.update(runtime_envs)
             task.update_envs(task_envs)
 
         # Collect task statuses and determine which tasks need launch vs resume.
@@ -1226,11 +1411,15 @@ class JobController:
             if tasks_to_launch:
                 logger.info(f'Phase 1: Launching clusters for tasks '
                             f'{tasks_to_launch}...')
+                # Each launch gets its own SkyPilotContext copy so that
+                # the env-var pop/restore in _launch() doesn't race
+                # across concurrent tasks sharing the same context.
                 launch_coros = []
                 for task_id in tasks_to_launch:
                     executor = strategy_executors[task_id]
                     if executor is not None:
-                        launch_coros.append(executor.launch())
+                        launch_coros.append(
+                            context.contextual_async(executor.launch)())
 
                 if launch_coros:
                     results = await asyncio.gather(*launch_coros,
@@ -1306,13 +1495,19 @@ class JobController:
 
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
-        # Build list of (task, handle) for non-terminal tasks with valid handles
+        # Build list of (task, handle) for non-terminal tasks with valid
+        # handles. Skip tasks that inline the DNS mapping — they already
+        # start the DNS updater from task.run.
         tasks_handles: List[Tuple[
             'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
         for tid, task in enumerate(tasks):
             task_handle = handles[tid]
-            if task_handle is not None:
-                tasks_handles.append((task, task_handle))
+            if task_handle is None:
+                continue
+            if (job_group_networking.dns_addresses_for_task(task, self._job_id)
+                    is not None):
+                continue
+            tasks_handles.append((task, task_handle))
 
         if tasks_handles:
             networking_success = await (
@@ -1609,6 +1804,17 @@ class JobController:
             await self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
+        except exceptions.ClusterSetUpError as e:
+            # Raised by the launch path for a non-retryable setup failure, e.g.
+            # the job's pod was OOMKilled during cluster/runtime setup. The
+            # failure is deterministic, so we mark the job terminal (rather than
+            # retrying forever) and surface the reason to the CLI/dashboard.
+            logger.error(f'Cluster setup failed for task {task_id}')
+            failure_reason = common_utils.format_exception(e, use_bracket=True)
+            logger.error(failure_reason)
+            await self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_SETUP,
+                failure_reason)
         except asyncio.CancelledError:  # pylint: disable=try-except-raise
             # have this here to avoid getting caught by the general except block
             # below.
@@ -1712,7 +1918,13 @@ class ControllerManager:
             error = None
 
             try:
-                if pool is None:
+                if task.metadata.get('batch_coordinator'):
+                    # Batch coordinator tasks run inline on the controller
+                    # — no separate cluster was provisioned, so skip
+                    # cluster termination.
+                    logger.info('Batch coordinator task — skipping cluster '
+                                'termination.')
+                elif pool is None:
                     cluster_name = (
                         managed_job_utils.generate_managed_job_cluster_name(
                             task.name, job_id))
@@ -1765,32 +1977,23 @@ class ControllerManager:
                 # we continue to try cleaning up whatever else we can.
 
             # Clean up any files mounted from the local disk, such as two-hop
-            # file mounts.
-            for file_mount in (task.file_mounts or {}).values():
-                try:
-                    # Skip if we are using cloud storage as the source.
-                    if data_utils.is_cloud_store_url(file_mount):
-                        continue
-                    # Otherwise, we always cleanup local files since they are
-                    # no longer needed after task cleanup, the file can be:
-                    # - Two hop file mounts rsynced from the API server: refer
-                    #   translate_local_file_mounts_to_two_hop for more details.
-                    # - API server file mount cache in consolidation mode:
-                    #   actually there is a dummy two hop that rsync the files
-                    #   from ~/.sky/clients to ~/.sky/tmp/controller/{ID}
-                    #   on server, which isolates the file mounts between
-                    #   tasks. Here we assume the source is always isolated
-                    #   even if the dummy two hop is removed.
-                    # TODO(aylei): remove dummy two hop after we isolate the
-                    # file mount cache for tasks.
-                    path = os.path.expanduser(file_mount)
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        f'Failed to clean up file mount {file_mount}: {e}')
+            # file mounts for non-consolidation mode.
+            # For consolidation mode, the file_mounts are shared across
+            # workloads and the lifecycle will be managed by API server.
+            if not managed_job_utils.is_consolidation_mode():
+                for file_mount in (task.file_mounts or {}).values():
+                    try:
+                        # Skip if we are using cloud storage as the source.
+                        if data_utils.is_cloud_store_url(file_mount):
+                            continue
+                        path = os.path.expanduser(file_mount)
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.warning(
+                            f'Failed to clean up file mount {file_mount}: {e}')
 
             if error is not None:
                 raise error
@@ -1803,6 +2006,19 @@ class ControllerManager:
                 await asyncio.to_thread(task_cleanup, task, job_id)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
+
+        # Clean up API server access token if one was created for this job.
+        def _cleanup_api_server_access_token(job_id: int):
+            token_id = managed_job_state.get_api_access_token_id(job_id)
+            if token_id is not None:
+                global_user_state.delete_service_account_token(token_id)
+                logger.info(f'Revoked API server access token for job {job_id}')
+
+        try:
+            await asyncio.to_thread(_cleanup_api_server_access_token, job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to revoke API server access token for '
+                           f'job {job_id}: {e}')
 
         if error is not None:
             # we only raise the last error that occurred, but its fine to lose
@@ -1959,6 +2175,19 @@ class ControllerManager:
                 logger.error(
                     'Failed to load environment variables for job %s: '
                     '%s', job_id, e)
+
+        # Install a fresh per-job usage MessageCollection so the run id and
+        # other identity fields reflect the per-job env we just loaded into
+        # ``ctx``. Without this, in consolidation mode the controller
+        # subprocess inherits a MessageCollection that was created at
+        # module import time (when class-body decorators like
+        # ``@usage_lib.messages.usage.update_runtime('provision')`` in
+        # ``sky/backends/backend.py`` first accessed the proxy) and bound
+        # the run id to whoever first spawned the controller; subsequent
+        # JobController coroutines would all share that one MC instead of
+        # their own per-job state. The override is scoped to this
+        # coroutine's contextvars Context.
+        usage_lib.install_fresh_messages_for_current_context()
 
         cancelling = False
         graceful, graceful_timeout = False, None
@@ -2262,7 +2491,8 @@ async def main(controller_uuid: str):
 
     context_utils.hijack_sys_attrs()
 
-    plugins.load_plugins(plugins.ExtensionContext())
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.CONTROLLER))
 
     controller = ControllerManager(controller_uuid)
 

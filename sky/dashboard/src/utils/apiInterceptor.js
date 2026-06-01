@@ -37,6 +37,19 @@ function isStaticAssetRequest(input) {
   return staticPatterns.some((pattern) => url.includes(pattern));
 }
 
+// AbortController.abort() and React unmount-driven cancellation both
+// throw a DOMException with name 'AbortError'. They never indicate
+// a server problem.
+function isAbortError(error) {
+  return (
+    error &&
+    (error.name === 'AbortError' ||
+      (typeof DOMException !== 'undefined' &&
+        error instanceof DOMException &&
+        error.code === DOMException.ABORT_ERR))
+  );
+}
+
 /**
  * Wraps fetch to intercept 503 responses and report upgrade status
  */
@@ -48,12 +61,29 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
     try {
       response = await originalFetch(input, init);
     } catch (error) {
-      // Network errors (e.g. connection refused) on non-static requests
-      // likely indicate the server is down during an upgrade, especially
-      // with the default Recreate deployment strategy where there is a gap
-      // between the old pod dying and the new pod starting.
+      // Network errors on non-static, non-cancelled, foreground
+      // requests likely indicate the server is down during an
+      // upgrade — especially under the Recreate deployment strategy
+      // where there's a gap between the old pod dying and the new
+      // pod starting (so we get connection refused, not 503).
+      //
+      // Filter out benign throws that don't represent server health:
+      //   - AbortError: caller cancelled (page nav, React unmount,
+      //     superseded poll).
+      //   - Static assets: noisy, and a stale 503 here doesn't tell
+      //     us the API is down.
+      //   - Tab hidden: iOS Safari aborts pending fetches as
+      //     `TypeError: Load failed` when the user switches apps.
+      //     The page just lost foreground; not an upgrade signal.
       try {
-        if (!isStaticAssetRequest(input)) {
+        const tabHidden =
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'hidden';
+        if (
+          !isAbortError(error) &&
+          !isStaticAssetRequest(input) &&
+          !tabHidden
+        ) {
           reportUpgrade();
         }
       } catch (e) {

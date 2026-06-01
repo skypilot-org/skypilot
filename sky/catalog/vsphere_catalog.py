@@ -75,6 +75,8 @@ def get_default_instance_type(
     local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    use_spot: bool = False,
+    max_hourly_cost: Optional[float] = None,
 ) -> Optional[str]:
     del disk_tier, local_disk  # unused
     if cpus is None and memory is None:
@@ -85,7 +87,8 @@ def get_default_instance_type(
         memory_gb_or_ratio = memory
     return common.get_instance_type_for_cpus_mem_impl(_get_df(), cpus,
                                                       memory_gb_or_ratio,
-                                                      region, zone)
+                                                      region, zone, use_spot,
+                                                      max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
@@ -103,6 +106,7 @@ def get_instance_type_for_accelerator(
     local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
@@ -117,6 +121,7 @@ def get_instance_type_for_accelerator(
         use_spot=use_spot,
         region=region,
         zone=zone,
+        max_hourly_cost=max_hourly_cost,
     )
 
 

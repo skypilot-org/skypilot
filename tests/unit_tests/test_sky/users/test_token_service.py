@@ -2,6 +2,7 @@
 
 import datetime
 import secrets
+import time
 from unittest import mock
 
 import pytest
@@ -79,6 +80,81 @@ class TestTokenService:
             assert result['expires_at'] < now + (31 * 24 * 3600
                                                 )  # Less than 31 days
 
+    def test_create_token_writes_both_e_and_exp(self):
+        """New tokens must carry both the legacy 'e' claim and the
+        standard 'exp' claim with the same value.
+
+        'exp' is what makes PyJWT enforce expiration automatically; 'e'
+        is kept so that the verify_token backward-compat branch still
+        catches tokens issued before this change.
+        """
+        import jwt as pyjwt
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = 'test_secret_key'
+
+            service = token_service.TokenService()
+            result = service.create_token(creator_user_id='creator123',
+                                          service_account_user_id='sa123',
+                                          token_name='test-token',
+                                          expires_in_days=30)
+
+            raw = pyjwt.decode(result['token'][4:],
+                               'test_secret_key',
+                               algorithms=['HS256'])
+            assert 'e' in raw and 'exp' in raw
+            assert raw['e'] == raw['exp'] == result['expires_at']
+
+    def test_create_token_without_expiration_has_no_exp(self):
+        """No expiration → neither 'e' nor 'exp' should be present."""
+        import jwt as pyjwt
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = 'test_secret_key'
+
+            service = token_service.TokenService()
+            result = service.create_token(creator_user_id='creator123',
+                                          service_account_user_id='sa123',
+                                          token_name='test-token')
+
+            raw = pyjwt.decode(result['token'][4:],
+                               'test_secret_key',
+                               algorithms=['HS256'])
+            assert 'e' not in raw
+            assert 'exp' not in raw
+            assert result['expires_at'] is None
+
+    def test_verify_expired_token_via_pyjwt_only(self):
+        """For tokens that carry the standard 'exp' claim, PyJWT raises
+        ExpiredSignatureError on its own -- the manual 'e' check in
+        verify_token is not needed for new tokens.
+
+        This documents the deprecation path: once all legacy 'e'-only
+        tokens have expired, the manual check can be removed and this
+        test still passes (it doesn't depend on the manual check).
+        """
+        import jwt as pyjwt
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = 'test_secret_key'
+
+            # Hand-craft a JWT that has only 'exp' (no 'e'), expired.
+            past = int((datetime.datetime.now(datetime.timezone.utc) -
+                        datetime.timedelta(days=1)).timestamp())
+            payload = {
+                'i': 'sky',
+                't': past,
+                'u': 'sa123',
+                'k': 'tok',
+                'y': 'sa',
+                'exp': past,  # standard claim only
+            }
+            jwt_token = 'sky_' + pyjwt.encode(
+                payload, 'test_secret_key', algorithm='HS256')
+
+            service = token_service.TokenService()
+            assert service.verify_token(jwt_token) is None
+
     def test_verify_valid_token(self):
         """Test verifying a valid token."""
         with mock.patch('sky.users.token_service.global_user_state'
@@ -117,7 +193,14 @@ class TestTokenService:
             assert payload is None
 
     def test_verify_expired_token(self):
-        """Test verifying an expired token."""
+        """Test verifying an expired token returns None.
+
+        The JWT payload uses the non-standard claim name 'e' for the
+        expiration timestamp. PyJWT only auto-validates the standard 'exp'
+        claim, so verify_token must perform the expiration check manually.
+        Without that manual check, this test would pass with a non-None
+        payload (the historical bug).
+        """
         with mock.patch('sky.users.token_service.global_user_state'
                        ) as mock_global_state:
             mock_global_state.get_system_config.return_value = 'test_secret_key'
@@ -139,20 +222,8 @@ class TestTokenService:
                     expires_in_days=0.5  # Half day, so it's expired
                 )
 
-            # Verify the expired token
             payload = service.verify_token(token_data['token'])
-            # Note: JWT expiration might not be immediately enforced in test environment
-            # The test expects None but we'll accept either None or an expired payload
-            if payload is not None:
-                # If payload is returned, check that the expiration time has passed
-                import time
-                current_time = int(time.time())
-                exp_time = payload.get('exp')
-                # The token should be expired (current time > expiration time)
-                assert exp_time is None or current_time > exp_time, f"Token should be expired: current={current_time}, exp={exp_time}"
-            else:
-                # This is the expected behavior - expired tokens should return None
-                assert payload is None
+            assert payload is None
 
     def test_verify_token_wrong_secret(self):
         """Test verifying a token with wrong secret key."""
@@ -195,16 +266,19 @@ class TestTokenService:
                 assert payload is None
 
     def test_verify_token_wrong_type(self):
-        """Test verifying a token with wrong type."""
+        """Test verifying a token with wrong type.
+
+        Uses the correct issuer ('sky') so the issuer branch passes;
+        otherwise the wrong-type branch is never reached.
+        """
         with mock.patch('sky.users.token_service.global_user_state'
                        ) as mock_global_state:
             mock_global_state.get_system_config.return_value = 'test_secret_key'
 
-            # Mock JWT to return payload with wrong type
             with mock.patch('sky.users.token_service.jwt') as mock_jwt:
                 mock_jwt.encode.return_value = 'mocked_jwt'
                 mock_jwt.decode.return_value = {
-                    'i': 'skypilot.api',
+                    'i': token_service.JWT_ISSUER,  # correct issuer
                     't': 1234567890,
                     'u': 'sa123',
                     'k': 'token123',
@@ -216,12 +290,80 @@ class TestTokenService:
 
                 assert payload is None
 
+    def test_verify_legacy_token_with_only_e_claim_expired(self):
+        """Cover the manual 'e' expiration check for legacy tokens that
+        predate the 'exp' claim. Hand-crafts a JWT that carries only
+        the shortened 'e' claim (no standard 'exp'), expired one day
+        ago.
+
+        PyJWT does NOT auto-validate the non-standard 'e' claim, so
+        without the manual check verify_token would return a payload
+        instead of None.
+        """
+        import jwt as pyjwt
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = 'test_secret_key'
+
+            past = int(time.time()) - 24 * 3600  # one day ago
+            payload = {
+                'i': token_service.JWT_ISSUER,
+                't': past,
+                'u': 'sa123',
+                'k': 'tok',
+                'y': 'sa',
+                'e': past,  # legacy short-name claim only, no 'exp'
+            }
+            jwt_token = 'sky_' + pyjwt.encode(
+                payload, 'test_secret_key', algorithm='HS256')
+
+            # Sanity: confirm the test setup truly is "legacy only".
+            raw = pyjwt.decode(jwt_token[4:],
+                               'test_secret_key',
+                               algorithms=['HS256'])
+            assert 'exp' not in raw
+            assert raw['e'] == past
+
+            service = token_service.TokenService()
+            assert service.verify_token(jwt_token) is None
+
     def test_token_service_singleton(self):
         """Test that token_service is properly initialized as singleton."""
         # Test that the global token_service instance exists
         assert hasattr(token_service, 'token_service')
         assert isinstance(token_service.token_service,
                           token_service.TokenService)
+
+    def test_token_preserves_user_identity_for_nested_jobs(self):
+        """Test that a token created for a managed job preserves user identity.
+
+        When api_server_access is set, _create_job_api_token creates a token
+        where both creator_user_id and service_account_user_id are the same
+        user. This ensures nested jobs launched via the token authenticate as
+        the original user.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = 'test_secret_key'
+
+            service = token_service.TokenService()
+
+            # Mirror _create_job_api_token: both IDs are the same user
+            user_hash = 'user_abc123'
+            token_data = service.create_token(
+                creator_user_id=user_hash,
+                service_account_user_id=user_hash,
+                token_name='managed-job-test-12345678',
+                expires_in_days=7)
+
+            # Verify the token carries the original user's identity
+            payload = service.verify_token(token_data['token'])
+            assert payload is not None
+            assert payload['sub'] == user_hash, (
+                'Token subject should be the original user so nested jobs '
+                'authenticate with the same identity')
+            assert payload['token_id'] == token_data['token_id']
+            assert payload['type'] == 'service_account'
 
     def test_jwt_payload_format(self):
         """Test that JWT payload uses correct format."""

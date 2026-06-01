@@ -30,6 +30,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import catalog
 from sky import skypilot_config
 from sky.skylet import constants
 
@@ -114,6 +115,44 @@ def test_aws_image_id_dict():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.aws
+def test_aws_image_id_dict_with_docker():
+    """Specify both a cloud VM image (AMI) and a Docker image (PR #9759).
+
+    Regression test for the old behavior where specifying a Docker image
+    caused a custom cloud VM image to be ignored. The motivating case is a
+    too-old default AMI driver for new GPUs: users want to boot a custom AMI
+    (correct NVIDIA driver) and still run their own container on top.
+
+    Asserts both halves are honored: the job runs inside the container, and
+    the VM booted from the requested AMI (read from instance metadata, which
+    is reachable because the container runs with --net=host).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-west-2'
+    # Resolve the AMI that the SkyPilot image tag maps to in this region, so
+    # we can assert the VM actually booted from the requested cloud image.
+    # Must match tests/test_yamls/test_aws_ami_and_docker.yaml.
+    expected_ami = catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004',
+                                                 region,
+                                                 clouds='aws')
+    test = smoke_tests_utils.Test(
+        'aws_image_id_dict_with_docker',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_aws_ami_and_docker.yaml',
+            f'sky logs {name} 1 --status',
+            # The job ran inside the Docker container.
+            f'sky logs {name} 1 --no-follow | grep "SKY_IN_CONTAINER=yes"',
+            # The VM booted from the requested AMI, not the default image.
+            f'sky logs {name} 1 --no-follow | grep "SKY_BOOTED_AMI={expected_ami}"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_gcp_image_id_dict():
     name = smoke_tests_utils.get_cluster_name()
@@ -141,12 +180,12 @@ def test_aws_image_id_dict_region():
         [
             # YAML has
             #   image_id:
-            #       us-west-2: skypilot:gpu-ubuntu-1804
-            #       us-east-2: skypilot:gpu-ubuntu-2004
+            #       us-east-1: skypilot:gpu-ubuntu-1804
+            #       us-west-2: skypilot:gpu-ubuntu-2004
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-1 examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-west-2 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
             f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
@@ -154,11 +193,11 @@ def test_aws_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-west-2',  # Ensure the region is correct.
             # Ensure exec works.
-            f'sky exec {name} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky exec {name} --infra aws/us-west-2 examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --infra aws/us-east-2 "ls ~"',
+            f'sky exec {name} --infra aws/us-west-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -211,12 +250,12 @@ def test_aws_image_id_dict_zone():
         [
             # YAML has
             #   image_id:
-            #       us-west-2: skypilot:gpu-ubuntu-1804
-            #       us-east-2: skypilot:gpu-ubuntu-2004
+            #       us-east-1: skypilot:gpu-ubuntu-1804
+            #       us-west-2: skypilot:gpu-ubuntu-2004
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --infra aws/*/us-east-1b {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --infra aws/*/us-east-2b {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --infra aws/*/us-east-2a {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --infra aws/*/us-west-2a {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
@@ -225,11 +264,11 @@ def test_aws_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status -v | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-west-2a',  # Ensure the zone is correct.
             # Ensure exec works.
-            f'sky exec {name} --infra aws/*/us-east-2a examples/per_region_images.yaml',
+            f'sky exec {name} --infra aws/*/us-west-2a examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --infra aws/us-east-2 "ls ~"',
+            f'sky exec {name} --infra aws/us-west-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -455,7 +494,6 @@ def test_image_no_conda():
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
-@pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
@@ -464,6 +502,8 @@ def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
         timeout *= 3
+    elif generic_cloud == 'nebius':
+        timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
@@ -737,6 +777,24 @@ def test_nebius_docker_image(generic_cloud: str):
             f's=$(sky logs --provision {name}) && '
             f'echo "$s" | grep -q "initialize_docker" && '
             f'! echo "$s" | grep -q "permission denied"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_image_family(generic_cloud: str):
+    # Test that SkyPilot correctly handles image families as VM boot disks.
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'nebius_image_family',
+        [
+            f'sky launch -y -c {name} --infra nebius '
+            f'--image-id ubuntu22.04-driverless '
+            f'"echo hello from nebius && whoami"',
+            f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,

@@ -110,7 +110,7 @@ def _node(name: str,
 
 @mock.patch('sky.provision.slurm.utils.get_cluster_default_partition',
             return_value='gpu')
-@mock.patch('sky.provision.slurm.utils._get_slurm_nodes_info')
+@mock.patch('sky.provision.slurm.utils.get_slurm_nodes_info')
 class TestResolveGresGpuType:
     """Tests for resolve_gres_gpu_type."""
 
@@ -215,7 +215,7 @@ class TestResolveGresGpuType:
 
 @mock.patch('sky.provision.slurm.utils.get_cluster_default_partition',
             return_value='gpu')
-@mock.patch('sky.provision.slurm.utils._get_slurm_nodes_info')
+@mock.patch('sky.provision.slurm.utils.get_slurm_nodes_info')
 class TestCheckInstanceFitsCanonical:  # pylint: disable=unused-argument
     """Tests for check_instance_fits with canonical GPU name matching."""
 

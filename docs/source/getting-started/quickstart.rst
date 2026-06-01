@@ -37,9 +37,9 @@ Create a directory from anywhere on your machine:
 
       resources:
         # Optional; if left out, automatically pick the cheapest cloud.
-        infra: aws
-        # 8x NVIDIA A100 GPU
-        accelerators: A100:8
+        infra: k8s/coreweave  # Or k8s/my-neocloud; aws; gcp; ...
+        # 8x NVIDIA B200 GPU
+        accelerators: B200:8
 
       # Working directory (optional) containing the project codebase.
       # Its contents are synced to ~/sky_workdir/ on the cluster.
@@ -48,13 +48,13 @@ Create a directory from anywhere on your machine:
       # Typical use: pip install -r requirements.txt
       # Invoked under the workdir (i.e., can use its files).
       setup: |
-        echo "Running setup."
+        uv pip install torch
 
       # Typical use: make use of resources, such as running training.
       # Invoked under the workdir (i.e., can use its files).
       run: |
         echo "Hello, SkyPilot!"
-        conda env list
+        nvidia-smi
 
   .. tab-item:: Python
     :sync: python
@@ -69,13 +69,13 @@ Create a directory from anywhere on your machine:
       # List of commands to run
       commands = [
           'echo "Hello, SkyPilot!"',
-          'conda env list'
+          'nvidia-smi'
       ]
 
       # Define a resource object.
       #   infra: (Optional) if left out, automatically pick cheapest available.
-      #   accelerators: 8x NVIDIA A100 GPU
-      resource = sky.Resources(infra='aws', accelerators='A100:8')
+      #   accelerators: 8x NVIDIA B200 GPU
+      resource = sky.Resources(infra='k8s/coreweave', accelerators='B200:8')  # Or 'k8s/my-neocloud', 'aws', 'gcp', ...
 
       # Define a task object.
       #   setup: Typical use: pip install -r requirements.txt
@@ -83,7 +83,7 @@ Create a directory from anywhere on your machine:
       #   workdir: Working directory (optional) containing the project codebase.
       #     Its contents are synced to ~/sky_workdir/ on the cluster.
       #     Both `setup` and `run` is invoked under the workdir (i.e., can use its files).
-      task = sky.Task(setup='echo "Running setup."',
+      task = sky.Task(setup='uv pip install torch',
                       run=commands,
                       workdir='.',
                       resources=resource)
@@ -118,7 +118,7 @@ Create a directory from anywhere on your machine:
           echo "Hello, SkyPilot!"
         done
 
-        conda env list
+        nvidia-smi
         """)
 
         task = sky.Task(run=commands)
@@ -198,7 +198,7 @@ Instead of launching a new cluster every time, we can execute tasks on an existi
       .. code-block:: console
 
         $ sky exec mycluster python train_cpu.py
-        $ sky exec mycluster --gpus=A100:8 python train_gpu.py
+        $ sky exec mycluster --gpus=B200:8 python train_gpu.py
 
       For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
@@ -245,9 +245,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       INFRA                RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED
-  mygcp      GCP (us-central1-a)  1x(cpus=4, mem=16, n2-standard-4, ...)      STOPPED  -         1 day ago
-  mycluster  AWS (us-east-1)      1x(gpus=A100:8, p4d.24xlarge, ...)          UP       -         4 mins ago
+  NAME       INFRA                   RESOURCES                                 STATUS   AUTOSTOP  LAUNCHED
+  mygcp      GCP (us-central1-a)     1x(cpus=4, mem=16, n2-standard-4, ...)    STOPPED  -         1 day ago
+  mycluster  Kubernetes (coreweave)  1x(gpus=B200:8, ...)                      UP       -         4 mins ago
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
@@ -397,7 +397,7 @@ Scaling out
 =========================
 
 So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
-When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**, or even spot instances.
+When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**.
 
 .. tab-set::
 
@@ -409,7 +409,7 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
     .. code-block:: console
 
       $ for i in $(seq 100) # launch 100 jobs
-          do sky jobs launch --use-spot --detach-run --async --yes -n hello-$i hello_sky.yaml
+          do sky jobs launch --detach-run --async --yes -n hello-$i hello_sky.yaml
         done
 
   .. tab-item:: Python

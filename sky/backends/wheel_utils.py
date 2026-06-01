@@ -144,6 +144,20 @@ def _build_sky_wheel() -> pathlib.Path:
         # TODO(#5046): Consider adding native UV support for building wheels.
         # Use `python -m pip` instead of `pip3` for better compatibility across
         # different environments (conda, venv, UV, system Python, etc.)
+        #
+        # Ensure reproducible wheel builds across processes and machines:
+        # Without these, API server replicas produce wheels with different
+        # hashes for identical source, which may cause unnecessary wheel
+        # reinstallations on sky clusters, as
+        # SKYPILOT_WHEEL_INSTALLATION_COMMANDS check for the wheel hash.
+        env = os.environ.copy()
+        # SOURCE_DATE_EPOCH is a standardized env var for reproducible builds
+        # (https://reproducible-builds.org/docs/source-date-epoch/). Forces
+        # pip to use a fixed timestamp in zip entries instead of file mtimes.
+        env['SOURCE_DATE_EPOCH'] = '0'
+        # PYTHONHASHSEED=0 makes pip emit Requires-Dist metadata in
+        # deterministic order (dict/set iteration depends on hash seed).
+        env['PYTHONHASHSEED'] = '0'
         try:
             subprocess.run([
                 sys.executable, '-m', 'pip', 'wheel', '--no-deps', norm_path,
@@ -152,7 +166,8 @@ def _build_sky_wheel() -> pathlib.Path:
             ],
                            capture_output=True,
                            check=True,
-                           text=True)
+                           text=True,
+                           env=env)
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr
             if 'No module named pip' in error_msg:

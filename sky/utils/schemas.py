@@ -4,11 +4,101 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
-from typing import Any, Dict, List, Tuple
+import os
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import kubernetes_enums
+
+# Registry for plugin-provided job_recovery schema properties.
+# Plugins call register_job_recovery_property() to add strategy-specific
+# config fields. On the server, once plugins have loaded, their properties
+# are registered so additionalProperties is False. On the client (or
+# before plugins load), additionalProperties is True to let plugin
+# config pass through for server-side validation.
+_extra_job_recovery_properties: Dict[str, Any] = {}
+
+
+def register_job_recovery_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the job_recovery schema.
+
+    This allows plugins to extend the job_recovery dict schema with
+    strategy-specific configuration fields. The property is merged into
+    the schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'integer'}).
+    """
+    _extra_job_recovery_properties[name] = schema
+
+
+_extra_jobs_properties: Dict[str, Any] = {}
+
+_extra_kubernetes_properties: Dict[str, Any] = {}
+
+# Registry for plugin-provided properties under the top-level
+# `plugins:` config section. Keyed by plugin name.
+_extra_plugin_properties: Dict[str, Any] = {}
+
+
+def register_plugin_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register a sub-property of the top-level `plugins:` config section."""
+    if name in _extra_plugin_properties:
+        raise ValueError(f'Plugin property {name!r} is already registered.')
+    _extra_plugin_properties[name] = schema
+
+
+def _allow_additional_properties() -> bool:
+    """Return True if schemas should allow additional properties.
+
+    On the client (ENV_VAR_IS_SKYPILOT_SERVER not set), always allow
+    additional properties so they pass through for server-side validation.
+    On the server, allow additional properties only until plugins have
+    been loaded — after that, enforce strict validation.
+    """
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        return True
+    # Import here to avoid circular imports (plugins imports from sky.utils).
+    from sky.server import plugins  # pylint: disable=import-outside-toplevel
+    return not plugins.plugins_loaded()
+
+
+def register_jobs_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the jobs controller schema.
+
+    This allows plugins to extend the ``jobs`` config section with
+    custom configuration fields.  The property is merged into the
+    schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'boolean'}).
+    """
+    if name in _extra_jobs_properties:
+        raise ValueError(f'Jobs property {name!r} is already registered.')
+    _extra_jobs_properties[name] = schema
+
+
+def register_kubernetes_property(name: str, schema: Dict[str, Any]) -> None:
+    """Register an additional property for the kubernetes schema.
+
+    This allows plugins to extend the kubernetes dict schema with
+    kubernetes-specific configuration fields. The property is merged into
+    the schema's properties dict, so it passes JSON schema validation
+    even with additionalProperties: False.
+
+    Args:
+        name: The property name.
+        schema: The JSON Schema for the property
+            (e.g., {'type': 'string'}).
+    """
+    _extra_kubernetes_properties[name] = schema
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -71,6 +161,8 @@ _AUTOSTOP_SCHEMA = {
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
                 },
+                # TODO(zpoint): remove after v0.15.0 — routed into
+                # top-level resources.hooks for backward compatibility.
                 'hook': {
                     'type': 'string',
                 },
@@ -81,6 +173,49 @@ _AUTOSTOP_SCHEMA = {
             },
         },
     ],
+}
+
+# Supported events in config.hooks[*].events.
+_HOOK_EVENTS = ['stop', 'preemption', 'down']
+
+_HOOKS_SCHEMA = {
+    'type': 'array',
+    # Bound the array so the SetAutostop request payload can't grow
+    # past gRPC's default max_receive_message_length (4 MB). 32 entries
+    # × 16 KiB per `run` plus event/timeout overhead leaves comfortable
+    # headroom.
+    'maxItems': 32,
+    'items': {
+        'type': 'object',
+        'required': ['run'],
+        'additionalProperties': False,
+        'properties': {
+            'run': {
+                'type': 'string',
+                'minLength': 1,
+                # 16 KiB cap. Matches typical shell-script size limits
+                # and keeps gRPC payloads tractable. Users with large
+                # bodies should put the script under workdir/ and call
+                # it from `run:` instead.
+                'maxLength': 16 * 1024,
+            },
+            # `events` is optional. When absent, Resources fills the
+            # default list (all three events) at load time.
+            'events': {
+                'type': 'array',
+                'minItems': 1,
+                'uniqueItems': True,
+                'items': {
+                    'type': 'string',
+                    'enum': _HOOK_EVENTS,
+                },
+            },
+            'timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        },
+    },
 }
 
 
@@ -222,7 +357,13 @@ def _get_single_resources_schema():
                     {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # On the server, plugins have registered
+                        # their properties via
+                        # register_job_recovery_property(), so we
+                        # can be strict. On the client we allow
+                        # unknown properties to pass through for
+                        # server-side validation.
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             'strategy': {
                                 'anyOf': [{
@@ -255,6 +396,10 @@ def _get_single_resources_schema():
                                     },
                                 ],
                             },
+                            # Plugin-registered strategy-specific
+                            # properties (validated on server side
+                            # where plugins are loaded).
+                            **_extra_job_recovery_properties,
                         }
                     }
                 ],
@@ -301,6 +446,14 @@ def _get_single_resources_schema():
                     'type': 'integer',
                 }],
             },
+            'ephemeral_storage': {
+                'anyOf': [{
+                    'type': 'string',
+                    'pattern': constants.MEMORY_SIZE_PATTERN,
+                }, {
+                    'type': 'integer',
+                }],
+            },
             'disk_tier': {
                 'type': 'string',
             },
@@ -309,6 +462,10 @@ def _get_single_resources_schema():
             },
             'local_disk': {
                 'type': 'string',
+            },
+            'max_hourly_cost': {
+                'type': 'number',
+                'exclusiveMinimum': 0,
             },
             'ports': {
                 'anyOf': [{
@@ -371,6 +528,9 @@ def _get_single_resources_schema():
                 'type': 'integer',
                 'minimum': constants.MIN_PRIORITY,
                 'maximum': constants.MAX_PRIORITY,
+            },
+            'priority_class': {
+                'type': 'string',
             },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
@@ -515,6 +675,12 @@ def get_volume_schema():
                     'namespace': {
                         'type': 'string',
                     },
+                    'host_path': {
+                        'type': 'string',
+                    },
+                    'cleanup_on_deletion': {
+                        'type': 'boolean',
+                    },
                 },
             },
             **_LABELS_SCHEMA,
@@ -639,6 +805,15 @@ def get_storage_schema():
                             },
                         },
                     },
+                    'mount': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
                 },
             },
             '_is_sky_managed': {
@@ -732,6 +907,12 @@ def get_service_schema():
                         'timeout_seconds': {
                             'type': 'number',
                         },
+                        'endpoint_probe_interval_seconds': {
+                            'type': 'number',
+                        },
+                        'consecutive_failure_threshold_timeout': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -747,6 +928,16 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'load_balancer': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'stream_timeout_seconds': {
+                        'type': 'number',
+                    },
+                },
             },
             'pool': {
                 'type': 'object',
@@ -920,6 +1111,28 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     return new_schema
 
 
+def _task_config_schema():
+    """Schema for task-YAML's `config:` block.
+
+    Hand-merged from the global config schema (filtered to overrideable
+    keys) plus the task-only `hooks` property. `hooks` is intentionally
+    NOT exposed in the global ``~/.sky/config.yaml`` schema — lifecycle
+    hooks are task-scoped (preserving the original ``resources.hooks:``
+    placement).
+    """
+    overrideable = _filter_schema(
+        get_config_schema(),
+        constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)['properties']
+    return {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            **overrideable,
+            'hooks': _HOOKS_SCHEMA,
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -986,15 +1199,45 @@ def get_task_schema():
                 'additionalProperties': False,
             },
             'secrets': {
-                'type': 'object',
-                'required': [],
-                'patternProperties': {
-                    # Checks secret keys are valid env var names.
-                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': ['string', 'null']
-                    }
+                'oneOf': [
+                    {
+                        'type': 'object',
+                        # Dict form: inline secrets + managed refs
+                        'additionalProperties': {
+                            'type': ['string', 'null']
+                        },
+                    },
+                    {
+                        'type': 'array',
+                        # Array form: managed secret refs only
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
+                ],
+            },
+            'managed_secrets': {
+                'type': 'array',
+                'items': {
+                    'oneOf': [
+                        {
+                            'type': 'string'
+                        },
+                        {
+                            'type': 'object',
+                            'maxProperties': 1,
+                            'additionalProperties': {
+                                'type': 'object',
+                                'properties': {
+                                    'mount_path': {
+                                        'type': 'string'
+                                    },
+                                },
+                                'additionalProperties': False,
+                            },
+                        },
+                    ],
                 },
-                'additionalProperties': False,
             },
             # inputs and outputs are experimental
             'inputs': {
@@ -1016,9 +1259,11 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
-            'config': _filter_schema(
-                get_config_schema(),
-                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            # Per-task config block. Hand-merged so we can add a
+            # task-only `hooks:` key that is intentionally NOT part of
+            # the global `~/.sky/config.yaml` schema (lifecycle hooks
+            # are task-scoped, not workspace/operator-scoped).
+            'config': _task_config_schema(),
             # volumes config is validated separately using get_volume_schema
             'volumes': {
                 'type': 'object',
@@ -1026,6 +1271,9 @@ def get_task_schema():
             'volume_mounts': {
                 'type': 'array',
                 'items': get_volume_mount_schema(),
+            },
+            'api_server_access': {
+                'type': 'boolean',
             },
             '_metadata': {
                 'type': 'object',
@@ -1116,7 +1364,8 @@ _LABELS_SCHEMA = {
 _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
     'oneOf': [
         {
-            'type': 'string'
+            'type': 'string',
+            'minLength': 1,
         },
         {
             # A list of single-element dict to pretain the
@@ -1130,7 +1379,8 @@ _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
             'items': {
                 'type': 'object',
                 'additionalProperties': {
-                    'type': 'string'
+                    'type': 'string',
+                    'minLength': 1,
                 },
                 'maxProperties': 1,
                 'minProperties': 1,
@@ -1215,6 +1465,21 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+_GPU_PARTITION_MAP_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'anyOf': [{
+            'type': 'string',
+        }, {
+            'type': 'array',
+            'items': {
+                'type': 'string',
+            },
+        }],
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1266,6 +1531,34 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    'allowed_nodes': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'label_selector': {
+                # Each key-value pair is OR'd: a node matches if ANY
+                # label matches. This differs from K8s label selectors
+                # which are AND'd.
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+            },
+            'names': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+            'ips': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                },
+            },
+        },
+    },
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
@@ -1280,6 +1573,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+    'namespace': {
+        'type': 'string',
+    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1302,6 +1598,21 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'additionalProperties': False,
         'properties': {
             'local_queue_name': {
+                'type': 'string',
+            },
+        },
+    },
+    # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
+    # when both are set. Permissive so external schedulers (registered
+    # via plugins) can layer their own sub-fields under `quota` without
+    # requiring per-key OSS schema updates; sub-field validation is the
+    # consumer's responsibility.
+    'quota': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': True,
+        'properties': {
+            'queue': {
                 'type': 'string',
             },
         },
@@ -1334,6 +1645,16 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'type': 'string'
         },
     },
+    'apt_mirrors': {
+        # List of APT mirror hostnames (or empty list to disable fallback
+        # mirrors entirely) to try in order when installing packages on a
+        # provisioned pod. When unset, SkyPilot uses a built-in default list.
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'pattern': '^[a-zA-Z0-9.-]+$',
+        },
+    },
     'set_pod_resource_limits': {
         # Can be:
         # - false: do not set limits (default)
@@ -1347,6 +1668,57 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
+    'auto_mounts': {
+        'type': 'array',
+        'items': {
+            'type': 'object',
+            'required': ['volume_name', 'mount_paths'],
+            'additionalProperties': False,
+            'properties': {
+                'volume_name': {
+                    'type': 'string',
+                },
+                'mount_paths': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'pattern': '^(/|~/|~$)',
+                    },
+                    'minItems': 1,
+                },
+            },
+        },
+    },
+    'enable_docker': {
+        'oneOf': [
+            # Simple form: enable_docker: true / false
+            {
+                'type': 'boolean'
+            },
+            # Simple form: enable_docker: "ALL" / "BUILD"
+            {
+                'type': 'string',
+                'enum': ['ALL', 'BUILD'],
+            },
+            # Detailed form with optional cache volume.
+            {
+                'type': 'object',
+                'required': ['mode'],
+                'additionalProperties': False,
+                'properties': {
+                    'mode': {
+                        'type': 'string',
+                        'enum': ['ALL', 'BUILD'],
+                    },
+                    # SkyPilot volume name for the Docker/BuildKit cache.
+                    # Omit to use an ephemeral emptyDir volume instead.
+                    'cache_volume': {
+                        'type': 'string',
+                    },
+                },
+            },
+        ],
+    },
 }
 
 
@@ -1362,45 +1734,51 @@ def get_config_schema():
     }
     resources_schema['properties'].pop('ports')
 
-    def _get_controller_schema():
+    def _get_controller_schema(extra_properties: Optional[Dict[str,
+                                                               Any]] = None,):
+        props: Dict[str, Any] = {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                        'default': False,
+                    },
+                    'autostop': _AUTOSTOP_SCHEMA,
+                    'consolidation_mode': {
+                        'type': 'boolean',
+                        # When unset, automatically enabled for deploy-mode
+                        # servers (--deploy) if no existing controller
+                        # clusters are found.
+                    },
+                    'controller_logs_gc_retention_hours': {
+                        'type': 'integer',
+                    },
+                    'task_logs_gc_retention_hours': {
+                        'type': 'integer',
+                    },
+                },
+            },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            },
+            'force_disable_cloud_bucket': {
+                'type': 'boolean',
+                'default': False,
+            },
+        }
+        if extra_properties:
+            props.update(extra_properties)
         return {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'controller': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'resources': resources_schema,
-                        'high_availability': {
-                            'type': 'boolean',
-                            'default': False,
-                        },
-                        'autostop': _AUTOSTOP_SCHEMA,
-                        'consolidation_mode': {
-                            'type': 'boolean',
-                            'default': False,
-                        },
-                        'controller_logs_gc_retention_hours': {
-                            'type': 'integer',
-                        },
-                        'task_logs_gc_retention_hours': {
-                            'type': 'integer',
-                        },
-                    },
-                },
-                'bucket': {
-                    'type': 'string',
-                    'pattern': '^(https|s3|gs|r2|cos)://.+',
-                    'required': [],
-                },
-                'force_disable_cloud_bucket': {
-                    'type': 'boolean',
-                    'default': False,
-                },
-            }
+            'additionalProperties': _allow_additional_properties(),
+            'properties': props,
         }
 
     cloud_configs = {
@@ -1434,6 +1812,18 @@ def get_config_schema():
                     }]
                 },
                 'vpc_names': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
+                    }],
+                },
+                'subnet_names': {
                     'oneOf': [{
                         'type': 'string',
                     }, {
@@ -1519,6 +1909,18 @@ def get_config_schema():
                         }
                     ],
                 },
+                'subnet_names': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
+                    }],
+                },
                 **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
@@ -1552,7 +1954,13 @@ def get_config_schema():
         'kubernetes': {
             'type': 'object',
             'required': [],
-            'additionalProperties': False,
+            # On the server, plugins have registered
+            # their properties via
+            # register_kubernetes_property(), so we
+            # can be strict. On the client we allow
+            # unknown properties to pass through for
+            # server-side validation.
+            'additionalProperties': _allow_additional_properties(),
             'properties': {
                 'allowed_contexts': {
                     'oneOf': [{
@@ -1573,13 +1981,21 @@ def get_config_schema():
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': False,
+                        # On the server, plugins have registered
+                        # their properties via
+                        # register_kubernetes_property(), so we
+                        # can be strict. On the client we allow
+                        # unknown properties to pass through for
+                        # server-side validation.
+                        'additionalProperties': _allow_additional_properties(),
                         'properties': {
                             **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                            **_extra_kubernetes_properties,
                         },
                     },
                 },
                 **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                **_extra_kubernetes_properties,
             }
         },
         'ssh': {
@@ -1632,6 +2048,10 @@ def get_config_schema():
                 },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
+                'cpu_partition': {
+                    'type': 'string',
+                },
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1649,6 +2069,10 @@ def get_config_schema():
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
+                            'cpu_partition': {
+                                'type': 'string',
+                            },
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -1729,6 +2153,8 @@ def get_config_schema():
                 'domain': {
                     'type': 'string',
                 },
+                'security_group_name':
+                    (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'region_configs': {
                     'type': 'object',
                     'required': [],
@@ -1836,6 +2262,12 @@ def get_config_schema():
                 'type': 'string',
                 'case_insensitive_enum': ['DEBUG', 'INFO', 'WARNING'],
             },
+            # Only honored by daemons that opt in to reading this; see the
+            # per-daemon event functions in sky/server/daemons.py for support.
+            'interval_seconds': {
+                'type': 'integer',
+                'minimum': 1,
+            },
         }
     }
 
@@ -1897,7 +2329,24 @@ def get_config_schema():
         'properties': {
             'default_role': {
                 'type': 'string',
-                'case_insensitive_enum': ['admin', 'user']
+                'case_insensitive_enum': ['admin', 'user', 'viewer']
+            },
+            # Per-role permission overrides. Schema is intentionally
+            # permissive (additionalProperties: True on
+            # `permissions`) because admin/user use `blocklist`
+            # entries while `viewer` uses `allowlist`; both shapes
+            # are `[{path, method}, ...]`.
+            'roles': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'object',
+                    'properties': {
+                        'permissions': {
+                            'type': 'object',
+                            'additionalProperties': True,
+                        },
+                    },
+                },
             },
         },
     }
@@ -2005,12 +2454,28 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        'namespace': {
+                            'type': 'string',
+                        },
                         'kueue': {
                             'type': 'object',
                             'required': [],
                             'additionalProperties': False,
                             'properties': {
                                 'local_queue_name': {
+                                    'type': 'string',
+                                },
+                            },
+                        },
+                        'quota': {
+                            'type': 'object',
+                            'required': [],
+                            # Permissive — see the per-context quota block
+                            # below; mirrors that policy at the workspace
+                            # cloud level.
+                            'additionalProperties': True,
+                            'properties': {
+                                'queue': {
                                     'type': 'string',
                                 },
                             },
@@ -2023,8 +2488,18 @@ def get_config_schema():
                             'additionalProperties': {
                                 'type': 'object',
                                 'required': [],
-                                'additionalProperties': False,
+                                # On the server, plugins have registered
+                                # their properties via
+                                # register_kubernetes_property(), so we
+                                # can be strict. On the client we allow
+                                # unknown properties to pass through for
+                                # server-side validation.
+                                'additionalProperties':
+                                    _allow_additional_properties(),
                                 'properties': {
+                                    'namespace': {
+                                        'type': 'string',
+                                    },
                                     'kueue': {
                                         'type': 'object',
                                         'required': [],
@@ -2035,11 +2510,32 @@ def get_config_schema():
                                             },
                                         },
                                     },
+                                    'quota': {
+                                        'type': 'object',
+                                        'required': [],
+                                        # Permissive — see the per-context
+                                        # quota block under
+                                        # _CONTEXT_CONFIG_SCHEMA_KUBERNETES.
+                                        'additionalProperties': True,
+                                        'properties': {
+                                            'queue': {
+                                                'type': 'string',
+                                            },
+                                        },
+                                    },
+                                    **_extra_kubernetes_properties,
                                 },
                             },
                         },
+                        **_extra_kubernetes_properties,
                     },
-                    'additionalProperties': False,
+                    # On the server, plugins have registered
+                    # their properties via
+                    # register_kubernetes_property(), so we
+                    # can be strict. On the client we allow
+                    # unknown properties to pass through for
+                    # server-side validation.
+                    'additionalProperties': _allow_additional_properties(),
                 },
                 'nebius': {
                     'type': 'object',
@@ -2162,6 +2658,32 @@ def get_config_schema():
         },
     }
 
+    dashboard_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'external_links': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['label', 'regex'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'label': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                        'regex': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -2175,7 +2697,8 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(),
+            'jobs': _get_controller_schema(
+                extra_properties=_extra_jobs_properties,),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
@@ -2189,6 +2712,17 @@ def get_config_schema():
             'logs': logs_schema,
             'daemons': daemon_schema,
             'data': data_schema,
+            'dashboard': dashboard_schema,
             **cloud_configs,
+            # For plugin-specific config.
+            'plugins': {
+                'type': 'object',
+                'required': [],
+                # Allow unknown properties since a plugin can be turned off
+                # and the previously valid config should not block server
+                # from reading the config file.
+                'additionalProperties': True,
+                'properties': _extra_plugin_properties,
+            },
         },
     }

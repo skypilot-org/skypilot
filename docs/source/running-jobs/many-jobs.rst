@@ -374,4 +374,6 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
 Best practices for scaling
 --------------------------
 
-By default, roughly 600 jobs can run in parallel (with about 24 launching at once). Increasing the controller's resources bumps those ceilings proportionally, and large controllers can reliably manage thousands of jobs in parallel. See :ref:`the best practices <jobs-controller-sizing>` for more info.
+The number of managed jobs that can run in parallel depends on the available memory. With the default API server size (8 GiB), up to ~400 jobs can run in parallel. Increasing memory increases capacity proportionally, up to 2000 jobs. See :ref:`resource planning for managed jobs <consolidation-mode-resource-planning>` for a full capacity table.
+
+If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, see :ref:`jobs-controller-sizing` for scaling guidance.

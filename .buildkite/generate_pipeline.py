@@ -51,6 +51,9 @@ QUEUE_BENCHMARK = 'single_container'
 # Kubernetes has low concurrency on a single VM originally,
 # so remote-server won't drain VM resources, we can reuse the same queue.
 QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
+# Default concurrency limit when --env-file is used (shared remote API
+# server). Override per-build with --concurrency N.
+DEFAULT_ENV_FILE_CONCURRENCY_LIMIT = 10
 # We use KUBE_BACKEND to specify the queue for kubernetes tests mark as
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
@@ -143,11 +146,13 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
+    parser.add_argument('--serve-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
     parser.add_argument('--plugin-yaml')
     parser.add_argument('--submodule-base-branch')
     parser.add_argument('--dependency', nargs='?', const='', default='all')
+    parser.add_argument('--concurrency', type=int)
 
     parsed_args, _ = parser.parse_known_args(args_list)
 
@@ -187,6 +192,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
+    if parsed_args.serve_consolidation:
+        extra_args.append('--serve-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
     if parsed_args.env_file:
@@ -200,11 +207,13 @@ def _parse_args(args: Optional[str] = None):
         space = ' ' if parsed_args.dependency else ''
         extra_args.append(f'--dependency{space}{parsed_args.dependency}')
 
-    return default_clouds_to_run, parsed_args.k, extra_args
+    return (default_clouds_to_run, parsed_args.k, extra_args,
+            parsed_args.concurrency, parsed_args.env_file is not None)
 
 
 def _extract_marked_tests(
-    file_path: str, args: str
+    file_path: str, args: str, default_clouds_to_run: List[str],
+    k_value: Optional[str], extra_args: List[str]
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[str],
                      List[bool]]]:
     """Extract test functions and filter clouds using pytest.mark
@@ -229,7 +238,6 @@ def _extract_marked_tests(
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
-    default_clouds_to_run, k_value, extra_args = _parse_args(args)
 
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
@@ -323,7 +331,17 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
-    function_cloud_map = _extract_marked_tests(test_file, args)
+    (default_clouds_to_run, k_value, extra_args, concurrency,
+     has_env_file) = _parse_args(args)
+    function_cloud_map = _extract_marked_tests(test_file, args,
+                                               default_clouds_to_run, k_value,
+                                               extra_args)
+    concurrency_limit = None
+    build_id = None
+    if has_env_file:
+        concurrency_limit = (concurrency if concurrency is not None else
+                             DEFAULT_ENV_FILE_CONCURRENCY_LIMIT)
+        build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param, extra_args, no_auto_retry in zip(
                 *clouds_queues_param):
@@ -350,6 +368,9 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                     'queue': queue
                 }
             }
+            if concurrency_limit is not None:
+                step['concurrency'] = concurrency_limit
+                step['concurrency_group'] = f'env-file-smoke-test-{build_id}'
             if no_auto_retry:
                 # Disable automatic retries but allow manual retries.
                 step['retry'] = {
@@ -390,6 +411,12 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         # Generate formatted group name from key
         group_name = ' '.join(
             word.capitalize() for word in re.split(r'[-_]', key))
+
+        if not all_steps:
+            # Skip empty groups — Buildkite rejects pipelines with
+            # empty step groups.
+            print(f'No matching tests for {yaml_file_path}, skipping.')
+            return
 
         grouped_steps = [{
             'group': group_name,

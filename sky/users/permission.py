@@ -4,9 +4,11 @@ import hashlib
 import logging
 import os
 import threading
+import time
 from typing import Generator, List, Optional, Set
 
 import casbin
+from casbin import util as casbin_util
 import filelock
 import sqlalchemy_adapter
 
@@ -15,10 +17,10 @@ from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
-from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils.db import db_utils
+from sky.utils.db import kv_cache
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.role').setLevel(sky_logging.ERROR)
@@ -32,6 +34,12 @@ POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 
 _enforcer_instance: Optional['PermissionService'] = None
 
+# KV cache constants for workspace permission checks.
+_WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
+_WORKSPACE_PERM_CACHE_KEY_SEP = ':'
+# Long TTL as safety net; primary freshness is explicit invalidation on update.
+_WORKSPACE_PERM_CACHE_TTL_SECONDS = 60 * 60  # 1h
+
 
 class PermissionService:
     """Permission service for SkyPilot API Server."""
@@ -39,6 +47,8 @@ class PermissionService:
     def __init__(self):
         self.enforcer: Optional[casbin.SyncedEnforcer] = None
         self._lock = threading.Lock()
+        # Viewer role's endpoint allowlist, materialised at boot.
+        self._viewer_allowlist: List[tuple] = []
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -78,6 +88,10 @@ class PermissionService:
             else:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
+            # The viewer allowlist is in-process state (not stored in
+            # casbin). It MUST be populated in every process that handles
+            # requests.
+            self._build_viewer_allowlist_no_lock()
 
     def _ensure_enforcer(self) -> casbin.SyncedEnforcer:
         """Ensure enforcer is initialized and return it."""
@@ -105,6 +119,61 @@ class PermissionService:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
+
+    def _get_plugin_viewer_allowlist(self) -> List[dict]:
+        """Get viewer-allowlist entries from loaded plugins.
+
+        Lazily populates the module-level plugin allowlist cache if
+        it's empty — this matters in uvicorn worker processes which
+        re-import `sky.server.plugins` from scratch and would otherwise
+        see an empty cache (only the main server process calls
+        `load_plugin_viewer_allowlist()` at startup).
+
+        Returns:
+            List of `{path, method}` records, or empty list if plugins
+            module is not available or no rules are defined.
+        """
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            cached = server_plugins.get_plugin_viewer_allowlist()
+            if cached:
+                return cached
+            # Cache empty — could be either "no plugin entries" or
+            # "loader hasn't run in this process". Try to populate it;
+            # `load_plugin_viewer_allowlist` is side-effect-free
+            # (instantiates each plugin but doesn't call install) and
+            # idempotent.
+            try:
+                return server_plugins.load_plugin_viewer_allowlist()
+            except AttributeError:
+                return cached
+        except ImportError:
+            logger.debug('Plugin module not available, '
+                         'skipping plugin viewer allowlist')
+            return []
+        except AttributeError:
+            # Old plugin module that doesn't export this loader.
+            logger.debug('Plugin module does not expose '
+                         'get_plugin_viewer_allowlist; skipping')
+            return []
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get plugin viewer allowlist: {e}')
+            return []
+
+    def _build_viewer_allowlist_no_lock(self) -> None:
+        """Build `self._viewer_allowlist` from defaults + plugin entries.
+
+        Read-only with respect to casbin/DB state — no policy lock
+        required. Safe to call from any process (main server or uvicorn
+        worker); the result is per-process in-memory state.
+        """
+        plugin_viewer_allow = self._get_plugin_viewer_allowlist()
+        self._viewer_allowlist = [(rule['path'], rule['method'])
+                                  for rule in rbac.get_viewer_allowlist(
+                                      plugin_allowlist=plugin_viewer_allow)]
+        logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
+                     'entries')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
@@ -143,6 +212,13 @@ class PermissionService:
 
         # Get plugin RBAC rules dynamically
         plugin_rules = self._get_plugin_rbac_rules()
+
+        # Viewer allowlist is built in `_lazy_initialize` (called above
+        # via `_ensure_enforcer`) so worker processes that never reach
+        # this method still get it. Operator-config changes to
+        # `rbac.roles.viewer.permissions.allowlist` still require a
+        # server restart — same semantics as the existing blocklist
+        # for the user role.
 
         # If we already have policies for the expected roles, skip
         # initialization
@@ -207,13 +283,22 @@ class PermissionService:
                 user_added = self._add_user_if_not_exists_no_lock(
                     existing_user.id)
                 policy_updated = policy_updated or user_added
-        for system_user_id in [
-                common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
-        ]:
+        system_users = [
+            (common.SERVER_ID, rbac.RoleName.ADMIN.value),
+            (constants.SKYPILOT_SYSTEM_USER_ID, rbac.RoleName.ADMIN.value),
+            (constants.SKYPILOT_SYSTEM_VIEWER_USER_ID,
+             rbac.RoleName.VIEWER.value),
+        ]
+        for system_user_id, system_user_role in system_users:
+            global_user_state.add_or_update_user(
+                models.User(id=system_user_id,
+                            name=system_user_id,
+                            user_type=models.UserType.SYSTEM.value))
             if system_user_id not in users_with_roles:
-                logger.debug(f'Adding role for system user: {system_user_id}')
+                logger.debug(f'Adding role for system user: {system_user_id} '
+                             f'({system_user_role})')
                 user_added = self._add_user_if_not_exists_no_lock(
-                    system_user_id, rbac.RoleName.ADMIN.value)
+                    system_user_id, system_user_role)
                 policy_updated = policy_updated or user_added
         if policy_updated:
             enforcer.save_policy()
@@ -251,6 +336,7 @@ class PermissionService:
                 return
             enforcer.remove_grouping_policy(user_id, current_roles[0])
             enforcer.save_policy()
+            self.invalidate_user_permission_cache(user_id)
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
@@ -271,6 +357,9 @@ class PermissionService:
             # Update user role
             enforcer.add_grouping_policy(user_id, new_role)
             enforcer.save_policy()
+            # Always invalidate: even a first role assignment can grant
+            # workspace access that was previously denied and cached.
+            self.invalidate_user_permission_cache(user_id)
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get all roles for a user.
@@ -325,7 +414,18 @@ class PermissionService:
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
-        """Check permission."""
+        """Check permission.
+
+        Return True to BLOCK the request (RBAC middleware turns truthy
+        return into 403). Return False to allow.
+
+        Admin / user roles use the Casbin blocklist semantics:
+        True iff a `(role, path, method)` policy matches.
+
+        Viewer role uses an in-memory allowlist:
+        True (block) unless the (path, method) matches an entry in
+        `self._viewer_allowlist`.
+        """
         # We intentionally don't load the policy here, as it is a hot path, and
         # we don't support updating the policy.
         # We don't hold the lock for checking permission, as it is read only and
@@ -333,7 +433,29 @@ class PermissionService:
         # as long as it is eventually consistent.
         # self._load_policy_no_lock()
         enforcer = self._ensure_enforcer()
+        # Read roles from in-memory enforcer state. Do NOT use
+        # self.get_user_roles(...) here — that does a DB roundtrip via
+        # _load_policy_no_lock and would put a query on the request hot
+        # path.
+        roles = enforcer.get_roles_for_user(user_id)
+        # Admin wins over viewer when a user holds both — viewer's
+        # default-deny semantics shouldn't restrict an admin.
+        if (rbac.RoleName.VIEWER.value in roles and
+                rbac.RoleName.ADMIN.value not in roles):
+            return not self._is_viewer_allowed(path, method)
         return enforcer.enforce(user_id, path, method)
+
+    def _is_viewer_allowed(self, path: str, method: str) -> bool:
+        """Test (path, method) against the viewer allowlist."""
+        for allow_path, allow_method in self._viewer_allowlist:
+            if allow_method != method:
+                continue
+            # casbin_util.key_match2: arg1 is the request key, arg2 is
+            # the policy pattern. Pattern supports `:name` placeholders
+            # and `*` wildcards.
+            if casbin_util.key_match2(path, allow_path):
+                return True
+        return False
 
     def _load_policy_no_lock(self):
         """Load policy from storage."""
@@ -345,15 +467,35 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
-    # Allow many cached (user, workspace) pairs so hot paths with many
-    # workspaces stay fast when batch get_accessible_workspace_names isn't used.
-    @annotations.lru_cache(scope='request', maxsize=256)
+    def _workspace_perm_cache_key(self, workspace_name: str,
+                                  user_id: str) -> str:
+        """Build a KV cache key for a workspace permission entry."""
+        return (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
+                f'{workspace_name}'
+                f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
+                f'{user_id}')
+
+    def invalidate_workspace_permission_cache(self,
+                                              workspace_name: str) -> None:
+        """Invalidate all cached permission entries for a workspace."""
+        prefix = (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
+                  f'{workspace_name}'
+                  f'{_WORKSPACE_PERM_CACHE_KEY_SEP}')
+        kv_cache.delete_cache_entries_by_prefix(prefix)
+
+    def invalidate_user_permission_cache(self, user_id: str) -> None:
+        """Invalidate all cached permission entries for a user."""
+        kv_cache.delete_cache_entries_by_prefix_suffix(
+            prefix=_WORKSPACE_PERM_CACHE_PREFIX,
+            suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
+
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.
 
         This method checks if a user has permission to access a specific
-        workspace.
+        workspace.  Results are cached in a DB-backed KV cache so that all
+        server/executor processes share the same view.
 
         For private workspaces, the user must have explicit permission.
 
@@ -364,18 +506,38 @@ class PermissionService:
             # When it is not on API server, we allow all users to access all
             # workspaces, as the workspace check has been done on API server.
             return True
+
+        # Check DB-backed KV cache (covers both admin and non-admin results).
+        cache_key = self._workspace_perm_cache_key(workspace_name, user_id)
+        cached = kv_cache.get_cache_entry(cache_key)
+        if cached is not None:
+            return cached == '1'
+
+        # Cache miss — compute the permission.
+        # Admin users have access to all workspaces.
         role = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in role:
-            return True
-        # The Casbin model matcher already handles the wildcard '*' case:
-        # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
-        # r.act == p.act
-        # This means if there's a policy ('*', workspace_name, '*'), it will
-        # match any user
-        enforcer = self._ensure_enforcer()
-        result = enforcer.enforce(user_id, workspace_name, '*')
+            result = True
+        else:
+            # The Casbin model matcher already handles the wildcard '*' case:
+            # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
+            # r.act == p.act
+            # This means if there's a policy ('*', workspace_name, '*'), it
+            # will match any user
+            enforcer = self._ensure_enforcer()
+            result = enforcer.enforce(user_id, workspace_name, '*')
+
         logger.debug(f'Workspace permission check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
+
+        # Cache the result; failures are non-critical.
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, '1' if result else '0',
+                time.time() + _WORKSPACE_PERM_CACHE_TTL_SECONDS)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache workspace permission: {e}')
+
         return result
 
     def check_service_account_token_permission(self, user_id: str,
@@ -395,13 +557,19 @@ class PermissionService:
             True if the user has permission, False otherwise
         """
         del action
-        # Users can always manage their own tokens
-        if user_id == token_owner_id:
+
+        user_roles = self.get_user_roles(user_id)
+        # Admin can manage any token — check this first so a user
+        # holding both admin and viewer isn't blocked by the viewer rule.
+        if rbac.RoleName.ADMIN.value in user_roles:
             return True
 
-        # Check if user has admin role (admins can manage any token)
-        user_roles = self.get_user_roles(user_id)
-        if rbac.RoleName.ADMIN.value in user_roles:
+        # Viewers cannot manage ANY service-account tokens.
+        if rbac.RoleName.VIEWER.value in user_roles:
+            return False
+
+        # Users can always manage their own tokens
+        if user_id == token_owner_id:
             return True
 
         # Regular users cannot manage tokens owned by others
@@ -424,6 +592,9 @@ class PermissionService:
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
             enforcer.save_policy()
+            # Invalidate stale cached denials (e.g. from checks between a
+            # workspace deletion and its re-creation with the same name).
+            self.invalidate_workspace_permission_cache(workspace_name)
 
     def update_workspace_policy(self, workspace_name: str,
                                 users: List[str]) -> None:
@@ -446,6 +617,10 @@ class PermissionService:
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
             enforcer.save_policy()
+            # Invalidate cached permission entries after the policy is
+            # persisted so other processes re-compute permissions on next
+            # check.
+            self.invalidate_workspace_permission_cache(workspace_name)
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
@@ -453,6 +628,10 @@ class PermissionService:
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
             enforcer.save_policy()
+            # Invalidate cached permission entries after the policy is
+            # persisted so other processes re-compute permissions on next
+            # check.
+            self.invalidate_workspace_permission_cache(workspace_name)
 
 
 @contextlib.contextmanager

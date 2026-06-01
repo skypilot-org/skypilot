@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import collections
 import os
@@ -125,6 +126,24 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
 
     # pylint: disable=protected-access
     monkeypatch.setattr(rest._session, "request", mock_http_request)
+
+    # Patch schedule_prepared_request to always enqueue immediately,
+    # skipping precondition waits.  The test fixture manually executes
+    # requests via _execute_request, so background precondition tasks
+    # are unnecessary and would outlive the TestClient event loop.
+    original_schedule = executor.schedule_prepared_request
+
+    async def _schedule_no_precondition(request_task,
+                                        ignore_return_value=False,
+                                        precondition=None,
+                                        retryable=False):
+        await original_schedule(request_task,
+                                ignore_return_value,
+                                precondition=None,
+                                retryable=retryable)
+
+    monkeypatch.setattr(executor, 'schedule_prepared_request',
+                        _schedule_no_precondition)
 
 
 # Define helper functions at module level for pickleability
@@ -392,6 +411,9 @@ def mock_queue(monkeypatch):
             request_id, ignore_return_value, _ = item
             self.queue_map[request_id] = ignore_return_value
 
+        async def put_async(self, item):
+            self.put(item)
+
         def get(self, request_id):
             # Retrieve ignore_return_value for a given request_id
             return self.queue_map.get(request_id)
@@ -405,6 +427,9 @@ def mock_queue(monkeypatch):
 
     # Apply monkeypatch to replace `mp_queue.get_queue`
     monkeypatch.setattr("sky.server.requests.queues.mp_queue.get_queue",
+                        mock_get_queue)
+    # Also patch executor._get_queue which uses the factory pattern
+    monkeypatch.setattr("sky.server.requests.executor._get_queue",
                         mock_get_queue)
 
     # Return the mock_queue_instance for use in tests
@@ -658,6 +683,32 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # The remote-api-version ContextVar gets set as a side effect of
+    # any test that exercises the auth / SetAutostop / hook-firing
+    # paths (real or via decorators like @check_server_healthy_or_start
+    # in sky.client.sdk). Without an explicit reset, leftover values
+    # — sometimes a Mock object planted by a fellow test in the same
+    # xdist worker — break subsequent tests that read
+    # ``versions.get_remote_api_version()`` expecting either None or
+    # an int (e.g. test_sky/server/test_sdk.py::test_api_login_*).
+    versions.set_remote_api_version(None)
+    versions.set_remote_version('unknown')
+    # Ensure a usable event loop is installed on the main thread.
+    # Python 3.9 + xdist sometimes leaves a worker process with no
+    # current event loop after pytest-asyncio (or any test that calls
+    # `asyncio.set_event_loop(None)` or closes a loop) tears it down.
+    # Subsequent tests that still use the legacy
+    # `asyncio.get_event_loop().run_until_complete(...)` pattern
+    # (e.g. tests/unit_tests/test_sky/skylet/test_managed_jobs_service.py)
+    # then hit ``RuntimeError: There is no current event loop in
+    # thread 'MainThread'``. Installing a fresh loop here makes the
+    # legacy pattern safe regardless of what the prior test did.
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            asyncio.set_event_loop(asyncio.new_event_loop())
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
     # Reload config from default paths to reset any in-memory config changes
     # from previous tests that might have modified the config.
     _safe_reload_config()
@@ -666,5 +717,8 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # Same ContextVar reset as the pre-yield branch.
+    versions.set_remote_api_version(None)
+    versions.set_remote_version('unknown')
     # Reload config again to reset any changes made by this test
     _safe_reload_config()

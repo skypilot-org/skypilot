@@ -459,6 +459,11 @@ export function RecipeDetail() {
         </div>
 
         <div className="flex items-center gap-4">
+          <PluginSlot
+            name="recipes.detail.actions"
+            context={{ recipe: template }}
+            wrapperClassName="contents"
+          />
           <button
             onClick={handleShare}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"

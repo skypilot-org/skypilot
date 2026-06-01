@@ -160,11 +160,11 @@ class TestResolveVolumeType:
         with pytest.raises(ValueError, match='No default volume type found'):
             provision_volume._resolve_volume_type(cloud, None)
 
-    def test_resolve_volume_type_multiple_types_error(self, monkeypatch):
-        """Test error when cloud has multiple volume types and none specified."""
+    def test_resolve_volume_type_defaults_to_ephemeral(self, monkeypatch):
+        """Test default resolution prefers the ephemeral-capable type."""
         cloud = clouds.Kubernetes()
 
-        # Mock the CLOUD_TO_VOLUME_TYPE with multiple types
+        # Mock CLOUD_TO_VOLUME_TYPE with PVC (ephemeral) + another type
         mock_cloud_to_volume = {
             clouds.Kubernetes(): [
                 volume_utils.VolumeType.PVC,
@@ -173,6 +173,27 @@ class TestResolveVolumeType:
         }
         monkeypatch.setattr('sky.volumes.volume.CLOUD_TO_VOLUME_TYPE',
                             mock_cloud_to_volume)
+
+        # Should default to PVC since it's the only ephemeral-capable type
+        result = provision_volume._resolve_volume_type(cloud, None)
+        assert result == volume_utils.VolumeType.PVC.value
+
+    def test_resolve_volume_type_multiple_types_error(self, monkeypatch):
+        """Test error when cloud has multiple types and none is ephemeral."""
+        cloud = clouds.Kubernetes()
+
+        # Mock with multiple types, none of which are ephemeral
+        mock_cloud_to_volume = {
+            clouds.Kubernetes(): [
+                volume_utils.VolumeType.PVC,
+                volume_utils.VolumeType.RUNPOD_NETWORK_VOLUME
+            ]
+        }
+        # Also mock EPHEMERAL_VOLUME_TYPES to be empty so no
+        # ephemeral type can be found
+        monkeypatch.setattr('sky.volumes.volume.CLOUD_TO_VOLUME_TYPE',
+                            mock_cloud_to_volume)
+        monkeypatch.setattr('sky.utils.volume.EPHEMERAL_VOLUME_TYPES', [])
 
         with pytest.raises(ValueError, match='Found multiple volume types'):
             provision_volume._resolve_volume_type(cloud, None)

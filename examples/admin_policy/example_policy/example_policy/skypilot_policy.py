@@ -1,6 +1,15 @@
 """Example prebuilt admin policies."""
+import logging
+import shlex
 import subprocess
+import threading
 from typing import Dict, List
+
+import cachetools
+
+from sky.provision.slurm import utils as slurm_utils
+
+logger = logging.getLogger(__name__)
 
 import sky
 from sky.schemas.api import responses
@@ -590,3 +599,104 @@ class SlurmPartitionRoutingPolicy(sky.AdminPolicy):
                 return cls.HIGHMEM_PARTITION
         # Default: standard CPU partition.
         return cls.CPU_PARTITION
+
+
+def get_required_filesystems(task: 'sky.Task') -> List[str]:
+    """Parse required filesystem paths from the task env var."""
+    raw = (task.envs or {}).get('SKYPILOT_REQUIRED_FILESYSTEMS', '')
+    return [p.strip() for p in raw.split(',') if p.strip()]
+
+
+# (cluster_name, frozenset(paths)) -> bool (all paths exist on cluster).
+# TTLCache handles expiry and caps memory; not thread-safe on its own.
+_filesystem_cache: 'cachetools.TTLCache[tuple, bool]' = cachetools.TTLCache(
+    maxsize=128, ttl=300)
+_filesystem_cache_lock = threading.Lock()
+
+
+def check_cluster_has_paths(cluster: str, paths: List[str]) -> bool:
+    """Check if all paths exist on a Slurm cluster (results are cached).
+
+    Uses a TTL cache so repeated checks within the TTL window (300s) skip
+    the SSH call entirely.
+    """
+    key = (cluster, frozenset(paths))
+    with _filesystem_cache_lock:
+        if key in _filesystem_cache:
+            return _filesystem_cache[key]
+
+    result = _check_paths_via_ssh(cluster, paths)
+    with _filesystem_cache_lock:
+        _filesystem_cache[key] = result
+    return result
+
+
+def _check_paths_via_ssh(cluster: str, paths: List[str]) -> bool:
+    """SSH into ``cluster`` once and return True if all paths exist."""
+    cfg = slurm_utils.get_slurm_ssh_config().lookup(cluster)
+    hostname = cfg['hostname']
+    user = cfg['user']
+    port = str(cfg.get('port', 22))
+
+    ssh_cmd = [
+        'ssh', '-p', port, '-o', 'BatchMode=yes', '-o',
+        'StrictHostKeyChecking=no'
+    ]
+    identity_file = slurm_utils.get_identity_file(cfg)
+    if identity_file:
+        ssh_cmd += ['-i', identity_file]
+    proxy_command = cfg.get('proxycommand')
+    if proxy_command:
+        ssh_cmd += ['-o', f'ProxyCommand={proxy_command}']
+    proxy_jump = cfg.get('proxyjump')
+    if proxy_jump:
+        ssh_cmd += ['-J', proxy_jump]
+
+    # Check all paths in a single SSH call by chaining with &&.
+    remote_cmd = ' && '.join(f'test -d {shlex.quote(p)}' for p in paths)
+    result = subprocess.run(
+        ssh_cmd + [f'{user}@{hostname}', remote_cmd],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+class SlurmFilesystemRoutingPolicy(sky.AdminPolicy):
+    """Routes Slurm jobs to clusters where required filesystem paths exist.
+
+    Users declare required paths via ``SKYPILOT_REQUIRED_FILESYSTEMS`` in
+    their task ``envs`` (comma-separated). The policy connects to each
+    candidate cluster over SSH and narrows ``slurm.allowed_clusters`` to
+    only the qualifying ones. Only runs server-side during optimization.
+    """
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Narrows slurm.allowed_clusters to those with all required paths."""
+        if (user_request.at_client_side or user_request.request_name !=
+                sky.AdminPolicyRequestName.OPTIMIZE):
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+        required_paths = get_required_filesystems(user_request.task)
+        if not required_paths:
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+        all_clusters = sky.clouds.Slurm.existing_allowed_clusters()
+        allowed = [
+            c for c in all_clusters
+            if check_cluster_has_paths(c, required_paths)
+        ]
+
+        if not allowed:
+            raise RuntimeError(
+                f'No Slurm clusters have all required filesystem paths: '
+                f'{required_paths}. Ensure at least one cluster in '
+                f'~/.slurm/config has all required paths mounted.')
+
+        config = user_request.skypilot_config
+        config.set_nested(('slurm', 'allowed_clusters'), allowed)
+        return sky.MutatedUserRequest(user_request.task, config)

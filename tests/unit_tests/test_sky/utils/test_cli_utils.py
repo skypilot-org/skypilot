@@ -205,21 +205,33 @@ def test_get_command():
 def test_get_autostop():
     """Test autostop display in status table."""
     mock_record = {
-        'autostop': 300,  # 5 minutes
+        'autostop': 300,  # multiple of 60 minutes -> rendered in hours
         'to_down': False,
     }
 
-    # Test normal autostop
+    # Multiples of 60 minutes are rendered in hours.
     autostop_str = status_utils._get_autostop(mock_record)
-    assert autostop_str == '300m'
+    assert autostop_str == '5h'
 
-    # Test autostop with to_down
+    # Hours rendering is preserved with to_down.
     mock_record['to_down'] = True
     autostop_str = status_utils._get_autostop(mock_record)
-    assert autostop_str == '300m (down)'
+    assert autostop_str == '5h (down)'
+
+    # Non-multiples of 60 stay in minutes.
+    mock_record['autostop'] = 90
+    mock_record['to_down'] = False
+    autostop_str = status_utils._get_autostop(mock_record)
+    assert autostop_str == '90m'
+
+    # 0 stays in minutes (immediate autostop).
+    mock_record['autostop'] = 0
+    autostop_str = status_utils._get_autostop(mock_record)
+    assert autostop_str == '0m'
 
     # Test no autostop
     mock_record['autostop'] = -1
+    mock_record['to_down'] = True
     autostop_str = status_utils._get_autostop(mock_record)
     assert autostop_str == '(down)'
 

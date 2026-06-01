@@ -1,5 +1,6 @@
 import importlib
 import os
+import pickle
 from typing import Dict
 from unittest import mock
 
@@ -656,6 +657,134 @@ def test_kubernetes_image_id_formats_in_resources(enable_all_clouds):
             clouds.Kubernetes), (f'Loaded cloud type mismatch for {input_id}')
 
 
+def test_image_id_dual_cloud_and_docker():
+    """image_id can carry both a cloud VM image and a docker image.
+
+    Uses the reserved 'docker' key alongside a region-keyed AMI. See the
+    AMI-missing-driver-for-B300 motivation (PR #9759): users want to boot a
+    custom AMI (correct NVIDIA driver) and still run their own container.
+    """
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    # The docker image is split out and stored separately.
+    assert r.extract_docker_image() == 'myimage:latest'
+    # The public image_id / get_cloud_image_id only expose the cloud image.
+    assert r.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+    assert r.image_id == {'us-east-1': 'ami-0abcdef'}
+    # Both features are required (regression: was an elif, dropping IMAGE_ID).
+    features = {f.value for f in r.get_required_cloud_features()}
+    assert 'docker_image' in features
+    assert 'image_id' in features
+
+
+def test_image_id_docker_key_strips_prefix():
+    """A 'docker:' prefix on the reserved docker key is stripped."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'docker:myimage:latest',
+                  })
+    assert r.extract_docker_image() == 'myimage:latest'
+    assert r.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_image_id_docker_key_only():
+    """A dict with only the 'docker' key behaves like docker:-only."""
+    r = Resources(cloud='aws', image_id={'docker': 'myimage:latest'})
+    assert r.extract_docker_image() == 'myimage:latest'
+    assert r.get_cloud_image_id() is None
+    assert r.image_id is None
+
+
+def test_image_id_ambiguous_docker_spec_rejected():
+    """docker key + a docker:-prefixed region value is ambiguous -> error."""
+    with pytest.raises(ValueError, match='only one mechanism'):
+        Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'docker:img1',
+                      'docker': 'img2',
+                  })
+
+
+@pytest.mark.parametrize(
+    'image_id, expected_docker, expected_cloud',
+    [
+        # Legacy docker:-prefixed string: no separate cloud image.
+        ('docker:myimage:latest', 'myimage:latest', None),
+        # Legacy region-agnostic docker dict.
+        ({
+            None: 'docker:myimage:latest'
+        }, 'myimage:latest', None),
+    ])
+def test_image_id_legacy_docker_formats_unchanged(image_id, expected_docker,
+                                                  expected_cloud):
+    """Existing docker: image_id formats keep their old semantics."""
+    r = Resources(cloud='aws', image_id=image_id)
+    assert r.extract_docker_image() == expected_docker
+    assert r.get_cloud_image_id() == expected_cloud
+
+
+def test_image_id_legacy_ami_unchanged():
+    """A plain AMI image_id is unaffected by the docker-key support."""
+    r = Resources(cloud='aws', region='us-east-1', image_id='ami-12345')
+    assert r.extract_docker_image() is None
+    assert r.get_cloud_image_id() == {'us-east-1': 'ami-12345'}
+    assert r._docker_image is None
+
+
+def test_image_id_dual_yaml_round_trip():
+    """to_yaml_config / from_yaml_config preserves both images."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    config = r.to_yaml_config()
+    assert config['image_id'] == {
+        'us-east-1': 'ami-0abcdef',
+        'docker': 'myimage:latest',
+    }
+    loaded = list(Resources.from_yaml_config(config))[0]
+    assert loaded.extract_docker_image() == 'myimage:latest'
+    assert loaded.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_image_id_dual_copy_preserves_both():
+    """Resources.copy() keeps both the cloud image and the docker image."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    copied = r.copy()
+    assert copied.extract_docker_image() == 'myimage:latest'
+    assert copied.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+
+def test_image_id_dual_pickle_round_trip():
+    """Pickling preserves both images, and old pickles migrate cleanly."""
+    r = Resources(cloud='aws',
+                  image_id={
+                      'us-east-1': 'ami-0abcdef',
+                      'docker': 'myimage:latest',
+                  })
+    unpickled = pickle.loads(pickle.dumps(r))
+    assert unpickled.extract_docker_image() == 'myimage:latest'
+    assert unpickled.get_cloud_image_id() == {'us-east-1': 'ami-0abcdef'}
+
+    # Simulate an object pickled before _VERSION 34 (no _docker_image attr).
+    legacy = Resources(cloud='aws', region='us-east-1', image_id='ami-12345')
+    state = dict(legacy.__dict__)
+    state.pop('_docker_image', None)
+    state['_version'] = 33
+    migrated = Resources.__new__(Resources)
+    migrated.__setstate__(state)
+    assert migrated._docker_image is None
+
+
 def test_network_tier_basic():
     """Test basic network tier functionality and validation."""
     # Test with no network_tier specified (defaults to None)
@@ -1056,6 +1185,22 @@ def test_priority_yaml_serialization():
     assert loaded_resources.priority == 200
     assert loaded_resources.cpus == '4'
     assert loaded_resources.memory == '8'
+
+
+def test_priority_class_yaml_serialization():
+    """priority_class round-trips; construction allows both priority fields."""
+    r = Resources(priority_class='tier1')
+    assert r.priority is None
+    assert r.priority_class == 'tier1'
+    yaml_config = r.to_yaml_config()
+    assert yaml_config['priority_class'] == 'tier1'
+    loaded = list(Resources.from_yaml_config(yaml_config))[0]
+    assert loaded.priority_class == 'tier1'
+
+    r2 = Resources(priority=100, priority_class='tier1')
+    assert r2.priority == 100 and r2.priority_class == 'tier1'
+    y2 = r2.to_yaml_config()
+    assert y2['priority'] == 100 and y2['priority_class'] == 'tier1'
 
 
 def test_priority_copy():

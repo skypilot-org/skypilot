@@ -1,11 +1,14 @@
 """Instrumentation for the API server."""
 
 import asyncio
+import atexit
+import glob
 import multiprocessing
 import os
+import re
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -19,12 +22,155 @@ import uvicorn
 from sky import core
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.utils import annotations
+from sky.utils import common
 
 logger = sky_logging.init_logger(__name__)
 
 _BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
 _COST_TIME_HORIZON_SECONDS = 3600
+
+# Idempotency guard for register_multiproc_cleanup_atexit.
+_multiproc_cleanup_registered = False
+
+
+def register_multiproc_cleanup_atexit() -> None:
+    """Clean up this process's prometheus_client multiproc files on exit.
+
+    Each process that uses pid-labelled multiprocess metrics (uvicorn
+    workers, executor workers) leaves files at
+    ``$PROMETHEUS_MULTIPROC_DIR/<type>_<pid>.db``. The MultiProcessCollector
+    keeps reading those files until ``multiprocess.mark_process_dead(pid)``
+    deletes them. Without this hook, a worker that exits leaves its last
+    written gauge value visible to every future scrape — for ``liveall``
+    gauges this can pin a stale per-pid value indefinitely.
+
+    Safe to call more than once per process; only the first call registers.
+    Only registers when ``PROMETHEUS_MULTIPROC_DIR`` is set; a no-op in
+    single-process / unit-test environments.
+    """
+    global _multiproc_cleanup_registered
+    if _multiproc_cleanup_registered:
+        return
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        return
+    pid = os.getpid()
+    atexit.register(multiprocess.mark_process_dead, pid)
+    _multiproc_cleanup_registered = True
+
+
+# Default reap interval. Tuned to give prompt cleanup of stale per-pid
+# files without measurable overhead: one directory glob + one pid_exists()
+# check per unique pid per tick.
+_REAPER_INTERVAL_SECONDS = 60
+# Matches the per-pid live-gauge file names written by
+# ``prometheus_client.multiprocess``: ``gauge_live{all,sum,max,min}_<pid>.db``.
+# These are the only files that ``mark_process_dead(pid)`` would remove; the
+# library intentionally preserves counters, histograms, summaries, and
+# non-live gauges so their accumulated values keep contributing to aggregate
+# readings after the writer exits.
+_LIVE_GAUGE_FILE_PID_RE = re.compile(r'^gauge_live[a-z]+_([0-9]+)\.db$')
+
+
+def _scan_multiproc_pids(multiproc_dir: str) -> Set[int]:
+    """Return pids that own live-gauge files in ``multiproc_dir``.
+
+    Uses the same glob shape that ``mark_process_dead`` would walk, so we
+    do not consider pids whose only on-disk traces are aggregate (counter
+    / histogram / non-live gauge) files — those are intentionally kept.
+    """
+    pattern = os.path.join(multiproc_dir, 'gauge_live*_*.db')
+    pids: Set[int] = set()
+    for path in glob.glob(pattern):
+        m = _LIVE_GAUGE_FILE_PID_RE.match(os.path.basename(path))
+        if m is not None:
+            pids.add(int(m.group(1)))
+    return pids
+
+
+def _reap_stale_multiproc_files() -> int:
+    """Remove prometheus multiproc files for pids that no longer exist.
+
+    Returns the number of pids reaped.
+    """
+    multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
+    if not multiproc_dir:
+        return 0
+    file_pids = _scan_multiproc_pids(multiproc_dir)
+    if not file_pids:
+        return 0
+    reaped = 0
+    for pid in file_pids:
+        if psutil.pid_exists(pid):
+            continue
+        try:
+            multiprocess.mark_process_dead(pid)
+            reaped += 1
+        except Exception:  # pylint: disable=broad-except
+            # Don't let a single bad file or a race with another reaper
+            # tick kill the daemon.
+            logger.warning(
+                f'Failed to reap prometheus multiproc files for pid {pid}.',
+                exc_info=True)
+    return reaped
+
+
+async def multiproc_reaper_daemon(
+        interval_seconds: int = _REAPER_INTERVAL_SECONDS) -> None:
+    """Periodically reap multiproc prometheus files from dead workers.
+
+    Per the prometheus_client multiprocess docs, an exiting writer
+    process should call ``multiprocess.mark_process_dead(pid)`` so its
+    per-pid live-gauge files are removed; otherwise the collector keeps
+    emitting the dead pid's last value on every scrape. ``atexit``-style
+    cleanup inside the worker covers graceful exits, but never fires on
+    SIGKILL / OOM / hard crash — in those cases a recycled worker's last
+    live-gauge value can be served by ``/metrics`` indefinitely (until
+    the API server pod itself restarts and wipes the metrics dir). This
+    daemon scans the multiproc dir from the main API server process and
+    invokes ``mark_process_dead`` on behalf of any writer whose pid no
+    longer exists.
+
+    Reaps any pid whose live-gauge file is present but for which
+    ``psutil.pid_exists`` returns False (i.e. the pid no longer maps to
+    any running process). The descendant relationship is intentionally
+    not used as the membership signal: writers may not always be direct
+    descendants of the main API server process (e.g. workers reparented
+    to init after an intermediate exits), and a strict descendant filter
+    would leak files from those legitimate writers.
+
+    Known false-negative: if a dead worker's pid is later reused by an
+    unrelated process inside the same pod, its files keep being scraped
+    until either that unrelated process exits, the worker's pid wraps to
+    another value, or a same-pid SkyPilot writer overwrites the file.
+    PID reuse within a pod's lifetime is rare in practice (Linux pid_max
+    is large and pids are allocated sequentially), so this is accepted.
+
+    No-op when ``PROMETHEUS_MULTIPROC_DIR`` is unset.
+    """
+    if not os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
+        logger.info(
+            'PROMETHEUS_MULTIPROC_DIR unset; multiproc reaper will not run.')
+        return
+    logger.info(
+        f'Starting prometheus multiproc reaper (interval={interval_seconds}s)')
+    while True:
+        try:
+            reaped = await asyncio.to_thread(_reap_stale_multiproc_files)
+            if reaped:
+                logger.info(
+                    f'Reaped prometheus multiproc files for {reaped} dead '
+                    f'pid(s).')
+        except asyncio.CancelledError:
+            logger.info('Prometheus multiproc reaper cancelled')
+            break
+        except Exception:  # pylint: disable=broad-except
+            logger.warning('Error in prometheus multiproc reaper.',
+                           exc_info=True)
+        await asyncio.sleep(interval_seconds)
 
 
 class BurnRateCollector:
@@ -94,33 +240,71 @@ try:
 except ValueError:
     pass
 
+# Collectors registered by plugins at runtime.
+_plugin_collectors: list = []
+
+
+def register_plugin_collector(collector):
+    """Register a custom Prometheus collector from a plugin."""
+    _plugin_collectors.append(collector)
+    try:
+        prom.REGISTRY.register(collector)
+    except ValueError:
+        pass
+
+
 # Cache TTL shared by all custom collectors.
 _COLLECTOR_CACHE_TTL_SECONDS = _BURN_RATE_UPDATE_INTERVAL_SECONDS
+
+# Label value substituted when a row has NULL in workspace / user_hash / cloud.
+# 'default' for workspace mirrors the convention used elsewhere in the
+# codebase for pre-workspace rows; '' for user/cloud keeps the absence
+# distinct without inventing a label value that could collide with a real
+# one.
+_NULL_WORKSPACE_LABEL = 'default'
+_NULL_LABEL = ''
+
+
+def _label_or_default(value: Optional[str], default: str) -> str:
+    return value if value else default
 
 
 class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
-    Queries the managed jobs DB to produce real-time gauges for
-    job status counts.
+    Emits ``sky_managed_jobs_count{workspace, user, status, cloud}`` for
+    every task — both active (PENDING / LAUNCHING / RUNNING / …) and
+    terminal (SUCCEEDED / FAILED* / CANCELLED). For pre-cloud-assignment
+    statuses (PENDING / LAUNCHING) the ``cloud`` label is the empty
+    string ``""``; operators can ``sum by (workspace, user, status)``
+    for a cloud-agnostic view.
+
+    Caveat: terminal counts grow monotonically as the DB accumulates
+    rows. Reading absolute values gives lifetime totals; for "failures
+    in the last hour" use ``increase(...)`` / ``delta(...)`` over a
+    window. A proper Counter incremented at the state-transition site
+    would be more semantically correct than a gauge here, but is
+    deferred.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._last_scrape_time = 0.0
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
-        self._cached_status_counts: dict = {}
+        # List of (workspace, user_hash, cloud, status, count) tuples.
+        self._cached_rows: list = []
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
         from sky.jobs import state as managed_job_state
-        self._cached_status_counts = (managed_job_state.get_status_counts())
+        self._cached_rows = (
+            managed_job_state.get_status_counts_by_workspace_user_cloud())
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_count',
-            'Current count of managed job tasks by status',
-            labels=['status'])
+            'sky_managed_jobs_count', ('Current count of managed job tasks by '
+                                       'workspace, user, status, and cloud.'),
+            labels=['workspace', 'user', 'status', 'cloud'])
 
     def collect(self):
         now = time.time()
@@ -128,19 +312,182 @@ class ManagedJobsCollector:
             if now - self._last_scrape_time >= self._cache_ttl:
                 try:
                     self._refresh()
-                    self._last_scrape_time = now
                 except Exception:  # pylint: disable=broad-except
                     logger.exception('Failed to collect managed jobs metrics')
-            status_counts = self._cached_status_counts
+                self._last_scrape_time = now
+            rows = self._cached_rows
 
-        status_metric = prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_count',
-            'Current count of managed job tasks by status',
-            labels=['status'])
-        for status, count in status_counts.items():
-            status_metric.add_metric([status], count)
-        yield status_metric
+        counts: dict = {}
+        for workspace, user_hash, cloud, status, count in rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            user_label = _label_or_default(user_hash, _NULL_LABEL)
+            cloud_label = _label_or_default(cloud, _NULL_LABEL)
+            key = (ws_label, user_label, status, cloud_label)
+            counts[key] = counts.get(key, 0) + count
 
+        metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_count', ('Current count of managed job tasks by '
+                                       'workspace, user, status, and cloud'),
+            labels=['workspace', 'user', 'status', 'cloud'])
+        for (workspace, user, status, cloud), count in counts.items():
+            metric.add_metric([workspace, user, status, cloud], count)
+        yield metric
+
+
+class WorkspaceUsageCollector:
+    """Per-workspace / per-user cluster usage metrics.
+
+    Walks ``global_user_state.get_clusters()`` once per cache window
+    (30 s) and emits:
+
+      * ``sky_clusters_count{workspace,user,status,cloud,kind}`` —
+        cluster counts. ``kind`` ∈ ``cluster|managed_job|controller``:
+        filter ``kind="cluster"`` to avoid overlap with
+        ``sky_managed_jobs_count`` and the controller; sum across
+        kinds for the all-clusters total.
+      * ``sky_clusters_gpus_in_flight{workspace,user,cloud,gpu_type,kind}``
+        — GPU count by accelerator model across ``UP`` clusters,
+        summed over ``launched_nodes``.
+
+    All gauges share one cache to keep the cost of a scrape bounded to
+    a single ``get_clusters()`` call (the same query
+    ``BurnRateCollector`` already runs).
+
+    The ``user`` label carries ``user_hash`` (immutable, 8-char hex)
+    rather than the display name; operators who want a readable name
+    can join with the ``users`` table or maintain a side-mapping.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
+        self._cached: dict = {
+            'counts': {},
+            'gpus': {},
+        }
+
+    @staticmethod
+    def _cluster_kind(cluster: dict) -> str:
+        """Classify a cluster for the ``kind`` label.
+
+        - ``controller``: jobs / serve controller (infra), by name prefix.
+        - ``managed_job``: a managed-job backing cluster (``is_managed``).
+        - ``cluster``: a plain cluster (``sky launch``).
+
+        Letting operators filter ``kind="cluster"`` avoids double-counting
+        against ``sky_managed_jobs_count`` / the controller; summing
+        across all kinds still gives full resource coverage.
+
+        We check the name prefix directly instead of going through
+        ``controller_utils.Controllers.from_name``: that helper asserts
+        exact-match against the live ``SERVER_ID`` (and mutates the
+        ``Controllers`` enum singleton on the looser path), which would
+        crash the whole scrape if the DB carries a controller row from
+        a previous server identity (e.g. ephemeral storage wiped
+        ``~/.sky/user_hash`` between restarts).
+        """
+        name = cluster.get('name') or ''
+        if (name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX) or
+                name.startswith(common.JOB_CONTROLLER_PREFIX)):
+            return 'controller'
+        if cluster.get('is_managed'):
+            return 'managed_job'
+        return 'cluster'
+
+    def _compute(self) -> dict:
+        clusters = global_user_state.get_clusters(summary_response=True)
+        counts: dict = {}
+        gpus: dict = {}
+
+        for cluster in clusters:
+            workspace = _label_or_default(cluster.get('workspace'),
+                                          _NULL_WORKSPACE_LABEL)
+            user = _label_or_default(cluster.get('user_hash'), _NULL_LABEL)
+            kind = self._cluster_kind(cluster)
+
+            handle = cluster.get('handle')
+            launched_resources = (getattr(handle, 'launched_resources', None)
+                                  if handle is not None else None)
+            cloud_obj = (getattr(launched_resources, 'cloud', None)
+                         if launched_resources is not None else None)
+            cloud = _label_or_default(
+                str(cloud_obj) if cloud_obj else None, _NULL_LABEL)
+
+            status = cluster.get('status')
+            status_name = getattr(status, 'name', str(status))
+
+            # ── count ──
+            count_key = (workspace, user, status_name, cloud, kind)
+            counts[count_key] = counts.get(count_key, 0) + 1
+
+            # ── GPUs, only for UP clusters ──
+            if status_name != 'UP':
+                continue
+            if launched_resources is None:
+                continue
+            num_nodes = max(1, int(getattr(handle, 'launched_nodes', 1) or 1))
+
+            accelerators = (launched_resources.accelerators or {})
+            for acc_name, acc_count in accelerators.items():
+                gpu_key = (workspace, user, cloud, acc_name, kind)
+                gpus[gpu_key] = (gpus.get(gpu_key, 0.0) +
+                                 float(acc_count) * num_nodes)
+
+        return {
+            'counts': counts,
+            'gpus': gpus,
+        }
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_clusters_count',
+            'Count of clusters by workspace, user, status, cloud, and kind '
+            '(kind=cluster|managed_job|controller)',
+            labels=['workspace', 'user', 'status', 'cloud', 'kind'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_clusters_gpus_in_flight',
+            'GPU count across UP clusters, by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._cached = self._compute()
+                    self._last_scrape_time = now
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('Failed to collect workspace usage')
+                    self._last_scrape_time = now
+            data = self._cached
+
+        m = prom_core.GaugeMetricFamily(
+            'sky_clusters_count',
+            'Count of clusters by workspace, user, status, cloud, and kind '
+            '(kind=cluster|managed_job|controller)',
+            labels=['workspace', 'user', 'status', 'cloud', 'kind'])
+        for (workspace, user, status, cloud, kind), v in data['counts'].items():
+            m.add_metric([workspace, user, status, cloud, kind], v)
+        yield m
+
+        m = prom_core.GaugeMetricFamily(
+            'sky_clusters_gpus_in_flight',
+            'GPU count across UP clusters, by workspace, user, cloud, '
+            'gpu_type, kind',
+            labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+        for (workspace, user, cloud, gpu_type, kind), v in data['gpus'].items():
+            m.add_metric([workspace, user, cloud, gpu_type, kind], v)
+        yield m
+
+
+_WORKSPACE_USAGE_COLLECTOR = WorkspaceUsageCollector()
+
+try:
+    prom.REGISTRY.register(_WORKSPACE_USAGE_COLLECTOR)
+except ValueError:
+    pass
 
 _MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
 
@@ -177,8 +524,14 @@ def metrics() -> fastapi.Response:
         registry = prom.CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         registry.register(_BURN_RATE_COLLECTOR)
+        registry.register(_WORKSPACE_USAGE_COLLECTOR)
         if _MANAGED_JOBS_COLLECTOR is not None:
             registry.register(_MANAGED_JOBS_COLLECTOR)
+        for c in _plugin_collectors:
+            try:
+                registry.register(c)
+            except ValueError:
+                pass
         data = generate_latest(registry)
     else:
         data = generate_latest()
@@ -188,17 +541,86 @@ def metrics() -> fastapi.Response:
 
 
 # Per-context timeout for metrics collection. Must be shorter than the
-# Prometheus scrape_timeout (default 10s in our Helm chart) so that the
-# endpoint responds promptly even when one remote cluster is unreachable.
-# Without this, a single hanging port-forward (e.g. 30s httpx timeout)
-# blocks the entire /gpu-metrics response, causing Prometheus to mark the
-# scrape target as down.
-_PER_CONTEXT_TIMEOUT_SECONDS = 8
+# Prometheus scrape_timeout configured on the upstream Prometheus that
+# scrapes this endpoint so the response arrives before that scrape times
+# out and marks the target down. Operators federating from a Prometheus
+# with a non-default scrape_timeout should adjust both together; see
+# docs/source/reference/api-server/examples/api-server-gpu-metrics-setup.rst.
+#
+# Without a per-context timeout, a single hanging port-forward (e.g. 30s
+# httpx timeout) would block the entire /gpu-metrics response.
+#
+# 20s accommodates large compute clusters where federate latency plus
+# port-forward setup can run 5-10s warm and longer cold.
+_PER_CONTEXT_TIMEOUT_SECONDS = 20
+
+_CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
+    '/var/skypilot/credentials/kubeconfig/kubeconfig')
+
+
+@metrics_app.get('/debug-gpu-metrics')
+async def gpu_metrics_debug() -> dict:
+    """Debug endpoint for diagnosing GPU metrics collection issues."""
+    kubeconfig_env = os.environ.get('KUBECONFIG', 'NOT_SET')
+    default_path = os.path.expanduser('~/.kube/config')
+
+    # Check what contexts are visible before and after cache clear
+    pre_clear_contexts = core.get_all_contexts()
+    annotations.clear_request_level_cache()
+    post_clear_contexts = core.get_all_contexts()
+
+    # Check kubeconfig file existence
+    if kubeconfig_env != 'NOT_SET':
+        kubeconfig_paths = kubeconfig_env.split(os.pathsep)
+    else:
+        kubeconfig_paths = [default_path]
+    path_info = {}
+    for p in kubeconfig_paths:
+        expanded = os.path.expanduser(p)
+        try:
+            st = os.stat(expanded)
+            path_info[p] = {'exists': True, 'size': st.st_size}
+        except OSError:
+            path_info[p] = {'exists': False, 'size': 0}
+
+    # Check credential manager kubeconfig separately
+    cred_mgr_exists = os.path.exists(_CREDENTIAL_MANAGER_KUBECONFIG_PATH)
+    cred_mgr_contexts = []
+    if cred_mgr_exists:
+        try:
+            ctxs, _ = (
+                kubernetes_adaptor.kubernetes.config.list_kube_config_contexts(
+                    config_file=_CREDENTIAL_MANAGER_KUBECONFIG_PATH))
+            cred_mgr_contexts = [c['name'] for c in ctxs]
+        except Exception as e:  # pylint: disable=broad-except
+            cred_mgr_contexts = [f'error: {e}']
+
+    return {
+        'pid': os.getpid(),
+        'thread': threading.current_thread().name,
+        'KUBECONFIG': kubeconfig_env,
+        'kubeconfig_paths': path_info,
+        'credential_manager_kubeconfig': {
+            'path': _CREDENTIAL_MANAGER_KUBECONFIG_PATH,
+            'exists': cred_mgr_exists,
+            'contexts': cred_mgr_contexts,
+        },
+        'contexts_before_cache_clear': pre_clear_contexts,
+        'contexts_after_cache_clear': post_clear_contexts,
+    }
 
 
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
+    # The metrics server runs as a daemon thread, not as a normal request
+    # handler, so:
+    # 1. The global config context (allowed_contexts, etc.) is a snapshot
+    #    from startup. Reload it from the DB to pick up config changes.
+    # 2. Request-scoped caches (kubernetes API clients, context names) are
+    #    never cleared automatically. Clear them to pick up new kubeconfigs.
+    skypilot_config.reload_config()
+    annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
     successful_contexts = 0

@@ -1439,12 +1439,19 @@ class Optimizer:
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
+                    # set_resources() may copy the Resources object, e.g. to
+                    # attach Docker login config. _fill_in_launchable_resources
+                    # keys its result by the post-processed resource in
+                    # local_task.resources, so use that singleton resource
+                    # instead of the original loop variable.
+                    assert len(local_task.resources) == 1, local_task.resources
+                    requested_resources = list(local_task.resources)[0]
                     launchable_resources_map, _, _, _ = (
                         _fill_in_launchable_resources(
                             task=local_task,
                             blocked_resources=blocked_resources,
                             quiet=False))
-                    if launchable_resources_map.get(resources, []):
+                    if launchable_resources_map.get(requested_resources, []):
                         break
 
         local_graph = local_dag.get_graph()
@@ -1767,6 +1774,13 @@ def _fill_in_launchable_resources(
                             '- Try using "+" suffix for at-least matching '
                             '(e.g., "nvme:500+"), or reduce the size '
                             f'requirement. {colorama.Style.RESET_ALL}')
+                    if resources.max_hourly_cost is not None:
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Max hourly cost limit '
+                                    f'(${resources.max_hourly_cost}/hr) may be '
+                                    'too restrictive. Try increasing the limit '
+                                    'or removing it to see available options.'
+                                    f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
                                 f'{repr(cloud)}: {hint}'

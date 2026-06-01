@@ -37,6 +37,7 @@ from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
+from sky.server.blob import blob_storage as bs
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -664,28 +665,23 @@ def _start_api_server(deploy: bool = False,
             raise RuntimeError(f'Cannot start API server: {get_server_url()} '
                                'is not a local URL')
 
-        # Check available memory before starting the server.
-        # Skip this warning if postgres is used, as:
-        #   1) that's almost certainly a remote API server;
-        #   2) the actual consolidation mode config is stashed in the database,
-        #      and the value of `job_utils.is_consolidation_mode` will not be
-        #      the actual value in the db, but only None as in this case, the
-        #      whole YAML config is really just `db: <URI>`.
-        if skypilot_config.get_nested(('db',), None) is None:
-            avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-            # pylint: disable=import-outside-toplevel
-            import sky.jobs.utils as job_utils
-            max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                          if job_utils.is_consolidation_mode(
-                              on_api_restart=True) else
-                          server_constants.MIN_AVAIL_MEM_GB)
-            if avail_mem_size_gb <= max_memory:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Your SkyPilot API server machine '
-                    f'only has {avail_mem_size_gb:.1f}GB memory available. '
-                    f'At least {max_memory}GB is recommended to support higher '
-                    'load with better performance.'
-                    f'{colorama.Style.RESET_ALL}')
+        # At this point, we cannot reliably tell if we will be using
+        # consolidation mode, because that requires accessing the db
+        # 1) to pull config if we are using postgres
+        # 2) to check if there is an existing jobs controller
+        # See job_utils.setup_consolidation_mode_on_startup for the logic...
+        # Instead, we will just assume consolidation mode is enabled if using
+        # deploy mode. This only affects the warning message.
+        avail_mem_size_gb: float = common_utils.get_mem_size_gb()
+        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                      if deploy else server_constants.MIN_AVAIL_MEM_GB)
+        if avail_mem_size_gb <= max_memory:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
+                f'has {avail_mem_size_gb:.1f}GB memory available. '
+                f'At least {max_memory}GB is recommended to support higher '
+                'load with better performance.'
+                f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
         if deploy:
@@ -952,14 +948,8 @@ def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
     """
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
-    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
-                  'file_mounts')
-    extraction_dir = client_dir / 'blobs' / blob_id
-    if not extraction_dir.is_dir():
-        raise FileNotFoundError(
-            f'Blob not found: {extraction_dir}. The file mounts blob may '
-            'have been garbage collected before execution started.')
-    return str(extraction_dir)
+    storage = bs.get_blob_storage()
+    return storage.resolve_blob_to_dir(user_hash, blob_id)
 
 
 def process_mounts_in_task_on_api_server(

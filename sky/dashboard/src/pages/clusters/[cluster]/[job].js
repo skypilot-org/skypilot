@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -22,6 +22,11 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import {
+  extractLinksFromLogs,
+  normalizeUrl,
+  useCustomUrlPatterns,
+} from '@/utils/externalLinks';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -81,8 +86,13 @@ function JobHeader({
 export function JobDetailPage() {
   const router = useRouter();
   const { cluster, job } = router.query;
-  const { clusterData, clusterJobData, loading, refreshData } =
-    useClusterDetails({ cluster });
+  const {
+    clusterData,
+    clusterJobData,
+    loading,
+    clusterJobsLoading,
+    refreshData,
+  } = useClusterDetails({ cluster });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
@@ -96,12 +106,12 @@ export function JobDetailPage() {
     return jobData && PENDING_STATUSES.includes(jobData.status);
   }, [clusterJobData, job, PENDING_STATUSES]);
 
-  // Update isInitialLoad when data is first loaded
+  // Update isInitialLoad when both cluster and job data are first loaded
   useEffect(() => {
-    if (!loading && isInitialLoad) {
+    if (!loading && !clusterJobsLoading && isInitialLoad) {
       setIsInitialLoad(false);
     }
-  }, [loading, isInitialLoad]);
+  }, [loading, clusterJobsLoading, isInitialLoad]);
 
   const logStreamArgs = useMemo(
     () => ({
@@ -123,6 +133,34 @@ export function JobDetailPage() {
     refreshTrigger: logsRefreshToken,
     onError: handleStreamError,
   });
+
+  // Scan streamed logs against built-in plus admin-configured URL patterns
+  // and surface matches in the Details card as an External Links row.
+  const urlPatterns = useCustomUrlPatterns();
+  const extractedLinksRef = useRef({});
+  const [extractedLinks, setExtractedLinks] = useState({});
+  useEffect(() => {
+    if (!displayLines || displayLines.length === 0) return;
+    const next = extractLinksFromLogs(
+      displayLines,
+      urlPatterns,
+      extractedLinksRef.current
+    );
+    extractedLinksRef.current = next;
+    if (Object.keys(next).length > 0) {
+      setExtractedLinks((prev) => {
+        const merged = { ...prev };
+        let changed = false;
+        for (const [label, url] of Object.entries(next)) {
+          if (merged[label] !== url) {
+            merged[label] = url;
+            changed = true;
+          }
+        }
+        return changed ? merged : prev;
+      });
+    }
+  }, [displayLines, urlPatterns]);
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
@@ -184,7 +222,7 @@ export function JobDetailPage() {
           isRefreshing={isRefreshing}
           loading={loading}
         />
-        {loading && isInitialLoad ? (
+        {isInitialLoad && (loading || clusterJobsLoading) ? (
           <div className="flex items-center justify-center h-64">
             <CircularProgress size={24} className="mr-2" />
             <span>Loading...</span>
@@ -300,6 +338,33 @@ export function JobDetailPage() {
                         )}
                       </div>
                     </div>
+                    {Object.keys(extractedLinks).length > 0 && (
+                      <div className="col-span-2">
+                        <div className="text-gray-600 font-medium text-base">
+                          External Links
+                        </div>
+                        <div className="text-base mt-1">
+                          <div className="flex flex-wrap gap-4">
+                            {Object.entries(extractedLinks).map(
+                              ([label, url]) => {
+                                const normalizedUrl = normalizeUrl(url);
+                                return (
+                                  <a
+                                    key={label}
+                                    href={normalizedUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                                  >
+                                    {label}
+                                  </a>
+                                );
+                              }
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -363,7 +428,7 @@ export function JobDetailPage() {
                       <span>Loading...</span>
                     </div>
                   ) : (
-                    <div className="max-h-96 overflow-y-auto">
+                    <div className="max-h-[max(200px,calc(100vh_-_572px))] overflow-y-auto">
                       <LogFilter logs={displayLines} />
                     </div>
                   )}

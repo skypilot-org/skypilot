@@ -244,6 +244,19 @@ class AWSIdentityType(enum.Enum):
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
     #    profile                <not set>             None    None
+    # access_key     ****************abcd            login
+    # secret_key     ****************abcd            login
+    #     region                us-east-1      config-file    ~/.aws/config
+    # The `aws login` command (released 2026) is a browser-based OAuth 2.0 +
+    # PKCE flow that writes short-term credentials to ~/.aws/login/cache/ and
+    # auto-rotates them every 15 minutes. boto3 resolves them via the standard
+    # credential provider chain. No ~/.aws/credentials file is used.
+    # https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html
+    LOGIN = 'login'
+
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                <not set>             None    None
     # access_key     ****************abcd shared-credentials-file
     # secret_key     ****************abcd shared-credentials-file
     #     region                us-east-1      config-file    ~/.aws/config
@@ -688,21 +701,27 @@ class AWS(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 local_disk=local_disk,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='aws')
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -802,7 +821,7 @@ class AWS(clouds.Cloud):
 
         docker_run_options = []
         if resources.extract_docker_image() is not None:
-            image_id_to_use = None
+            image_id_to_use = resources.get_cloud_image_id()
             if enable_efa:
                 docker_run_options = _EFA_DOCKER_RUN_OPTIONS
         else:
@@ -917,7 +936,9 @@ class AWS(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -936,6 +957,7 @@ class AWS(clouds.Cloud):
              local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='aws')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
@@ -1086,6 +1108,11 @@ class AWS(clouds.Cloud):
             # variables. So we don't check for the existence of ~/.aws/credentials.
             # i.e. the identity is not determined by the file.
             hints = f'AWS env is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.LOGIN:
+            # `aws login` stores credentials in ~/.aws/login/cache/ and rotates
+            # them automatically; the ~/.aws/credentials file is not used.
+            # boto3 resolves them via the standard credential provider chain.
+            hints = f'AWS login is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -1149,6 +1176,7 @@ class AWS(clouds.Cloud):
             AWSIdentityType.SSO,
             AWSIdentityType.IAM_ROLE,
             AWSIdentityType.CONTAINER_ROLE,
+            AWSIdentityType.LOGIN,
         }
         return identity_type in non_static_types
 
@@ -1319,6 +1347,9 @@ class AWS(clouds.Cloud):
                 pass
 
         result = cls._sts_get_caller_identity()
+        # get_catalog_path() is now a pure path getter; create the
+        # parent dir explicitly before writing.
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         with open(cache_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(result))
         return result

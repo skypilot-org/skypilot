@@ -170,3 +170,44 @@ def test_python_m_pip_usage():
 
         # Verify we're NOT using pip3
         assert 'pip3' not in call_args
+
+
+def test_wheel_build_reproducible():
+    """Test that wheel builds are reproducible across separate processes.
+
+    PYTHONHASHSEED is randomized per-process, so without the fix (setting
+    SOURCE_DATE_EPOCH and PYTHONHASHSEED in the pip subprocess env), two
+    separate processes building the same source can produce different wheel
+    hashes due to non-deterministic metadata ordering and zip timestamps.
+
+    We simulate this by running each build in a separate subprocess,
+    just like different API server replicas would. Each subprocess gets
+    a naturally randomized PYTHONHASHSEED.
+    """
+    build_script = (
+        'import shutil, os; '
+        'from sky.backends import wheel_utils; '
+        'shutil.rmtree(str(wheel_utils.WHEEL_DIR), ignore_errors=True); '
+        '_, h = wheel_utils.build_sky_wheel(); '
+        'print(h)')
+
+    try:
+        result1 = subprocess.run([sys.executable, '-c', build_script],
+                                 capture_output=True,
+                                 text=True,
+                                 check=True)
+        hash1 = result1.stdout.strip().splitlines()[-1]
+
+        result2 = subprocess.run([sys.executable, '-c', build_script],
+                                 capture_output=True,
+                                 text=True,
+                                 check=True)
+        hash2 = result2.stdout.strip().splitlines()[-1]
+
+        assert hash1 == hash2, (
+            f'Wheel build is not reproducible across processes: '
+            f'{hash1} != {hash2}. '
+            'Check that SOURCE_DATE_EPOCH and PYTHONHASHSEED are set in the '
+            'pip wheel subprocess environment in _build_sky_wheel().')
+    finally:
+        shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)

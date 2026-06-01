@@ -432,6 +432,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace name
     if not workspace_name or not isinstance(workspace_name, str):
         raise ValueError('Workspace name must be a non-empty string.')
+    common_utils.check_workspace_name_is_valid(workspace_name)
 
     _validate_workspace_config(workspace_name, config)
 
@@ -567,6 +568,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
         if workspace_name not in current_workspaces:
+            # Validate names for newly added workspaces only (not existing
+            # ones, for backward compatibility with pre-validation names).
+            common_utils.check_workspace_name_is_valid(workspace_name)
             users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['add'][workspace_name] = users
             continue
@@ -634,6 +638,24 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def check_workspace_permission(user: models.User, workspace: str) -> None:
+    """Checks that a user has permission to access the given workspace.
+
+    Args:
+        user: The user making the request.
+        workspace: The workspace name to check.
+
+    Raises:
+        PermissionDeniedError: If the user does not have permission to access
+            the workspace.
+    """
+    if not permission.permission_service.check_workspace_permission(
+            user.id, workspace):
+        raise exceptions.PermissionDeniedError(
+            f'User {user.name} ({user.id}) does not have '
+            f'permission to access workspace {workspace!r}')
+
+
 def reject_request_for_unauthorized_workspace(user: models.User) -> None:
     """Rejects a request that has no permission to access active workspace.
 
@@ -644,12 +666,7 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
         PermissionDeniedError: If the user does not have permission to access
             the active workspace.
     """
-    active_workspace = skypilot_config.get_active_workspace()
-    if not permission.permission_service.check_workspace_permission(
-            user.id, active_workspace):
-        raise exceptions.PermissionDeniedError(
-            f'User {user.name} ({user.id}) does not have '
-            f'permission to access workspace {active_workspace!r}')
+    check_workspace_permission(user, skypilot_config.get_active_workspace())
 
 
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:

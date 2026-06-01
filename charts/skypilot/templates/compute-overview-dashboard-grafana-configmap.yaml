@@ -1,0 +1,14 @@
+{{- if and .Values.grafana.enabled .Values.grafana.sidecar.dashboards.enabled }}
+{{- $fullName := include "skypilot.fullname" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullName }}-compute-overview-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $fullName }}-api
+    grafana_dashboard: "true"
+data:
+  compute-overview-dashboard.json: |
+{{ .Files.Get "manifests/compute-overview-dashboard.json" | indent 4 }}
+{{- end }}

@@ -32,6 +32,7 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -102,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # Remove the in-cluster context name - this is only meaningful for the
+    # local Kubernetes environment and should not be forwarded to the server,
+    # which has its own cluster context configuration.
+    env_vars.pop(kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
     return env_vars
 
 
@@ -288,6 +293,14 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    extra_launch_context: Dict[str, Any] = {}
+    # When True and the server supports it (API_VERSION >=
+    # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
+    # 3-tuple (job_id, handle, credentials) instead of (job_id, handle).
+    # Old servers ignore this field via Pydantic ``extra='ignore'`` and
+    # continue to return the 2-tuple, so it is safe for new clients to
+    # set against any server.
+    include_credentials: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
 
@@ -309,6 +322,8 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
+        kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
 
 
@@ -406,9 +421,14 @@ class ProvisionLogsBody(RequestBody):
     worker: Optional[int] = None
 
 
-class AutostopLogsBody(RequestBody):
-    """Autostop logs request body."""
+class HookLogsBody(RequestBody):
+    """Per-event lifecycle-hook logs request body.
+
+    ``event`` is optional — when None, the server auto-selects
+    whichever per-event log exists on the cluster.
+    """
     cluster_name: str
+    event: Optional[str] = None
     follow: bool = True
     tail: int = 0
 
@@ -512,6 +532,7 @@ class VolumeApplyBody(RequestBody):
     config: Optional[Dict[str, Any]] = None
     labels: Optional[Dict[str, str]] = None
     use_existing: Optional[bool] = None
+    creation_yaml: Optional[str] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -567,6 +588,10 @@ class JobsLaunchBody(RequestBody):
             self.env_vars,
             workdir_only=False,
             file_mounts_blob_id=self.file_mounts_blob_id)
+        # Pass the blob id through so that consolidation-mode submissions can
+        # record it on the job and keep the blob alive until the job is
+        # terminal.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -618,7 +643,24 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Skip the last `tail_offset` lines from the end of the file before
+    # taking `tail` lines. Used by the dashboard live-tail UI to fetch
+    # progressively older windows without re-reading the whole file.
+    tail_offset: Optional[int] = None
     # Task identifier: int for task_id, str for task_name
+    task: Optional[Union[str, int]] = None
+
+
+class JobsWaitBody(RequestBody):
+    """The request body for the jobs wait endpoint."""
+    name: Optional[str] = None
+    job_id: Optional[int] = None
+    # Timeout in seconds. None means wait forever.
+    timeout: Optional[int] = None
+    # Polling interval in seconds. Minimum 5, default 15.
+    poll_interval: int = 15
+    # Task identifier for JobGroups: int for task_id, str for task_name.
+    # If None, waits for all tasks.
     task: Optional[Union[str, int]] = None
 
 
@@ -888,9 +930,24 @@ class CostReportBody(RequestBody):
     # we use hashes instead of names to avoid the case where
     # the name is not unique
     cluster_hashes: Optional[List[str]] = None
+    # Filter by cluster name. Useful for the dashboard, which routes a
+    # torn-down cluster's detail page by name (the URL param is the
+    # cluster name, not the hash). When both cluster_hashes and
+    # cluster_names are set, rows matching either are returned.
+    cluster_names: Optional[List[str]] = None
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False
+
+
+class CreateDebugDumpBody(RequestBody):
+    """The request body for the debug dump init endpoint."""
+    request_ids: Optional[List[str]] = None
+    cluster_names: Optional[List[str]] = None
+    managed_job_ids: Optional[List[int]] = None
+    recent_minutes: Optional[float] = None
+    # Client-side info for troubleshooting (version, config, environment)
+    client_info: Optional[Dict[str, Any]] = None
 
 
 class RequestPayload(BasePayload):

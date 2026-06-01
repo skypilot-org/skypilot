@@ -3,6 +3,7 @@ name: nccl-gpu-direct-tcpx
 resources:
   infra: gcp
   instance_type: a3-highgpu-8g
+  network_tier: best
   image_id: docker:us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/nccl-plugin-gpudirecttcpx
 
 num_nodes: 2
@@ -48,7 +49,7 @@ run: |
     export NCCL_SOCKET_NTHREADS=1
     export NCCL_NET_GDR_LEVEL=PIX
     export NCCL_DYNAMIC_CHUNK_SIZE=524288
-    export NCCL_P2P_PXN_LEVEL=0    
+    export NCCL_P2P_PXN_LEVEL=0
     export NCCL_P2P_NET_CHUNKSIZE=524288
     export NCCL_P2P_PCI_CHUNKSIZE=524288
     export NCCL_P2P_NVL_CHUNKSIZE=1048576
@@ -70,7 +71,7 @@ run: |
       # Use the default NCCL library
       export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64
     fi
-    
+
     mpirun \
       --allow-run-as-root \
       --tag-output \
@@ -120,7 +121,6 @@ run: |
 
 config:
   gcp:
-    enable_gpu_direct: true
     managed_instance_group:
       run_duration: 36000
       provision_timeout: 900
