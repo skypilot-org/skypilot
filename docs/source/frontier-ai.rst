@@ -9,7 +9,7 @@ SkyPilot is used by AI teams of all sizes, from individual researchers to organi
 
 For AI infra and platform teams supporting frontier AI work, **SkyPilot Platform** extends SkyPilot OSS with capabilities tuned for production at scale:
 
-- **Researcher productivity** — persistent dev environments for engineers and AI agents; fast launches across the AI lifecycle: large-scale pre-training, SFT and RL post-training, batch inference, RL rollouts, and parallel evals.
+- **Researcher productivity** — persistent dev environments for engineers and AI agents; isolated sandboxes for coding agents and RL rollouts; fast launches across the AI lifecycle: large-scale pre-training, SFT and RL post-training, batch inference, and parallel evals.
 - **Higher GPU utilization** — multi-team quotas with borrowing and preemption, fleet-wide observability, idle reclamation.
 - **Standardized GPU operations** — uniform health checks and incident response across the fleet; instant GPU failure detection and recovery across XID, NVML, NCCL, and dmesg signals, with Slack alerts.
 - **Production deployments** — multi-cluster model serving, HA managed API server, encrypted secrets, SSO.
@@ -43,7 +43,18 @@ For researchers and AI agents
      accelerators: B200:8
    num_nodes: 5000
 
-▸ **Fast parallel jobs and sandboxes** — Launch thousands of parallel jobs and sandboxes in seconds, for RL rollouts, parallel evals, and agent sandboxes. Tight integration with SkyPilot job groups.
+▸ **Fast parallel jobs** — Launch thousands of parallel jobs in seconds, for RL rollouts, parallel evals, and batch inference. Tight integration with SkyPilot job groups.
+
+▸ **SkyPilot Sandboxes** — Fast, isolated compute environments on your own Kubernetes clusters for AI coding agents, RL training rollouts, and parallel evals. Pre-warmed pools launch sandboxes in under a second with volumes and secrets injected automatically. Ships with a built-in image for Claude Code.
+
+.. raw:: html
+
+   <figure class="align-center" style="width: 90%; margin: 0 auto 20px auto;">
+     <video id="sandbox-video" style="width: 100%; height: auto;" autoplay muted playsinline loop>
+        <source src="_static/sandbox-claude.mp4" type="video/mp4" />
+     </video>
+     <figcaption><p>Sandboxes: launching a Claude Code environment on your own cluster with secrets injected from the SkyPilot Secrets Manager.</p></figcaption>
+   </figure>
 
 For infra teams
 ~~~~~~~~~~~~~~~
