@@ -1183,6 +1183,25 @@ class TestProvisionStatusHeadline:
         assert (jobs_utils._provision_status_headline(msg) ==
                 'Doing [bold]X[/] now')
 
+    def test_extracts_headline_from_real_spinner_message(self):
+        # Regression: real spinner messages append the log hint with raw ANSI
+        # (colorama) codes, not rich `[dim]...[/]` markup, so the headline does
+        # not end the string. The headline must still be extracted (otherwise
+        # the provisioning detail under "Waiting for task to start" vanishes).
+        from sky.utils import ux_utils
+        msg = ux_utils.spinner_message('Preparing SkyPilot runtime (1/3)',
+                                       log_path='~/sky_logs/x/provision.log')
+        assert msg != '[bold cyan]Preparing SkyPilot runtime (1/3)[/]'
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Preparing SkyPilot runtime (1/3)')
+
+    def test_extracts_headline_with_provision_hint(self):
+        # The provision-log hint variant (sky logs --provision <cluster>) also
+        # appends an ANSI-colored, bold-wrapped hint after the headline.
+        from sky.utils import ux_utils
+        msg = ux_utils.spinner_message('Launching', cluster_name='my-cluster')
+        assert jobs_utils._provision_status_headline(msg) == 'Launching'
+
 
 class TestIsRelayedStatusPayloadLine:
     """Tests for hiding relayed rich-status payloads from --controller logs."""
