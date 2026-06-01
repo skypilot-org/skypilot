@@ -1412,20 +1412,35 @@ def _is_relayed_status_payload_line(line: str) -> bool:
 def _provision_status_headline(provision_msg: str) -> Optional[str]:
     """Returns the blue headline of a provisioning spinner message.
 
-    Provisioning messages from the cluster launch look like
-    ``[bold cyan]Preparing SkyPilot runtime (1/3)[/]  [dim]<log hint>[/]``. We
-    keep only the colored (blue) headline and drop the trailing log-path hint,
-    so the caller can show it as a secondary detail under the "Waiting for task
-    to start" line. Returns ``None`` when the message has no blue headline, so
-    the caller can show nothing rather than a raw/unstyled message.
+    Provisioning messages from the cluster launch are built by
+    ``ux_utils.spinner_message`` and look like
+    ``[bold cyan]Preparing SkyPilot runtime (1/3)[/]  <dim log hint>``, where
+    the trailing hint is colored with raw ANSI (colorama) codes rather than
+    rich markup -- so the message does *not* end at the headline's ``[/]``. We
+    keep only the ``[bold cyan]...[/]`` headline and drop the trailing hint, so
+    the caller can show it as a secondary detail under the "Waiting for task to
+    start" line. Returns ``None`` when the message has no ``[bold cyan]``
+    headline, so the caller can show nothing rather than a raw/unstyled message.
     """
-    # Drop the trailing dim log-path hint (``  [dim]...[/]``), if any, then peel
-    # off the outer ``[bold cyan]...[/]`` wrapper. The inner capture is greedy
-    # so nested markup (e.g. ``[bold cyan]Doing [bold]X[/] now[/]``) is kept
-    # intact instead of being truncated at the first ``[/]``.
-    headline = re.sub(r'\s*\[dim\].*\[/\]\s*$', '', provision_msg)
-    match = re.match(r'\s*\[bold cyan\](.*)\[/\]\s*$', headline)
-    return match.group(1) if match else None
+    open_tag = '[bold cyan]'
+    start = provision_msg.find(open_tag)
+    if start == -1:
+        return None
+    start += len(open_tag)
+    # Walk the rich-markup tags after the opening tag, tracking nesting depth,
+    # and stop at the ``[/]`` that closes this ``[bold cyan]``. This keeps any
+    # nested markup (e.g. ``[bold]X[/]``) inside the headline intact -- instead
+    # of truncating at the first ``[/]`` -- and ignores the trailing log hint
+    # (which is ANSI-colored and contains no rich tags).
+    depth = 1
+    for match in re.finditer(r'\[[^\]]*\]', provision_msg[start:]):
+        if match.group(0).startswith('[/'):
+            depth -= 1
+            if depth == 0:
+                return provision_msg[start:start + match.start()]
+        else:
+            depth += 1
+    return None
 
 
 def stream_logs_by_id(
