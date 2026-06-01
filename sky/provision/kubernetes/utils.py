@@ -2373,21 +2373,31 @@ def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
 
 def check_credentials(context: Optional[str],
                       timeout: int = kubernetes.API_TIMEOUT,
-                      run_optional_checks: bool = False) -> \
+                      run_optional_checks: bool = False,
+                      cloud: str = 'kubernetes') -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
+
+    The RBAC probe ``list_namespaced_pod`` is issued against the
+    workspace-resolved namespace (via ``get_namespace``) rather than the
+    raw kubeconfig context default, so a user who only has access to
+    their workspace's configured namespace is not reported as broken.
 
     Args:
         context (Optional[str]): The Kubernetes context to use. If none, uses
             in-cluster auth to check credentials, if available.
         timeout (int): Timeout in seconds for the test API call
+        run_optional_checks (bool): Whether to run additional soft checks
+            (exec-based auth, GPU labels) after the credential probe.
+        cloud (str): Top-level config key the namespace resolver consults
+            (e.g. ``'kubernetes'`` vs ``'ssh'``).
 
     Returns:
         bool: True if credentials are valid, False otherwise
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        namespace = get_kube_config_context_namespace(context)
+        namespace = get_namespace(context=context, cloud=cloud)
         kubernetes.core_api(context).list_namespaced_pod(
             namespace, limit=1, _request_timeout=timeout)
         # This call is "free" because this function is a cached call,
@@ -2890,6 +2900,33 @@ def get_kube_config_context_namespace(
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
         return DEFAULT_NAMESPACE
+
+
+def get_namespace(context: Optional[str] = None,
+                  workspace: Optional[str] = None,
+                  override_configs: Optional[Dict[str, Any]] = None,
+                  cloud: str = 'kubernetes') -> str:
+    """Resolve the Kubernetes namespace for ``context``, with fallback.
+
+    Calls ``skypilot_config.get_effective_namespace`` to resolve the
+    namespace from config; on miss, falls back to
+    ``get_kube_config_context_namespace(context)`` (then ``"default"``).
+
+    Drop-in replacement for ``get_kube_config_context_namespace`` at
+    sites that have a workspace in scope.
+
+    ``cloud`` selects the top-level config key the resolver consults
+    (e.g. ``'kubernetes'`` vs ``'ssh'``).
+    """
+    config_namespace = skypilot_config.get_effective_namespace(
+        cloud=cloud,
+        region=context,
+        workspace=workspace,
+        override_configs=override_configs,
+    )
+    if config_namespace is not None:
+        return config_namespace
+    return get_kube_config_context_namespace(context)
 
 
 def parse_cpu_or_gpu_resource_to_float(resource_str: str) -> float:

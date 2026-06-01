@@ -4084,5 +4084,22 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
              None))
 
 
+class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
+    """`_check_single_context` forwards the cloud key to `check_credentials`.
+
+    Ensures `sky check` resolves the credential-probe namespace under
+    the calling cloud's config key (``kubernetes`` vs ``ssh``) instead
+    of always querying the kubeconfig context default.
+    """
+
+    @patch('sky.provision.kubernetes.utils.check_credentials')
+    def test_forwards_kubernetes_cloud_key(self, mock_check_credentials):
+        mock_check_credentials.return_value = (True, None)
+        kubernetes.Kubernetes._check_single_context('some-ctx')
+        mock_check_credentials.assert_called_once_with('some-ctx',
+                                                       run_optional_checks=True,
+                                                       cloud='kubernetes')
+
+
 if __name__ == '__main__':
     unittest.main()
