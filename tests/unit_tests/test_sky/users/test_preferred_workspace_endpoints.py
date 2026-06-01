@@ -143,96 +143,146 @@ class TestSetPreferredWorkspaceSdkVersionGate(unittest.TestCase):
 
 
 class TestRequestBodyCarriesClientApiVersion(unittest.TestCase):
-    """The client API version MUST travel on RequestBody, not via the
-    `_remote_api_version` ContextVar — the ContextVar is set by
-    APIVersionMiddleware in the FastAPI async event loop, but request
-    execution runs in a worker process spawned by BurstableExecutor
-    (ProcessPoolExecutor). ContextVar values do not propagate across
-    process boundaries, so a worker reading the ContextVar would always
-    see the None default and the resolver gate would silently treat
-    every request as 'old client' — disabling the per-user resolver
-    entirely. This test guards the propagation path."""
+    """The client API version MUST be available on RequestBody in the
+    worker process — the `_remote_api_version` ContextVar set by
+    APIVersionMiddleware does not propagate from the FastAPI async event
+    loop into worker processes spawned by BurstableExecutor
+    (ProcessPoolExecutor). The chosen design: server-side
+    `prepare_request_async` reads the ContextVar (set from the
+    `X-SkyPilot-API-Version` header) and stamps the body — so the field
+    is fully server-driven from the wire header, and neither the Python
+    SDK nor the dashboard need their own body-stamping logic.
 
-    def _client_side(self):
-        """Context manager that flips `annotations.is_on_api_server` to
-        False, mimicking what `@client_api` SDK wrappers do at runtime
-        so client-side RequestBody construction stamps the field."""
-        from sky.utils import annotations
+    This class guards three properties:
+      * No client-side stamping happens in `RequestBody.__init__`.
+      * The field round-trips through Pydantic JSON serialization.
+      * `prepare_request_async` writes the ContextVar value to the body.
+    """
 
-        class _Ctx:
-
-            def __enter__(self_inner):
-                self_inner._prev = annotations.is_on_api_server
-                annotations.is_on_api_server = False
-
-            def __exit__(self_inner, *exc):
-                annotations.is_on_api_server = self_inner._prev
-
-        return _Ctx()
-
-    def test_client_construction_stamps_local_api_version(self):
-        """When a SDK call constructs a RequestBody (i.e.
-        `annotations.is_on_api_server` is False because we are inside a
-        `@client_api` wrapper), `__init__` MUST stamp the local
-        API_VERSION so the value travels with the body to the worker."""
-        with self._client_side():
-            body = payloads.RequestBody()
-        self.assertEqual(body.client_api_version, server_constants.API_VERSION)
+    def test_construction_does_not_stamp_field_anywhere(self):
+        """`RequestBody.__init__` must NOT populate `client_api_version`
+        — server-side `prepare_request_async` is the single point of
+        truth for this field. Stamping in `__init__` would either need
+        a fragile `is_on_api_server` check (and old clients would get
+        the server's API_VERSION on round-trip, silently bypassing the
+        gate) or would mis-mark requests that bypass the header path.
+        """
+        body = payloads.RequestBody()
+        self.assertIsNone(body.client_api_version)
 
     def test_server_side_parse_of_old_client_body_leaves_field_none(self):
-        """The critical back-compat case. Old clients (pre-this-PR) do
-        not know about `client_api_version`. The server MUST NOT silently
-        substitute its own API_VERSION when deserializing such a body —
-        doing so would bypass the executor's old-client gate and may
-        raise WorkspaceAmbiguousError, an exception class the old
-        client cannot deserialize.
-
-        `annotations.is_on_api_server` is True in this test (the default
-        in a server process), so the `__init__` default fill must be
-        suppressed and Pydantic should leave the field at its
-        Optional[int] = None declaration default.
+        """Back-compat: old clients (pre-this-PR) do not send the
+        `X-SkyPilot-API-Version` header for the workspace-resolver
+        feature, so prepare_request_async stamps None — which the
+        worker-side gate interprets as 'skip the resolver' (legacy
+        behavior). Pydantic parsing of the body alone must NOT
+        substitute any non-None value.
         """
-        from sky.utils import annotations
-
-        # Sanity-check we are in server-mode for this test.
-        self.assertTrue(annotations.is_on_api_server)
-        # Old-client JSON: every required RequestBody field present
-        # EXCEPT client_api_version (which old clients do not know
-        # about).
         old_body_json = (
             '{"env_vars": {}, "entrypoint": "", "entrypoint_command": "",'
             ' "using_remote_api_server": false}')
         body = payloads.RequestBody.model_validate_json(old_body_json)
         self.assertIsNone(body.client_api_version)
 
-    def test_server_side_parse_of_new_client_body_preserves_field(self):
-        """The forward path: a new client sends `client_api_version` on
-        the wire. Server-side parse MUST preserve it verbatim, not
-        clobber it with the server's local API_VERSION."""
-        new_body_json = (
+    def test_server_side_parse_of_explicit_field_preserves_value(self):
+        """If a body arrives with the field already set (e.g. a
+        synthetic or test client), Pydantic preserves it. The server
+        will then overwrite it from the header in
+        `prepare_request_async`, but the parse step itself must not
+        clobber explicit values."""
+        body_json = (
             '{"env_vars": {}, "entrypoint": "", "entrypoint_command": "",'
             ' "using_remote_api_server": false, "client_api_version": 53}')
-        body = payloads.RequestBody.model_validate_json(new_body_json)
+        body = payloads.RequestBody.model_validate_json(body_json)
         self.assertEqual(body.client_api_version, 53)
 
     def test_explicit_override_is_respected(self):
-        """Tests and synthetic callers must be able to override the
-        field directly via kwargs, independent of client/server mode."""
+        """Tests and synthetic callers must be able to set the field
+        directly via kwargs."""
         body = payloads.RequestBody(client_api_version=42)
         self.assertEqual(body.client_api_version, 42)
-        # Pydantic accepts None on Optional[int].
         body_none = payloads.RequestBody(client_api_version=None)
         self.assertIsNone(body_none.client_api_version)
 
     def test_field_survives_pydantic_roundtrip(self):
         """Persisting the body to the request DB goes through
-        model_dump_json + model_validate_json. The field MUST be present
-        on the rehydrated body — otherwise the executor's worker reads
-        None and the resolver never fires."""
+        model_dump_json + model_validate_json. The field MUST be
+        present on the rehydrated body — otherwise the executor's
+        worker reads None and the resolver never fires."""
         original = payloads.RequestBody(client_api_version=99)
         rehydrated = payloads.RequestBody.model_validate_json(
             original.model_dump_json())
         self.assertEqual(rehydrated.client_api_version, 99)
+
+
+class TestPrepareRequestAsyncStampsClientApiVersion(
+        unittest.IsolatedAsyncioTestCase):
+    """`prepare_request_async` is the choke point where every external
+    request crosses from the FastAPI dispatch process (where the
+    `_remote_api_version` ContextVar set by APIVersionMiddleware is
+    valid) into the request DB / worker pool (where it is not). It MUST
+    capture the ContextVar value onto the request body so the worker can
+    see it.
+    """
+
+    async def asyncSetUp(self):
+        from sky.server import versions
+        from sky.server.requests import executor
+        self.executor = executor
+        self.versions = versions
+        # Reset the ContextVar between tests so leakage from elsewhere
+        # in the suite does not contaminate this one.
+        versions.set_remote_api_version(None)
+
+    async def asyncTearDown(self):
+        self.versions.set_remote_api_version(None)
+
+    async def _prepare_one(self):
+        """Drive prepare_request_async with a benign body + mocked DB
+        write, return the client_api_version that ended up on the body.
+        """
+        from sky import models
+        from sky.server.requests import request_names
+        from sky.server.requests import requests as api_requests
+
+        async def _stub_create_if_not_exists_async(_request):
+            return True
+
+        body = payloads.RequestBody()
+        # Sanity: construction itself does not populate the field.
+        self.assertIsNone(body.client_api_version)
+
+        def _noop():
+            return None
+
+        with mock.patch.object(api_requests,
+                               'create_if_not_exists_async',
+                               side_effect=_stub_create_if_not_exists_async), \
+             mock.patch.object(self.executor.global_user_state,
+                               'add_or_update_user'):
+            await self.executor.prepare_request_async(
+                request_id='r-0',
+                request_name=request_names.RequestName.CLUSTER_LAUNCH,
+                request_body=body,
+                func=_noop,
+                auth_user=models.User(id='u', name='u'),
+            )
+        return body.client_api_version
+
+    async def test_stamps_from_contextvar_when_header_present(self):
+        """When APIVersionMiddleware has set the ContextVar from a
+        header, prepare_request_async writes that value onto the body
+        — the value the worker will see."""
+        self.versions.set_remote_api_version(57)
+        self.assertEqual(await self._prepare_one(), 57)
+
+    async def test_stamps_none_when_header_absent(self):
+        """An old client without the version header leaves the
+        ContextVar at its default (None). prepare_request_async writes
+        None onto the body, which the worker-side gate interprets as
+        'old client → skip resolver'."""
+        # ContextVar was reset to None in asyncSetUp.
+        self.assertIsNone(await self._prepare_one())
 
 
 # Executor resolver-gate ----------------------------------------------

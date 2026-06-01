@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
+  API_VERSION_HEADER,
+  CLIENT_API_VERSION,
+  CLIENT_VERSION,
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
   ENDPOINT,
+  VERSION_HEADER,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
@@ -850,7 +854,18 @@ async function downloadLogsWithRetry(body, maxAttempts = 30) {
   })();
   const dispatch = await fetch(`${baseUrl}${ENDPOINT}/jobs/download_logs`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // /jobs/download_logs is a queued (executor.schedule_request_async)
+      // route, so the worker-side gate honors this header to pick up
+      // the resolver path — without it, users without 'default'
+      // workspace access would be rejected at
+      // reject_request_for_unauthorized_workspace. Both
+      // API_VERSION_HEADER and VERSION_HEADER are required — the server
+      // middleware drops the ContextVar write if either is missing.
+      [API_VERSION_HEADER]: CLIENT_API_VERSION,
+      [VERSION_HEADER]: CLIENT_VERSION,
+    },
     body: JSON.stringify({
       ...body,
       env_vars: {

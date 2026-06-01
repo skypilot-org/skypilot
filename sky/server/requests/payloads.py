@@ -34,7 +34,6 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
-from sky.server import constants as server_constants
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
@@ -158,11 +157,18 @@ class RequestBody(BasePayload):
     override_skypilot_config_path: Optional[str] = None
     # Blob ID for uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
-    # The client's API_VERSION at construction time. Travels with the
-    # request body so worker processes — which cannot see the server-side
-    # `_remote_api_version` ContextVar set by APIVersionMiddleware — can
-    # still tell whether the client speaks a new-enough protocol. None
-    # means an old client constructed this body before the field existed.
+    # The client's API_VERSION as captured server-side from the
+    # `X-SkyPilot-API-Version` request header in `prepare_request_async`
+    # (the FastAPI dispatch context, where the `_remote_api_version`
+    # ContextVar set by APIVersionMiddleware is visible). The field
+    # exists because the worker process that later runs the request
+    # cannot see that ContextVar — it crosses a process boundary via
+    # the persisted request body. Clients themselves do NOT populate
+    # this field; the server fills it in from the wire header so any
+    # client that already sets the header (Python SDK already does; the
+    # dashboard apiClient also sets it) gets the right value without
+    # client-specific code. `None` means the request arrived without
+    # the header — i.e. an old client.
     client_api_version: Optional[int] = None
 
     def __init__(self, **data):
@@ -181,17 +187,6 @@ class RequestBody(BasePayload):
         data['override_skypilot_config_path'] = data.get(
             'override_skypilot_config_path',
             get_override_skypilot_config_path_from_client())
-        # Stamp `client_api_version` ONLY when constructing on the client
-        # side. If we filled it in unconditionally, server-side Pydantic
-        # deserialization of a body sent by an old client (which omits
-        # the field) would populate it with the server's API_VERSION,
-        # silently bypassing the executor's old-client gate and
-        # potentially raising a WorkspaceAmbiguousError the old client
-        # cannot deserialize. Leaving the field as `None` for missing
-        # input on the server is the correct legacy-client signal.
-        if not annotations.is_on_api_server:
-            data['client_api_version'] = data.get('client_api_version',
-                                                  server_constants.API_VERSION)
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:

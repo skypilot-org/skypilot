@@ -46,6 +46,7 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -868,6 +869,16 @@ async def prepare_request_async(
             models.User(id=user_id,
                         name=user_id,
                         user_type=models.UserType.SYSTEM.value))
+    # Capture the client's API version from the FastAPI dispatch context
+    # into the request body so it survives the process boundary into the
+    # worker that runs the request. APIVersionMiddleware set the
+    # ContextVar from the X-SkyPilot-API-Version header; reading it here
+    # (still in the async dispatch process) and stamping the body is the
+    # one place where header -> body translation happens, so neither the
+    # Python SDK nor the dashboard need their own stamping logic. Old
+    # clients (no header) yield None, which the worker-side gate treats
+    # as "skip the workspace resolver".
+    request_body.client_api_version = versions.get_remote_api_version()
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,

@@ -281,10 +281,21 @@ def enabled_clouds(workspace: Optional[str] = None,
     Request Returns:
         A list of enabled clouds in string format.
     """
-    if workspace is None:
+    # Only stamp an explicit workspace into the request when the user
+    # actually configured one (thread-local, project `.sky.yaml`, or
+    # user `~/.sky/config.yaml`). Falling back to the literal 'default'
+    # here would be sent on the wire as an explicit intent — the
+    # server-side workspace resolver gate (c) respects explicit names
+    # and refuses to substitute a workspace the user has access to.
+    # When `workspace is None`, let the server resolver run and pick
+    # based on the user's accessible workspaces / preferred default.
+    if workspace is None and skypilot_config.is_active_workspace_set():
         workspace = skypilot_config.get_active_workspace()
-    response = server_common.make_authenticated_request(
-        'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
+    if workspace is None:
+        url = f'/enabled_clouds?expand={expand}'
+    else:
+        url = f'/enabled_clouds?workspace={workspace}&expand={expand}'
+    response = server_common.make_authenticated_request('GET', url)
     return server_common.get_request_id(response)
 
 

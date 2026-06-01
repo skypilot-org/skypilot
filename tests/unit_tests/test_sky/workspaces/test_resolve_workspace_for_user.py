@@ -430,36 +430,64 @@ class TestIsActiveWorkspaceSet(unittest.TestCase):
                                return_value='team-a'):
             self.assertTrue(skypilot_config.is_active_workspace_set())
 
+    def _clear_attr(self):
+        try:
+            del skypilot_config._active_workspace_context.workspace
+        except AttributeError:
+            pass
+
     def test_local_active_workspace_ctx_cleanup_on_exception(self):
         """`local_active_workspace_ctx` MUST restore the previous
         thread-local workspace even when the wrapped code raises.
         Without try/finally on the yield, an exception leaks the new
         workspace value to subsequent requests in the same
-        ProcessPoolExecutor worker; the next request's gate then sees
-        `is_active_workspace_set()` return True and silently skips the
-        per-user resolver — routing that request to the leaked
-        workspace instead of resolving its own.
+        ProcessPoolExecutor worker.
         """
 
         class _Boom(Exception):
             pass
 
-        # Pin the "previous" value to a known sentinel so the assertion
-        # does not depend on any local skypilot config the dev happens
-        # to have on disk.
-        with mock.patch.object(skypilot_config,
-                               'get_active_workspace',
-                               return_value='pre-existing'):
+        skypilot_config._active_workspace_context.workspace = 'pre-existing'
+        try:
             with self.assertRaises(_Boom):
                 with skypilot_config.local_active_workspace_ctx('team-leaked'):
                     raise _Boom()
-        # Post-condition: the workspace MUST have been restored to its
-        # pre-`with` value (the sentinel) even though _Boom escaped.
-        # Without try/finally on the yield, this would still be
-        # `'team-leaked'` — the leak the new test guards against.
-        self.assertEqual(
-            getattr(skypilot_config._active_workspace_context, 'workspace',
-                    None), 'pre-existing')
+            self.assertEqual(
+                getattr(skypilot_config._active_workspace_context, 'workspace',
+                        None), 'pre-existing')
+        finally:
+            self._clear_attr()
+
+    def test_local_active_workspace_ctx_removes_attr_when_originally_unset(
+            self):
+        """The cleanup MUST remove the thread-local attribute entirely
+        when it was unset before the `with` block — NOT restore the
+        string returned by `get_active_workspace()`. `get_active_workspace`
+        falls back to the literal `SKYPILOT_DEFAULT_WORKSPACE` ('default')
+        when nothing is set; restoring to that string would leave the
+        attribute SET to 'default', and `is_active_workspace_set()`
+        would then return True for the next request handled by the
+        same ProcessPoolExecutor worker — making the gate skip the
+        resolver and fall back to the broken legacy 'default' path.
+        Production hit this exact bug for dashboard requests by users
+        without 'default' workspace access.
+        """
+        self._clear_attr()
+        self.assertFalse(
+            hasattr(skypilot_config._active_workspace_context, 'workspace'))
+        with skypilot_config.local_active_workspace_ctx('team-a'):
+            self.assertEqual(
+                skypilot_config._active_workspace_context.workspace, 'team-a')
+        # Critical assertion: the attribute must be GONE, NOT set to
+        # the literal 'default'.
+        self.assertFalse(
+            hasattr(skypilot_config._active_workspace_context, 'workspace'))
+        # As a consequence, `is_active_workspace_set()` reports False —
+        # which is the precondition the resolver gate relies on for a
+        # downstream request that has no explicit active_workspace.
+        with mock.patch.object(skypilot_config, 'get_nested',
+                               return_value=None):
+            self.assertFalse(skypilot_config.is_active_workspace_set())
 
     def test_returns_true_for_thread_local_context(self):
         """The CLI --workspace flag sets the thread-local context. The

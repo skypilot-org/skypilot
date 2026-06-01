@@ -1972,11 +1972,15 @@ def _show_endpoint(query_clusters: Optional[List[str]],
 
 
 def _show_enabled_infra(
-        active_workspace: str, show_workspace: bool,
+        active_workspace: Optional[str], show_workspace: bool,
         enabled_clouds_request_id: server_common.RequestId[List[str]]):
     """Show the enabled infrastructure."""
     workspace_str = ''
-    if show_workspace:
+    # When `active_workspace` is None, the client did not set a workspace
+    # explicitly and the server-side resolver picked one — skip the
+    # `(workspace: ...)` annotation since we do not know the server's
+    # pick at this point in the CLI flow.
+    if show_workspace and active_workspace is not None:
         workspace_str = f' (workspace: {active_workspace!r})'
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
@@ -2190,7 +2194,16 @@ def status(verbose: bool,
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         return sdk.workspaces()
 
-    active_workspace = skypilot_config.get_active_workspace()
+    # Only carry an explicit workspace into `sdk.enabled_clouds` when
+    # the user actually set one client-side. Otherwise leave it as
+    # None so the server-side workspace resolver picks something the
+    # user has access to (rather than us hard-coding 'default' here,
+    # which the server treats as an explicit intent and rejects for
+    # users without 'default' access).
+    if skypilot_config.is_active_workspace_set():
+        active_workspace = skypilot_config.get_active_workspace()
+    else:
+        active_workspace = None
 
     def submit_enabled_clouds():
         return sdk.enabled_clouds(workspace=active_workspace, expand=True)
