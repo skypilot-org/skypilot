@@ -2706,7 +2706,8 @@ class TestInspectPodStatusTierIntegration:
     def test_pending_pod_container_creating_does_not_raise(self, monkeypatch):
         """phase=Pending, ContainerCreating: tier-1 returns None, tier-2/3
         consulted, no raise. Smoke check that the happy in-flight case still
-        loops."""
+        loops. With no container-status reason and no event, the pending reason
+        defaults to 'container creation' so the spinner shows useful detail."""
         pod = self._make_pod(
             phase='Pending',
             container_statuses=[
@@ -2721,9 +2722,35 @@ class TestInspectPodStatusTierIntegration:
             c for c in add_event.call_args_list if c.kwargs.get('event_type') is
             instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
         ]
-        # Bare 'Launching' status text is skipped per the existing guard at
-        # instance.py:845. So no LAUNCH_PROGRESS row.
-        assert lp_calls == []
+        # The reason defaults to 'container creation', so a LAUNCH_PROGRESS row
+        # is emitted with the enriched 'Launching (...)' status text.
+        assert len(lp_calls) == 1
+        assert ('Launching (1 pod(s) pending due to container creation)'
+                in lp_calls[0].kwargs['reason'])
+
+    def test_pending_pod_bound_no_container_statuses_defaults_reason(
+            self, monkeypatch):
+        """A freshly-bound pod the kubelet has not picked up yet sits Pending
+        with container_statuses == None, host_ip == None, and no events. The
+        pending reason must default to 'container creation' so the spinner shows
+        'Launching (1 pod(s) pending due to container creation)' instead of a
+        bare 'Launching' during the kubelet-pickup window. We assert on the
+        LAUNCH_PROGRESS reason, whose value is the spinner status text."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=None,
+        )
+        pod.status.host_ip = None
+        # No events → tier-2 and tier-3 return None, so the default kicks in.
+        monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **kw: [])
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(lp_calls) == 1
+        assert ('Launching (1 pod(s) pending due to container creation)'
+                in lp_calls[0].kwargs['reason'])
 
 
 class TestCheckInitContainersEnrichedRaise:

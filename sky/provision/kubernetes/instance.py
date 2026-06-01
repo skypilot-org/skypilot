@@ -831,11 +831,18 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                     context, namespace, pod.metadata.name)
                 if pending_reason is not None:
                     reason, event_message = pending_reason
-            if reason is not None:
-                log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
-                if event_message:
-                    log_msg += f': {event_message}'
-                logger.debug(log_msg)
+            if reason is None:
+                # A freshly-bound pod that the kubelet has not picked up yet
+                # (and the uninformative 'ContainerCreating' state) has no
+                # container-status reason and no event yet. Default to
+                # 'container creation' so the launch spinner shows useful
+                # detail (e.g. 'Launching (1 pod(s) pending due to container
+                # creation)') instead of a bare 'Launching'.
+                reason = 'container creation'
+            log_msg = f'Pod {pod.metadata.name} is pending: {reason}'
+            if event_message:
+                log_msg += f': {event_message}'
+            logger.debug(log_msg)
             return False, reason
 
         # phase == 'Running' but not all containers running (e.g. one is in
