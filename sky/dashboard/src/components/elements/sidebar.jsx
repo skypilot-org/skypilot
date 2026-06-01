@@ -646,6 +646,13 @@ export function TopBar() {
                   </a>
                 </CustomTooltip>
 
+                {/* Slot for plugin-provided top-bar icons (e.g. an icon with
+                    a dropdown panel). */}
+                <PluginSlot
+                  name="topbar.icons"
+                  wrapperClassName="flex items-center space-x-1"
+                />
+
                 <div className="border-l border-gray-200 h-6"></div>
 
                 {/* Version Display */}
