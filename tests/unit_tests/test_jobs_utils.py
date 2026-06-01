@@ -793,6 +793,207 @@ class TestCollectDebugDumpManifestParallel:
         assert len(job_info_items) == len(ok_jobs)
 
 
+class TestControllerSystemLogScoping:
+    """Scope managed_jobs/controller_system/*.log to the controllers that
+    actually ran the requested jobs.
+
+    The unscoped behavior (glob controller_*.log) dragged thousands of
+    unrelated controller-process logs into every dump.
+    """
+
+    _UUID_A = '4cfc2dc5-5b4e-47eb-a517-079aa7ba6757'
+    _UUID_B = '276636dc-a8dd-4210-86f1-31f43b4f9d05'
+
+    @staticmethod
+    def _job_log_head(uuids):
+        lines = [
+            'Starting job loop for 1',
+            '  log_file=/tmp/1.log',
+            '  pool=None',
+        ]
+        for u in uuids:
+            lines.append(f'From controller {u}')
+            lines.append('  pid=27476')
+        return '\n'.join(lines) + '\n'
+
+    def _setup_logs_dir(self, tmpdir, jobid_log_contents, controller_uuids):
+        """Build a fake controller logs dir.
+
+        ``jobid_log_contents`` maps job_id -> string content for <jobid>.log.
+        ``controller_uuids`` is the iterable of controller UUIDs whose
+        ``controller_<uuid>.log`` should exist on disk.
+        """
+        for jid, content in jobid_log_contents.items():
+            (pathlib.Path(tmpdir) / f'{jid}.log').write_text(content)
+        for u in controller_uuids:
+            (pathlib.Path(tmpdir) / f'controller_{u}.log').write_text('hi')
+        return str(tmpdir)
+
+    def test_extracts_single_uuid(self):
+        """One "From controller" line → UUID set with one element."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(tmpdir,
+                                 {1: self._job_log_head([self._UUID_A])}, [])
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A}
+
+    def test_extracts_multiple_uuids_for_ha_recovered_job(self):
+        """An HA-recovered job has multiple "From controller" lines."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(
+                tmpdir, {1: self._job_log_head([self._UUID_A, self._UUID_B])},
+                [])
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A, self._UUID_B}
+
+    def test_extracts_ha_recovery_uuid_far_from_head(self):
+        """HA recovery appends a second "From controller …" line after
+        an arbitrary amount of intervening output (the per-job log is
+        opened in append mode at sky/utils/context.py:146). A 16 KB-only
+        head read would miss it; the scan must traverse the whole file.
+        """
+        gap_bytes = 200 * 1024  # 200 KB of intervening status output
+        content = (
+            f'Starting job loop for 1\nFrom controller {self._UUID_A}\n'
+            # Realistic-ish filler: many short status lines.
+            + ('Status check: still running\n' * (gap_bytes // 28)) +
+            f'=== Recovery ===\nFrom controller {self._UUID_B}\n')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (pathlib.Path(tmpdir) / '1.log').write_text(content)
+            assert (pathlib.Path(tmpdir) / '1.log').stat().st_size > 16 * 1024
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, _, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == {self._UUID_A, self._UUID_B}
+
+    def test_missing_job_log_returns_empty_set(self):
+        """No <jobid>.log → empty UUID set, no exception."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                with mock.patch(
+                        'sky.jobs.utils.managed_job_state'
+                        '.get_managed_job_tasks',
+                        return_value=[]):
+                    with mock.patch(
+                            'sky.jobs.utils.managed_job_state'
+                            '.get_job_events',
+                            return_value=[]):
+                        with mock.patch(
+                                'sky.jobs.utils.managed_job_state'
+                                '.get_all_task_ids_names_statuses_logs',
+                                return_value=[]):
+                            with mock.patch(
+                                    'sky.jobs.utils.managed_job_state'
+                                    '.get_pool_submit_info',
+                                    return_value=(None, None)):
+                                _, _, errs, _, uuids = (
+                                    utils._collect_job_debug_manifest(1))
+        assert uuids == set()
+        assert errs == []
+
+    def test_collect_controller_system_with_empty_uuids_emits_no_files(self):
+        """Empty relevant_uuids must NOT fall back to globbing the dir.
+
+        This is the regression we are fixing — globbing dragged in 8 000+
+        unrelated controller process logs.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(tmpdir, {}, [self._UUID_A, self._UUID_B])
+            file_paths: list = []
+            errors: list = []
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                utils._collect_controller_system_log_paths(
+                    file_paths, errors, set())
+        assert file_paths == []
+        assert errors == []
+
+    def test_collect_controller_system_filters_to_relevant_uuids(self):
+        """Only UUIDs in the relevant set become file_paths entries.
+
+        ``relevant_uuids`` includes a UUID that isn't on disk → silently
+        skipped. The on-disk-but-not-relevant UUID is also skipped.
+        """
+        missing_uuid = '00000000-0000-0000-0000-000000000000'
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup_logs_dir(tmpdir, {},
+                                 [self._UUID_A, self._UUID_B])  # both on disk
+            file_paths: list = []
+            errors: list = []
+            with mock.patch(
+                    'sky.jobs.utils.managed_job_constants'
+                    '.JOBS_CONTROLLER_LOGS_DIR', tmpdir):
+                utils._collect_controller_system_log_paths(
+                    file_paths, errors, {self._UUID_A, missing_uuid})
+        # Only the on-disk + relevant UUID survives.
+        rel_paths = sorted(p['relative_path'] for p in file_paths)
+        assert rel_paths == [
+            f'managed_jobs/controller_system/controller_{self._UUID_A}.log'
+        ]
+        assert errors == []
+
+
 class TestCleanupExpiredApiAccessTokens:
     """Unit tests for the expired managed-job token sweep."""
 

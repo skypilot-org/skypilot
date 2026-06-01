@@ -95,6 +95,19 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
+# Pattern matching the "From controller <UUID>" line that the controller
+# emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
+# the debug-dump manifest to scope controller_system/*.log files to the
+# controllers that actually ran the requested jobs. HA recovery causes
+# the per-job log (opened in append mode at sky/utils/context.py:146) to
+# receive a fresh "From controller …" line each time a new controller
+# picks up the job — and that line can land arbitrarily far into the
+# file after hours of intervening status-check output, so we scan the
+# whole file rather than just the head.
+_CONTROLLER_UUID_LOG_RE = re.compile(
+    r'From controller ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
+    r'[0-9a-f]{4}-[0-9a-f]{12})')
+
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
     '{status_str}. It may take a few minutes.\n'
@@ -909,19 +922,25 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 
     # Merge results and collect cluster info for unique clusters
     seen_cluster_names: Set[str] = set()
-    for job_id, (job_inline, job_files, job_errors,
-                 cluster_name) in zip(job_ids, results):
+    seen_controller_uuids: Set[str] = set()
+    for job_id, (job_inline, job_files, job_errors, cluster_name,
+                 controller_uuids) in zip(job_ids, results):
         inline_data.extend(job_inline)
         file_paths.extend(job_files)
         errors.extend(job_errors)
+        seen_controller_uuids.update(controller_uuids)
         if cluster_name and cluster_name not in seen_cluster_names:
             seen_cluster_names.add(cluster_name)
             job_prefix = f'managed_jobs/{job_id}'
             _collect_cluster_debug_manifest(cluster_name, job_prefix,
                                             inline_data, errors)
 
-    # Collect controller system log paths (shared, not per-job)
-    _collect_controller_system_log_paths(file_paths, errors)
+    # Collect controller system log paths (shared, not per-job). Scope to
+    # the controllers that actually ran the requested jobs — globbing the
+    # whole directory would drag in thousands of unrelated controller
+    # processes' logs.
+    _collect_controller_system_log_paths(file_paths, errors,
+                                         seen_controller_uuids)
 
     return {
         'inline_data': inline_data,
@@ -933,18 +952,25 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 def _collect_job_debug_manifest(
     job_id: int,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
-           Optional[str]]:
+           Optional[str], Set[str]]:
     """Collect debug manifest entries for a single managed job.
 
     Returns:
-        (inline_data, file_paths, errors, cluster_name) for this job.
+        (inline_data, file_paths, errors, cluster_name, controller_uuids)
+        for this job. ``controller_uuids`` is the set of parent controller
+        UUIDs that ran this job (empty if no <jobid>.log exists yet or the
+        log doesn't contain the marker — e.g., the job never started).
     """
     inline_data: List[Dict[str, str]] = []
     file_paths: List[Dict[str, str]] = []
     errors: List[Dict[str, str]] = []
+    controller_uuids: Set[str] = set()
     job_prefix = f'managed_jobs/{job_id}'
 
-    # 1. Controller log for this job (FILE — needs rsync)
+    # 1. Controller log for this job (FILE — needs rsync). Also parse its
+    # head for "From controller <UUID>" so the caller can scope the
+    # shared controller_system/*.log set to only the controllers that
+    # actually ran this job.
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
@@ -954,6 +980,21 @@ def _collect_job_debug_manifest(
                 'remote_path': str(log_file),
                 'relative_path': f'{job_prefix}/{job_id}.log',
             })
+            try:
+                # Stream the file line by line: HA recovery appends a
+                # fresh "From controller <UUID>" line after the prior
+                # controller's entire output, which can be many MB into
+                # the file. Bounded memory regardless of file size.
+                with open(log_file, 'r', encoding='utf-8',
+                          errors='replace') as f:
+                    for line in f:
+                        match = _CONTROLLER_UUID_LOG_RE.search(line)
+                        if match is not None:
+                            controller_uuids.add(match.group(1))
+            except OSError:
+                # File disappeared / unreadable between is_file() and open;
+                # leave controller_uuids unchanged.
+                pass
 
     # 2. Job info from DB (inline — small data)
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/job_info'):
@@ -1015,7 +1056,7 @@ def _collect_job_debug_manifest(
                 cluster_name = generate_managed_job_cluster_name(
                     task_name, job_id)
 
-    return inline_data, file_paths, errors, cluster_name
+    return inline_data, file_paths, errors, cluster_name, controller_uuids
 
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
@@ -1051,14 +1092,26 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
-                                         errors: List[Dict[str, str]]) -> None:
-    """Collect controller system log file paths (controller_*.log files)."""
+                                         errors: List[Dict[str, str]],
+                                         relevant_uuids: Set[str]) -> None:
+    """Collect controller system log file paths (controller_*.log files).
+
+    Only the controllers whose UUIDs appear in ``relevant_uuids`` are
+    included. UUIDs are sourced from "From controller <UUID>" lines in
+    each requested job's <jobid>.log (see _collect_job_debug_manifest).
+    If ``relevant_uuids`` is empty (no requested job has a log yet, or
+    none of them recorded a controller marker), no controller_system
+    files are included — we do not fall back to globbing.
+    """
+    if not relevant_uuids:
+        return
     with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
         if not controller_logs_dir.exists():
             return
-        for log_file in controller_logs_dir.glob('controller_*.log'):
+        for uuid_str in relevant_uuids:
+            log_file = controller_logs_dir / f'controller_{uuid_str}.log'
             if log_file.is_file():
                 file_paths.append({
                     'remote_path': str(log_file),
