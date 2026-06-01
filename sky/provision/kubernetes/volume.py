@@ -437,14 +437,22 @@ def get_volume_usedby(
 def refresh_volume_config(
     config: models.VolumeConfig,) -> Tuple[bool, models.VolumeConfig]:
     """Refreshes the volume config.
-    For volume config with region None, we need to set the region to the
-    in-cluster context name.
+
+    For volumes created without an explicit region before PR #8386, the
+    region is None. If we're currently running with in-cluster auth, those
+    volumes belong to the in-cluster context, so rewrite the region. If
+    in-cluster auth is NOT available (e.g. the API server authenticates via
+    kubeconfig), leave region=None so it gets resolved from the task's
+    --infra at launch time. Otherwise the optimizer would compare a literal
+    'in-cluster' against the kubeconfig contexts and raise
+    ResourcesUnavailableError on every launch that references the volume.
 
     Returns:
         need_refresh: Whether need to refresh the volume config.
         volume_config: The volume config to be refreshed.
     """
-    if config.region is None:
+    if (config.region is None and
+            kubernetes_utils.is_incluster_config_available()):
         config.region = kubernetes.in_cluster_context_name()
         return True, config
     return False, config

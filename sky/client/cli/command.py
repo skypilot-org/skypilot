@@ -2429,8 +2429,12 @@ def status_kubernetes(verbose: bool):
               type=int,
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
+@flags.output_format_option()
 @usage_lib.entrypoint
-def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
+def cost_report(
+        all: bool,  # pylint: disable=redefined-builtin
+        days: int,
+        output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -2474,6 +2478,23 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 controllers[controller_name] = cluster_record
         else:
             normal_cluster_records.append(cluster_record)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        all_records = list(normal_cluster_records)
+        for cluster_record in controllers.values():
+            all_records.append(cluster_record)
+        json_records = []
+        for record in all_records:
+            r = dict(record)
+            if r.get('resources') is not None:
+                r['resources'] = r['resources'].to_yaml_config(
+                    redact_secrets=True)
+            record_status = r.get('status')
+            r['status'] = (record_status.value
+                           if record_status is not None else 'TERMINATED')
+            json_records.append(r)
+        click.echo(json.dumps(json_records, indent=2))
+        return
 
     total_cost = status_utils.get_total_cost_of_displayed_records(
         normal_cluster_records, all)
@@ -4229,9 +4250,13 @@ def _show_gpus_impl(
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
-                node_taints = getattr(node_info, 'taints', None) or []
-                node_is_tainted = len(node_taints) > 0
-                if not node_is_ready or node_is_cordoned or node_is_tainted:
+                node_taints = getattr(node_info, 'taints', None)
+                # Only un-tolerated taints count toward the "not ready" GPU
+                # tally. Taints matched by `kubernetes.pod_config.spec
+                # .tolerations` arrive with `tolerated=True` and don't make
+                # the node unschedulable for the user's workloads.
+                if (not node_is_ready or node_is_cordoned or
+                        kubernetes_utils.has_untolerated_taint(node_taints)):
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -4470,22 +4495,28 @@ def _show_gpus_impl(
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
                 if node_is_cordoned:
                     status_info.append('Cordoned')
-                # Add taint info grouped by effect
-                taints = getattr(node_info, 'taints', None)
-                if taints:
+                # Add taint info grouped by effect. Only un-tolerated taints
+                # count toward node status — taints matched by the user's
+                # configured `kubernetes.pod_config.spec.tolerations` arrive
+                # with `tolerated=True` and don't make the node unhealthy.
+                untolerated_taints = [
+                    t for t in (getattr(node_info, 'taints', None) or [])
+                    if not t.get('tolerated', False)
+                ]
+                if untolerated_taints:
                     # Group taints by effect: 'NoSchedule Taint [key1, key2],
                     # NoExecute Taint [key3]'
                     taints_by_effect: Dict[str, List[str]] = {}
-                    for taint in taints:
+                    for taint in untolerated_taints:
                         effect = taint['effect']
                         key = taint['key']
                         if effect not in taints_by_effect:
                             taints_by_effect[effect] = []
                         taints_by_effect[effect].append(key)
-                    taints_strs = []
-                    for effect, keys in taints_by_effect.items():
-                        taints_strs.append(
-                            f'{effect} Taint [{", ".join(keys)}]')
+                    taints_strs = [
+                        f'{effect} Taint [{", ".join(keys)}]'
+                        for effect, keys in taints_by_effect.items()
+                    ]
                     if taints_strs:
                         status_info.append(', '.join(taints_strs))
 

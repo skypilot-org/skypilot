@@ -821,7 +821,7 @@ class AWS(clouds.Cloud):
 
         docker_run_options = []
         if resources.extract_docker_image() is not None:
-            image_id_to_use = None
+            image_id_to_use = resources.get_cloud_image_id()
             if enable_efa:
                 docker_run_options = _EFA_DOCKER_RUN_OPTIONS
         else:

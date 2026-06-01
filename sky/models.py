@@ -95,7 +95,9 @@ class KubernetesNodeInfo:
     # Whether the node is cordoned (spec.unschedulable is true)
     is_cordoned: bool = False
     # List of taints on the node, each taint is a dict with 'key', 'value',
-    # 'effect'
+    # 'effect', and optionally 'tolerated' (a bool indicating whether the
+    # taint is matched by an entry in the configured
+    # `kubernetes.pod_config.spec.tolerations`).
     taints: Optional[List[Dict[str, Any]]] = None
 
 
