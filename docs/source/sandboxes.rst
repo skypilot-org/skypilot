@@ -70,7 +70,7 @@ template (a ``python`` image); create your own when you need a different image o
 size.
 
 A **sandbox** is a single running pod claimed from a template's warm pool. It has
-a unique name, a lifecycle you control (launch ``→`` use ``→`` tear down), and is
+a unique name, a lifecycle you control (launch, use, then tear down), and is
 accessible until you call ``down()``. Commands run inside the sandbox over the
 same exec primitive ``kubectl exec`` uses, returning ``stdout``, ``stderr``, and
 the exit code synchronously.
@@ -148,10 +148,13 @@ fan-out, templates and warm pools, and secret / volume injection:
             async def main():
                 sandboxes = await sky_sandbox.launch_async(
                     name='rollout', num_sandboxes=100)
-                results = await asyncio.gather(
-                    *(sb.exec_async('python rollout.py') for sb in sandboxes))
-                await asyncio.gather(*(sb.down_async() for sb in sandboxes))
-                await sky_sandbox.aclose()  # release the shared session
+                try:
+                    results = await asyncio.gather(
+                        *(sb.exec_async('python rollout.py') for sb in sandboxes))
+                finally:
+                    # Always tear down, even if an exec raises.
+                    await asyncio.gather(*(sb.down_async() for sb in sandboxes))
+                    await sky_sandbox.aclose()  # release the shared session
 
             asyncio.run(main())
 
