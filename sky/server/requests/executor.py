@@ -459,9 +459,8 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
-# Per-worker-process flags consumed by _gated_sigterm_handler.
+# Set by _request_execution_wrapper; read by _gated_sigterm_handler.
 _in_request_execution: bool = False
-_pending_sigterm: bool = False
 
 
 def _gated_sigterm_handler(signum: int,
@@ -470,17 +469,16 @@ def _gated_sigterm_handler(signum: int,
 
     SIGTERM landing on an idle worker (blocked in
     concurrent.futures._process_worker's call_queue.get) would escape
-    _process_worker unhandled and break the entire pool. Latch instead
-    and honor at the next wrapper entry.
+    _process_worker unhandled and break the entire pool. Swallow it; the
+    cancellation path already targets the worker by pid, so a stray SIGTERM
+    on an idle worker just means we lost the race with the request finishing.
     """
     del signum, frame
-    global _pending_sigterm  # pylint: disable=global-statement
     if _in_request_execution:
         raise KeyboardInterrupt
-    _pending_sigterm = True
     # logger isn't async-signal-safe (re-entrant lock); use os.write.
     try:
-        os.write(2, b'SIGTERM received while worker idle; deferred.\n')
+        os.write(2, b'SIGTERM received while worker idle; ignored.\n')
     except Exception:  # pylint: disable=broad-except
         pass
 
@@ -542,14 +540,9 @@ def _request_execution_wrapper(request_id: str,
     request_name = None
     # Set _in_request_execution inside the try so `finally` always clears it,
     # even if a SIGTERM lands before any wrapper code runs.
-    global _in_request_execution, _pending_sigterm  # pylint: disable=global-statement
+    global _in_request_execution  # pylint: disable=global-statement
     try:
         _in_request_execution = True
-        pending = _pending_sigterm
-        _pending_sigterm = False
-        if pending:
-            logger.info(f'Request {request_id}: honoring deferred SIGTERM.')
-            raise KeyboardInterrupt
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
         # the try block to ensure we have the KeyboardInterrupt handling.

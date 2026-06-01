@@ -808,14 +808,12 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def reset_sigterm_gate():
-    """Reset module-level flags (shared across tests in same process)."""
+    """Reset module-level flag (shared across tests in same process)."""
     import signal as _signal
     original_handler = _signal.getsignal(_signal.SIGTERM)
     executor._in_request_execution = False
-    executor._pending_sigterm = False
     yield
     executor._in_request_execution = False
-    executor._pending_sigterm = False
     _signal.signal(_signal.SIGTERM, original_handler)
 
 
@@ -824,39 +822,13 @@ def test_gated_sigterm_handler_raises_when_active(reset_sigterm_gate):
     executor._in_request_execution = True
     with pytest.raises(KeyboardInterrupt):
         executor._gated_sigterm_handler(_signal.SIGTERM, None)
-    assert executor._pending_sigterm is False
 
 
-def test_gated_sigterm_handler_latches_when_idle(reset_sigterm_gate):
+def test_gated_sigterm_handler_swallows_when_idle(reset_sigterm_gate):
     import signal as _signal
     executor._in_request_execution = False
-    executor._pending_sigterm = False
+    # Must not raise; pool would break if SIGTERM escapes _process_worker.
     executor._gated_sigterm_handler(_signal.SIGTERM, None)
-    assert executor._pending_sigterm is True
-
-
-@pytest.mark.asyncio
-async def test_wrapper_honors_pending_sigterm_on_entry(isolated_database,
-                                                       reset_sigterm_gate):
-    _pending_sigterm_entrypoint_called[0] = False
-    req = requests_lib.Request(request_id='pending-sigterm-test',
-                               name='test',
-                               entrypoint=_pending_sigterm_test_entrypoint,
-                               request_body=payloads.RequestBody(),
-                               status=requests_lib.RequestStatus.PENDING,
-                               created_at=0.0,
-                               user_id='test-user')
-    assert await requests_lib.create_if_not_exists_async(req) is True
-
-    executor._in_request_execution = False
-    executor._pending_sigterm = True
-
-    executor._request_execution_wrapper('pending-sigterm-test',
-                                        ignore_return_value=False)
-
-    assert _pending_sigterm_entrypoint_called[0] is False
-    assert executor._pending_sigterm is False
-    assert executor._in_request_execution is False
 
 
 @pytest.mark.asyncio
@@ -875,15 +847,6 @@ async def test_wrapper_clears_in_request_execution_after_success(
                                         ignore_return_value=False)
 
     assert executor._in_request_execution is False
-    assert executor._pending_sigterm is False
-
-
-_pending_sigterm_entrypoint_called = [False]
-
-
-def _pending_sigterm_test_entrypoint():
-    _pending_sigterm_entrypoint_called[0] = True
-    return 'should-not-happen'
 
 
 def _gate_clears_after_success_entrypoint():
@@ -896,7 +859,6 @@ def _install_gated_handler_in_worker():
     from sky.server.requests import executor as _executor
     _signal.signal(_signal.SIGTERM, _executor._gated_sigterm_handler)
     _executor._in_request_execution = False
-    _executor._pending_sigterm = False
 
 
 def _worker_pid():
