@@ -128,6 +128,20 @@ _ACC_INSTANCE_TYPE_DICTS = {
     'B200': {
         8: ['a4-highgpu-8g'],
     },
+    # G4 VMs with NVIDIA RTX PRO 6000 Blackwell GPUs (GA Oct 2025)
+    # https://cloud.google.com/blog/products/compute/g4-vms-powered-by-nvidia-rtx-6000-blackwell-gpus-are-ga
+    'RTX6000': {
+        1: [
+            'g4-standard-4',
+            'g4-standard-8',
+            'g4-standard-12',
+            'g4-standard-16',
+            'g4-standard-32',
+        ],
+        2: ['g4-standard-24'],
+        4: ['g4-standard-48'],
+        8: ['g4-standard-96'],
+    },
 }
 # Enable GPU type inference from instance types
 _INSTANCE_TYPE_TO_ACC = {
@@ -181,6 +195,13 @@ _NUM_ACC_TO_NUM_CPU = {
         8: 64,
         16: 128
     },
+    # G4/RTX6000 Blackwell - similar to L4
+    'RTX6000': {
+        1: 8,
+        2: 16,
+        4: 32,
+        8: 64,
+    },
 }
 
 # num_gpus -> (max_num_cpus, max_memory_gb)
@@ -212,7 +233,14 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
         1: (16, 104),
         2: (32, 208),
         4: (96, 624),  # except for us-east1-c, europe-west1-d, europe-west1-b
-    }
+    },
+    # G4/RTX6000 Blackwell - 768 GB GDDR7 per GPU, up to 384 vCPUs
+    'RTX6000': {
+        1: (48, 384),
+        2: (96, 768),
+        4: (192, 768),
+        8: (384, 1536),
+    },
 }
 
 
