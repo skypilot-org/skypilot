@@ -113,7 +113,12 @@ class RichUtilsTest(unittest.TestCase):
         self.assertNotIn(None, result)
 
     def test_decode_rich_status_relay_drops_heartbeat(self):
-        """Heartbeats must not be relayed (they would bloat the log)."""
+        """Heartbeats are not relayed, but still yield None for retry progress.
+
+        The encoded payload must not reach the log (it would bloat it), yet we
+        still yield None so `stream_response` advances its progress counter and
+        the retry decorator sees forward progress during quiet phases.
+        """
         heartbeat = message_utils.encode_payload(
             rich_utils.Control.HEARTBEAT.encode(''))
         mock_response = mock.MagicMock(spec=requests.Response)
@@ -122,4 +127,8 @@ class RichUtilsTest(unittest.TestCase):
         result = list(
             rich_utils.decode_rich_status(mock_response,
                                           relay_rich_status=True))
+        # The encoded heartbeat line is not relayed...
+        self.assertNotIn(heartbeat, result)
         self.assertEqual([r for r in result if r is not None], [])
+        # ...but a None is yielded so progress_count still advances.
+        self.assertEqual(result, [None])

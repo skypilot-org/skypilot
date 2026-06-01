@@ -395,10 +395,15 @@ def decode_rich_status(
                         'Streaming interrupted. Please retry.')
                 if relay_rich_status:
                     # Forward the encoded payload verbatim instead of rendering
-                    # it locally. Heartbeats are control-plane only and are
-                    # dropped to avoid bloating the relayed log.
+                    # it locally. Heartbeats are control-plane only and are not
+                    # relayed (they would bloat the log), but we still yield
+                    # None for them so `stream_response` advances its progress
+                    # counter and the `retry_transient_errors` decorator sees
+                    # forward progress during quiet provisioning phases.
                     if control != Control.HEARTBEAT:
                         yield line
+                    else:
+                        yield None
                     continue
                 # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():

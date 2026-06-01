@@ -1349,10 +1349,16 @@ def read_provision_status_from_log(
     Returns:
         A tuple ``(new_pos, latest_msg)``. ``latest_msg`` is ``None`` if
         provisioning has not emitted a spinner yet, or if it has finished
-        (a STOP/EXIT control clears the message).
+        (an EXIT control clears the message).
     """
     msg = current_msg
     try:
+        # If the log was truncated or recreated (e.g. controller recovery or a
+        # job retry), the saved offset can be past the new EOF; restart from the
+        # beginning so following doesn't get stuck reading nothing.
+        if os.path.exists(log_path) and pos > os.path.getsize(log_path):
+            pos = 0
+            msg = None
         with open(log_path, 'r', encoding='utf-8') as f:
             f.seek(pos)
             while True:
@@ -1372,17 +1378,35 @@ def read_provision_status_from_log(
                     continue
                 control, encoded_status = rich_utils.Control.decode(decoded)
                 if control in (rich_utils.Control.INIT,
-                               rich_utils.Control.UPDATE,
-                               rich_utils.Control.START):
+                               rich_utils.Control.UPDATE):
+                    # INIT/UPDATE carry the live spinner text.
                     msg = encoded_status
-                elif control in (rich_utils.Control.STOP,
-                                 rich_utils.Control.EXIT):
+                elif control == rich_utils.Control.EXIT:
+                    # The spinner is done.
                     msg = None
+                # START/STOP only toggle the spinner's visibility and carry the
+                # original (possibly stale) init message rather than the live
+                # one: entering a nested status emits UPDATE(nested) then
+                # START(original), so updating `msg` on START would revert the
+                # headline to the stale text. Leave `msg` unchanged for both.
     except (OSError, ValueError):
         # Best-effort: the log may not exist yet (FileNotFoundError) or be
         # mid-write; never let log following break job-log streaming.
         pass
     return pos, msg
+
+
+def _is_relayed_status_payload_line(line: str) -> bool:
+    """Whether a controller-log line is a relayed rich-status payload.
+
+    With ``relay_rich_status=True``, the jobs controller writes the inner
+    cluster launch's encoded rich-status payloads into its per-job log to drive
+    the provisioning spinner (see ``read_provision_status_from_log``). These
+    encoded ``<sky-payload>`` lines are control-plane only and must be hidden
+    from the human-readable ``sky jobs logs --controller`` output.
+    """
+    is_payload, _ = message_utils.decode_payload(line, raise_for_mismatch=False)
+    return is_payload
 
 
 def _provision_status_headline(provision_msg: str) -> Optional[str]:
@@ -1395,7 +1419,12 @@ def _provision_status_headline(provision_msg: str) -> Optional[str]:
     to start" line. Returns ``None`` when the message has no blue headline, so
     the caller can show nothing rather than a raw/unstyled message.
     """
-    match = re.search(r'\[bold cyan\](.*?)\[/\]', provision_msg)
+    # Drop the trailing dim log-path hint (``  [dim]...[/]``), if any, then peel
+    # off the outer ``[bold cyan]...[/]`` wrapper. The inner capture is greedy
+    # so nested markup (e.g. ``[bold cyan]Doing [bold]X[/] now[/]``) is kept
+    # intact instead of being truncated at the first ``[/]``.
+    headline = re.sub(r'\s*\[dim\].*\[/\]\s*$', '', provision_msg)
+    match = re.match(r'\s*\[bold cyan\](.*)\[/\]\s*$', headline)
     return match.group(1) if match else None
 
 
@@ -2037,12 +2066,16 @@ def stream_logs(job_id: Optional[int],
             tail_lines, end_pos = log_lib.tail_lines_from_end(
                 controller_log_path, tail, offset_arg)
             for line in tail_lines:
+                if _is_relayed_status_payload_line(line):
+                    continue
                 print(line, end='')
             print(end='', flush=True)
         else:
             with open(controller_log_path, 'r', newline='',
                       encoding='utf-8') as f:
                 for line in f:
+                    if _is_relayed_status_payload_line(line):
+                        continue
                     print(line, end='')
                 end_pos = f.tell()
                 print(end='', flush=True)
@@ -2058,7 +2091,8 @@ def stream_logs(job_id: Optional[int],
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':
-                        print(line, end='')
+                        if not _is_relayed_status_payload_line(line):
+                            print(line, end='')
                         line = f.readline()
 
                     # Flush.
@@ -2080,7 +2114,13 @@ def stream_logs(job_id: Optional[int],
                 time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
                 # Print any remaining logs including incomplete line.
-                print(f.read(), end='', flush=True)
+                remaining = f.read()
+                if remaining:
+                    print(''.join(
+                        line for line in remaining.splitlines(keepends=True)
+                        if not _is_relayed_status_payload_line(line)),
+                          end='',
+                          flush=True)
 
         if follow:
             return ux_utils.finishing_message(
