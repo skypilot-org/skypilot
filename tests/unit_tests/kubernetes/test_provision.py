@@ -1320,10 +1320,11 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
 
     @staticmethod
     def _make_pending_pod(name: str, cluster_name_on_cloud: str):
-        """Build a pod that is Pending with no container_statuses.
+        """Build a pod that is Pending and not yet bound by the scheduler.
 
-        This represents a pod that has not yet been scheduled — the loop
-        should keep waiting for it.
+        This represents a pod that has not yet been scheduled — no
+        spec.node_name and no PodScheduled=True condition — so the loop
+        should keep waiting for it (and eventually time out).
         """
         from sky.provision import constants as prov_constants
         pod = mock.MagicMock()
@@ -1333,6 +1334,12 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         }
         pod.status.phase = 'Pending'
         pod.status.container_statuses = None
+        # The scheduler has not bound this pod: no node assignment and no
+        # PodScheduled=True condition. Set explicitly so the MagicMock does
+        # not auto-create truthy attributes that _pod_is_scheduled would
+        # misread as "bound".
+        pod.spec.node_name = None
+        pod.status.conditions = []
         return pod
 
     def _setup(self, monkeypatch, autoscaler_type, autoscale_detected):
@@ -1598,6 +1605,183 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         kwargs = launch_progress_calls[0].kwargs
         assert kwargs['reason'].startswith('Launching (')
         assert kwargs['nop_if_duplicate'] is True
+
+
+class TestWaitForPodsToScheduleBoundPod:
+    """Tests that _wait_for_pods_to_schedule treats a pod as scheduled once
+    the kube-scheduler has bound it to a node, even before the kubelet has
+    populated status.container_statuses.
+
+    Regression: the previous implementation decided a pod was scheduled by
+    checking ``container_statuses is not None``. container_statuses is
+    populated by the kubelet only after it picks the pod up and starts the
+    sandbox, which can lag the scheduler binding when the control plane is
+    slow to propagate the binding to the kubelet. At the provision_timeout
+    deadline a fully bound pod (PodScheduled True / spec.node_name set) could
+    still have container_statuses == None and be wrongly reported as out of
+    resources. The function must instead hand off to _wait_for_pods_to_run.
+    """
+
+    @staticmethod
+    def _make_node(name: str, cluster_name_on_cloud: str):
+        from sky.provision import constants as prov_constants
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        return node
+
+    @staticmethod
+    def _make_bound_pending_pod(name: str,
+                                cluster_name_on_cloud: str,
+                                node_name=None,
+                                pod_scheduled_condition: bool = False):
+        """A Pending pod that the scheduler has bound but the kubelet has not
+        yet picked up: container_statuses / host_ip / start_time are still
+        None. Binding is expressed via spec.node_name and/or a PodScheduled
+        condition.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        pod.status.phase = 'Pending'
+        # The kubelet has not populated any of these yet.
+        pod.status.container_statuses = None
+        pod.status.host_ip = None
+        pod.status.start_time = None
+        # The scheduler has bound the pod.
+        pod.spec.node_name = node_name
+        if pod_scheduled_condition:
+            cond = mock.MagicMock()
+            cond.type = 'PodScheduled'
+            cond.status = 'True'
+            pod.status.conditions = [cond]
+        else:
+            pod.status.conditions = []
+        return pod
+
+    @staticmethod
+    def _make_unbound_pending_pod(name: str, cluster_name_on_cloud: str):
+        """A Pending pod the scheduler has NOT bound: no node_name and no
+        PodScheduled=True condition. This pod is genuinely unschedulable and
+        must keep the loop waiting until the timeout.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        pod.status.phase = 'Pending'
+        pod.status.container_statuses = None
+        pod.status.host_ip = None
+        pod.status.start_time = None
+        pod.spec.node_name = None
+        pod.status.conditions = []
+        return pod
+
+    @staticmethod
+    def _wire_common_mocks(monkeypatch, pod, autoscaler_type=None):
+        """Mock config lookup, core_api, autoscale detection and the
+        error-surfacing path. Returns the raise_errors marker mock."""
+
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            if keys == ('autoscaler',):
+                return autoscaler_type
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        pods_list = mock.MagicMock()
+        pods_list.items = [pod]
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = pods_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        monkeypatch.setattr(instance, '_cluster_had_autoscale_event',
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(instance, '_cluster_maybe_autoscaling',
+                            lambda *a, **kw: False)
+
+        raise_errors = mock.MagicMock(
+            side_effect=config_lib.KubernetesError('simulated-timeout'))
+        monkeypatch.setattr(instance, '_raise_pod_scheduling_errors',
+                            raise_errors)
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        return raise_errors
+
+    @pytest.mark.parametrize('node_name, pod_scheduled_condition', [
+        ('node-1', False),
+        (None, True),
+        ('node-1', True),
+    ])
+    def test_bound_pending_pod_without_container_statuses_returns(
+            self, monkeypatch, node_name, pod_scheduled_condition):
+        """The regression case: a bound but not-yet-picked-up pod (no
+        container_statuses / host_ip) must be treated as scheduled, so the
+        function returns promptly without raising — handing off to
+        _wait_for_pods_to_run."""
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_bound_pending_pod(
+            'pod-0',
+            cluster_name_on_cloud,
+            node_name=node_name,
+            pod_scheduled_condition=pod_scheduled_condition)
+        raise_errors = self._wire_common_mocks(monkeypatch, pod)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        # A positive timeout; the function must return well before it without
+        # raising because the pod is bound.
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=30,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert not raise_errors.called, (
+            'A bound pod (scheduler placed it) must not trigger the '
+            'out-of-resources error path even though the kubelet has not '
+            'populated container_statuses yet.')
+
+    def test_unbound_pending_pod_times_out_and_raises(self, monkeypatch):
+        """A genuinely unschedulable pod (no node_name, no PodScheduled=True)
+        must keep the loop waiting and eventually raise once the timeout
+        elapses."""
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_unbound_pending_pod('pod-0', cluster_name_on_cloud)
+        # No autoscaler configured, so the timeout is not bumped to the
+        # autoscaler minimum and stays at the tiny value below.
+        raise_errors = self._wire_common_mocks(monkeypatch,
+                                               pod,
+                                               autoscaler_type=None)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=1,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert raise_errors.called, (
+            'An unbound (unschedulable) pod must drive the timeout/error '
+            'path.')
 
 
 # ---------------------------------------------------------------------------

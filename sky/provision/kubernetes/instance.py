@@ -91,6 +91,37 @@ def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
                 None)
 
 
+def _pod_is_scheduled(pod) -> bool:
+    """Whether the kube-scheduler has bound this pod to a node.
+
+    The scheduler sets ``spec.nodeName`` (and the ``PodScheduled`` status
+    condition to ``True``) the moment it places a pod -- i.e. capacity has
+    been found. The kubelet on the target node only later populates
+    ``status.container_statuses`` / ``host_ip`` once it picks the pod up and
+    starts the sandbox. That kubelet pickup can occasionally lag past
+    ``provision_timeout`` when the control plane is slow to propagate the
+    binding to the kubelet, even though the pod is already bound to a node.
+
+    We treat a bound pod as scheduled so that provisioning hands off to
+    ``_wait_for_pods_to_run`` (which waits for containers without the short
+    ``provision_timeout``) instead of failing over as if the cluster were out
+    of resources. A genuinely unschedulable pod keeps ``PodScheduled`` False
+    and no ``nodeName``, so it stays in the scheduling wait loop.
+    """
+    # Running/Succeeded/Failed pods are clearly past scheduling; Failed pods
+    # are surfaced as errors later in _wait_for_pods_to_run.
+    if pod.status.phase != 'Pending':
+        return True
+    # spec.nodeName is set atomically when the scheduler binds the pod.
+    if pod.spec.node_name:
+        return True
+    # Fall back to the PodScheduled status condition.
+    for condition in (pod.status.conditions or []):
+        if condition.type == 'PodScheduled' and condition.status == 'True':
+            return True
+    return False
+
+
 def _get_pvc_name(cluster_name: str, volume_name: str) -> str:
     return f'{cluster_name}-{volume_name}'
 
@@ -615,16 +646,14 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             time.sleep(0.5)
             continue
 
-        # Check if all pods are scheduled
-        all_scheduled = True
-        for pod in pods:
-            if (pod.metadata.name in expected_pod_names and
-                    pod.status.phase == 'Pending'):
-                # If container_statuses is None, then the pod hasn't
-                # been scheduled yet.
-                if pod.status.container_statuses is None:
-                    all_scheduled = False
-                    break
+        # A pod is considered scheduled once the kube-scheduler has bound it
+        # to a node (capacity found). We deliberately do not wait for the
+        # kubelet to populate container_statuses here -- that can lag and is
+        # handled by _wait_for_pods_to_run, which has no provision_timeout.
+        all_scheduled = all(
+            _pod_is_scheduled(pod)
+            for pod in pods
+            if pod.metadata.name in expected_pod_names)
 
         if all_scheduled:
             return
