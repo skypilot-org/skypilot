@@ -7,6 +7,7 @@ and handle.launched_nodes == 1. The previous logic fell through to
 INIT node. _update_cluster_status should now recognize nodes in
 unexpected (non-UP, non-STOPPED) states and report them distinctly.
 """
+import contextlib
 import time
 from unittest import mock
 
@@ -116,3 +117,113 @@ class TestUpdateClusterStatusInitReason:
         msg = _capture_init_log_message(
             {'pod-0': (status_lib.ClusterStatus.UP, None)}, launched_nodes=2)
         assert 'one or more nodes terminated' in msg, msg
+
+
+def _collect_cluster_events_with_ray_status(run_return_value,
+                                            *,
+                                            count_healthy=None,
+                                            launched_nodes=2):
+    """Drive _update_cluster_status while controlling the `ray status` check.
+
+    All nodes report UP from the cloud/k8s API (so all_nodes_up is True and the
+    Ray health check on the head node is exercised). `run_return_value` is what
+    the head node's command runner returns for the `ray status` command: a
+    non-zero return code simulates the control plane being unreachable, while a
+    zero return code with a mocked `count_healthy` simulates a successful query
+    that reports a given (ready_head, ready_workers).
+
+    Returns the list of (status, message) tuples passed to add_cluster_event.
+    """
+    handle = _make_handle()
+    handle.launched_nodes = launched_nodes
+    handle.num_ips_per_node = 1
+    record = _make_record(handle)
+
+    node_statuses = {
+        f'pod-{i}': (status_lib.ClusterStatus.UP, None)
+        for i in range(launched_nodes)
+    }
+
+    head_runner = mock.Mock()
+    head_runner.run.return_value = run_return_value
+    handle.get_command_runners.return_value = [head_runner]
+
+    events = []
+
+    def _capture_event(cluster_name, new_status, message, event_type, **kwargs):
+        events.append((new_status, message))
+
+    external_failure = mock.Mock()
+    external_failure.get.return_value = None
+
+    patches = [
+        mock.patch.object(backend_utils,
+                          '_query_cluster_status_via_cloud_api',
+                          return_value=node_statuses),
+        mock.patch.object(backend_utils, 'ExternalFailureSource',
+                          external_failure),
+        # In the healthy (UP) path the backend is fetched to check for
+        # autostopping; a plain Mock is not a CloudVmRayBackend, so that
+        # check is skipped.
+        mock.patch.object(backend_utils,
+                          'get_backend_from_handle',
+                          return_value=mock.Mock()),
+        # Keep the abnormal-path reason deterministic and avoid real sleeps in
+        # the ray status retry loop.
+        mock.patch.object(backend_utils,
+                          '_summarize_pod_reasons',
+                          return_value=''),
+        mock.patch.object(backend_utils.time, 'sleep'),
+        mock.patch.object(backend_utils.global_user_state,
+                          'add_cluster_event',
+                          side_effect=_capture_event),
+        mock.patch.object(backend_utils.global_user_state,
+                          'add_or_update_cluster'),
+        mock.patch.object(backend_utils.global_user_state,
+                          'get_cluster_from_name',
+                          return_value=record),
+    ]
+    if count_healthy is not None:
+        patches.append(
+            mock.patch.object(backend_utils,
+                              '_count_healthy_nodes_from_ray',
+                              return_value=count_healthy))
+
+    with contextlib.ExitStack() as stack:
+        for patch in patches:
+            stack.enter_context(patch)
+        backend_utils._update_cluster_status('test-cluster',
+                                             record,
+                                             retry_if_missing=False)
+    return events
+
+
+class TestRayStatusTransientConnectivity:
+    """`ray status` failing to *execute* (a transient control-plane error)
+    must not be mistaken for the Ray cluster being down."""
+
+    def test_unreachable_control_plane_keeps_cluster_up(self):
+        # Every `ray status` attempt fails to connect (e.g. `connect:
+        # operation not permitted`, a 521, or a timeout). The cloud API still
+        # reports all nodes UP, so the cluster must stay UP rather than flip
+        # to INIT (which would trigger a destructive managed-job recovery).
+        events = _collect_cluster_events_with_ray_status(
+            (255, '', 'dial tcp 10.112.64.1:443: connect: operation not '
+             'permitted'))
+        statuses = [status for status, _ in events]
+        assert status_lib.ClusterStatus.INIT not in statuses, events
+        assert status_lib.ClusterStatus.UP in statuses, events
+
+    def test_ray_reports_missing_nodes_still_goes_init(self):
+        # Guard against masking real degradation: a SUCCESSFUL `ray status`
+        # that reports fewer ready nodes than expected must still mark the
+        # cluster INIT.
+        events = _collect_cluster_events_with_ray_status(
+            (0, 'ray status output', ''), count_healthy=(1, 0))
+        init_messages = [
+            message for status, message in events
+            if status == status_lib.ClusterStatus.INIT
+        ]
+        assert init_messages, events
+        assert 'ray cluster is unhealthy (1/2 ready)' in init_messages[0], (
+            init_messages)
