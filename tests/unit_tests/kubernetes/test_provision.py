@@ -2752,6 +2752,31 @@ class TestInspectPodStatusTierIntegration:
         assert ('Launching (1 pod(s) pending due to container creation)'
                 in lp_calls[0].kwargs['reason'])
 
+    def test_pending_pod_not_scheduled_does_not_default_reason(
+            self, monkeypatch):
+        """A Pending pod the scheduler has NOT bound yet (no spec.node_name,
+        no PodScheduled=True) with no determinable reason must NOT be labeled
+        'container creation' -- it is still waiting for capacity, not creating
+        a container. _inspect_pod_status returns (False, None), so no
+        LAUNCH_PROGRESS row is emitted and the spinner stays a bare
+        'Launching'."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=None,
+        )
+        pod.status.host_ip = None
+        # Not bound: no node assignment and no PodScheduled=True condition.
+        pod.spec.node_name = None
+        pod.status.conditions = []
+        # No events → tier-2 and tier-3 return None.
+        monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **kw: [])
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert not lp_calls
+
 
 class TestCheckInitContainersEnrichedRaise:
     """Tests the enriched raise message in _check_init_containers when an
