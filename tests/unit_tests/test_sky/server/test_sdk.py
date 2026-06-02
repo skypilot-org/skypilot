@@ -845,7 +845,7 @@ def test_stream_response_resumable_retry_skips_replayed_lines():
     output_stream = io.StringIO()
     decode_call_count = 0
 
-    def decode_side_effect(_response):
+    def decode_side_effect(_response, relay_rich_status=False):
         nonlocal decode_call_count
         decode_call_count += 1
         if decode_call_count == 1:

@@ -2396,6 +2396,36 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         return job_ids
 
 
+def get_nonterminal_job_counts_by_pool(pool: str) -> Dict[str, int]:
+    """Get the number of nonterminal jobs per cluster in a pool.
+
+    Returns a dict mapping cluster_name to the count of nonterminal jobs
+    running on that cluster. Uses a single GROUP BY query instead of
+    per-cluster queries.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = sqlalchemy.select(
+            job_info_table.c.current_cluster_name,
+            # pylint: disable=not-callable
+            sqlalchemy.func.count(
+                spot_table.c.spot_job_id.distinct()
+            )).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+            ).where(
+                sqlalchemy.and_(
+                    ~spot_table.c.status.in_([
+                        status.value
+                        for status in ManagedJobStatus.terminal_statuses()
+                    ]),
+                    job_info_table.c.pool == pool,
+                )).group_by(job_info_table.c.current_cluster_name)
+        rows = session.execute(query).fetchall()
+        return {row[0]: row[1] for row in rows if row[0] is not None}
+
+
 def get_nonterminal_job_ids_by_pool_grouped(
         pool: str) -> Dict[Optional[str], List[int]]:
     """Get nonterminal job ids in a pool, grouped by current_cluster_name.

@@ -425,7 +425,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
     # Storage account must be length of 3-24
     # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
     pattern = re.compile(
-        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
+        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)+$')
     match = pattern.match(endpoint_url)
     if match is None:
         return False

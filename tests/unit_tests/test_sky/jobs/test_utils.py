@@ -1057,3 +1057,162 @@ class TestFormatJobDetails:
         # No cloud info -> surface the reason without a (possibly wrong) hint.
         result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
         assert result == 'Recovering: podX OOMKilled (exit code 137)'
+
+
+class TestReadProvisionStatusFromLog:
+    """Tests for relaying the provisioning spinner from the controller log."""
+
+    @staticmethod
+    def _status_line(control, msg=''):
+        from sky.utils import message_utils
+        return message_utils.encode_payload(control.encode(msg))
+
+    def test_missing_file_returns_inputs(self, tmp_path):
+        path = str(tmp_path / 'missing.log')
+        pos, msg = jobs_utils.read_provision_status_from_log(path, 0, 'prev')
+        assert pos == 0
+        assert msg == 'prev'
+
+    def test_reads_latest_spinner_message_incrementally(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text('a plain provisioning log line\n' +
+                        self._status_line(rich_utils.Control.INIT, 'Launching'))
+
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+        assert pos > 0
+
+        # Append an UPDATE; only the newly appended bytes should be read.
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(
+                self._status_line(rich_utils.Control.UPDATE,
+                                  'Preparing SkyPilot runtime (1/3)'))
+        pos2, msg2 = jobs_utils.read_provision_status_from_log(
+            str(path), pos, msg)
+        assert msg2 == 'Preparing SkyPilot runtime (1/3)'
+        assert pos2 > pos
+
+    def test_stop_control_clears_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.EXIT))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg is None
+
+    def test_partial_trailing_line_is_not_consumed(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        full = self._status_line(rich_utils.Control.INIT, 'Launching')
+        # Write a complete payload plus a partial (no trailing newline) one.
+        partial = self._status_line(rich_utils.Control.UPDATE,
+                                    'half').rstrip('\n')
+        path.write_text(full + partial)
+
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+        # Complete the partial line; the next read should pick it up.
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('\n')
+        _, msg2 = jobs_utils.read_provision_status_from_log(str(path), pos, msg)
+        assert msg2 == 'half'
+
+    def test_start_does_not_revert_to_stale_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        # A nested status enter emits UPDATE(nested) then START(original); the
+        # START carries the stale init message, so it must not overwrite the
+        # live UPDATE text.
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.UPDATE,
+                              'Preparing SkyPilot runtime (1/3)') +
+            self._status_line(rich_utils.Control.START, 'Launching'))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Preparing SkyPilot runtime (1/3)'
+
+    def test_stop_keeps_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        # STOP only pauses the spinner; it must not clear the message.
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.STOP))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+
+    def test_truncated_log_resets_offset(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.UPDATE, 'Preparing'))
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Preparing'
+        assert pos > 0
+
+        # Recreate (truncate) the log; the saved offset now points past EOF.
+        path.write_text(self._status_line(rich_utils.Control.INIT, 'Relaunch'))
+        _, msg2 = jobs_utils.read_provision_status_from_log(str(path), pos, msg)
+        assert msg2 == 'Relaunch'
+
+
+class TestProvisionStatusHeadline:
+    """Tests for extracting the blue headline from a provisioning message."""
+
+    def test_extracts_blue_headline_and_drops_hint(self):
+        msg = ('[bold cyan]Preparing SkyPilot runtime (1/3)[/]  '
+               '[dim]View logs at: ~/sky_logs/x/provision.log[/]')
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Preparing SkyPilot runtime (1/3)')
+
+    def test_headline_without_hint(self):
+        msg = '[bold cyan]Launching[/]'
+        assert jobs_utils._provision_status_headline(msg) == 'Launching'
+
+    def test_returns_none_when_not_blue(self):
+        # No [bold cyan] wrapper: nothing should be displayed.
+        assert jobs_utils._provision_status_headline('Launching') is None
+
+    def test_nested_markup_is_preserved(self):
+        # Nested markup inside the headline must not be truncated at the first
+        # closing tag, and the trailing dim hint is still dropped.
+        msg = '[bold cyan]Doing [bold]X[/] now[/]  [dim]hint[/]'
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Doing [bold]X[/] now')
+
+    def test_extracts_headline_from_real_spinner_message(self):
+        # Regression: real spinner messages append the log hint with raw ANSI
+        # (colorama) codes, not rich `[dim]...[/]` markup, so the headline does
+        # not end the string. The headline must still be extracted (otherwise
+        # the provisioning detail under "Waiting for task to start" vanishes).
+        from sky.utils import ux_utils
+        msg = ux_utils.spinner_message('Preparing SkyPilot runtime (1/3)',
+                                       log_path='~/sky_logs/x/provision.log')
+        assert msg != '[bold cyan]Preparing SkyPilot runtime (1/3)[/]'
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Preparing SkyPilot runtime (1/3)')
+
+    def test_extracts_headline_with_provision_hint(self):
+        # The provision-log hint variant (sky logs --provision <cluster>) also
+        # appends an ANSI-colored, bold-wrapped hint after the headline.
+        from sky.utils import ux_utils
+        msg = ux_utils.spinner_message('Launching', cluster_name='my-cluster')
+        assert jobs_utils._provision_status_headline(msg) == 'Launching'
+
+
+class TestIsRelayedStatusPayloadLine:
+    """Tests for hiding relayed rich-status payloads from --controller logs."""
+
+    def test_payload_line_detected(self):
+        from sky.utils import message_utils
+        from sky.utils import rich_utils
+        line = message_utils.encode_payload(
+            rich_utils.Control.UPDATE.encode('Preparing'))
+        assert jobs_utils._is_relayed_status_payload_line(line) is True
+
+    def test_plain_log_line_not_detected(self):
+        assert jobs_utils._is_relayed_status_payload_line(
+            'Preparing SkyPilot runtime (1/3)\n') is False
