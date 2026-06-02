@@ -313,12 +313,18 @@ class CommandError(CommandFailureException):
         command: The command that was run.
         error_msg: The error message to print.
         detailed_reason: The stderr of the command.
+        failure: Normally constructed from returncode, but included for serde.
     """
 
-    def __init__(self, returncode: int, command: str, error_msg: str,
-                 detailed_reason: Optional[str]) -> None:
+    def __init__(self,
+                 returncode: int,
+                 command: str,
+                 error_msg: str,
+                 detailed_reason: Optional[str],
+                 failure: Optional[str] = None) -> None:
         self.returncode = returncode
-        failure = f'failed with return code {returncode}'
+        if failure is None:
+            failure = f'failed with return code {returncode}'
         super().__init__(command, failure, error_msg, detailed_reason)
 
 
