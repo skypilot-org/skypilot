@@ -1128,11 +1128,11 @@ def refresh_workspace_state_for_sync_handler() -> None:
 
     The executor's ``reload_for_new_request`` pipeline refreshes config
     and the request-scoped lru cache on every queued worker request, but
-    plugin handlers that respond synchronously bypass it and would
+    handlers that respond synchronously bypass it and would
     otherwise see whatever workspace config was loaded into this
     process's ``_global_config_context`` at boot (or the last time
-    something explicitly reloaded). After
-    ``sky workspace create/update`` runs on a worker process, the YAML
+    something explicitly reloaded).
+    After workspace create/update runs on a worker process, the YAML
     /DB state moves forward but this process's cached snapshot does
     not — so a sync handler filtering by ``accessible_workspaces`` will
     exclude newly-created workspaces (e.g. jobs land in a workspace the
