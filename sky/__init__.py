@@ -1,10 +1,17 @@
 """The SkyPilot package."""
+import importlib
+import importlib.abc
+import importlib.util
 import os
 import subprocess
-from typing import Optional
+import sys
+from typing import Any, Optional, TYPE_CHECKING
 import urllib.request
 
 from sky.utils import directory_utils
+
+if TYPE_CHECKING:
+    from importlib.metadata import EntryPoint
 
 # Replaced with the current commit when building the wheels.
 _SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
@@ -255,3 +262,102 @@ __all__ = [
     # Batch processing
     'batch',
 ]
+
+# --------------------- Client SDK namespace --------------------- #
+# Installed packages can surface a client SDK under the ``sky`` namespace by
+# registering an entry point in the ``sky.client_sdks`` group whose value is
+# the dotted path of the module to expose:
+#
+#     # in the providing package's setup.py / pyproject.toml
+#     entry_points={'sky.client_sdks': ['foo = some_package.foo.sdk']}
+#
+# ``sky.foo``, ``from sky import foo`` and ``import sky.foo`` then all resolve
+# (lazily) to ``some_package.foo.sdk``, letting add-on packages extend the
+# ``sky`` namespace without SkyPilot having to know about them at build time.
+# This mirrors the other entry-point hooks SkyPilot already exposes.
+_CLIENT_SDK_ENTRY_POINT_GROUP = 'sky.client_sdks'
+
+
+def _find_client_sdk_entry_point(name: str) -> Optional['EntryPoint']:
+    """Return the ``sky.client_sdks`` entry point named ``name``, if any."""
+    # Imported lazily: importlib.metadata adds measurable time to ``import
+    # sky`` and is only needed the first time a contributed SDK is resolved.
+    # pylint: disable-next=import-outside-toplevel
+    import importlib.metadata as importlib_metadata
+    all_entry_points = importlib_metadata.entry_points()
+    # ``entry_points().select(group=...)`` is the API on Python 3.10+ (and the
+    # only one on 3.12+). On 3.8/3.9 ``entry_points()`` returns a plain mapping
+    # of group name to entry points, so fall back to ``.get()`` there.
+    select = getattr(all_entry_points, 'select', None)
+    if select is not None:
+        group_entry_points = select(group=_CLIENT_SDK_ENTRY_POINT_GROUP)
+    else:
+        group_entry_points = all_entry_points.get(_CLIENT_SDK_ENTRY_POINT_GROUP,
+                                                  [])
+    for entry_point in group_entry_points:
+        if entry_point.name == name:
+            return entry_point
+    return None
+
+
+class _ClientSdkLoader(importlib.abc.Loader):
+    """importlib loader that aliases ``sky.<name>`` to an existing module."""
+
+    def __init__(self, target_module: str) -> None:
+        self._target_module = target_module
+
+    def create_module(self, spec: Any) -> Any:
+        del spec  # Unused; the module name comes from the registered target.
+        # Return the target module itself so that, e.g.,
+        # ``sky.foo is some_package.foo.sdk`` and it is not executed again
+        # under a second name.
+        return importlib.import_module(self._target_module)
+
+    def exec_module(self, module: Any) -> None:
+        del module  # Already initialized by import_module in create_module.
+
+
+class _ClientSdkFinder(importlib.abc.MetaPathFinder):
+    """importlib meta-path finder for entry-point-registered client SDKs.
+
+    Appended to ``sys.meta_path`` so it only runs after the default finders;
+    real ``sky`` submodules always take precedence.
+    """
+
+    def find_spec(self,
+                  fullname: str,
+                  path: Any = None,
+                  target: Any = None) -> Any:
+        del path, target  # Unused; resolution is keyed only on ``fullname``.
+        prefix = f'{__name__}.'
+        if not fullname.startswith(prefix):
+            return None
+        name = fullname[len(prefix):]
+        if '.' in name:
+            return None
+        entry_point = _find_client_sdk_entry_point(name)
+        if entry_point is None:
+            return None
+        return importlib.util.spec_from_loader(
+            fullname, _ClientSdkLoader(entry_point.value))
+
+
+def __getattr__(name: str) -> Any:  # pylint: disable=invalid-name
+    """Lazily resolve client SDKs registered under ``sky.client_sdks``.
+
+    PEP 562 module hook, consulted only for attributes not already defined on
+    ``sky``, so it never shadows real submodules or symbols. This handles bare
+    attribute access (``import sky; sky.foo``), which does not go through the
+    meta-path finder above.
+    """
+    if name.startswith('_'):
+        raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+    if _find_client_sdk_entry_point(name) is None:
+        raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+    # Routes through _ClientSdkFinder, which binds ``sky.<name>`` and registers
+    # it in sys.modules; any error importing the SDK propagates unchanged.
+    return importlib.import_module(f'{__name__}.{name}')
+
+
+if not any(isinstance(finder, _ClientSdkFinder) for finder in sys.meta_path):
+    sys.meta_path.append(_ClientSdkFinder())
