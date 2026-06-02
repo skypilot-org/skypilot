@@ -56,7 +56,10 @@ export const ErrorDisplay = ({ error, title = 'Error', onDismiss }) => {
             </svg>
           </div>
           <div className="ml-3">
-            <div className="text-sm text-red-800">
+            {/* whitespace-pre-wrap so multi-line server error messages
+                (e.g. demotion failure with per-workspace bullets) keep
+                their \n line breaks instead of collapsing to one line. */}
+            <div className="text-sm text-red-800 whitespace-pre-wrap">
               <strong>{title}:</strong> {displayError}
             </div>
           </div>
