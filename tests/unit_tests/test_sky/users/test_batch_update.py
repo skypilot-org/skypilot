@@ -153,8 +153,8 @@ class TestUserBatchUpdate:
                                                if r == 'admin' else [])
         mock_get_user_roles.return_value = ['admin']
 
-        def fake_demotion_check(uid, **_kwargs):
-            if uid == 'u2':
+        def fake_demotion_check(user, **_kwargs):
+            if user.id == 'u2':
                 raise ValueError(
                     "user 'u2' has active resources in 'private-ws'")
 
@@ -247,7 +247,7 @@ class TestUserRoleDemotion:
                                      mock_get_active):
         mock_get_nested.return_value = {}
         # Should not raise.
-        resource_checker.check_user_role_demotion('u1')
+        resource_checker.check_user_role_demotion(_mk_user('u1', name='alice'))
         mock_get_active.assert_not_called()
 
     @mock.patch('sky.global_user_state.get_user')
@@ -274,7 +274,8 @@ class TestUserRoleDemotion:
         mock_get_user.return_value = _mk_user('u1', name='alice')
 
         with pytest.raises(ValueError) as exc_info:
-            resource_checker.check_user_role_demotion('u1')
+            resource_checker.check_user_role_demotion(
+                _mk_user('u1', name='alice'))
         msg = str(exc_info.value)
         assert "'alice'" in msg
         assert 'private-locked' in msg
@@ -304,7 +305,7 @@ class TestUserRoleDemotion:
         mock_get_user.return_value = _mk_user('u1', name='alice')
 
         # Should not raise.
-        resource_checker.check_user_role_demotion('u1')
+        resource_checker.check_user_role_demotion(_mk_user('u1', name='alice'))
 
     @mock.patch('sky.global_user_state.get_user')
     @mock.patch('sky.utils.resource_checker._get_active_resources')
@@ -328,5 +329,5 @@ class TestUserRoleDemotion:
         mock_get_user.return_value = _mk_user('u1', name='alice')
 
         # Should not raise (public workspace not even checked).
-        resource_checker.check_user_role_demotion('u1')
+        resource_checker.check_user_role_demotion(_mk_user('u1', name='alice'))
         mock_get_ws_users.assert_not_called()

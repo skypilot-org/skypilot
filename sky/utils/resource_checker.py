@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky.skylet import constants
 
@@ -400,10 +401,9 @@ def load_fresh_workspaces() -> Dict[str, Any]:
 
 
 def check_user_role_demotion(
-        user_id: str,
+        user: models.User,
         workspaces: Optional[Dict[str, Any]] = None,
         resources: Optional[ResourceSnapshot] = None,
-        user_display: Optional[str] = None,
         workspaces_allowed_users: Optional[Dict[str, Set[str]]] = None) -> None:
     """Check whether an admin can be safely demoted to a regular user.
 
@@ -413,7 +413,10 @@ def check_user_role_demotion(
     they would lose access to.
 
     Args:
-        user_id: The ID of the user being demoted.
+        user: The user being demoted. Used for both the access check
+            (``user.id`` against each workspace's ``allowed_users``) and
+            the error message (``user.name`` preferred, falling back to
+            ``user.id``).
         workspaces: Optional pre-fetched workspaces config (from
             ``load_fresh_workspaces()``). When called in a batch loop, the
             caller should fetch this once and pass it in to avoid the
@@ -424,11 +427,6 @@ def check_user_role_demotion(
             is O(1) (via the snapshot's user index) instead of an
             O(C+J) scan per user. When not provided, a transient
             snapshot is fetched internally.
-        user_display: Optional pre-resolved display string (username or
-            user_id) used in the error message. Batch callers that already
-            hold the user model should pass this to skip the per-call
-            ``global_user_state.get_user`` lookup that's only used to
-            format the error string.
         workspaces_allowed_users: Optional pre-resolved map of
             ``workspace_name -> set(allowed_user_ids)`` for private
             workspaces. Batch callers should resolve each private
@@ -445,6 +443,9 @@ def check_user_role_demotion(
     # Imports done lazily to avoid circular imports with permission/workspaces.
     # pylint: disable=import-outside-toplevel
     from sky.workspaces import utils as workspaces_utils
+
+    user_id = user.id
+    user_display = user.name or user.id
 
     if workspaces is None:
         # Single-call path. /users/update and /users/batch_update are sync
@@ -499,11 +500,6 @@ def check_user_role_demotion(
 
     if not workspace_resources:
         return
-
-    if user_display is None:
-        user_info = global_user_state.get_user(user_id)
-        user_display = (user_info.name
-                        if user_info and user_info.name else user_id)
 
     error_lines = []
     for ws, res in workspace_resources.items():

@@ -201,8 +201,7 @@ def user_update(request: fastapi.Request,
                    role != rbac.RoleName.ADMIN.value)
     if is_demotion:
         try:
-            resource_checker.check_user_role_demotion(
-                user_info.id, user_display=user_info.name or user_info.id)
+            resource_checker.check_user_role_demotion(user_info)
         except ValueError as e:
             raise fastapi.HTTPException(status_code=400, detail=str(e))
 
@@ -322,10 +321,9 @@ def user_batch_update(request: fastapi.Request,
                     target_user_roles[0] == rbac.RoleName.ADMIN.value and
                     role != rbac.RoleName.ADMIN.value):
                 resource_checker.check_user_role_demotion(
-                    user_info.id,
+                    user_info,
                     workspaces=batch_workspaces,
                     resources=batch_resources,
-                    user_display=user_info.name or user_info.id,
                     workspaces_allowed_users=batch_workspaces_allowed_users)
             with _user_lock(user_info.id):
                 permission.permission_service.update_role(user_info.id, role)
