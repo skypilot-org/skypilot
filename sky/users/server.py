@@ -19,11 +19,11 @@ from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import permission
 from sky.users import rbac
+from sky.users import resolver as user_resolver
 from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
-from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -251,60 +251,42 @@ def user_batch_update(request: fastapi.Request,
             raise fastapi.HTTPException(
                 status_code=403, detail='Only admin can update user roles')
 
-    # Pre-fetch user + role state ONCE for the whole batch so the per-user
-    # loop is O(1) dict lookups instead of N * (DB get_user + casbin
-    # get_user_roles). For a batch of size N, this drops the per-iteration
-    # round-trip cost from O(N) to O(supported_roles) total.
-    all_users = global_user_state.get_all_users()
-    all_users_map = {u.id: u for u in all_users}
+    # Pre-fetch the per-user role state ONCE for the whole batch so the
+    # per-user loop is O(1) dict lookups instead of N * casbin
+    # get_user_roles.
     users_to_role: Dict[str, str] = {}
     for supported_role in supported_roles:
         for uid in permission.permission_service.get_users_for_role(
                 supported_role):
             users_to_role[uid] = supported_role
-    all_admin_user_ids = {
-        uid for uid, r in users_to_role.items()
-        if r == rbac.RoleName.ADMIN.value
-    }
 
-    # Pre-compute the post-batch admin set for the demotion check so
-    # we treat the rest of the batch consistently: if A and B are both admins
-    # and both being demoted, A losing access can't be saved by "but B is still
-    # an admin".
     batch_workspaces_allowed_users: Optional[Dict[str, Set[str]]] = None
     if role == rbac.RoleName.ADMIN.value:
-        remaining_admin_user_ids = all_admin_user_ids | set(user_ids)
-        # Promotion -> nobody needs the demotion check, so no need to fetch
-        # workspaces / active resources.
+        # Promotion -> nobody needs the demotion check, so we only need
+        # user info for the batch's user_ids (one targeted IN query,
+        # avoiding a full-table scan that gets wasted on this path).
+        all_users_map = global_user_state.get_users(set(user_ids))
         batch_workspaces = None
         batch_active_resources_by_user = None
     else:
-        # Any non-admin target (user, viewer, ...) removes the targets from
-        # the admin set.
-        remaining_admin_user_ids = all_admin_user_ids - set(user_ids)
-        # Fetch + index the inputs the per-user demotion check needs ONCE
-        # for the whole batch. This drops the per-user O(C+J) filter scan
-        # to an O(1) dict lookup, so the whole batch is O(N + C + J)
-        # instead of O(N * (C+J)).
+        # Demotion -> we need the full user list anyway to detect
+        # username-uniqueness across the whole system when resolving each
+        # private workspace's ``allowed_users``. Build one shared
+        # UserResolver and derive the per-user map from the same fetch
+        # so we still do exactly one DB round-trip.
+        resolver = user_resolver.UserResolver()
+        all_users_map = resolver.id_to_user
         batch_workspaces = resource_checker.load_fresh_workspaces()
         batch_active_resources_by_user = (
             resource_checker.index_active_resources_by_user_hash(
                 resource_checker.get_active_resources()))
-        # Pre-resolve each private workspace's allowed_users -> user_id set
-        # ONCE for the batch. Without this, check_user_role_demotion
+        # Pre-resolve each private workspace's allowed_users -> user_id
+        # set ONCE for the batch. Without this, check_user_role_demotion
         # iterates private workspaces and calls get_workspace_users for
         # each (every call re-fetches get_all_users() from the DB),
         # giving N * P * get_all_users() round-trips in a batch.
-        batch_name_to_ids = workspaces_utils.build_username_to_ids_map(
-            all_users)
-        batch_workspaces_allowed_users = {}
-        for ws_name, ws_cfg in batch_workspaces.items():
-            if ws_cfg.get('private', False):
-                batch_workspaces_allowed_users[ws_name] = set(
-                    workspaces_utils.get_workspace_users(
-                        ws_cfg,
-                        all_users=all_users,
-                        name_to_ids=batch_name_to_ids))
+        batch_workspaces_allowed_users = (
+            resolver.resolve_workspaces_allowed_users(batch_workspaces))
 
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
@@ -343,7 +325,6 @@ def user_batch_update(request: fastapi.Request,
                     role != rbac.RoleName.ADMIN.value):
                 resource_checker.check_user_role_demotion(
                     user_info.id,
-                    remaining_admin_user_ids=remaining_admin_user_ids,
                     workspaces=batch_workspaces,
                     active_resources_by_user=batch_active_resources_by_user,
                     user_display=user_info.name or user_info.id,

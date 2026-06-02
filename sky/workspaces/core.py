@@ -7,7 +7,6 @@ import filelock
 
 from sky import check as sky_check
 from sky import exceptions
-from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -15,7 +14,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.users import permission
-from sky.users import rbac
+from sky.users import resolver as user_resolver
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -165,22 +164,17 @@ def _validate_workspace_config(workspace_name: str,
 def _compare_workspace_configs(
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
-    admin_user_ids: Optional[List[str]] = None,
-    all_users: Optional[List[models.User]] = None,
-    name_to_ids: Optional[Dict[str, List[str]]] = None,
+    resolver: Optional[user_resolver.UserResolver] = None,
 ) -> WorkspaceConfigComparison:
     """Compare current and new workspace configurations.
 
     Args:
         current_config: The current workspace configuration.
         new_config: The new workspace configuration.
-        admin_user_ids: Optional pre-fetched list of admin user_ids. Batch
-            callers should pass this so we don't call
-            ``get_users_for_role(ADMIN)`` once per workspace.
-        all_users: Optional pre-fetched user list for the inner
-            ``get_workspace_users`` calls (avoids two ``get_all_users()``
-            DB round-trips per workspace in a batch).
-        name_to_ids: Optional pre-built username -> [user_id] map.
+        resolver: Optional shared ``UserResolver`` so batch callers don't
+            re-fetch ``get_all_users()`` / ``get_users_for_role(ADMIN)``
+            per workspace. If not provided, a transient resolver is built
+            internally.
 
     Returns:
         WorkspaceConfigComparison object containing the comparison results.
@@ -190,17 +184,17 @@ def _compare_workspace_configs(
     private_new = new_config.get('private', False)
     private_changed = private_old != private_new
 
-    if admin_user_ids is None:
-        admin_user_ids = permission.permission_service.get_users_for_role(
-            rbac.RoleName.ADMIN.value)
-    # Get allowed users (resolve to user IDs for comparison)
-    allowed_users_old = workspaces_utils.get_workspace_users(
-        current_config, all_users=all_users,
-        name_to_ids=name_to_ids) if private_old else []
+    if resolver is None:
+        resolver = user_resolver.UserResolver()
+    admin_user_ids = resolver.admin_user_ids
+    # Get allowed users (resolve to user IDs for comparison).
+    # Routed through the free helper so test seams that patch
+    # ``workspaces_utils.get_workspace_users`` keep working.
+    allowed_users_old = (workspaces_utils.get_workspace_users(
+        current_config, resolver=resolver) if private_old else [])
     allowed_users_old += admin_user_ids
-    allowed_users_new = workspaces_utils.get_workspace_users(
-        new_config, all_users=all_users,
-        name_to_ids=name_to_ids) if private_new else []
+    allowed_users_new = (workspaces_utils.get_workspace_users(
+        new_config, resolver=resolver) if private_new else [])
     allowed_users_new += admin_user_ids
 
     # Convert to sets for easier comparison
@@ -245,9 +239,7 @@ def _validate_workspace_config_changes_with_lock(
     active_resources_for_workspace: Optional[Tuple[List[Dict[str, Any]],
                                                    List[Dict[str,
                                                              Any]]]] = None,
-    admin_user_ids: Optional[List[str]] = None,
-    all_users: Optional[List[models.User]] = None,
-    name_to_ids: Optional[Dict[str, List[str]]] = None,
+    resolver: Optional[user_resolver.UserResolver] = None,
 ) -> None:
     lock_id = backend_utils.workspace_lock_id(workspace_name)
     lock_timeout = backend_utils.WORKSPACE_LOCK_TIMEOUT_SECONDS
@@ -259,9 +251,7 @@ def _validate_workspace_config_changes_with_lock(
                 current_config,
                 new_config,
                 active_resources_for_workspace=active_resources_for_workspace,
-                admin_user_ids=admin_user_ids,
-                all_users=all_users,
-                name_to_ids=name_to_ids)
+                resolver=resolver)
     except locks.LockTimeout as e:
         raise RuntimeError(
             f'Failed to validate workspace {workspace_name!r} due to '
@@ -277,9 +267,7 @@ def _validate_workspace_config_changes(
     active_resources_for_workspace: Optional[Tuple[List[Dict[str, Any]],
                                                    List[Dict[str,
                                                              Any]]]] = None,
-    admin_user_ids: Optional[List[str]] = None,
-    all_users: Optional[List[models.User]] = None,
-    name_to_ids: Optional[Dict[str, List[str]]] = None,
+    resolver: Optional[user_resolver.UserResolver] = None,
 ) -> None:
     """Validate workspace configuration changes based on active resources.
 
@@ -307,12 +295,9 @@ def _validate_workspace_config_changes(
         ValueError: If the configuration change is not allowed due to active
         resources.
     """
-    config_comparison = _compare_workspace_configs(
-        current_config,
-        new_config,
-        admin_user_ids=admin_user_ids,
-        all_users=all_users,
-        name_to_ids=name_to_ids)
+    config_comparison = _compare_workspace_configs(current_config,
+                                                   new_config,
+                                                   resolver=resolver)
 
     if config_comparison.only_user_access_changes:
         # Only user access settings changed
@@ -756,21 +741,15 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
 
     # Resolve each user_id to its preferred allowed_users entry ONCE for the
     # whole batch (avoids O(W * N * M) work where W=workspaces, N=batch,
-    # M=total users). Build name_to_ids and user_id_to_user once so
-    # preferred_identifier_for_user is O(1) instead of O(M) per call.
-    all_users = global_user_state.get_all_users()
-    name_to_ids = workspaces_utils.build_username_to_ids_map(all_users)
-    user_id_to_user = workspaces_utils.build_user_id_to_user_map(all_users)
+    # M=total users). UserResolver builds the id->User and name->[ids]
+    # maps once so each preferred_entry call is O(1).
+    resolver = user_resolver.UserResolver()
     user_id_to_entry: Dict[str, str] = {}
     failed: List[Dict[str, str]] = []
     for user_id in user_ids:
         if user_id in user_id_to_entry:
             continue
-        entry = workspaces_utils.preferred_identifier_for_user(
-            user_id,
-            all_users=all_users,
-            name_to_ids=name_to_ids,
-            user_id_to_user=user_id_to_user)
+        entry = resolver.preferred_entry(user_id)
         if entry is None:
             # User resolution failure is not workspace-scoped; use a
             # placeholder so the UI doesn't render "workspace=" with an
@@ -811,7 +790,7 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 # don't add a duplicate row for users already present under
                 # a different form (username vs user_id).
                 resolved_current = set(
-                    workspaces_utils.get_workspace_users(current_config))
+                    resolver.resolve_workspace_users(current_config))
                 new_allowed = list(current_allowed)
                 added = False
                 for user_id, entry in user_id_to_entry.items():
@@ -882,33 +861,25 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     if not user_ids:
         raise ValueError('user_ids must not be empty')
 
-    # Build the lookup maps once for the batch so each entries_for_user call
-    # is O(1) instead of O(M) rebuild + O(M) linear scan.
-    all_users = global_user_state.get_all_users()
-    name_to_ids = workspaces_utils.build_username_to_ids_map(all_users)
-    user_id_to_user = workspaces_utils.build_user_id_to_user_map(all_users)
+    # Build one shared UserResolver for the whole batch so each
+    # entries_for / preferred_entry / resolve_workspace_users call is
+    # O(1) instead of rebuilding the id->User and name->[ids] maps.
+    # Admin user_ids is lazily fetched on first access (used by
+    # _compare_workspace_configs inside the per-workspace validation
+    # loop below).
+    resolver = user_resolver.UserResolver()
     user_entries_map: Dict[str, List[str]] = {}
     failed: List[Dict[str, str]] = []
     for user_id in user_ids:
-        entries = workspaces_utils.entries_for_user(
-            user_id,
-            all_users=all_users,
-            name_to_ids=name_to_ids,
-            user_id_to_user=user_id_to_user)
-        # If the user doesn't exist, entries_for_user returns [user_id]; we
+        # If the user doesn't exist, entries_for returns [user_id]; we
         # still allow removal in case the workspace has a stale entry.
-        user_entries_map[user_id] = entries
+        user_entries_map[user_id] = resolver.entries_for(user_id)
 
     entries_to_strip: Set[str] = set()
     for entries in user_entries_map.values():
         entries_to_strip.update(entries)
 
     succeeded: List[str] = []
-    # Pre-fetch the admin user_ids ONCE for the batch; otherwise
-    # _compare_workspace_configs would call get_users_for_role(ADMIN) per
-    # workspace.
-    admin_user_ids = permission.permission_service.get_users_for_role(
-        rbac.RoleName.ADMIN.value)
     # Pre-pass OUTSIDE the global config file lock: validate per-workspace
     # changes (which acquire a per-workspace lock). The single-workspace
     # update_workspace path also validates before acquiring the config
@@ -976,15 +947,12 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 current_ws_config,
                 new_ws_config,
                 active_resources_for_workspace=ws_resources[workspace_name],
-                admin_user_ids=admin_user_ids,
-                all_users=all_users,
-                name_to_ids=name_to_ids)
+                resolver=resolver)
             # Pre-resolve the post-removal user_id set ONCE here, using the
-            # batch maps, so update_workspace_policy in the modifier (under
-            # the config file lock) doesn't have to do another
+            # shared resolver, so update_workspace_policy in the modifier
+            # (under the config file lock) doesn't have to do another
             # get_all_users() round-trip.
-            new_resolved = workspaces_utils.get_workspace_users(
-                new_ws_config, all_users=all_users, name_to_ids=name_to_ids)
+            new_resolved = resolver.resolve_workspace_users(new_ws_config)
             validated_changes[workspace_name] = (new_ws_config, new_resolved)
         except ValueError as e:
             failed.append({

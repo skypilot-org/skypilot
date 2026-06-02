@@ -323,7 +323,6 @@ def load_fresh_workspaces() -> Dict[str, Any]:
 
 def check_user_role_demotion(
         user_id: str,
-        remaining_admin_user_ids: Optional[Set[str]] = None,
         workspaces: Optional[Dict[str, Any]] = None,
         active_resources_by_user: Optional[Tuple[Dict[str, List[Dict[str,
                                                                      Any]]],
@@ -341,9 +340,6 @@ def check_user_role_demotion(
 
     Args:
         user_id: The ID of the user being demoted.
-        remaining_admin_user_ids: Optional pre-computed set of user IDs that
-            will remain admins after the demotion. If not provided, it is
-            computed from the casbin policy.
         workspaces: Optional pre-fetched workspaces config (from
             ``load_fresh_workspaces()``). When called in a batch loop, the
             caller should fetch this once and pass it in to avoid the
@@ -376,8 +372,6 @@ def check_user_role_demotion(
     """
     # Imports done lazily to avoid circular imports with permission/workspaces.
     # pylint: disable=import-outside-toplevel
-    from sky.users import permission
-    from sky.users import rbac
     from sky.workspaces import utils as workspaces_utils
 
     if workspaces is None:
@@ -389,12 +383,6 @@ def check_user_role_demotion(
         workspaces = load_fresh_workspaces()
     if not workspaces:
         return
-
-    if remaining_admin_user_ids is None:
-        remaining_admin_user_ids = set(
-            permission.permission_service.get_users_for_role(
-                rbac.RoleName.ADMIN.value))
-        remaining_admin_user_ids.discard(user_id)
 
     inaccessible_workspaces: List[str] = []
     for workspace_name, workspace_config in workspaces.items():
@@ -408,7 +396,7 @@ def check_user_role_demotion(
         else:
             allowed_user_ids = set(
                 workspaces_utils.get_workspace_users(workspace_config))
-        if (user_id in allowed_user_ids or user_id in remaining_admin_user_ids):
+        if user_id in allowed_user_ids:
             continue
         inaccessible_workspaces.append(workspace_name)
 

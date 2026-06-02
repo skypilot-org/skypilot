@@ -33,18 +33,20 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_all_users')
-    def test_promote_two_users_to_admin(self, mock_get_all_users,
+    @mock.patch('sky.global_user_state.get_users')
+    def test_promote_two_users_to_admin(self, mock_get_users,
                                         mock_get_users_for_role,
                                         mock_get_user_roles, mock_update_role,
                                         mock_demotion_check, mock_user_lock,
                                         admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_all_users.return_value = [
-            _mk_user('u1', name='name-u1'),
-            _mk_user('u2', name='name-u2'),
-        ]
+        # Promotion path uses get_users(set(user_ids)), which returns
+        # {id -> User}.
+        mock_get_users.return_value = {
+            'u1': _mk_user('u1', name='name-u1'),
+            'u2': _mk_user('u2', name='name-u2'),
+        }
         # Both users are currently role=user; nobody is admin or viewer.
         mock_get_users_for_role.side_effect = (lambda r: ['u1', 'u2']
                                                if r == 'user' else [])
@@ -63,15 +65,15 @@ class TestUserBatchUpdate:
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_all_users')
+    @mock.patch('sky.global_user_state.get_users')
     def test_internal_user_and_missing_user_are_isolated_failures(
-            self, mock_get_all_users, mock_get_users_for_role,
-            mock_get_user_roles, mock_update_role, mock_user_lock,
-            admin_request):
+            self, mock_get_users, mock_get_users_for_role, mock_get_user_roles,
+            mock_update_role, mock_user_lock, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        # 'unknown' is intentionally NOT in get_all_users so the lookup
-        # returns None and the batch records it as a failure.
+        # 'unknown' is intentionally NOT in the get_users return so the
+        # lookup returns None and the batch records it as a failure.
+        # Promotion path uses get_users(set(user_ids)) -> {id -> User}.
         known_users = [
             _mk_user('good', name='good'),
             _mk_user(constants.SKYPILOT_SYSTEM_USER_ID, name='system'),
@@ -79,7 +81,7 @@ class TestUserBatchUpdate:
                      name='system-viewer'),
             _mk_user(common.SERVER_ID, name='server'),
         ]
-        mock_get_all_users.return_value = known_users
+        mock_get_users.return_value = {u.id: u for u in known_users}
         mock_get_users_for_role.side_effect = (
             lambda r: [u.id for u in known_users] if r == 'user' else [])
         mock_get_user_roles.return_value = ['user']
@@ -196,24 +198,21 @@ class TestUserBatchUpdate:
 
         assert result == {'succeeded': ['u1'], 'failed': []}
         mock_demotion_check.assert_called_once()
-        # When demoting to viewer, the target is removed from the remaining
-        # admin set (same as demoting to user).
-        _, kwargs = mock_demotion_check.call_args
-        assert kwargs['remaining_admin_user_ids'] == set()
         mock_update_role.assert_called_once_with('u1', 'viewer')
 
     @mock.patch('sky.users.server._user_lock')
     @mock.patch('sky.users.permission.permission_service.update_role')
     @mock.patch('sky.users.permission.permission_service.get_user_roles')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    @mock.patch('sky.global_user_state.get_all_users')
-    def test_noop_when_role_unchanged(self, mock_get_all_users,
+    @mock.patch('sky.global_user_state.get_users')
+    def test_noop_when_role_unchanged(self, mock_get_users,
                                       mock_get_users_for_role,
                                       mock_get_user_roles, mock_update_role,
                                       mock_user_lock, admin_request):
         mock_user_lock.return_value = mock.MagicMock(__enter__=mock.MagicMock(),
                                                      __exit__=mock.MagicMock())
-        mock_get_all_users.return_value = [_mk_user('u1', name='alice')]
+        # Promotion path -> get_users(set(user_ids)) returns {id -> User}.
+        mock_get_users.return_value = {'u1': _mk_user('u1', name='alice')}
         # u1 is already an admin; the batch is a no-op.
         mock_get_users_for_role.side_effect = (lambda r: ['u1']
                                                if r == 'admin' else [])
@@ -331,43 +330,3 @@ class TestUserRoleDemotion:
         # Should not raise (public workspace not even checked).
         resource_checker.check_user_role_demotion('u1')
         mock_get_ws_users.assert_not_called()
-
-    @mock.patch('sky.global_user_state.get_user')
-    @mock.patch('sky.utils.resource_checker._get_active_resources')
-    @mock.patch('sky.skypilot_config.get_nested')
-    @mock.patch('sky.workspaces.utils.get_workspace_users')
-    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
-    def test_remaining_admin_set_overrides_lookup(self, mock_get_users_for_role,
-                                                  mock_get_ws_users,
-                                                  mock_get_nested,
-                                                  mock_get_active,
-                                                  mock_get_user):
-        """When two admins are demoted at once, only the post-batch admin
-        set should be considered for access."""
-        mock_get_nested.return_value = {
-            'private-locked': {
-                'private': True,
-                'allowed_users': []
-            },
-        }
-        mock_get_ws_users.return_value = []
-        # Live policy says u1 and u2 are admins; pretend they're both being
-        # demoted in this batch.
-        mock_get_users_for_role.return_value = ['u1', 'u2']
-        mock_get_active.return_value = ([{
-            'name': 'c1',
-            'user_hash': 'u1',
-            'workspace': 'private-locked'
-        }], [])
-        mock_get_user.return_value = _mk_user('u1', name='alice')
-
-        # Without the override, u2 would "save" u1. With the override
-        # (remaining = empty set), u1 has nothing to fall back on.
-        with pytest.raises(ValueError):
-            resource_checker.check_user_role_demotion(
-                'u1', remaining_admin_user_ids=set())
-
-        # And if the caller passes a remaining admin set that does include
-        # u1 (somehow), the check is satisfied.
-        resource_checker.check_user_role_demotion(
-            'u1', remaining_admin_user_ids={'u1'})
