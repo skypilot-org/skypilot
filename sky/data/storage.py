@@ -3503,25 +3503,30 @@ class AzureBlobStore(AbstractStore):
                 created already exists or fails to assign role to the create
                 storage account.
         """
+        # Build a typed StorageAccountCreateParameters model rather than a
+        # hand-built dict. azure-mgmt-storage 25.0.0 switched to a TypeSpec
+        # serializer that serializes a dict verbatim and no longer remaps the
+        # top-level `encryption` key to `properties.encryption`, so a raw dict
+        # is rejected by ARM (InvalidRequestContent). The typed model serializes
+        # to the correct `properties.encryption` body under both msrest (<=24.x)
+        # and the TypeSpec encoder (25.x).
+        # See https://github.com/skypilot-org/skypilot/issues/9775.
+        storage_models = azure.azure_mgmt_models('storage')
+        create_parameters = storage_models.StorageAccountCreateParameters(
+            sku=storage_models.Sku(name='Standard_GRS'),
+            kind='StorageV2',
+            location=self.region,
+            encryption=storage_models.Encryption(
+                services=storage_models.EncryptionServices(
+                    blob=storage_models.EncryptionService(key_type='Account',
+                                                          enabled=True)),
+                key_source='Microsoft.Storage'),
+        )
         try:
             creation_response = (
                 self.storage_client.storage_accounts.begin_create(
-                    resource_group_name, storage_account_name, {
-                        'sku': {
-                            'name': 'Standard_GRS'
-                        },
-                        'kind': 'StorageV2',
-                        'location': self.region,
-                        'encryption': {
-                            'services': {
-                                'blob': {
-                                    'key_type': 'Account',
-                                    'enabled': True
-                                }
-                            },
-                            'key_source': 'Microsoft.Storage'
-                        },
-                    }).result())
+                    resource_group_name, storage_account_name,
+                    create_parameters).result())
         except azure.exceptions().ResourceExistsError as error:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
