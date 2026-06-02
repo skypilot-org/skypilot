@@ -4609,6 +4609,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
+        if not stdout:
+            # We see some cases in the wild where a misbehaving cluster/k8s
+            # apiserver (not sure which) can have a returncode of 0 but
+            # incorrectly empty stdout. Treat this as a failure.
+            raise exceptions.CommandFailureException(
+                command=code,
+                failure='produced no output',
+                error_msg='Failed to get job status.',
+                detailed_reason=f'stderr="{stderr}"',
+            )
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
@@ -5792,7 +5802,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
                 handle, code, require_outputs=True, stream_logs=stream_logs)
-            if returncode == 0:
+            # We see some cases in the wild where a misbehaving cluster/k8s
+            # apiserver (not sure which) can have a returncode of 0 but
+            # incorrectly empty stdout. Don't try to decode this.
+            if returncode == 0 and stdout:
                 is_autostopping = message_utils.decode_payload(stdout)
             else:
                 logger.debug('Failed to check if cluster is autostopping with '
