@@ -177,7 +177,9 @@ kubernetes_dependencies = [
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in
 # a few places.
-AZURE_CLI = 'azure-cli>=2.65.0'
+# Cap <2.87.0: 2.87.0 pulls azure-mgmt-storage 25.0.0, whose TypeSpec models
+# break our Azure storage code (storage-account create and key listing).
+AZURE_CLI = 'azure-cli>=2.65.0,<2.87.0'
 
 cloud_dependencies: Dict[str, List[str]] = {
     'aws': aws_dependencies,
