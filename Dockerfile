@@ -124,7 +124,9 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
+    # Cap azure-cli<2.87.0: 2.87.0 pulls the broken azure-mgmt-storage 25.0.0
+    # (see sky/setup_files/dependencies.py).
+    ~/.local/bin/uv pip install --prerelease allow "azure-cli<2.87.0" --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
     ~/.local/bin/uv cache clean && \
