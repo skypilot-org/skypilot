@@ -70,10 +70,10 @@ template (a ``python`` image); create your own when you need a different image o
 size.
 
 A **sandbox** is a single running pod claimed from a template's warm pool. It has
-a unique name, a lifecycle you control (launch, use, then tear down), and is
-accessible until you call ``down()``. Commands run inside the sandbox over the
-same exec primitive ``kubectl exec`` uses, returning ``stdout``, ``stderr``, and
-the exit code synchronously.
+a unique name, a lifecycle you control (create, use, then terminate), and is
+accessible until you call ``terminate()``. Commands are passed as argv tokens and
+run directly via the same exec primitive ``kubectl exec`` uses (no implicit
+shell), returning ``stdout``, ``stderr``, and the exit code synchronously.
 
 Because each sandbox is its own pod, it is isolated from other sandboxes and
 workloads on the cluster, a clean boundary for code an agent generates at
@@ -84,77 +84,79 @@ template image or passed on the command line.
 Quickstart
 ----------
 
-Once the SkyPilot CLI and the bundled Sandbox SDK are installed, launch a
-sandbox, run a command, and tear it down:
+Once the SkyPilot CLI and the bundled Sandbox SDK are installed, create a
+sandbox, run a command, and terminate it:
 
 .. code-block:: python
 
-   import sky_sandbox
+   import sky.sandbox
 
-   # Launch a sandbox from the built-in `default` template.
-   sb = sky_sandbox.launch(name='dev')
+   # Create a sandbox from the built-in `default` template.
+   sb = sky.sandbox.create(name='dev')
 
-   # Run a command inside it; get stdout / stderr / exit_code back.
-   result = sb.exec('python -c "print(2 ** 10)"')
+   # Run a command (argv tokens, no implicit shell); get
+   # stdout / stderr / exit_code back.
+   result = sb.exec('python', '-c', 'print(2 ** 10)')
    print(result['stdout'])  # 1024
 
    # Tear it down.
-   sb.down()
+   sb.terminate()
 
-Or use the context manager to tear down automatically:
+Or use the context manager to terminate automatically:
 
 .. code-block:: python
 
-   import sky_sandbox
+   import sky.sandbox
 
-   with sky_sandbox.launch(name='dev') as sb:
-       sb.exec('python train.py')
-   # Sandbox is torn down on exit.
+   with sky.sandbox.create(name='dev') as sb:
+       sb.exec('python', 'train.py')
+   # Sandbox is terminated on exit.
 
 Working with the SDK
 --------------------
 
-Beyond launch / exec / down, the ``sky_sandbox`` SDK covers batch and async
+Beyond create / exec / terminate, the ``sky.sandbox`` SDK covers batch and async
 fan-out, templates and warm pools, and secret / volume injection:
 
 .. tab-set::
 
     .. tab-item:: Batch
 
-        Pass ``num_sandboxes`` to launch a batch in one call; names are
+        Pass ``num_sandboxes`` to create a batch in one call; names are
         auto-generated from the prefix (``rollout-0001``, ``rollout-0002``, ...).
 
         .. code-block:: python
 
-            import sky_sandbox
+            import sky.sandbox
 
-            sandboxes = sky_sandbox.launch(
+            sandboxes = sky.sandbox.create(
                 name='rollout',
                 template='ml-gpu',
                 num_sandboxes=1000,
             )
             for sb in sandboxes:
-                sb.exec('python rollout.py')
+                sb.exec('python', 'rollout.py')
 
     .. tab-item:: Async fan-out
 
-        A single event loop can drive hundreds of concurrent ``exec`` calls.
+        Every entrypoint has an async sibling on a ``.aio`` attribute. A single
+        event loop can drive hundreds of concurrent ``exec`` calls.
 
         .. code-block:: python
 
             import asyncio
-            import sky_sandbox
+            import sky.sandbox
 
             async def main():
-                sandboxes = await sky_sandbox.launch_async(
+                sandboxes = await sky.sandbox.create.aio(
                     name='rollout', num_sandboxes=100)
                 try:
                     results = await asyncio.gather(
-                        *(sb.exec_async('python rollout.py') for sb in sandboxes))
+                        *(sb.exec.aio('python', 'rollout.py') for sb in sandboxes))
                 finally:
                     # Always tear down, even if an exec raises.
-                    await asyncio.gather(*(sb.down_async() for sb in sandboxes))
-                    await sky_sandbox.aclose()  # release the shared session
+                    await asyncio.gather(*(sb.terminate.aio() for sb in sandboxes))
+                    await sky.sandbox.aclose()  # release the shared session
 
             asyncio.run(main())
 
@@ -165,10 +167,10 @@ fan-out, templates and warm pools, and secret / volume injection:
 
         .. code-block:: python
 
-            import sky_sandbox
+            import sky.sandbox
 
             # Create a template with 10 warm pods kept idle and ready.
-            sky_sandbox.create_template(
+            sky.sandbox.create_template(
                 name='ml-gpu',
                 image='nvcr.io/nvidia/pytorch:24.05-py3',
                 cpus=8,
@@ -177,26 +179,27 @@ fan-out, templates and warm pools, and secret / volume injection:
             )
 
             # Scale the warm pool up or down at any time.
-            sky_sandbox.set_pool_size('ml-gpu', replicas=50)
+            sky.sandbox.set_pool_size('ml-gpu', replicas=50)
 
     .. tab-item:: Secrets & volumes
 
-        Inject secrets and mount volumes at launch.
+        Inject secrets and mount volumes at create time.
 
         .. code-block:: python
 
-            import sky_sandbox
+            import sky.sandbox
 
-            sb = sky_sandbox.launch(
+            sb = sky.sandbox.create(
                 name='job',
                 template='ml-gpu',
-                # Inject a stored secret as an env var (via the secrets manager).
-                secret_refs=[{'name': 'HF_TOKEN', 'env_var_name': 'HF_TOKEN'}],
+                # Inject secrets from the secrets manager as env vars of the
+                # same name.
+                secrets=['HF_TOKEN'],
                 # Plain (non-secret) env vars.
                 env={'PROJECT': 'demo'},
-                # Mount an existing volume (create it with `sky volumes apply`).
-                volume_mounts=[{'volume_name': 'shared-data',
-                                'mount_path': '/data'}],
+                # Mount existing volumes, keyed by mount path (create them with
+                # `sky volumes apply`).
+                volumes={'/data': 'shared-data'},
             )
 
     .. tab-item:: Claude Code
@@ -206,22 +209,26 @@ fan-out, templates and warm pools, and secret / volume injection:
 
         .. code-block:: python
 
-            import sky_sandbox
+            import sky.sandbox
 
-            with sky_sandbox.launch(
+            with sky.sandbox.create(
                 name='claude',
                 template='claude',
-                secret_refs=[{'name': 'CLAUDE_CODE_OAUTH_TOKEN'}],
+                secrets=['CLAUDE_CODE_OAUTH_TOKEN'],
             ) as sb:
+                # Shell features like pipes need an explicit shell.
                 result = sb.exec(
+                    'sh', '-c',
                     "echo 'Create a hello world index.html' | "
                     'claude -p --dangerously-skip-permissions')
                 print(result['stdout'])
 
-The SDK exposes ``launch``, ``exec``, ``down``, ``ls``, ``create_template``,
-``set_pool_size``, and ``delete_template``, each with an ``_async`` variant for
-event-loop code. See the dashboard's **Sandboxes** page to manage templates,
-warm pools, and running sandboxes in the UI.
+The SDK exposes ``create``, ``exec``, ``terminate``, ``ls``, ``create_template``,
+``set_pool_size``, and ``delete_template``. Every per-call entrypoint has an async
+sibling on a ``.aio`` attribute (``sky.sandbox.create.aio(...)``,
+``sb.exec.aio(...)``), so the same names work in event-loop code. See the
+dashboard's **Sandboxes** page to manage templates, warm pools, and running
+sandboxes in the UI.
 
 .. seealso::
 
