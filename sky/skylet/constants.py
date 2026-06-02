@@ -510,10 +510,6 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
-    # SSH Node Pools reuse the Kubernetes backend and read
-    # set_pod_resource_limits under the 'kubernetes' config key (see
-    # Kubernetes.make_deploy_resources_variables), so only the kubernetes
-    # entry is needed to cover both Kubernetes and SSH.
     ('kubernetes', 'set_pod_resource_limits'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
