@@ -267,7 +267,7 @@ def user_batch_update(request: fastapi.Request,
         # avoiding a full-table scan that gets wasted on this path).
         all_users_map = global_user_state.get_users(set(user_ids))
         batch_workspaces = None
-        batch_active_resources_by_user = None
+        batch_resources = None
     else:
         # Demotion -> we need the full user list anyway to detect
         # username-uniqueness across the whole system when resolving each
@@ -277,9 +277,7 @@ def user_batch_update(request: fastapi.Request,
         resolver = user_resolver.UserResolver()
         all_users_map = resolver.id_to_user
         batch_workspaces = resource_checker.load_fresh_workspaces()
-        batch_active_resources_by_user = (
-            resource_checker.index_active_resources_by_user_hash(
-                resource_checker.get_active_resources()))
+        batch_resources = resource_checker.ResourceSnapshot.fetch_all()
         # Pre-resolve each private workspace's allowed_users -> user_id
         # set ONCE for the batch. Without this, check_user_role_demotion
         # iterates private workspaces and calls get_workspace_users for
@@ -326,7 +324,7 @@ def user_batch_update(request: fastapi.Request,
                 resource_checker.check_user_role_demotion(
                     user_info.id,
                     workspaces=batch_workspaces,
-                    active_resources_by_user=batch_active_resources_by_user,
+                    resources=batch_resources,
                     user_display=user_info.name or user_info.id,
                     workspaces_allowed_users=batch_workspaces_allowed_users)
             with _user_lock(user_info.id):

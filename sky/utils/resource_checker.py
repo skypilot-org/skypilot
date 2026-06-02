@@ -142,31 +142,48 @@ def _check_active_resources(resource_operations: List[Tuple[str, str]],
 def check_users_workspaces_active_resources(
     user_ids: List[str],
     workspace_names: List[str],
-    active_resources: Optional[Tuple[List[Dict[str, Any]],
-                                     List[Dict[str, Any]]]] = None
+    resources: Optional['ResourceSnapshot'] = None,
 ) -> Tuple[str, List[str], Dict[str, str]]:
     """Check if all the active clusters or managed jobs in workspaces
        belong to the user_ids. If not, return the error message.
 
     Args:
         user_ids: List of user_id.
-        workspace_names: List of workspace_name.
-        active_resources: Optional pre-fetched ``(clusters, managed_jobs)``
-            tuple already filtered to the given ``workspace_names``. Batch
-            callers should fetch this once via
-            ``_get_active_resources_for_workspaces`` and pass it in to avoid
-            paying the per-call fetch cost in a loop.
+        workspace_names: List of workspaces to check.
+        resources: Optional shared ``ResourceSnapshot`` covering at
+            least the given workspaces. Batch callers should construct
+            one ``ResourceSnapshot.fetch_for_workspaces`` and pass it
+            through; the per-workspace slice is taken from the
+            snapshot's workspace index. When not provided, a transient
+            snapshot scoped to ``workspace_names`` is fetched
+            internally.
 
     Returns:
         resource_error_summary: str
         missed_users_names: List[str]
         missed_user_dict: Dict[str, str]
     """
-    if active_resources is None:
-        all_clusters, all_managed_jobs = _get_active_resources_for_workspaces(
-            workspace_names)
+    if resources is None:
+        # Fetch already filters to the given workspaces, so we can use
+        # the raw lists directly (and preserve their original order).
+        resources = ResourceSnapshot.fetch_for_workspaces(workspace_names)
+        all_clusters = resources.clusters
+        all_managed_jobs = resources.managed_jobs
     else:
-        all_clusters, all_managed_jobs = active_resources
+        # Caller-supplied snapshot may cover a superset of workspaces; do
+        # a single linear filter so the relative order of the source
+        # lists is preserved.
+        workspace_set = set(workspace_names)
+        all_clusters = [
+            c for c in resources.clusters
+            if c.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
+            workspace_set
+        ]
+        all_managed_jobs = [
+            j for j in resources.managed_jobs
+            if j.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
+            workspace_set
+        ]
     resource_errors = []
     missed_users = set()
     active_cluster_names = []
@@ -273,38 +290,99 @@ def _get_active_resources_by_names(
     return resource_clusters, resource_active_jobs
 
 
-def get_active_resources() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Public alias for ``_get_active_resources``. Exposed so batch callers
-    can fetch the (clusters, managed_jobs) tuple once and pass it to multiple
-    ``check_user_role_demotion`` / ``check_users_workspaces_active_resources``
-    calls instead of paying the fetch cost per call.
+class ResourceSnapshot:
+    """A point-in-time view of active clusters and managed jobs.
+
+    Holds the raw ``(clusters, managed_jobs)`` lists fetched from the
+    cluster / managed-jobs sources, and builds per-user and per-workspace
+    indices lazily on first access. Batch callers should construct one
+    snapshot at the top of the operation and pass it through helpers;
+    each ``for_user`` / ``for_workspace`` lookup is then O(1) instead of
+    re-filtering the full lists per call.
     """
-    return _get_active_resources()
 
+    def __init__(
+        self,
+        clusters: List[Dict[str, Any]],
+        managed_jobs: List[Dict[str, Any]],
+    ):
+        self._clusters = clusters
+        self._managed_jobs = managed_jobs
+        self._by_workspace: Optional[Dict[str, Tuple[List[Dict[str, Any]],
+                                                     List[Dict[str,
+                                                               Any]]]]] = None
+        self._by_user: Optional[Tuple[Dict[str, List[Dict[str, Any]]],
+                                      Dict[str, List[Dict[str, Any]]]]] = None
 
-def index_active_resources_by_user_hash(
-    active_resources: Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]
-) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
-    """Group (clusters, jobs) by ``user_hash`` for O(1) per-user lookup.
+    @classmethod
+    def fetch_all(cls) -> 'ResourceSnapshot':
+        """Fetch all active clusters + managed jobs from the DB / controller."""
+        return cls(*_get_active_resources())
 
-    For a batch of N users, building this index ONCE up-front and passing it
-    via ``check_user_role_demotion(..., active_resources_by_user=...)``
-    drops the per-user filter from O(C+J) to O(C_user + J_user), giving
-    O(N + C + J) total instead of O(N * (C+J)).
-    """
-    clusters_by_user: Dict[str, List[Dict[str,
-                                          Any]]] = collections.defaultdict(list)
-    jobs_by_user: Dict[str, List[Dict[str,
-                                      Any]]] = collections.defaultdict(list)
-    for cluster in active_resources[0]:
-        user_hash = cluster.get('user_hash')
-        if user_hash:
-            clusters_by_user[user_hash].append(cluster)
-    for job in active_resources[1]:
-        user_hash = job.get('user_hash')
-        if user_hash:
-            jobs_by_user[user_hash].append(job)
-    return clusters_by_user, jobs_by_user
+    @classmethod
+    def fetch_for_workspaces(cls,
+                             workspace_names: List[str]) -> 'ResourceSnapshot':
+        """Fetch active resources filtered to the given workspaces."""
+        return cls(*_get_active_resources_for_workspaces(workspace_names))
+
+    @property
+    def clusters(self) -> List[Dict[str, Any]]:
+        return self._clusters
+
+    @property
+    def managed_jobs(self) -> List[Dict[str, Any]]:
+        return self._managed_jobs
+
+    def for_user(
+            self,
+            user_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Return ``(clusters, jobs)`` owned by ``user_id``.
+
+        Index is built lazily on first call.
+        """
+        if self._by_user is None:
+            clusters_by_user: Dict[str, List[Dict[
+                str, Any]]] = collections.defaultdict(list)
+            jobs_by_user: Dict[str,
+                               List[Dict[str,
+                                         Any]]] = collections.defaultdict(list)
+            for cluster in self._clusters:
+                uh = cluster.get('user_hash')
+                if uh:
+                    clusters_by_user[uh].append(cluster)
+            for job in self._managed_jobs:
+                uh = job.get('user_hash')
+                if uh:
+                    jobs_by_user[uh].append(job)
+            self._by_user = (dict(clusters_by_user), dict(jobs_by_user))
+        return (self._by_user[0].get(user_id,
+                                     []), self._by_user[1].get(user_id, []))
+
+    def for_workspace(
+        self, workspace_name: str
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Return ``(clusters, jobs)`` in the given workspace.
+
+        Index is built lazily on first call.
+        """
+        if self._by_workspace is None:
+            clusters_by_ws: Dict[str, List[Dict[
+                str, Any]]] = collections.defaultdict(list)
+            jobs_by_ws: Dict[str,
+                             List[Dict[str,
+                                       Any]]] = collections.defaultdict(list)
+            for cluster in self._clusters:
+                ws = cluster.get('workspace',
+                                 constants.SKYPILOT_DEFAULT_WORKSPACE)
+                clusters_by_ws[ws].append(cluster)
+            for job in self._managed_jobs:
+                ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
+                jobs_by_ws[ws].append(job)
+            self._by_workspace = {
+                name: (clusters_by_ws.get(name, []), jobs_by_ws.get(name, []))
+                for name in set(clusters_by_ws) | set(jobs_by_ws)
+            }
+        return self._by_workspace.get(workspace_name, ([], []))
 
 
 def load_fresh_workspaces() -> Dict[str, Any]:
@@ -324,11 +402,7 @@ def load_fresh_workspaces() -> Dict[str, Any]:
 def check_user_role_demotion(
         user_id: str,
         workspaces: Optional[Dict[str, Any]] = None,
-        active_resources_by_user: Optional[Tuple[Dict[str, List[Dict[str,
-                                                                     Any]]],
-                                                 Dict[str,
-                                                      List[Dict[str,
-                                                                Any]]]]] = None,
+        resources: Optional[ResourceSnapshot] = None,
         user_display: Optional[str] = None,
         workspaces_allowed_users: Optional[Dict[str, Set[str]]] = None) -> None:
     """Check whether an admin can be safely demoted to a regular user.
@@ -344,13 +418,12 @@ def check_user_role_demotion(
             ``load_fresh_workspaces()``). When called in a batch loop, the
             caller should fetch this once and pass it in to avoid the
             per-call ``safe_reload_config`` + YAML read overhead.
-        active_resources_by_user: Optional pre-built
-            ``(clusters_by_user_hash, jobs_by_user_hash)`` index from
-            ``index_active_resources_by_user_hash``. When provided, the
-            per-user lookup is O(1) instead of an O(C+J) scan, giving
-            O(N + C + J) total for a batch instead of O(N * (C+J)).
-            When not provided (single-user path), the function fetches
-            and filters internally.
+        resources: Optional shared ``ResourceSnapshot``. Batch callers
+            should build one ``ResourceSnapshot.fetch_all()`` at the top
+            of the operation and pass it through, so the per-user lookup
+            is O(1) (via the snapshot's user index) instead of an
+            O(C+J) scan per user. When not provided, a transient
+            snapshot is fetched internally.
         user_display: Optional pre-resolved display string (username or
             user_id) used in the error message. Batch callers that already
             hold the user model should pass this to skip the per-call
@@ -360,11 +433,10 @@ def check_user_role_demotion(
             ``workspace_name -> set(allowed_user_ids)`` for private
             workspaces. Batch callers should resolve each private
             workspace's ``allowed_users`` once (via
-            ``workspaces_utils.get_workspace_users`` with a shared
-            ``all_users`` list) and pass the map. Without this, each
-            invocation re-calls ``get_workspace_users`` for every
-            private workspace, and each of those re-fetches
-            ``get_all_users()`` from the DB.
+            ``UserResolver.resolve_workspaces_allowed_users``) and pass
+            the map. Without this, each invocation re-calls
+            ``get_workspace_users`` for every private workspace, and each
+            of those re-fetches ``get_all_users()`` from the DB.
 
     Raises:
         ValueError: If the user has active clusters or managed jobs in
@@ -403,21 +475,12 @@ def check_user_role_demotion(
     if not inaccessible_workspaces:
         return
 
-    # Resolve the demoted user's clusters / jobs. Prefer the pre-built
-    # index (O(1) lookup) when the batch caller supplied one; fall back
-    # to a fresh fetch + linear filter for the single-user path.
-    if active_resources_by_user is not None:
-        clusters_by_user, jobs_by_user = active_resources_by_user
-        user_clusters = clusters_by_user.get(user_id, [])
-        user_jobs = jobs_by_user.get(user_id, [])
-    else:
-        all_clusters, all_managed_jobs = _get_active_resources()
-        user_clusters = [
-            c for c in all_clusters if c.get('user_hash') == user_id
-        ]
-        user_jobs = [
-            j for j in all_managed_jobs if j.get('user_hash') == user_id
-        ]
+    # Resolve the demoted user's clusters / jobs via the snapshot's
+    # per-user index. Build a transient snapshot for the single-user
+    # path; batch callers pass a shared one.
+    if resources is None:
+        resources = ResourceSnapshot.fetch_all()
+    user_clusters, user_jobs = resources.for_user(user_id)
 
     workspace_set = set(inaccessible_workspaces)
     workspace_resources: Dict[str, Dict[str, List[str]]] = {}

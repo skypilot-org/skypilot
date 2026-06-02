@@ -236,9 +236,7 @@ def _validate_workspace_config_changes_with_lock(
     workspace_name: str,
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
-    active_resources_for_workspace: Optional[Tuple[List[Dict[str, Any]],
-                                                   List[Dict[str,
-                                                             Any]]]] = None,
+    resources: Optional[resource_checker.ResourceSnapshot] = None,
     resolver: Optional[user_resolver.UserResolver] = None,
 ) -> None:
     lock_id = backend_utils.workspace_lock_id(workspace_name)
@@ -246,12 +244,11 @@ def _validate_workspace_config_changes_with_lock(
     try:
         with locks.get_lock(lock_id, lock_timeout):
             # Validate the configuration changes based on active resources
-            _validate_workspace_config_changes(
-                workspace_name,
-                current_config,
-                new_config,
-                active_resources_for_workspace=active_resources_for_workspace,
-                resolver=resolver)
+            _validate_workspace_config_changes(workspace_name,
+                                               current_config,
+                                               new_config,
+                                               resources=resources,
+                                               resolver=resolver)
     except locks.LockTimeout as e:
         raise RuntimeError(
             f'Failed to validate workspace {workspace_name!r} due to '
@@ -264,9 +261,7 @@ def _validate_workspace_config_changes(
     workspace_name: str,
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
-    active_resources_for_workspace: Optional[Tuple[List[Dict[str, Any]],
-                                                   List[Dict[str,
-                                                             Any]]]] = None,
+    resources: Optional[resource_checker.ResourceSnapshot] = None,
     resolver: Optional[user_resolver.UserResolver] = None,
 ) -> None:
     """Validate workspace configuration changes based on active resources.
@@ -284,12 +279,13 @@ def _validate_workspace_config_changes(
         workspace_name: The name of the workspace.
         current_config: The current workspace configuration.
         new_config: The new workspace configuration.
-        active_resources_for_workspace: Optional pre-fetched
-            ``(clusters, managed_jobs)`` tuple already filtered to this
-            workspace. Batch callers should fetch this once for all
-            workspaces in the batch (via
-            ``resource_checker._get_active_resources_for_workspaces``) and
-            pass the per-workspace slice to avoid the per-call fetch.
+        resources: Optional shared ``ResourceSnapshot`` covering this
+            workspace. Batch callers build one
+            ``ResourceSnapshot.fetch_for_workspaces`` and pass it
+            through so the per-workspace slice is taken from the
+            snapshot's index instead of fetching per call.
+        resolver: Optional shared ``UserResolver`` (see
+            ``_compare_workspace_configs``).
 
     Raises:
         ValueError: If the configuration change is not allowed due to active
@@ -321,7 +317,7 @@ def _validate_workspace_config_changes(
                 error_summary, missed_users_names, _ = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name],
-                        active_resources=active_resources_for_workspace))
+                        resources=resources))
                 if error_summary:
                     error_msg=f'Cannot change workspace {workspace_name!r}' \
                     f' to private '
@@ -349,7 +345,7 @@ def _validate_workspace_config_changes(
                 error_summary, missed_users_names, missed_user_dict = (
                     resource_checker.check_users_workspaces_active_resources(
                         config_comparison.allowed_users_new, [workspace_name],
-                        active_resources=active_resources_for_workspace))
+                        resources=resources))
                 if error_summary:
                     error_user_ids = []
                     for user_id in config_comparison.removed_users:
@@ -898,22 +894,11 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # Otherwise each per-workspace _validate_workspace_config_changes call
     # would re-query clusters + managed jobs from scratch (the
     # managed-jobs fetch in particular is a blocking RPC to the
-    # controller), giving O(W * (C+J)) instead of O(C+J).
-    # pylint: disable=protected-access
-    batch_clusters, batch_jobs = (
-        resource_checker._get_active_resources_for_workspaces(workspace_names))
-    ws_resources: Dict[str, Tuple[List[Dict[str, Any]],
-                                  List[Dict[str, Any]]]] = {
-                                      name: ([], []) for name in workspace_names
-                                  }
-    for cluster in batch_clusters:
-        ws = cluster.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if ws in ws_resources:
-            ws_resources[ws][0].append(cluster)
-    for job in batch_jobs:
-        ws = job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE)
-        if ws in ws_resources:
-            ws_resources[ws][1].append(job)
+    # controller), giving O(W * (C+J)) instead of O(C+J). The
+    # snapshot's per-workspace index is built lazily on first
+    # ``for_workspace`` call.
+    resources = resource_checker.ResourceSnapshot.fetch_for_workspaces(
+        workspace_names)
 
     for workspace_name in workspace_names:
         try:
@@ -942,12 +927,11 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
             new_ws_config = dict(current_ws_config)
             new_ws_config['allowed_users'] = new_allowed
             _validate_workspace_config(workspace_name, new_ws_config)
-            _validate_workspace_config_changes_with_lock(
-                workspace_name,
-                current_ws_config,
-                new_ws_config,
-                active_resources_for_workspace=ws_resources[workspace_name],
-                resolver=resolver)
+            _validate_workspace_config_changes_with_lock(workspace_name,
+                                                         current_ws_config,
+                                                         new_ws_config,
+                                                         resources=resources,
+                                                         resolver=resolver)
             # Pre-resolve the post-removal user_id set ONCE here, using the
             # shared resolver, so update_workspace_policy in the modifier
             # (under the config file lock) doesn't have to do another

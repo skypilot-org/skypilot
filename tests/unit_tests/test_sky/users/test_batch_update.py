@@ -127,8 +127,8 @@ class TestUserBatchUpdate:
             server.user_batch_update(admin_request, body)
         assert exc_info.value.status_code == 400
 
-    @mock.patch('sky.utils.resource_checker.get_active_resources',
-                return_value=([], []))
+    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
+                return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})
     @mock.patch('sky.users.server._user_lock')
@@ -171,8 +171,8 @@ class TestUserBatchUpdate:
         # update_role only called for the two that passed the check.
         assert mock_update_role.call_count == 2
 
-    @mock.patch('sky.utils.resource_checker.get_active_resources',
-                return_value=([], []))
+    @mock.patch('sky.utils.resource_checker.ResourceSnapshot.fetch_all',
+                return_value=mock.MagicMock())
     @mock.patch('sky.utils.resource_checker.load_fresh_workspaces',
                 return_value={})
     @mock.patch('sky.users.server._user_lock')
