@@ -317,13 +317,9 @@ PRIORITY_OPTION = [
         default=None,
         type=str,
         help=(
-            'Priority for this task. Accepts either an integer priority (from '
-            f'{constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}, where '
-            'higher values indicate higher priority) which sets the '
-            '"resources.priority" config, or a string priority class name '
-            '(e.g. for Kueue) which sets the "resources.priority_class" '
-            'config. Setting one clears the other. Passing "none" resets '
-            'both.'),
+            'Priority for this task. Accepts either an integer (from '
+            f'{constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}, '
+            'or a string priority class name. Passing "none" clears both.'),
     ),
 ]
 
