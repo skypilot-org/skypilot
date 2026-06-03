@@ -8035,17 +8035,22 @@ def workspace():
 def workspace_use(name: Optional[str], clear: bool):
     """Sets (or clears with --clear) your default workspace on the server.
 
-    The default is picked up automatically on subsequent ``sky launch`` /
-    ``sky jobs launch`` commands. Per-command overrides (``--workspace`` and
-    project ``.sky.yaml``) continue to win.
+    This default is picked up by ``sky launch`` / ``sky jobs launch`` when
+    no explicit ``active_workspace`` is in effect. Anything that DOES set
+    ``active_workspace`` still wins — including a per-command
+    ``--workspace`` / ``-w`` flag, ``--config active_workspace=X``,
+    project ``./.sky.yaml``, user ``~/.sky/config.yaml``, or a server-
+    side ``active_workspace`` pinned by an admin.
 
     Examples:
 
-      .. code-block:: bash
+    .. code-block:: bash
 
-        \b
-        sky workspace use team-a       # set
-        sky workspace use --clear      # clear
+      # Set team-a as your default.
+      sky workspace use team-a
+      \b
+      # Clear the default.
+      sky workspace use --clear
     """
     if clear and name:
         raise click.UsageError('Cannot pass both --clear and a workspace name.')

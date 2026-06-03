@@ -503,18 +503,20 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
     """Returns workspace state for the calling user.
 
     Mirrors the launch-path precedence — if the caller has an explicit
-    ``active_workspace`` (passed in as ``requested`` or set in the local
-    ``.sky.yaml``), the server returns that with ``source='explicit'``;
+    ``active_workspace``, the server returns that with ``source='explicit'``;
     otherwise the resolver runs (preferred / default-fallback /
     single-membership).
 
     Args:
         requested: explicit active workspace to ask about. ``None`` (the
-            default) means "use whatever I have in ``.sky.yaml`` if
-            anything" — the SDK reads ``skypilot_config`` locally and
-            forwards it on the wire. Pass a non-None value to query
-            "what would land if I set active to X" without mutating
-            local state.
+            default) — the SDK reads your locally-configured
+            ``active_workspace`` (the value `skypilot_config` merges
+            from ``~/.sky/config.yaml`` + ``./.sky.yaml`` + any
+            ``--config active_workspace=X`` override) and forwards it
+            on the wire as ``?requested=``. Pass a non-None value to
+            query the resolver as if ``active_workspace`` were that
+            value, without changing your local config — useful for
+            previewing "what would land if I switched to X".
 
     Returns:
         ``{workspace, source, note, preferred, accessible}``.
@@ -532,8 +534,6 @@ def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
           unset).
         * ``accessible``: sorted list of workspaces the user can launch
           into.
-
-    This is the read-only counterpart to :func:`set_preferred_workspace`.
     """
     # Same fallback the launch path uses: only stamp `requested` when
     # the user actually set `active_workspace` somewhere. Sending the
