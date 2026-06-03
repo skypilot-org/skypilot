@@ -2709,20 +2709,6 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
 
-    # Auth middlewares (BasicAuth, AuthProxy, BearerToken, and any plugin-
-    # supplied middleware) populate `request.state.auth_user` from
-    # headers/JWT/credentials. Most paths surface only id+name+type and
-    # don't carry the persisted `preferred_workspace` column. Re-read from
-    # the DB here so `sky api info` can show the user's saved preferred
-    # workspace regardless of how they were authenticated. This is the
-    # only synchronous endpoint that surfaces `preferred_workspace` to the
-    # client; the resolver gate runs worker-side, where
-    # `add_or_update_user(return_user=True)` already refreshes the row.
-    if user is not None and user.id:
-        fresh = global_user_state.get_user(user.id)
-        if fresh is not None:
-            user = fresh
-
     # Get latest version from cache (returns None for dev versions
     # or if not available)
     latest_version = version_check.get_latest_version_for_current()

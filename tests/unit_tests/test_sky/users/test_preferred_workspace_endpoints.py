@@ -4,10 +4,6 @@ injection gate (daemon-skip + client API version gate).
 The endpoint is synchronous (returns JSON directly, not the request-queue
 pattern), so it can be exercised by calling the route handler with a
 fake fastapi.Request — no full test client setup needed.
-
-Note: there is no GET counterpart. The user's preferred_workspace is
-returned inline on the User row of /api/health (the User dataclass
-includes the column), so a dedicated GET would just duplicate that.
 """
 import unittest
 from unittest import mock
@@ -88,6 +84,236 @@ class TestSetUsersMeWorkspace(unittest.TestCase):
             users_server.set_user_preferred_workspace(
                 _fake_request(auth_user=None), self._body('team-a'))
         self.assertEqual(cm.exception.status_code, 401)
+
+
+# GET /users/me/workspace --------------------------------------------
+
+
+class TestGetUsersMeWorkspace(unittest.TestCase):
+    """Coverage for the read counterpart of POST /users/me/workspace.
+
+    Exercises the four shapes the handler is supposed to surface:
+      * happy path (resolver picks preferred)
+      * resolver drift (preferred set but not accessible -> note populated)
+      * resolver returns the same workspace via default-fallback even
+        though preferred is None (back-compat path)
+      * 401 when no auth user
+
+    The handler is read-only and pure-Python; we mock the DB fetch and
+    the resolver helpers rather than spinning up a full app.
+    """
+
+    def setUp(self):
+        # Middleware-built user: only id+name+type, no preferred_workspace.
+        # Matches how AuthProxyMiddleware constructs `auth_user` from a
+        # header — which the handler must NOT blindly trust for fields
+        # that live in the DB.
+        self.auth_user = models.User(id='hailong', name='hailong')
+
+    def _patch(self, fresh_user, resolution, accessible):
+        return [
+            mock.patch.object(users_server.global_user_state,
+                              'get_user',
+                              return_value=fresh_user),
+            mock.patch.object(users_server.workspaces_core,
+                              'resolve_workspace_for_user',
+                              return_value=resolution),
+            mock.patch.object(users_server.workspaces_core,
+                              'get_accessible_workspace_names',
+                              return_value=set(accessible)),
+            # Pin the server-side `active_workspace` lookup to "unset"
+            # so these tests don't depend on the test machine's actual
+            # `~/.sky/config.yaml`. The fallback-to-server-config path
+            # is exercised separately in
+            # `test_server_active_workspace_falls_back_into_requested`.
+            mock.patch.object(users_server.skypilot_config,
+                              'is_active_workspace_set',
+                              return_value=False),
+        ]
+
+    def test_happy_path_preferred(self):
+        """Preferred set + accessible -> resolver returns preferred, the
+        handler echoes both alongside the accessible set."""
+        fresh = models.User(id='hailong',
+                            name='hailong',
+                            preferred_workspace='team-a')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='team-a',
+            source=workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        patches = self._patch(fresh, resolution, {'team-a', 'team-b'})
+        for p in patches:
+            p.start()
+        try:
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        finally:
+            for p in patches:
+                p.stop()
+        self.assertEqual(resp['workspace'], 'team-a')
+        self.assertEqual(resp['source'],
+                         workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        self.assertIsNone(resp['note'])
+        self.assertEqual(resp['preferred'], 'team-a')
+        # `accessible` is sorted to make the wire format deterministic
+        # — the handler sorts the set the permission service returns.
+        self.assertEqual(resp['accessible'], ['team-a', 'team-b'])
+
+    def test_drift_preferred_not_accessible(self):
+        """Preferred='team-x' but the user lost access (RBAC drift).
+        Resolver falls back to default; handler exposes the drift note
+        AND echoes the stale preferred so the UI can surface it."""
+        fresh = models.User(id='hailong',
+                            name='hailong',
+                            preferred_workspace='team-x')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='default',
+            source=workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
+            note="preferred 'team-x' not accessible")
+        patches = self._patch(fresh, resolution, {'default', 'team-a'})
+        for p in patches:
+            p.start()
+        try:
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        finally:
+            for p in patches:
+                p.stop()
+        self.assertEqual(resp['workspace'], 'default')
+        self.assertEqual(resp['source'],
+                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+        self.assertEqual(resp['note'], "preferred 'team-x' not accessible")
+        # The persisted preferred is reported even though it's not
+        # accessible — the dashboard surfaces this to explain the drift.
+        self.assertEqual(resp['preferred'], 'team-x')
+
+    def test_preferred_none_with_default_fallback(self):
+        """User has not set preferred but has access to default.
+        Returned `preferred` is None (not the resolved fallback), so a
+        client can tell "I haven't set anything" from "I set default"."""
+        fresh = models.User(id='hailong', name='hailong')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='default',
+            source=workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+        patches = self._patch(fresh, resolution, {'default', 'team-a'})
+        for p in patches:
+            p.start()
+        try:
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        finally:
+            for p in patches:
+                p.stop()
+        self.assertEqual(resp['workspace'], 'default')
+        self.assertIsNone(resp['preferred'])
+
+    def test_unauth_get_raises_401(self):
+        """Reads also require an identity — anonymous probes can't see
+        another user's workspace state. Mirrors POST 401 semantics."""
+        with self.assertRaises(fastapi.HTTPException) as cm:
+            users_server.get_user_workspace(_fake_request(auth_user=None))
+        self.assertEqual(cm.exception.status_code, 401)
+
+    def test_requested_passed_through_to_resolver_as_explicit(self):
+        """Caller's `--workspace` / client-side `active_workspace` lands
+        on the resolver's `requested` param so it picks the EXPLICIT
+        precedence branch. Without this, `sky workspace info` would
+        contradict `sky launch` for users with an active workspace set
+        locally — same machinery, different answer."""
+        fresh = models.User(id='hailong',
+                            name='hailong',
+                            preferred_workspace='team-a')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='team-b',
+            source=workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               return_value=resolution) as resolve_mock, \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               return_value={'team-a', 'team-b'}), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user),
+                                                   requested='team-b')
+        # Resolver MUST receive `requested='team-b'`, not None.
+        resolve_mock.assert_called_once_with(fresh, requested='team-b')
+        self.assertEqual(resp['workspace'], 'team-b')
+        self.assertEqual(resp['source'],
+                         workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+        # Preferred is reported alongside even though the explicit
+        # override won — the caller may want to surface "you're
+        # overriding your saved preference for this one launch".
+        self.assertEqual(resp['preferred'], 'team-a')
+
+    def test_server_active_workspace_falls_back_into_requested(self):
+        """When the client did NOT pass `?requested=`, the handler picks
+        up the server's own `skypilot_config.active_workspace` (rare —
+        usually unset, but admins may pin it). Matches launch-path
+        precedence: the server's loaded config flows into the
+        resolver's `requested` slot."""
+        fresh = models.User(id='hailong', name='hailong')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='server-pinned',
+            source=workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               return_value=resolution) as resolve_mock, \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               return_value={'server-pinned'}), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=True), \
+             mock.patch.object(users_server.skypilot_config,
+                               'get_active_workspace',
+                               return_value='server-pinned'):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        resolve_mock.assert_called_once_with(fresh, requested='server-pinned')
+        self.assertEqual(resp['workspace'], 'server-pinned')
+
+    def test_ambiguous_resolver_surfaces_as_note_with_null_workspace(self):
+        """When the resolver raises WorkspaceAmbiguousError (multi-ws
+        user, no preferred, no 'default' access), the GET handler
+        returns 200 with `workspace=None` + the guidance message in
+        `note`. The CLI uses `note` to print "run `sky workspace use
+        <name>`" — a 4xx body would force every caller to parse error
+        envelopes."""
+        fresh = models.User(id='hailong', name='hailong')
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(
+                 users_server.workspaces_core,
+                 'resolve_workspace_for_user',
+                 side_effect=exceptions.WorkspaceAmbiguousError(
+                     accessible=['team-a', 'team-b'])), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               return_value={'team-a', 'team-b'}), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertIsNone(resp['workspace'])
+        self.assertIsNone(resp['source'])
+        # The exception's formatted message lists candidates + guidance —
+        # we surface it verbatim in `note` so the CLI doesn't need to
+        # re-format.
+        self.assertIn('multiple workspaces', resp['note'])
+        self.assertIn('team-a', resp['note'])
+        self.assertIn('sky workspace use', resp['note'])
+        # Accessible is still populated so the CLI can list candidates.
+        self.assertEqual(resp['accessible'], ['team-a', 'team-b'])
 
 
 # Version gate constant -----------------------------------------------

@@ -15,6 +15,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -120,11 +121,8 @@ def set_user_preferred_workspace(
     """Sets (or clears with `preferred: null`) the user's preferred workspace.
 
     Echoes the new preferred value on success. Callers that need the
-    user's accessible workspaces should fetch /workspaces; callers that
-    need the persisted preferred (e.g. dashboard re-render, `sky api
-    info`) should re-fetch /api/health (the user row already includes
-    `preferred_workspace`). Keeping this endpoint to just the
-    write-and-echo keeps it cheap and the API surface small.
+    resolved workspace + accessible list should follow up with
+    ``GET /users/me/workspace``.
 
     RBAC: rejects setting a workspace the user does not have access to.
     """
@@ -140,6 +138,110 @@ def set_user_preferred_workspace(
         # Workspace does not exist.
         raise fastapi.HTTPException(status_code=404, detail=str(e)) from e
     return {'preferred': body.preferred}
+
+
+@router.get('/me/workspace')
+def get_user_workspace(
+    request: fastapi.Request,
+    requested: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Returns workspace state for the calling user.
+
+    One stop for everything ``sky workspace info`` / dashboard pages /
+    ``_show_enabled_infra`` need:
+
+    * ``workspace``: the workspace the launch path would pick for this
+      user RIGHT NOW. Mirrors the launch-path precedence — an explicit
+      ``active_workspace`` (set client-side in ``.sky.yaml`` and passed
+      here via ``?requested=``, or set in the server's own loaded
+      config) wins; otherwise the resolver runs preferred /
+      default-fallback / single-membership.
+    * ``source``: one of ``WORKSPACE_SOURCE_*``. Tells the UI / CLI why
+      the resolver landed where it did (``explicit`` when the active
+      override won, otherwise ``preferred`` / ``default-fallback`` /
+      ``single-membership``). Drives the optional ``note``.
+    * ``note``: free-form message — drift on success
+      (``preferred 'team-x' not accessible``), or the error message
+      when the resolver couldn't pick a workspace
+      (``WorkspaceAmbiguousError``, ``NoWorkspaceAccessError``, or a
+      ``PermissionDeniedError`` against an explicit ``requested``). In
+      those error cases ``workspace`` is ``None`` and ``source`` is
+      ``None``; the caller should render ``note`` as guidance instead
+      of treating the request as a server fault.
+    * ``preferred``: the persisted preferred workspace (``None`` if the
+      user has not set one).
+    * ``accessible``: sorted list of every workspace the user can launch
+      into. Same set ``/workspaces`` returns the config for, but just
+      the names.
+
+    Args:
+        request: FastAPI request — the auth middleware must have
+            populated ``request.state.auth_user``.
+        requested: explicit active workspace from the caller. Mirrors
+            the resolver's precedence-1 slot. The client SDK reads its
+            local ``active_workspace`` (if any) and stamps it here, so
+            the answer reflects what would actually land at launch.
+
+    The handler is synchronous (no executor.schedule_request_async) —
+    no request body, the resolver is pure-Python, and dashboard pages
+    poll this frequently enough that latency matters.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Not authenticated.')
+    # Sync FastAPI handler — see comment in user_update for why we have
+    # to set the per-request user context here ourselves. Without this,
+    # `workspaces_core.get_accessible_workspace_names()` (which calls
+    # `common_utils.get_current_user()`) would fall back to the API-
+    # server process's own identity and return the wrong user's
+    # accessible set.
+    common_utils.set_current_user(auth_user)
+    # Same reason: refresh process-cached workspace config +
+    # request-scoped lru cache so admin `workspace create/update`
+    # ops that ran on a worker process are visible here.
+    server_common.refresh_workspace_state_for_sync_handler()
+    # The auth middleware does not populate `preferred_workspace` on
+    # `auth_user` (only id/name/type travel via the request context); the
+    # resolver reads it off the User dataclass directly. Re-fetch the user
+    # row so this handler matches what worker-side `add_or_update_user(
+    # return_user=True)` would supply.
+    fresh_user = global_user_state.get_user(auth_user.id)
+    user_for_resolve = fresh_user if fresh_user is not None else auth_user
+    # Mirror launch-path precedence: an explicit `active_workspace` — set
+    # by the client and shipped here as `?requested=`, or
+    # set in the server's own loaded config — beats the resolver's 2-6
+    # path. For queued requests the executor reads the merged thread-
+    # local (client-overlay + server base), but this synchronous GET has
+    # no request body, so the SDK stamps `?requested=` explicitly. We
+    # still check the server-side config as a fallback so an admin who
+    # set `active_workspace` globally gets honored.
+    if requested is None and skypilot_config.is_active_workspace_set():
+        requested = skypilot_config.get_active_workspace()
+    accessible = sorted(workspaces_core.get_accessible_workspace_names())
+    response: Dict[str, Any] = {
+        'workspace': None,
+        'source': None,
+        'note': None,
+        'preferred': user_for_resolve.preferred_workspace,
+        'accessible': accessible,
+    }
+    try:
+        resolution = workspaces_core.resolve_workspace_for_user(
+            user_for_resolve, requested=requested)
+    except (exceptions.WorkspaceAmbiguousError,
+            exceptions.NoWorkspaceAccessError,
+            exceptions.PermissionDeniedError) as e:
+        # All three are "tell me my state" answers from the user's
+        # perspective, not server faults. Surface the message in
+        # `note` and return 200 so callers can render guidance
+        # uniformly without parsing 4xx bodies.
+        response['note'] = str(e)
+        return response
+    response['workspace'] = resolution.workspace
+    response['source'] = resolution.source
+    response['note'] = resolution.note
+    return response
 
 
 @router.post('/create')
