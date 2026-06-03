@@ -27,7 +27,10 @@ ARCH=$(uname -m)
 
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
     echo "Detected ARM architecture: $ARCH"
-    ARCH_PATH="arm64"
+    # Use the SBSA (Server Base System Architecture) repo for ARM server GPUs
+    # (AWS Graviton + GPU, GH200, GB200). The `arm64` repo is the Jetson/Tegra
+    # (L4T) repo and does not carry CUDA 13.0.
+    ARCH_PATH="sbsa"
 else
     echo "Detected x86_64 architecture"
     ARCH_PATH="x86_64"
