@@ -2012,7 +2012,8 @@ function UsersTable({
     }
 
     if (sortConfig.key === 'default') {
-      // Default sort: GPUs desc, then Joined (most recent first), then Name asc.
+      // Default sort: GPUs desc, then Clusters desc, then Jobs desc, then
+      // Joined (most recent first), then Name asc.
       const cmpStr = (a, b) => {
         const sa = (a ?? '').toString().toLowerCase();
         const sb = (b ?? '').toString().toLowerCase();
@@ -2024,6 +2025,10 @@ function UsersTable({
       return [...filtered].sort((a, b) => {
         const byGpu = cmpNum(b.gpuCount, a.gpuCount);
         if (byGpu !== 0) return byGpu;
+        const byClusters = cmpNum(b.clusterCount, a.clusterCount);
+        if (byClusters !== 0) return byClusters;
+        const byJobs = cmpNum(b.jobCount, a.jobCount);
+        if (byJobs !== 0) return byJobs;
         const byJoined = cmpNum(b.created_at, a.created_at);
         if (byJoined !== 0) return byJoined;
         return cmpStr(a.usernameDisplay, b.usernameDisplay);
