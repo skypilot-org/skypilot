@@ -1212,6 +1212,65 @@ sky.workspaces() -> server_common.RequestId[Dict[str, Any]]
 
 Gets the workspaces.
 
+### `sky.set_preferred_workspace`
+
+```python
+sky.set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]
+```
+
+Sets (or clears with None) the user's preferred workspace.
+
+**Args:**
+    preferred: workspace name to set as default, or None to clear.
+
+**Returns:**
+    ``{'preferred': <new value>}`` echoing what was set. Callers that
+    need the resolved workspace + accessible list should follow up
+    with :func:`get_user_workspace`. Raises if the server rejects
+    the change (workspace does not exist, or user lacks permission
+    to it).
+
+### `sky.get_user_workspace`
+
+```python
+sky.get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]
+```
+
+Returns workspace state for the calling user.
+
+Mirrors the launch-path precedence — if the caller has an explicit
+``active_workspace`` (passed in as ``requested`` or set in the local
+``.sky.yaml``), the server returns that with ``source='explicit'``;
+otherwise the resolver runs (preferred / default-fallback /
+single-membership).
+
+**Args:**
+    requested: explicit active workspace to ask about. ``None`` (the
+        default) means "use whatever I have in ``.sky.yaml`` if
+        anything" — the SDK reads ``skypilot_config`` locally and
+        forwards it on the wire. Pass a non-None value to query
+        "what would land if I set active to X" without mutating
+        local state.
+
+**Returns:**
+    ``{workspace, source, note, preferred, accessible}``.
+
+    * ``workspace``: the workspace the launch path would pick. Can
+      be ``None`` when the resolver couldn't pick (no access /
+      ambiguous / explicit ``requested`` rejected by RBAC); the
+      reason is then in ``note``.
+    * ``source``: one of ``WORKSPACE_SOURCE_*`` on success, ``None``
+      when ``workspace`` is ``None``.
+    * ``note``: optional message — drift on success
+      (``preferred 'team-x' not accessible``) or the resolver error
+      when ``workspace`` is ``None``.
+    * ``preferred``: the persisted preferred workspace (``None`` if
+      unset).
+    * ``accessible``: sorted list of workspaces the user can launch
+      into.
+
+This is the read-only counterpart to :func:`set_preferred_workspace`.
+
 ## Other Functions
 
 ### `sky.create_debug_dump`
@@ -1332,24 +1391,6 @@ Gets the real-time Slurm GPU availability.
 
 **Returns:**
     The request ID of the Slurm GPU availability request.
-
-### `sky.set_preferred_workspace`
-
-```python
-sky.set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]
-```
-
-Sets (or clears with None) the user's preferred workspace.
-
-**Args:**
-    preferred: workspace name to set as default, or None to clear.
-
-**Returns:**
-    ``{'preferred': <new value>}`` echoing what was set. Callers that
-    need the user's accessible workspaces or other state should fetch
-    them separately (``/workspaces``, ``/api/health``). Raises if the
-    server rejects the change (workspace does not exist, or user
-    lacks permission to it).
 
 ### `sky.slurm_node_info`
 

@@ -751,6 +751,29 @@ Set up a cluster using SSH targets from a file. If not specified, ~/.sky/ssh_nod
 - `--async` — Run the command asynchronously.
 - `--file`, `-f` — The file containing the SSH targets.
 
+## Workspace Commands
+
+Per-user workspace commands.
+
+### `sky workspace info`
+
+Shows the workspace your next request lands in by default, plus your saved preferred and the workspaces you can access.
+
+**Options:**
+
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `-o`, `--output` (default: `table`) — Output format (default: table). Use "json" for a machine-readable shape.
+
+### `sky workspace use`
+
+Sets (or clears with --clear) your default workspace on the server.
+
+**Options:**
+
+- `NAME` — text
+- `--clear` — Clear the saved preferred workspace.
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+
 ## Other Commands
 
 ### `sky debug-dump`

@@ -2196,12 +2196,6 @@ def status(verbose: bool,
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         return sdk.workspaces()
 
-    # Only carry an explicit workspace into `sdk.enabled_clouds` when
-    # the user actually set one client-side. Otherwise leave it as
-    # None so the server-side workspace resolver picks something the
-    # user has access to (rather than us hard-coding 'default' here,
-    # which the server treats as an explicit intent and rejects for
-    # users without 'default' access).
     if skypilot_config.is_active_workspace_set():
         active_workspace = skypilot_config.get_active_workspace()
     else:
