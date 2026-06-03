@@ -478,6 +478,12 @@ class UserImportBody(RequestBody):
     csv_content: str
 
 
+class UserBatchUpdateBody(RequestBody):
+    """The request body for the user batch update endpoint."""
+    user_ids: List[str]
+    role: str
+
+
 class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
@@ -912,6 +918,18 @@ class CreateWorkspaceBody(RequestBody):
 class DeleteWorkspaceBody(RequestBody):
     """The request body for deleting a workspace."""
     workspace_name: str
+
+
+class WorkspaceBatchAddUsersBody(RequestBody):
+    """The request body for adding users to multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
+class WorkspaceBatchRemoveUsersBody(RequestBody):
+    """The request body for removing users from multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
 
 
 class UpdateConfigBody(RequestBody):

@@ -1168,7 +1168,7 @@ may cause GET /api/get being sent to a restarted API server.
 ### `sky.stream_and_get`
 
 ```python
-sky.stream_and_get(request_id: Optional[server_common.RequestId[T]] = None, log_path: Optional[str] = None, tail: Optional[int] = None, follow: bool = True, output_stream: Optional['io.TextIOBase'] = None) -> Optional[T]
+sky.stream_and_get(request_id: Optional[server_common.RequestId[T]] = None, log_path: Optional[str] = None, tail: Optional[int] = None, follow: bool = True, output_stream: Optional['io.TextIOBase'] = None, relay_rich_status: bool = False) -> Optional[T]
 ```
 
 Streams the logs of a request or a log file and gets the final result.
@@ -1187,6 +1187,11 @@ prefix of the full request id.
     follow: Whether to follow the logs.
     output_stream: The output stream to write to. If None, print to the
         console.
+    relay_rich_status: If True, forward encoded rich-status control payloads
+        verbatim to the output instead of rendering a local spinner. Used by
+        the managed jobs controller to preserve provisioning spinner codes
+        in its per-job log. See
+        :func:`sky.utils.rich_utils.decode_rich_status`.
 
 **Returns:**
     The ``Request Returns`` of the specified request. See the documentation
@@ -1406,7 +1411,7 @@ as managed jobs or services.
 ### `sky.stream_response`
 
 ```python
-sky.stream_response(request_id: Optional[server_common.RequestId[T]], response: 'requests.Response', output_stream: Optional['io.TextIOBase'] = None, resumable: bool = False, get_result: bool = True) -> Optional[T]
+sky.stream_response(request_id: Optional[server_common.RequestId[T]], response: 'requests.Response', output_stream: Optional['io.TextIOBase'] = None, resumable: bool = False, get_result: bool = True, relay_rich_status: bool = False) -> Optional[T]
 ```
 
 Streams the response to the console.
@@ -1424,6 +1429,9 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
+    relay_rich_status: If True, forward encoded rich-status control payloads
+        verbatim to the output instead of rendering a local spinner. See
+        :func:`sky.utils.rich_utils.decode_rich_status`.
 
 ### `sky.tail_autostop_logs`
 

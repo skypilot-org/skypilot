@@ -50,6 +50,7 @@ import {
   UploadIcon,
   DownloadIcon,
   PlusIcon,
+  MinusIcon,
   CopyIcon,
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
@@ -66,6 +67,11 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import {
+  BatchRoleDialog,
+  BatchAddToWorkspacesDialog,
+  BatchRemoveFromWorkspacesDialog,
+} from '@/components/users-batch-dialogs';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { statusGroups } from '@/components/jobs';
 import {
@@ -967,6 +973,7 @@ export function Users() {
           setValueList={setValueList}
           deduplicateUsers={deduplicateUsers}
           setLastFetchedTime={setLastFetchedTime}
+          setCreateError={setCreateError}
         />
       ) : activeMainTab === 'service-accounts' ? (
         serviceAccountTokenEnabled && (
@@ -1402,6 +1409,7 @@ function UsersTable({
   setValueList,
   deduplicateUsers,
   setLastFetchedTime,
+  setCreateError,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1412,6 +1420,12 @@ function UsersTable({
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
+
+  // Multi-select state for batch operations on users.
+  // Only enabled when the current user is an admin (the checkbox column is
+  // hidden otherwise). System users cannot be selected.
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set());
+  const [bulkDialog, setBulkDialog] = useState(null); // 'role' | 'add' | 'remove'
 
   // Lookup dictionary for GPU type and infra filtering
   // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
@@ -2048,7 +2062,7 @@ function UsersTable({
   const handleSaveEdit = async (userId) => {
     if (!userId || !currentEditingRole) {
       console.error('User ID or role is missing.');
-      alert('Error: User ID or role is missing.');
+      setCreateError(new Error('User ID or role is missing.'));
       return;
     }
     setIsLoading(true); // Or use parent setLoading
@@ -2067,11 +2081,112 @@ function UsersTable({
       handleCancelEdit(); // Exit edit mode
     } catch (error) {
       console.error('Failed to update user role:', error);
-      alert(`Error updating role: ${error.message}`);
+      handleCancelEdit();
+      setCreateError(error);
     } finally {
       setIsLoading(false); // Or use parent setLoading
     }
   };
+
+  // Users that are eligible to be selected for batch operations.
+  // System users (e.g., dashboard, system API user) are excluded.
+  const selectableUsers = useMemo(
+    () => (filteredAndSortedUsers || []).filter((u) => u.userType !== 'system'),
+    [filteredAndSortedUsers]
+  );
+
+  const allOnPageSelected =
+    selectableUsers.length > 0 &&
+    selectableUsers.every((u) => selectedUserIds.has(u.userId));
+  const someOnPageSelected =
+    !allOnPageSelected &&
+    selectableUsers.some((u) => selectedUserIds.has(u.userId));
+
+  const showBulkColumn =
+    currentUserRole === 'admin' &&
+    !deduplicateUsers &&
+    !ingressBasicAuthEnabled;
+
+  const toggleSelectAllOnPage = () => {
+    const next = new Set(selectedUserIds);
+    if (allOnPageSelected) {
+      selectableUsers.forEach((u) => next.delete(u.userId));
+    } else {
+      selectableUsers.forEach((u) => next.add(u.userId));
+    }
+    setSelectedUserIds(next);
+  };
+
+  const toggleSelectOne = (userId) => {
+    const next = new Set(selectedUserIds);
+    if (next.has(userId)) {
+      next.delete(userId);
+    } else {
+      next.add(userId);
+    }
+    setSelectedUserIds(next);
+  };
+
+  const clearSelection = () => setSelectedUserIds(new Set());
+
+  // "Workspaces" dropdown on the floating bar.
+  const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+  const wsDropdownRef = useRef(null);
+
+  // Esc clears the current selection (and dismisses the floating bar).
+  useEffect(() => {
+    if (selectedUserIds.size === 0) return undefined;
+    const handler = (e) => {
+      if (e.key === 'Escape') {
+        // If the workspaces dropdown is open, Esc closes the dropdown
+        // first; pressing Esc again clears the selection.
+        if (wsDropdownOpen) {
+          setWsDropdownOpen(false);
+        } else {
+          clearSelection();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedUserIds.size, wsDropdownOpen]);
+
+  // Close the workspaces dropdown on outside click.
+  useEffect(() => {
+    if (!wsDropdownOpen) return undefined;
+    const handler = (e) => {
+      if (wsDropdownRef.current && !wsDropdownRef.current.contains(e.target)) {
+        setWsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [wsDropdownOpen]);
+
+  const handleBulkDialogClose = async (fullySucceeded) => {
+    setBulkDialog(null);
+    if (fullySucceeded) {
+      clearSelection();
+      dashboardCache.invalidate(getUsers);
+      await fetchDataAndProcess(true);
+    } else {
+      // Refresh even on partial failure so the table reflects the rows that
+      // did succeed; keep the selection so the admin can retry failures.
+      dashboardCache.invalidate(getUsers);
+      await fetchDataAndProcess(false);
+    }
+  };
+
+  const openBulkDialog = async (kind) => {
+    await checkPermissionAndAct(`cannot perform bulk ${kind} on users`, () =>
+      setBulkDialog(kind)
+    );
+  };
+
+  const selectedUserObjects = useMemo(
+    () => (usersWithCounts || []).filter((u) => selectedUserIds.has(u.userId)),
+    [usersWithCounts, selectedUserIds]
+  );
 
   if (isLoading && usersWithCounts.length === 0 && !hasInitiallyLoaded) {
     return (
@@ -2128,11 +2243,123 @@ function UsersTable({
           {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
         </div>
       )}
+      {showBulkColumn && (
+        // Floating bottom-center action bar. Always mounted (so the
+        // slide animation works in both directions), but
+        // pointer-events-none + translate-y-full + opacity-0 when no
+        // selection so it occupies no visual space and can't be
+        // interacted with. No layout shift on the table itself.
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-30 transition-all duration-200 ease-out ${
+            selectedUserIds.size > 0
+              ? 'opacity-100 translate-y-0'
+              : 'opacity-0 translate-y-[200%] pointer-events-none'
+          }`}
+          role="region"
+          aria-label="Batch user actions"
+          aria-hidden={selectedUserIds.size === 0}
+        >
+          <div className="flex items-center gap-3 px-4 py-2 bg-white border border-gray-200 shadow-lg rounded-full">
+            <div className="text-sm text-gray-700 whitespace-nowrap">
+              <span className="font-medium text-sky-blue">
+                {selectedUserIds.size}
+              </span>{' '}
+              selected
+            </div>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="text-sm text-sky-blue hover:text-sky-blue-bright underline whitespace-nowrap"
+            >
+              Clear
+            </button>
+            <div className="h-5 w-px bg-gray-200" aria-hidden="true" />
+            <button
+              type="button"
+              onClick={() => openBulkDialog('role')}
+              disabled={roleLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              Role
+            </button>
+            <div className="relative" ref={wsDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setWsDropdownOpen((v) => !v)}
+                disabled={roleLoading}
+                aria-haspopup="menu"
+                aria-expanded={wsDropdownOpen}
+                className="bg-sky-600 hover:bg-sky-700 text-white inline-flex items-center gap-1 rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                <span>Workspaces</span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${
+                    wsDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                  aria-hidden="true"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+              {wsDropdownOpen && (
+                <div
+                  role="menu"
+                  className="absolute bottom-full right-0 mb-2 bg-white rounded-lg shadow-xl border border-gray-200 z-40 py-1.5 px-1"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setWsDropdownOpen(false);
+                      openBulkDialog('add');
+                    }}
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors whitespace-nowrap"
+                  >
+                    <PlusIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                    <span>Add to workspaces</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setWsDropdownOpen(false);
+                      openBulkDialog('remove');
+                    }}
+                    className="flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded transition-colors whitespace-nowrap"
+                  >
+                    <MinusIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                    <span>Remove from workspaces</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
+                {showBulkColumn && (
+                  <TableHead className="w-8 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all users on this page"
+                      checked={allOnPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someOnPageSelected;
+                      }}
+                      onChange={toggleSelectAllOnPage}
+                    />
+                  </TableHead>
+                )}
                 <TableHead
                   onClick={() => requestSort('usernameDisplay')}
                   className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -2208,6 +2435,18 @@ function UsersTable({
                     user.userId === currentUserId);
                 return (
                   <TableRow key={user.userId}>
+                    {showBulkColumn && (
+                      <TableCell className="w-8 whitespace-nowrap">
+                        {!isSystemUser && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select user ${user.usernameDisplay || user.userId}`}
+                            checked={selectedUserIds.has(user.userId)}
+                            onChange={() => toggleSelectOne(user.userId)}
+                          />
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="truncate" title={user.username}>
                       {user.usernameDisplay}
                     </TableCell>
@@ -2421,6 +2660,27 @@ function UsersTable({
           </Table>
         </div>
       </Card>
+      {bulkDialog === 'role' && (
+        <BatchRoleDialog
+          open={bulkDialog === 'role'}
+          onClose={handleBulkDialogClose}
+          selectedUsers={selectedUserObjects}
+        />
+      )}
+      {bulkDialog === 'add' && (
+        <BatchAddToWorkspacesDialog
+          open={bulkDialog === 'add'}
+          onClose={handleBulkDialogClose}
+          selectedUsers={selectedUserObjects}
+        />
+      )}
+      {bulkDialog === 'remove' && (
+        <BatchRemoveFromWorkspacesDialog
+          open={bulkDialog === 'remove'}
+          onClose={handleBulkDialogClose}
+          selectedUsers={selectedUserObjects}
+        />
+      )}
     </>
   );
 }
@@ -2441,6 +2701,7 @@ UsersTable.propTypes = {
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
   setLastFetchedTime: PropTypes.func,
+  setCreateError: PropTypes.func.isRequired,
 };
 
 // Service Account Tokens Management Component

@@ -566,11 +566,11 @@ Install the necessary dependencies for Azure.
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-      uv pip install --prerelease allow azure-cli
+      uv pip install --prerelease allow "azure-cli<2.87.0"
       uv pip install "skypilot[azure]"
       # From nightly build
       # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-      uv pip install --prerelease allow azure-cli
+      uv pip install --prerelease allow "azure-cli<2.87.0"
       uv pip install "skypilot-nightly[azure]"
 
   .. tab-item:: uv tool
