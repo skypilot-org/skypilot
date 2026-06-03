@@ -32,6 +32,19 @@ class _SelectableEntryPoints(list):
         return [ep for ep in self if ep.group == group]
 
 
+@pytest.fixture(autouse=True)
+def _reset_client_sdk_cache():
+    """Clear the loader's process-lifetime entry-point cache around each test.
+
+    The loader memoizes ``importlib.metadata.entry_points()``; clearing it
+    before and after every test ensures monkeypatched entry points take effect
+    and never leak between tests.
+    """
+    sky._client_sdk_entry_points.cache_clear()  # pylint: disable=protected-access
+    yield
+    sky._client_sdk_entry_points.cache_clear()  # pylint: disable=protected-access
+
+
 @pytest.fixture
 def fake_sdk(monkeypatch):
     """Register a fake client SDK and the target module it aliases to."""
@@ -70,6 +83,15 @@ def test_from_import_resolves_sdk(fake_sdk):
     # ``from sky import fakesdk`` (exercises the from-list import machinery).
     module = __import__('sky', fromlist=[_SDK_NAME])
     assert getattr(module, _SDK_NAME) is fake_sdk
+
+
+@pytest.mark.usefixtures('fake_sdk')
+def test_submodule_import_raises_for_module_target():
+    # The entry point exposes a single *module*, so a submodule import under it
+    # (``sky.fakesdk.sub``) is intentionally not aliased; it fails like any
+    # attempt to import a submodule of a non-package module.
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(f'sky.{_SDK_NAME}.sub')
 
 
 @pytest.mark.usefixtures('fake_sdk')
