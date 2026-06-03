@@ -316,10 +316,9 @@ PRIORITY_OPTION = [
         required=False,
         default=None,
         type=str,
-        help=(
-            'Priority for this task. Accepts either an integer (from '
-            f'{constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}, '
-            'or a string priority class name. Passing "none" clears both.'),
+        help=('Priority for this task. Accepts either an integer (from '
+              f'{constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}, '
+              'or a string priority class name. Passing "none" clears both.'),
     ),
 ]
 
