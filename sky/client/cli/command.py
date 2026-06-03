@@ -761,11 +761,12 @@ def _parse_override_params(
         else:
             override_params['ports'] = ports
     if priority is not None:
+        priority = priority.strip()
         # `--priority` accepts either an integer (priority) or a string
         # (priority class). Clear both first so that a resource never carries
         # both at once, then set whichever one applies ('none' clears both).
         override_params.update({'priority': None, 'priority_class': None})
-        if priority.lower() != 'none':
+        if priority.lower() != 'none' and priority != '':
             try:
                 override_params['priority'] = int(priority)
             except ValueError:
