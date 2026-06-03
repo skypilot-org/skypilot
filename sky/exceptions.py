@@ -276,20 +276,20 @@ class SkyPilotExcludeArgsBaseException(Exception):
     pass
 
 
-class CommandError(SkyPilotExcludeArgsBaseException):
-    """Raised when a command fails.
+class CommandFailureException(SkyPilotExcludeArgsBaseException):
+    """Raised if a command fails for some reason.
 
     Args:
-        returncode: The returncode of the command.
         command: The command that was run.
-        error_message: The error message to print.
-        detailed_reason: The stderr of the command.
+        failure: The mode of failure.
+        error_msg: The error message to print.
+        detailed_reason: Detailed output from the failure, if possible.
     """
 
-    def __init__(self, returncode: int, command: str, error_msg: str,
+    def __init__(self, command: str, failure: str, error_msg: str,
                  detailed_reason: Optional[str]) -> None:
-        self.returncode = returncode
         self.command = command
+        self.failure = failure
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
 
@@ -300,9 +300,32 @@ class CommandError(SkyPilotExcludeArgsBaseException):
                     not env_options.Options.SHOW_DEBUG_INFO.get()):
                 # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
-            message = (f'Command {command} failed with return code '
-                       f'{returncode}.\n{error_msg}\n{detailed_reason}')
+            message = (f'Command {command} {failure}.\n'
+                       f'{error_msg}\n{detailed_reason}')
         super().__init__(message)
+
+
+class CommandError(CommandFailureException):
+    """Raised when a command returns a non-zero exit code.
+
+    Args:
+        returncode: The returncode of the command.
+        command: The command that was run.
+        error_msg: The error message to print.
+        detailed_reason: The stderr of the command.
+        failure: Normally constructed from returncode, but included for serde.
+    """
+
+    def __init__(self,
+                 returncode: int,
+                 command: str,
+                 error_msg: str,
+                 detailed_reason: Optional[str],
+                 failure: Optional[str] = None) -> None:
+        self.returncode = returncode
+        if failure is None:
+            failure = f'failed with return code {returncode}'
+        super().__init__(command, failure, error_msg, detailed_reason)
 
 
 class ClusterNotUpError(Exception):
