@@ -72,6 +72,9 @@ _KNOWN_VIEWER_DENIED: set = {
     # --- Auth writes ---
     ('/api/v1/auth/authorize', 'POST'),
     ('/api/cancel', 'POST'),
+    # Viewers are read-only; they cannot mutate their own preferred
+    # workspace. (The matching GET is in rbac._DEFAULT_VIEWER_ALLOWLIST.)
+    ('/users/me/workspace', 'POST'),
     # --- Managed jobs writes ---
     ('/jobs/launch', 'POST'),
     ('/jobs/cancel', 'POST'),

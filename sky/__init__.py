@@ -106,11 +106,13 @@ from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
 from sky.client.sdk import get
+from sky.client.sdk import get_user_workspace
 from sky.client.sdk import job_status
 from sky.client.sdk import launch
 from sky.client.sdk import optimize
 from sky.client.sdk import queue
 from sky.client.sdk import reload_config
+from sky.client.sdk import set_preferred_workspace
 from sky.client.sdk import start
 from sky.client.sdk import status
 from sky.client.sdk import stop
@@ -236,6 +238,8 @@ __all__ = [
     'api_status',
     'api_cancel',
     'api_info',
+    'set_preferred_workspace',
+    'get_user_workspace',
     'api_login',
     'api_start',
     'api_stop',

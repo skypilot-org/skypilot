@@ -52,6 +52,7 @@ Launch a cluster or task.
 - `--fast` — [Experimental] If the cluster is already up and available, skip provisioning and setup steps.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
+- `--workspace`, `-w` — Workspace to launch into. Shorthand for `--config active_workspace=<name>`.
 
 ### `sky exec`
 
@@ -352,6 +353,7 @@ Launch a managed job from a YAML or a command.
 - `--num-jobs` — Number of jobs to submit.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
+- `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`
@@ -748,6 +750,29 @@ Set up a cluster using SSH targets from a file. If not specified, ~/.sky/ssh_nod
 - `--infra` — Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.
 - `--async` — Run the command asynchronously.
 - `--file`, `-f` — The file containing the SSH targets.
+
+## Workspace Commands
+
+Per-user workspace commands.
+
+### `sky workspace info`
+
+Shows the workspace your next request lands in by default, plus your saved preferred and the workspaces you can access.
+
+**Options:**
+
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `-o`, `--output` (default: `table`) — Output format (default: table). Use "json" for a machine-readable shape.
+
+### `sky workspace use`
+
+Sets (or clears with --clear) your default workspace on the server.
+
+**Options:**
+
+- `NAME` — text
+- `--clear` — Clear the saved preferred workspace.
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 
 ## Other Commands
 

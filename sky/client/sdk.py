@@ -281,10 +281,21 @@ def enabled_clouds(workspace: Optional[str] = None,
     Request Returns:
         A list of enabled clouds in string format.
     """
-    if workspace is None:
+    # Only stamp an explicit workspace into the request when the user
+    # actually configured one (thread-local, project `.sky.yaml`, or
+    # user `~/.sky/config.yaml`). Falling back to the literal 'default'
+    # here would be sent on the wire as an explicit intent — the
+    # server-side workspace resolver gate (c) respects explicit names
+    # and refuses to substitute a workspace the user has access to.
+    # When `workspace is None`, let the server resolver run and pick
+    # based on the user's accessible workspaces / preferred default.
+    if workspace is None and skypilot_config.is_active_workspace_set():
         workspace = skypilot_config.get_active_workspace()
-    response = server_common.make_authenticated_request(
-        'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
+    if workspace is None:
+        url = f'/enabled_clouds?expand={expand}'
+    else:
+        url = f'/enabled_clouds?workspace={workspace}&expand={expand}'
+    response = server_common.make_authenticated_request('GET', url)
     return server_common.get_request_id(response)
 
 
@@ -457,6 +468,85 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     """Gets the workspaces."""
     response = server_common.make_authenticated_request('GET', '/workspaces')
     return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(
+    server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION)
+@annotations.client_api
+def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    Args:
+        preferred: workspace name to set as default, or None to clear.
+
+    Returns:
+        ``{'preferred': <new value>}`` echoing what was set. Callers that
+        need the resolved workspace + accessible list should follow up
+        with :func:`get_user_workspace`. Raises if the server rejects
+        the change (workspace does not exist, or user lacks permission
+        to it).
+    """
+    response = server_common.make_authenticated_request(
+        'POST', '/users/me/workspace', json={'preferred': preferred})
+    response.raise_for_status()
+    return response.json()
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(
+    server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION)
+@annotations.client_api
+def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
+    """Returns workspace state for the calling user.
+
+    Mirrors the launch-path precedence — if the caller has an explicit
+    ``active_workspace``, the server returns that with ``source='explicit'``;
+    otherwise the resolver runs (preferred / default-fallback /
+    single-membership).
+
+    Args:
+        requested: explicit active workspace to ask about. ``None`` (the
+            default) — the SDK reads your locally-configured
+            ``active_workspace`` (the value `skypilot_config` merges
+            from ``~/.sky/config.yaml`` + ``./.sky.yaml`` + any
+            ``--config active_workspace=X`` override) and forwards it
+            on the wire as ``?requested=``. Pass a non-None value to
+            query the resolver as if ``active_workspace`` were that
+            value, without changing your local config — useful for
+            previewing "what would land if I switched to X".
+
+    Returns:
+        ``{workspace, source, note, preferred, accessible}``.
+
+        * ``workspace``: the workspace the launch path would pick. Can
+          be ``None`` when the resolver couldn't pick (no access /
+          ambiguous / explicit ``requested`` rejected by RBAC); the
+          reason is then in ``note``.
+        * ``source``: one of ``WORKSPACE_SOURCE_*`` on success, ``None``
+          when ``workspace`` is ``None``.
+        * ``note``: optional message — drift on success
+          (``preferred 'team-x' not accessible``) or the resolver error
+          when ``workspace`` is ``None``.
+        * ``preferred``: the persisted preferred workspace (``None`` if
+          unset).
+        * ``accessible``: sorted list of workspaces the user can launch
+          into.
+    """
+    # Same fallback the launch path uses: only stamp `requested` when
+    # the user actually set `active_workspace` somewhere. Sending the
+    # default 'default' literal as `requested` would change the
+    # resolver's precedence and reject users without 'default' access.
+    if requested is None and skypilot_config.is_active_workspace_set():
+        requested = skypilot_config.get_active_workspace()
+    url = '/users/me/workspace'
+    if requested is not None:
+        url += f'?requested={urlparse.quote(requested)}'
+    response = server_common.make_authenticated_request('GET', url)
+    response.raise_for_status()
+    return response.json()
 
 
 def _raise_exception_object_on_client(e: BaseException) -> None:

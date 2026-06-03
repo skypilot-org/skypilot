@@ -80,6 +80,12 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('password', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('type', sqlalchemy.Text, server_default=None),
+    # User-set default workspace; null when unset. Resolution and RBAC
+    # validation are handled in sky/workspaces/; this column is the
+    # persisted value only.
+    sqlalchemy.Column('preferred_workspace',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -419,6 +425,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                 )
             result = session.execute(insert_stmnt)
 
@@ -448,6 +455,7 @@ def add_or_update_user(
                         user_table.c.password,
                         user_table.c.created_at,
                         user_table.c.type,
+                        user_table.c.preferred_workspace,
                     )
 
                 result = session.execute(update_stmnt)
@@ -468,6 +476,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -504,6 +513,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -521,6 +531,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -542,6 +553,7 @@ def get_user(user_id: str) -> Optional[models.User]:
         password=row.password,
         created_at=row.created_at,
         user_type=row.type,
+        preferred_workspace=row.preferred_workspace,
     )
 
 
@@ -558,6 +570,7 @@ def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     }
 
@@ -576,6 +589,7 @@ def get_user_by_name(username: str) -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -592,6 +606,7 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
             name=row.name,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -616,11 +631,32 @@ def get_all_users() -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
 
 @db_retries.retry
+@metrics_lib.time_me
+def set_user_preferred_workspace(user_id: str,
+                                 workspace: Optional[str]) -> bool:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    This is the raw DB write; RBAC validation that the user has access to the
+    target workspace MUST be done by the caller in sky/workspaces/ before
+    invoking this. Returns True if a row was updated, False if the user_id
+    does not exist.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(user_table).where(
+                user_table.c.id == user_id).values(
+                    preferred_workspace=workspace))
+        session.commit()
+        return result.rowcount > 0
+
+
 @metrics_lib.time_me
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',

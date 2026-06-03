@@ -429,16 +429,45 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
     Raises:
         RuntimeError: If called from a non-main thread.
     """
-    original_workspace = get_active_workspace()
-    if original_workspace == workspace:
+    if get_active_workspace() == workspace:
         # No change, do nothing.
         yield
         return
+    # Capture whether the thread-local attribute was set, NOT the
+    # resolved active_workspace string. The two differ when nothing was
+    # set previously: `get_active_workspace()` falls back to the literal
+    # SKYPILOT_DEFAULT_WORKSPACE ('default'), and unconditionally
+    # restoring to that string would leave the attribute SET to 'default'
+    # — making `is_active_workspace_set()` return True for the next
+    # request handled by the same worker process, which causes the
+    # workspace resolver gate to silently skip and fall back to the
+    # literal 'default' (broken for users without 'default' access).
+    had_workspace = hasattr(_active_workspace_context, 'workspace')
+    prior_value: Optional[str] = None
+    if had_workspace:
+        prior_value = _active_workspace_context.workspace
     _active_workspace_context.workspace = workspace
     logger.debug(f'Set context workspace: {workspace}')
-    yield
-    logger.debug(f'Reset context workspace: {original_workspace}')
-    _active_workspace_context.workspace = original_workspace
+    # try/finally is required: a caller that lets an exception escape the
+    # `with` block would otherwise leak this thread-local workspace to
+    # subsequent callers in the same worker process (ProcessPoolExecutor
+    # reuses workers). For most callers the leak is masked because
+    # `override_skypilot_config` rebinds `_active_workspace_context` to a
+    # fresh `threading.local()` per request, but tightening this here is
+    # the right shape for a contextmanager and removes the implicit
+    # dependency on that downstream reset.
+    try:
+        yield
+    finally:
+        if had_workspace:
+            logger.debug(f'Reset context workspace: {prior_value}')
+            _active_workspace_context.workspace = prior_value
+        else:
+            logger.debug('Reset context workspace: <unset>')
+            try:
+                del _active_workspace_context.workspace
+            except AttributeError:
+                pass
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
@@ -455,6 +484,24 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
     else:
         logger.debug(f'Got active workspace: {active_workspace}')
     return active_workspace
+
+
+def is_active_workspace_set() -> bool:
+    """Returns True iff active_workspace was explicitly set somewhere.
+
+    Distinguishes "user set active_workspace" from "fell back to the
+    SKYPILOT_DEFAULT_WORKSPACE literal because nothing was set". The two are
+    indistinguishable through `get_active_workspace()` (both return a string)
+    but are different on the wire: the override config sent by the client
+    omits the key entirely when unset. The server-side per-user resolver
+    should only kick in for the unset case — explicit intent (including
+    explicit `'default'`) is respected as-is.
+    """
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if context_workspace is not None:
+        return True
+    return get_nested(keys=('active_workspace',),
+                      default_value=None) is not None
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:

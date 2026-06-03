@@ -37,6 +37,10 @@ class User:
     password: Optional[str] = None
     created_at: Optional[int] = None
     user_type: Optional[str] = None
+    # The user's preferred default workspace, if one has been set.
+    # Resolution and RBAC validation live in sky/workspaces/; this field is
+    # just the persisted value. None means "no preference set".
+    preferred_workspace: Optional[str] = None
 
     def __init__(
         self,
@@ -45,15 +49,22 @@ class User:
         password: Optional[str] = None,
         created_at: Optional[int] = None,
         user_type: Optional[str] = None,
+        preferred_workspace: Optional[str] = None,
     ):
         self.id = id.strip().lower()
         self.name = name
         self.password = password
         self.created_at = created_at
         self.user_type = user_type
+        self.preferred_workspace = preferred_workspace
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': self.id, 'name': self.name, 'user_type': self.user_type}
+        return {
+            'id': self.id,
+            'name': self.name,
+            'user_type': self.user_type,
+            'preferred_workspace': self.preferred_workspace,
+        }
 
     @classmethod
     def get_current_user(cls) -> 'User':

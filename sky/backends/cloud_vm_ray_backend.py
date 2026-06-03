@@ -4140,6 +4140,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
+                    # `ManagedJobInfo.workspace` is currently not read by
+                    # skylet (see `services.py::QueueJob`). Kept on the
+                    # wire for future consumers.
                     workspace = skypilot_config.get_active_workspace(
                         force_user_workspace=True)
                     entrypoint = common_utils.get_current_command()
