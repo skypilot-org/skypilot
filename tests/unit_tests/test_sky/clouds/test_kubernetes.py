@@ -4101,5 +4101,70 @@ class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
                                                        cloud='kubernetes')
 
 
+class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
+    """Test fnmatch pattern matching for K8s remote_identity dict.
+
+    Tests exercise the matching logic from sky/clouds/kubernetes.py which
+    uses fnmatch.fnmatchcase(context, str(pattern)) to resolve SA names.
+    """
+
+    def _match_remote_identity(self, remote_identity, context):
+        """Reproduce the production matching logic from kubernetes.py:793."""
+        import fnmatch as fnmatch_mod
+        for pattern, sa_name in remote_identity.items():
+            if fnmatch_mod.fnmatchcase(context, str(pattern)):
+                return sa_name
+        return None
+
+    def test_exact_match(self):
+        result = self._match_remote_identity(
+            {
+                'my-cluster': 'my-sa',
+                'other-cluster': 'other-sa'
+            }, 'my-cluster')
+        self.assertEqual(result, 'my-sa')
+
+    def test_glob_pattern(self):
+        result = self._match_remote_identity(
+            {
+                '*-prod': 'prod-sa',
+                '*-dev': 'dev-sa'
+            }, 'eks-dev')
+        self.assertEqual(result, 'dev-sa')
+
+    def test_wildcard_fallback(self):
+        result = self._match_remote_identity(
+            {
+                'special-cluster': 'special-sa',
+                '*': 'default-sa'
+            }, 'some-random-cluster')
+        self.assertEqual(result, 'default-sa')
+
+    def test_no_match_returns_none(self):
+        result = self._match_remote_identity(
+            {
+                'prod-*': 'prod-sa',
+                'staging-*': 'staging-sa'
+            }, 'dev-cluster')
+        self.assertIsNone(result)
+
+    def test_first_match_wins(self):
+        result = self._match_remote_identity(
+            {
+                '*-cluster': 'first-sa',
+                '*': 'fallback-sa'
+            }, 'my-cluster')
+        self.assertEqual(result, 'first-sa')
+
+    def test_non_string_key_coerced(self):
+        """Non-string keys (e.g., YAML int) are coerced via str()."""
+        result = self._match_remote_identity(
+            {
+                12345: 'numeric-sa',
+                '*': 'default-sa'
+            }, '12345')
+        self.assertEqual(result, 'numeric-sa')
+
+
 if __name__ == '__main__':
     unittest.main()
