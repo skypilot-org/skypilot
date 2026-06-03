@@ -3164,6 +3164,23 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
                 'Use the appropriate endpoint instead.')
             return
 
+        # Enforce the server's vm_ssh_proxy_mode policy.
+        proxy_mode = server_config.load_vm_ssh_proxy_mode()
+        if proxy_mode == server_config.VmSshProxyMode.NONE:
+            await websocket.close(
+                code=1008,
+                reason='VM SSH proxy is disabled on this server '
+                '(vm_proxy_mode: none).')
+            return
+        if (proxy_mode == server_config.VmSshProxyMode.ONLY_INTERNAL and
+                not handle.use_internal_ips()):
+            await websocket.close(
+                code=1008,
+                reason=f'Cluster {cluster_name} does not use internal IPs '
+                'and vm_proxy_mode is only-internal. '
+                'Connect directly instead.')
+            return
+
         runners = handle.get_command_runners()
         if worker >= len(runners):
             await websocket.close(
@@ -3224,7 +3241,7 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
             async def close_stdin() -> None:
                 stdin.close()
 
-            ssh_failed = await _run_websocket_proxy(
+            ssh_failed = await websocket_utils.run_websocket_proxy(
                 websocket,
                 read_from_backend=lambda: stdout.read(4096),
                 write_to_backend=write_and_drain,

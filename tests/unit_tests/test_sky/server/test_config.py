@@ -636,3 +636,61 @@ class TestExtractUserFromHeader:
         user = _extract_user_from_header(request, proxy_config)
 
         assert user is None
+
+
+class TestLoadVmSshProxyMode:
+    """Test cases for load_vm_ssh_proxy_mode function."""
+
+    def setup_method(self):
+        config.load_vm_ssh_proxy_mode.cache_clear()
+
+    def teardown_method(self):
+        config.load_vm_ssh_proxy_mode.cache_clear()
+
+    def test_default_is_only_internal(self):
+        mock_cfg = _mock_server_config({})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_cfg):
+            mode = config.load_vm_ssh_proxy_mode()
+        assert mode == config.VmSshProxyMode.ONLY_INTERNAL
+
+    def test_load_none_mode(self):
+        mock_cfg = _mock_server_config({'ssh': {'vm_proxy_mode': 'none'}})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_cfg):
+            mode = config.load_vm_ssh_proxy_mode()
+        assert mode == config.VmSshProxyMode.NONE
+
+    def test_load_all_mode(self):
+        mock_cfg = _mock_server_config({'ssh': {'vm_proxy_mode': 'all'}})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_cfg):
+            mode = config.load_vm_ssh_proxy_mode()
+        assert mode == config.VmSshProxyMode.ALL
+
+    def test_load_only_internal_mode(self):
+        mock_cfg = _mock_server_config(
+            {'ssh': {
+                'vm_proxy_mode': 'only-internal'
+            }})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_cfg):
+            mode = config.load_vm_ssh_proxy_mode()
+        assert mode == config.VmSshProxyMode.ONLY_INTERNAL
+
+    def test_invalid_value_falls_back_to_default(self):
+        mock_cfg = _mock_server_config(
+            {'ssh': {
+                'vm_proxy_mode': 'invalid-mode'
+            }})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_cfg):
+            mode = config.load_vm_ssh_proxy_mode()
+        assert mode == config.VmSshProxyMode.ONLY_INTERNAL
+
+    def test_missing_ssh_section_returns_default(self):
+        mock_cfg = _mock_server_config({'auth': {}})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_cfg):
+            mode = config.load_vm_ssh_proxy_mode()
+        assert mode == config.VmSshProxyMode.ONLY_INTERNAL
