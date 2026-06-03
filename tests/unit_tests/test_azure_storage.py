@@ -35,7 +35,7 @@ def test_create_storage_account_passes_typed_model(monkeypatch):
 
     # Short-circuit the post-create role-assignment retry loop.
     monkeypatch.setattr(storage_lib.azure, 'assign_storage_account_iam_role',
-                        lambda **kwargs: None)
+                        lambda *args, **kwargs: None)
 
     store._create_storage_account('my-rg', 'myaccount')
 
