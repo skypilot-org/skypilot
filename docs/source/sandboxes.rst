@@ -63,37 +63,58 @@ Use cases
 Quickstart
 ----------
 
-A sandbox is a pod you create, run commands in, and terminate. Once the SkyPilot
-CLI and the bundled Sandbox SDK are installed, that is the whole loop:
+A sandbox is an isolated pod you create, run commands in, and terminate. Once
+the SkyPilot CLI and the bundled Sandbox SDK are installed, that is the whole
+loop:
 
-.. code-block:: python
+.. tab-set::
 
-   import sky.sandbox
+    .. tab-item:: CLI
 
-   # Create a sandbox from the built-in `default` pool.
-   sb = sky.sandbox.create(name='dev')
+        ``sky sandbox create`` provisions a sandbox and drops you straight into
+        an interactive shell; exit the shell and the sandbox is destroyed.
 
-   # Run a command (argv tokens, no implicit shell); get
-   # stdout / stderr / exit_code back.
-   result = sb.exec('python', '-c', 'print(2 ** 10)')
-   print(result['stdout'])  # 1024
+        .. code-block:: console
 
-   # Tear it down.
-   sb.terminate()
+            # Create a sandbox and drop into a shell (destroyed on exit).
+            $ sky sandbox create -n dev
+            ✓ Sandbox dev is ready. Connecting via bash...
 
-Commands are argv tokens run directly in the pod (no implicit shell). For shell
-features like pipes, globs, or env-var expansion, invoke a shell explicitly:
-``sb.exec('sh', '-c', 'echo $HOME | wc -c')``.
+            # Or keep it running with --detach, then manage it by name.
+            $ sky sandbox create --detach -n dev
+            $ sky sandbox ls
+            $ sky sandbox terminate dev
 
-Or use the context manager to terminate automatically:
+    .. tab-item:: Python
 
-.. code-block:: python
+        .. code-block:: python
 
-   import sky.sandbox
+            import sky.sandbox
 
-   with sky.sandbox.create(name='dev') as sb:
-       sb.exec('python', 'train.py')
-   # Sandbox is terminated on exit.
+            # Create a sandbox from the built-in `default` pool.
+            sb = sky.sandbox.create(name='dev')
+
+            # Run a command (argv tokens, no implicit shell); get
+            # stdout / stderr / exit_code back.
+            result = sb.exec('python', '-c', 'print(2 ** 10)')
+            print(result['stdout'])  # 1024
+
+            # Tear it down.
+            sb.terminate()
+
+        Commands are argv tokens run directly in the pod (no implicit shell).
+        For shell features like pipes, globs, or env-var expansion, invoke a
+        shell explicitly: ``sb.exec('sh', '-c', 'echo $HOME | wc -c')``.
+
+        Or use the context manager to terminate automatically:
+
+        .. code-block:: python
+
+            import sky.sandbox
+
+            with sky.sandbox.create(name='dev') as sb:
+                sb.exec('python', 'train.py')
+            # Sandbox is terminated on exit.
 
 Working with the SDK
 --------------------
@@ -166,8 +187,8 @@ sibling on a ``.aio`` attribute (``sky.sandbox.create.aio(...)``,
 ``sb.exec.aio(...)``), so the same names work in event-loop code. See the
 dashboard's **Sandboxes** page to manage pools and running sandboxes in the UI.
 
-Running AI coding agents
-------------------------
+Example: Running AI coding agents
+---------------------------------
 
 The built-in ``claude`` pool ships with `Claude Code
 <https://www.anthropic.com/claude-code>`_ installed. Give an agent its own
@@ -193,13 +214,17 @@ non-interactively:
 Each agent runs in its own pod, so many agents can work in parallel without
 sharing a filesystem or stepping on each other.
 
-Pools
------
+Advanced: Warm pools for fast provisioning
+------------------------------------------
 
-A **pool** defines the shape of a sandbox (its container image, CPU, and memory)
-and keeps a set of warm, pre-provisioned pods ready. Launching is instant:
-``create`` *claims* a ready pod from the pool, which becomes your running
-sandbox. SkyPilot ships a built-in ``default`` pool (a ``python`` image), so the
+Without a pool, ``create`` provisions a fresh pod on demand, which waits on
+Kubernetes scheduling and the container image pull. A **pool** keeps a set of
+warm, pre-provisioned pods ready, so ``create`` instead *claims* an
+already-running pod, cutting a single sandbox's launch time by more than 50%. A
+pool also fixes the shape of its sandboxes: their container image, CPU, and
+memory.
+
+SkyPilot ships a built-in ``default`` pool (a ``python`` image), so the
 quickstart above needs no setup; create your own when you need a different image
 or size.
 
