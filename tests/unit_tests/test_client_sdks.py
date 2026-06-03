@@ -8,6 +8,7 @@ build time.
 # fake_sdk is a pytest fixture; receiving it as an argument is intentional.
 # pylint: disable=redefined-outer-name
 import importlib
+import importlib.machinery
 import importlib.metadata
 import sys
 import types
@@ -21,8 +22,9 @@ _TARGET_MODULE = 'sky_fake_sdk_target'
 
 
 def _make_entry_point():
-    return importlib.metadata.EntryPoint(_SDK_NAME, _TARGET_MODULE,
-                                         'sky.client_sdks')
+    return importlib.metadata.EntryPoint(name=_SDK_NAME,
+                                         value=_TARGET_MODULE,
+                                         group='sky.client_sdks')
 
 
 class _SelectableEntryPoints(list):
@@ -49,6 +51,10 @@ def _reset_client_sdk_cache():
 def fake_sdk(monkeypatch):
     """Register a fake client SDK and the target module it aliases to."""
     target = types.ModuleType(_TARGET_MODULE)
+    # A real imported module has a populated __spec__; give the fake target one
+    # so the alias loader can preserve it (see test_resolved_sdk_keeps_spec).
+    target.__spec__ = importlib.machinery.ModuleSpec(_TARGET_MODULE,
+                                                     loader=None)
     target.create = lambda: 'created'  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, _TARGET_MODULE, target)
 
@@ -83,6 +89,34 @@ def test_from_import_resolves_sdk(fake_sdk):
     # ``from sky import fakesdk`` (exercises the from-list import machinery).
     module = __import__('sky', fromlist=[_SDK_NAME])
     assert getattr(module, _SDK_NAME) is fake_sdk
+
+
+def test_resolved_sdk_keeps_spec(fake_sdk):
+    # Aliasing must not corrupt the target module's spec: ``__name__`` and
+    # ``__spec__.name`` stay consistent (so e.g. importlib.reload still works),
+    # rather than being mutated to the ``sky.<name>`` alias name.
+    module = importlib.import_module(f'sky.{_SDK_NAME}')
+    assert module is fake_sdk
+    assert module.__spec__ is not None
+    assert module.__spec__.name == module.__name__ == _TARGET_MODULE
+
+
+def test_target_import_error_propagates(monkeypatch):
+    # A registered SDK whose target module is missing must surface the real
+    # ModuleNotFoundError, not be masked as AttributeError.
+    bad = importlib.metadata.EntryPoint(name='brokensdk',
+                                        value='sky_no_such_target_xyz',
+                                        group='sky.client_sdks')
+    monkeypatch.setattr(importlib.metadata, 'entry_points',
+                        lambda: _SelectableEntryPoints([bad]))
+    try:
+        with pytest.raises(ModuleNotFoundError):
+            getattr(sky, 'brokensdk')
+    finally:
+        # Clean up via __dict__: hasattr()/getattr() would re-trigger
+        # __getattr__ and re-raise the same ModuleNotFoundError.
+        sys.modules.pop('sky.brokensdk', None)
+        vars(sky).pop('brokensdk', None)
 
 
 @pytest.mark.usefixtures('fake_sdk')

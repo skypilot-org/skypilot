@@ -316,16 +316,28 @@ class _ClientSdkLoader(importlib.abc.Loader):
 
     def __init__(self, target_module: str) -> None:
         self._target_module = target_module
+        self._original_spec: Any = None
 
     def create_module(self, spec: Any) -> Any:
         del spec  # Unused; the module name comes from the registered target.
         # Return the target module itself so that, e.g.,
         # ``sky.foo is some_package.foo.sdk`` and it is not executed again
         # under a second name.
-        return importlib.import_module(self._target_module)
+        target = importlib.import_module(self._target_module)
+        # Capture the target's real spec now: module_from_spec() will shortly
+        # overwrite ``target.__spec__`` with this alias's spec (whose name is
+        # ``sky.<name>`` and whose loader is this object). exec_module restores
+        # it.
+        self._original_spec = getattr(target, '__spec__', None)
+        return target
 
     def exec_module(self, module: Any) -> None:
-        del module  # Already initialized by import_module in create_module.
+        # Restore the target's real spec that module_from_spec() just
+        # overwrote, so the aliased module keeps a consistent ``__name__`` /
+        # ``__spec__.name`` and stays reloadable (importlib.reload keys off
+        # ``__spec__``, not ``__name__``).
+        if self._original_spec is not None:
+            module.__spec__ = self._original_spec
 
 
 class _ClientSdkFinder(importlib.abc.MetaPathFinder):
