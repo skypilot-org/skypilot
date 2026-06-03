@@ -1,5 +1,38 @@
 import { apiClient } from '@/data/connectors/client';
 
+/**
+ * Whether a server-side pagination plugin is available for SA tokens.
+ * The pagination plugin sets this on window when its bundle is loaded.
+ */
+export function isServiceAccountTokensPaginationAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.__skyServiceAccountTokensPaginationFetch === 'function'
+  );
+}
+
+/**
+ * Server-paginated SA tokens fetch. Returns { items, total, page, limit,
+ * total_pages, has_next, has_prev }. Throws if the pagination plugin is
+ * not installed — callers should gate on
+ * isServiceAccountTokensPaginationAvailable().
+ */
+export async function getServiceAccountTokensPaginated({
+  page = 1,
+  limit = 50,
+  search = '',
+  sortBy = 'created_at',
+  sortOrder = 'desc',
+} = {}) {
+  const fetcher =
+    typeof window !== 'undefined' &&
+    window.__skyServiceAccountTokensPaginationFetch;
+  if (typeof fetcher !== 'function') {
+    throw new Error('Service account tokens pagination plugin not available');
+  }
+  return fetcher({ page, limit, search, sortBy, sortOrder });
+}
+
 export async function getServiceAccountTokens() {
   try {
     const response = await apiClient.get('/users/service-account-tokens');
@@ -14,6 +47,26 @@ export async function getServiceAccountTokens() {
     console.error('Failed to fetch service account tokens:', error);
     throw error;
   }
+}
+
+export async function batchUpdateUserRoles(userIds, role) {
+  const response = await apiClient.post('/users/batch_update', {
+    user_ids: userIds,
+    role,
+  });
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const data = await response.json();
+      detail = data?.detail || JSON.stringify(data);
+    } catch (e) {
+      detail = await response.text().catch(() => '');
+    }
+    throw new Error(
+      detail || `Batch update user roles failed with status ${response.status}`
+    );
+  }
+  return response.json();
 }
 
 export async function getUsers() {

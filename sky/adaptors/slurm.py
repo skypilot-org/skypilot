@@ -3,6 +3,7 @@
 import ipaddress
 import logging
 import re
+import shlex
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
@@ -24,6 +25,11 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 # Matches MaxTime=<time> and captures the time
 _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
 
+# Regex pattern to extract DefaultTime from scontrol output
+# Matches DefaultTime=<time>, DefaultTime=UNLIMITED, or DefaultTime=NONE.
+_DEFAULT_TIME_REGEX = re.compile(
+    r'DefaultTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED|NONE)')
+
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
 hostlist = common.LazyImport('hostlist',
@@ -39,6 +45,10 @@ class SlurmPartition(NamedTuple):
     # The maximum time a job can run in seconds.
     # None if the maximum time is unlimited.
     maxtime: Optional[int]
+    # The raw Slurm time string the partition assigns when --time is omitted
+    # (e.g. '01:00:00', '2-00:00:00'). None if the partition has no
+    # DefaultTime configured (NONE/UNLIMITED).
+    default_time: Optional[str]
 
 
 # TODO(kevin): Add more API types for other client functions.
@@ -73,6 +83,22 @@ def _parse_maxtime(line: str) -> Optional[int]:
 
     h, m, s = map(int, time_part.split(':'))
     return days * 86400 + h * 3600 + m * 60 + s
+
+
+def _parse_default_time(line: str) -> Optional[str]:
+    """Parse the DefaultTime a partition uses from the scontrol output.
+
+    Returns the raw Slurm time string (e.g. '01:00:00', '2-00:00:00') so it
+    can be passed straight through to ``--time``. Returns None when the
+    partition has no DefaultTime configured (``NONE``/``UNLIMITED``).
+    """
+    match = _DEFAULT_TIME_REGEX.search(line)
+    if not match:
+        return None
+    raw = match.group(1)
+    if raw in ('NONE', 'UNLIMITED'):
+        return None
+    return raw
 
 
 class SlurmClient:
@@ -348,8 +374,13 @@ class SlurmClient:
         """
         # Use --only-job-state since we only need the job state.
         # This reduces the work required by slurmctld.
+        # Fall back to the command without --only-job-state for older
+        # Slurm versions (< 21.08) that don't support this flag.
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0 and 'unrecognized option' in stderr:
+            cmd = f'squeue -h --jobs {job_id} -o "%T"'
+            rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -444,9 +475,12 @@ class SlurmClient:
         """
 
         cmd = (
-            f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
-            f'while read node; do '
+            # Use scontrol show hostnames to expand both compact Slurm
+            # hostlist notation (e.g. ml-16-node-[001-002]) and
+            # comma-separated nodes into individual node names.
             # TODO(kevin): Use json output for more robust parsing.
+            f'nodelist=$(squeue -h --jobs {job_id} -o "%N"); '
+            f'scontrol show hostnames $nodelist | while read -r node; do '
             f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
             f'echo "$node $node_addr"; '
@@ -586,13 +620,15 @@ class SlurmClient:
             if 'Default=YES' in line:
                 is_default = True
             maxtime = _parse_maxtime(line)
+            default_time = _parse_default_time(line)
             if match:
                 partition = match.group(1).strip()
                 if partition:
                     partitions.append(
                         SlurmPartition(name=partition,
                                        is_default=is_default,
-                                       maxtime=maxtime))
+                                       maxtime=maxtime,
+                                       default_time=default_time))
         return partitions
 
     def get_default_partition(self) -> Optional[str]:
@@ -634,3 +670,128 @@ class SlurmClient:
         if match:
             return match.group(1)
         return None
+
+    def get_select_type_parameters(self) -> Optional[str]:
+        """Get SelectTypeParameters from Slurm configuration.
+
+        See: https://slurm.schedmd.com/slurm.conf.html#OPT_SelectTypeParameters
+
+        Returns:
+            The raw value (e.g., 'CR_CPU', 'CR_CPU_Memory', 'CR_Core_Memory'),
+            or None if it cannot be determined.
+        """
+        cmd = 'scontrol show config | grep -i "^SelectTypeParameters"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.warning(f'Failed to get SelectTypeParameters: {stderr}')
+            return None
+
+        # Parse output like "SelectTypeParameters     = CR_CPU_Memory"
+        # When unset, Slurm defaults to CR_CORE_MEMORY for select/cons_tres,
+        # so this field always has a value.
+        match = re.search(r'SelectTypeParameters\s*=\s*(\S+)', stdout)
+        if match:
+            return match.group(1)
+        return None
+
+    def check_pyxis_enabled(self) -> bool:
+        """Check if the Pyxis SPANK plugin is installed.
+
+        Pyxis registers --container-* flags tagged with [pyxis] in srun
+        help output. This is a reliable way to detect the plugin without
+        requiring a job allocation.
+
+        Returns:
+            True if Pyxis is installed, False otherwise.
+        """
+        cmd = 'srun --help 2>&1 | grep -q \'\\[pyxis\\]\''
+        rc, _, _ = self._run_slurm_cmd(cmd)
+        return rc == 0
+
+    def get_env(self) -> Dict[str, str]:
+        """Fetch environment variables from the remote host.
+
+        Returns:
+            Dictionary of environment variable name -> value.
+        """
+        rc, stdout, stderr = self._run_slurm_cmd('env')
+        if rc != 0:
+            logger.warning(f'Failed to fetch remote env: {stderr}')
+            return {}
+        env: Dict[str, str] = {}
+        for line in stdout.splitlines():
+            if '=' in line:
+                key, _, value = line.partition('=')
+                env[key] = value
+        return env
+
+    def get_remote_home_dir(self) -> str:
+        """Returns the remote user's home directory."""
+        return self._runner.get_remote_home_dir()
+
+    def check_file_exists(self, path: str) -> bool:
+        """Check if a file exists on the remote host."""
+        cmd = f'test -f {shlex.quote(path)}'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc not in (0, 1):
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                f'Failed to check for file: {path}',
+                stderr=f'{stdout}\n{stderr}')
+        return rc == 0
+
+    def check_fuse_enabled(self) -> bool:
+        """Check if FUSE is available on the cluster.
+
+        FUSE is required for mounting object stores (e.g., via goofys or
+        rclone). We check for /dev/fuse which is the device node that FUSE
+        requires.
+
+        We first try to check on a compute node via srun, since that is
+        where mounts actually happen. If srun cannot allocate resources
+        (cluster is full, etc.), we fall back to checking the login node.
+
+        Returns:
+            True if FUSE is available, False otherwise.
+        """
+        # Try checking on a compute node first. We use a wrapper that
+        # prints a marker so we can distinguish "command ran and /dev/fuse
+        # is missing" from "srun itself failed to allocate".
+        srun_cmd = ('srun --immediate=10 --time=00:00:30 '
+                    'bash -c \'test -e /dev/fuse '
+                    '&& echo FUSE_OK || echo FUSE_MISSING\'')
+        rc, stdout, _ = self._run_slurm_cmd(srun_cmd)
+        stdout = stdout.strip()
+        if rc == 0 and 'FUSE_OK' in stdout:
+            return True
+        if rc == 0 and 'FUSE_MISSING' in stdout:
+            return False
+
+        # srun failed (no resources, misconfigured, etc.).
+        # Fall back to checking the login node.
+        logger.debug('srun FUSE check failed, falling back to login node')
+        cmd = 'test -e /dev/fuse'
+        rc, _, _ = self._run_slurm_cmd(cmd)
+        return rc == 0
+
+    def check_dir_shared_fs(self, path: str) -> Optional[str]:
+        """Check the filesystem type of a directory.
+
+        Args:
+            path: The directory path to check. Must be an absolute path
+                (no shell variables or ~).
+
+        Returns:
+            The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
+            or None if the check could not be performed.
+        """
+        cmd = f'stat -f -c %T {shlex.quote(path)}'
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return None
+        return stdout.strip().lower()
+
+    def check_homedir_shared_fs(self) -> Optional[str]:
+        """Check the filesystem type of the home directory."""
+        return self.check_dir_shared_fs('~')

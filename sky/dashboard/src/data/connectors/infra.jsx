@@ -7,11 +7,28 @@ import dashboardCache from '@/lib/cache';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
 /**
+ * Returns true iff `nodeData` (a `KubernetesNodeInfo`-shaped object from
+ * the API) should be excluded from free-GPU availability counts — i.e.,
+ * it's not ready, cordoned, or carries at least one taint that the
+ * configured `kubernetes.pod_config.spec.tolerations` does NOT tolerate.
+ * Taints with `tolerated: true` (set by the backend for matching
+ * tolerations) don't suppress availability.
+ */
+function isNodeNotReadyForGpus(nodeData) {
+  const isReady = nodeData['is_ready'] !== false;
+  const isCordoned = nodeData['is_cordoned'] === true;
+  const isTainted = (nodeData['taints'] || []).some(
+    (t) => t && t.tolerated !== true
+  );
+  return !isReady || isCordoned || isTainted;
+}
+
+/**
  * Fast function to get just the list of enabled clouds (without counts).
  * Used for progressive loading - display cloud rows immediately, then overlay counts.
  */
 export async function getEnabledCloudsList() {
-  const { getWorkspaces, getEnabledClouds } = await import(
+  const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );
 
@@ -26,31 +43,22 @@ export async function getEnabledCloudsList() {
       return { clouds: [], totalClouds: CLOUDS_LIST.length, enabledClouds: 0 };
     }
 
-    // Fetch enabled clouds for each workspace and aggregate
-    const enabledCloudsSet = new Set();
+    // Fetch enabled clouds for all workspaces in a single batch call
+    const batchResult = await dashboardCache.get(getEnabledCloudsBatch, [
+      workspaceNames,
+      false,
+    ]);
 
-    await Promise.all(
-      workspaceNames.map(async (workspaceName) => {
-        try {
-          const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
-            workspaceName,
-            false,
-          ]);
-          if (Array.isArray(workspaceClouds)) {
-            workspaceClouds.forEach((cloud) => {
-              if (cloud) {
-                enabledCloudsSet.add(cloud.toLowerCase());
-              }
-            });
+    const enabledCloudsSet = new Set();
+    Object.values(batchResult || {}).forEach((workspaceClouds) => {
+      if (Array.isArray(workspaceClouds)) {
+        workspaceClouds.forEach((cloud) => {
+          if (cloud) {
+            enabledCloudsSet.add(cloud.toLowerCase());
           }
-        } catch (error) {
-          console.error(
-            `Error fetching enabled clouds for workspace ${workspaceName}:`,
-            error
-          );
-        }
-      })
-    );
+        });
+      }
+    });
 
     // Build cloud objects with just name and enabled status (no counts)
     const enabledCloudsList = Array.from(enabledCloudsSet);
@@ -74,7 +82,7 @@ export async function getEnabledCloudsList() {
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
-  const { getWorkspaces, getEnabledClouds } = await import(
+  const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );
 
@@ -109,31 +117,21 @@ export async function getCloudInfrastructure(forceRefresh = false) {
       console.warn('No accessible workspaces found');
       enabledCloudsList = [];
     } else {
-      // Fetch enabled clouds for each workspace and aggregate
-      const enabledCloudsSet = new Set();
+      // Fetch enabled clouds for all workspaces in a single batch call
+      const batchResult = await dashboardCache
+        .get(getEnabledCloudsBatch, [workspaceNames, false])
+        .catch(() => ({}));
 
-      await Promise.all(
-        workspaceNames.map(async (workspaceName) => {
-          try {
-            const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
-              workspaceName,
-              false,
-            ]);
-            if (Array.isArray(workspaceClouds)) {
-              workspaceClouds.forEach((cloud) => {
-                if (cloud) {
-                  enabledCloudsSet.add(cloud.toLowerCase());
-                }
-              });
+      const enabledCloudsSet = new Set();
+      Object.values(batchResult || {}).forEach((workspaceClouds) => {
+        if (Array.isArray(workspaceClouds)) {
+          workspaceClouds.forEach((cloud) => {
+            if (cloud) {
+              enabledCloudsSet.add(cloud.toLowerCase());
             }
-          } catch (error) {
-            console.error(
-              `Error fetching enabled clouds for workspace ${workspaceName}:`,
-              error
-            );
-          }
-        })
-      );
+          });
+        }
+      });
 
       enabledCloudsList = Array.from(enabledCloudsSet);
       console.log(
@@ -244,95 +242,53 @@ export async function getWorkspaceInfrastructure() {
       };
     }
 
-    // Step 2: For each workspace, fetch enabled clouds with expanded infrastructure
-    const { getEnabledClouds } = await import('@/data/connectors/workspaces');
+    // Step 2: Fetch expanded clouds for all workspaces in a single batch call
+    const { getEnabledCloudsBatch } = await import(
+      '@/data/connectors/workspaces'
+    );
+    const workspaceNames = Object.keys(workspacesData);
+    const batchResult = await dashboardCache
+      .get(getEnabledCloudsBatch, [workspaceNames, true])
+      .catch(() => ({}));
+
     const workspaceInfraData = {};
     const allContextsAcrossWorkspaces = [];
     const contextWorkspaceMap = {};
 
-    await Promise.allSettled(
-      Object.entries(workspacesData).map(
-        async ([workspaceName, workspaceConfig]) => {
-          console.log(
-            `Fetching infrastructure for workspace: ${workspaceName}`
-          );
+    Object.entries(workspacesData).forEach(
+      ([workspaceName, workspaceConfig]) => {
+        const expandedClouds = batchResult[workspaceName] || [];
+        workspaceInfraData[workspaceName] = {
+          config: workspaceConfig,
+          clouds: expandedClouds,
+          contexts: [],
+        };
 
-          try {
-            // Get enabled clouds with expanded infrastructure for this workspace (use cache for performance)
-            console.log(
-              `[DEBUG] Fetching enabled clouds for workspace: ${workspaceName} via cache`
-            );
-            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
-              workspaceName,
-              true,
-            ]);
-            console.log(
-              `[DEBUG] Expanded clouds for ${workspaceName}:`,
-              expandedClouds
-            );
-
-            workspaceInfraData[workspaceName] = {
-              config: workspaceConfig,
-              clouds: expandedClouds,
-              contexts: [],
-            };
-
-            // Extract contexts from expanded cloud data
-            // expandedClouds is an array of strings like ['kubernetes/context1', 'SSH/pool1']
-            console.log(
-              `[DEBUG] Processing expandedClouds for ${workspaceName}:`,
-              expandedClouds
-            );
-            if (expandedClouds && Array.isArray(expandedClouds)) {
-              expandedClouds.forEach((infraItem) => {
-                console.log(`[DEBUG] Processing infraItem: ${infraItem}`);
-                if (infraItem.toLowerCase().startsWith('kubernetes/')) {
-                  const context = infraItem.replace(/^kubernetes\//i, '');
-                  console.log(
-                    `[DEBUG] Extracted kubernetes context: ${context}`
-                  );
-                  allContextsAcrossWorkspaces.push(context);
-                  if (!contextWorkspaceMap[context]) {
-                    contextWorkspaceMap[context] = [];
-                  }
-                  if (!contextWorkspaceMap[context].includes(workspaceName)) {
-                    contextWorkspaceMap[context].push(workspaceName);
-                  }
-                  workspaceInfraData[workspaceName].contexts.push(context);
-                } else if (infraItem.toLowerCase().startsWith('ssh/')) {
-                  const poolName = infraItem.replace(/^ssh\//i, '');
-                  const sshContextName = `ssh-${poolName}`;
-                  console.log(
-                    `[DEBUG] Extracted SSH context: ${sshContextName}`
-                  );
-                  allContextsAcrossWorkspaces.push(sshContextName);
-                  if (!contextWorkspaceMap[sshContextName]) {
-                    contextWorkspaceMap[sshContextName] = [];
-                  }
-                  if (
-                    !contextWorkspaceMap[sshContextName].includes(workspaceName)
-                  ) {
-                    contextWorkspaceMap[sshContextName].push(workspaceName);
-                  }
-                  workspaceInfraData[workspaceName].contexts.push(
-                    sshContextName
-                  );
-                }
-              });
-            } else {
-              console.log(
-                `[DEBUG] No expanded clouds or not an array for ${workspaceName}`
-              );
+        expandedClouds.forEach((infraItem) => {
+          if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+            const context = infraItem.replace(/^kubernetes\//i, '');
+            allContextsAcrossWorkspaces.push(context);
+            if (!contextWorkspaceMap[context]) {
+              contextWorkspaceMap[context] = [];
             }
-          } catch (error) {
-            console.error(
-              `Failed to fetch infrastructure for workspace ${workspaceName}:`,
-              error
-            );
-            throw error;
+            if (!contextWorkspaceMap[context].includes(workspaceName)) {
+              contextWorkspaceMap[context].push(workspaceName);
+            }
+            workspaceInfraData[workspaceName].contexts.push(context);
+          } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+            const poolName = infraItem.replace(/^ssh\//i, '');
+            const sshContextName = `ssh-${poolName}`;
+            allContextsAcrossWorkspaces.push(sshContextName);
+            if (!contextWorkspaceMap[sshContextName]) {
+              contextWorkspaceMap[sshContextName] = [];
+            }
+            if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
+              contextWorkspaceMap[sshContextName].push(workspaceName);
+            }
+            workspaceInfraData[workspaceName].contexts.push(sshContextName);
           }
-        }
-      )
+        });
+      }
     );
 
     // Step 3: Get detailed GPU information for all contexts
@@ -411,67 +367,53 @@ export async function getWorkspaceContexts() {
       };
     }
 
-    // Step 2: For each workspace, fetch enabled clouds with expanded infrastructure
-    const { getEnabledClouds } = await import('@/data/connectors/workspaces');
+    // Step 2: Fetch expanded clouds for all workspaces in a single batch call
+    const { getEnabledCloudsBatch } = await import(
+      '@/data/connectors/workspaces'
+    );
+    const workspaceNames = Object.keys(workspacesData);
+    const batchResult = await dashboardCache
+      .get(getEnabledCloudsBatch, [workspaceNames, true])
+      .catch(() => ({}));
+
     const workspaceInfraData = {};
     const allContextsAcrossWorkspaces = [];
     const contextWorkspaceMap = {};
 
-    await Promise.allSettled(
-      Object.entries(workspacesData).map(
-        async ([workspaceName, workspaceConfig]) => {
-          try {
-            // Get enabled clouds with expanded infrastructure for this workspace
-            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
-              workspaceName,
-              true,
-            ]);
+    Object.entries(workspacesData).forEach(
+      ([workspaceName, workspaceConfig]) => {
+        const expandedClouds = batchResult[workspaceName] || [];
+        workspaceInfraData[workspaceName] = {
+          config: workspaceConfig,
+          clouds: expandedClouds,
+          contexts: [],
+        };
 
-            workspaceInfraData[workspaceName] = {
-              config: workspaceConfig,
-              clouds: expandedClouds,
-              contexts: [],
-            };
-
-            // Extract contexts from expanded cloud data
-            if (expandedClouds && Array.isArray(expandedClouds)) {
-              expandedClouds.forEach((infraItem) => {
-                if (infraItem.toLowerCase().startsWith('kubernetes/')) {
-                  const context = infraItem.replace(/^kubernetes\//i, '');
-                  allContextsAcrossWorkspaces.push(context);
-                  if (!contextWorkspaceMap[context]) {
-                    contextWorkspaceMap[context] = [];
-                  }
-                  if (!contextWorkspaceMap[context].includes(workspaceName)) {
-                    contextWorkspaceMap[context].push(workspaceName);
-                  }
-                  workspaceInfraData[workspaceName].contexts.push(context);
-                } else if (infraItem.toLowerCase().startsWith('ssh/')) {
-                  const poolName = infraItem.replace(/^ssh\//i, '');
-                  const sshContextName = `ssh-${poolName}`;
-                  allContextsAcrossWorkspaces.push(sshContextName);
-                  if (!contextWorkspaceMap[sshContextName]) {
-                    contextWorkspaceMap[sshContextName] = [];
-                  }
-                  if (
-                    !contextWorkspaceMap[sshContextName].includes(workspaceName)
-                  ) {
-                    contextWorkspaceMap[sshContextName].push(workspaceName);
-                  }
-                  workspaceInfraData[workspaceName].contexts.push(
-                    sshContextName
-                  );
-                }
-              });
+        expandedClouds.forEach((infraItem) => {
+          if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+            const context = infraItem.replace(/^kubernetes\//i, '');
+            allContextsAcrossWorkspaces.push(context);
+            if (!contextWorkspaceMap[context]) {
+              contextWorkspaceMap[context] = [];
             }
-          } catch (error) {
-            console.error(
-              `Failed to fetch infrastructure for workspace ${workspaceName}:`,
-              error
-            );
+            if (!contextWorkspaceMap[context].includes(workspaceName)) {
+              contextWorkspaceMap[context].push(workspaceName);
+            }
+            workspaceInfraData[workspaceName].contexts.push(context);
+          } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+            const poolName = infraItem.replace(/^ssh\//i, '');
+            const sshContextName = `ssh-${poolName}`;
+            allContextsAcrossWorkspaces.push(sshContextName);
+            if (!contextWorkspaceMap[sshContextName]) {
+              contextWorkspaceMap[sshContextName] = [];
+            }
+            if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
+              contextWorkspaceMap[sshContextName].push(workspaceName);
+            }
+            workspaceInfraData[workspaceName].contexts.push(sshContextName);
           }
-        }
-      )
+        });
+      }
     );
 
     return {
@@ -503,14 +445,7 @@ export async function getContextGPUData(context) {
         const gpuName = nodeData['accelerator_type'] || '-';
         const totalCount = nodeData['total']?.['accelerator_count'] || 0;
         const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-        const isReady = nodeData['is_ready'] !== false;
-        // Check if node is cordoned (defaults to false for backward compatibility)
-        const isCordoned = nodeData['is_cordoned'] === true;
-        // Check if node has taints (defaults to empty for backward compatibility)
-        const taints = nodeData['taints'] || [];
-        const isTainted = taints.length > 0;
-        // Node is considered not ready if it's not ready, cordoned, or tainted
-        const isNodeNotReady = !isReady || isCordoned || isTainted;
+        const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
         // Per-node data - use same field names as original getKubernetesGPUsFromContexts
         perNodeGPUs.push({
@@ -518,9 +453,9 @@ export async function getContextGPUData(context) {
           gpu_name: gpuName,
           gpu_total: totalCount,
           gpu_free: freeCount,
-          is_ready: isReady,
-          is_cordoned: isCordoned,
-          taints: taints,
+          is_ready: nodeData['is_ready'] !== false,
+          is_cordoned: nodeData['is_cordoned'] === true,
+          taints: nodeData['taints'] || [],
           context: context,
           ip_address: nodeData['ip_address'] || null,
           cpu_count: nodeData['cpu_count'] ?? null,
@@ -640,15 +575,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-          // Check if node is ready (defaults to true for backward compatibility)
-          const isReady = nodeData['is_ready'] !== false;
-          // Check if node is cordoned (defaults to false for backward compatibility)
-          const isCordoned = nodeData['is_cordoned'] === true;
-          // Check if node has taints (defaults to empty for backward compatibility)
-          const taints = nodeData['taints'] || [];
-          const isTainted = taints.length > 0;
-          // Node is considered not ready if it's not ready, cordoned, or tainted
-          const isNodeNotReady = !isReady || isCordoned || isTainted;
+          const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {

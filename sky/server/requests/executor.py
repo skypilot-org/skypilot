@@ -23,7 +23,6 @@ import concurrent.futures
 import contextlib
 import multiprocessing
 import os
-import queue as queue_lib
 import signal
 import sys
 import threading
@@ -39,20 +38,22 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
-from sky.server.requests.queues import local_queue
-from sky.server.requests.queues import mp_queue
+from sky.server.requests.queues import base as queue_base
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -111,30 +112,30 @@ def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
 
 
 class RequestQueue:
-    """The queue for the requests, either redis or multiprocessing.
+    """The queue for the requests.
 
-    The elements in the queue are tuples of (request_id, ignore_return_value).
+    Wraps a QueueBackend instance. The elements in the queue are tuples of
+    (request_id, ignore_return_value, retryable).
     """
 
-    def __init__(self,
-                 schedule_type: api_requests.ScheduleType,
-                 backend: Optional[server_config.QueueBackend] = None) -> None:
-        self.name = schedule_type.value
-        self.backend = backend
-        if backend == server_config.QueueBackend.MULTIPROCESSING:
-            self.queue = mp_queue.get_queue(self.name)
-        elif backend == server_config.QueueBackend.LOCAL:
-            self.queue = local_queue.get_queue(self.name)
-        else:
-            raise RuntimeError(f'Invalid queue backend: {backend}')
+    def __init__(self, queue_backend_impl: queue_base.QueueBackend) -> None:
+        self._backend = queue_backend_impl
 
     def put(self, request: Tuple[str, bool, bool]) -> None:
-        """Put and request to the queue.
+        """Put a request to the queue.
 
         Args:
             request: A tuple of request_id, ignore_return_value, and retryable.
         """
-        self.queue.put(request)  # type: ignore
+        self._backend.put(request)
+
+    async def put_async(self, request: Tuple[str, bool, bool]) -> None:
+        """Put a request to the queue, async.
+
+        Args:
+            request: A tuple of request_id, ignore_return_value, and retryable.
+        """
+        await self._backend.put_async(request)
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.
@@ -144,24 +145,26 @@ class RequestQueue:
         Returns:
             A tuple of request_id, ignore_return_value, and retryable.
         """
-        try:
-            return self.queue.get(block=False)
-        except queue_lib.Empty:
-            return None
+        return self._backend.get()
 
     def __len__(self) -> int:
         """Get the length of the queue."""
-        return self.queue.qsize()
+        return self._backend.qsize()
 
 
-queue_backend = server_config.QueueBackend.MULTIPROCESSING
+# The active queue factory, set during start().
+_queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     # Load plugins for executor process.
-    plugins.load_plugins(plugins.ExtensionContext())
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.EXECUTOR))
+    # Same rationale as in sky.server.uvicorn.Server.run: reap this
+    # executor's prometheus multiproc files when it exits.
+    metrics_lib.register_multiproc_cleanup_atexit()
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -218,10 +221,16 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id, fields=['status'])
+            request = api_requests.get_request(request_id,
+                                               fields=['status', 'created_at'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
+            if metrics_utils.METRICS_ENABLED:
+                metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
+                    schedule_type=self.schedule_type.value,).observe(
+                        max(0,
+                            time.time() - request.created_at))
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
@@ -339,7 +348,42 @@ class RequestWorker:
 
 @annotations.lru_cache(scope='global', maxsize=None)
 def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
-    return RequestQueue(schedule_type, backend=queue_backend)
+    factory = _queue_factory
+    if factory is None:
+        factory = queue_base.get_queue_backend_factory()
+    assert factory is not None
+    return RequestQueue(factory.create_queue(schedule_type.value))
+
+
+def _should_apply_workspace_resolver(is_daemon: bool,
+                                     client_api_version: Optional[int]) -> bool:
+    """Returns True iff the per-user workspace resolver should run for
+    this request. Three gates, in order:
+
+      (a) skip daemons / system-user requests — the system user is admin
+          and would land on 'default' via the default-fallback step
+          anyway; the resolver would add a DB read + permission check per
+          daemon tick (thousands per hour) for zero behavioral change.
+      (b) skip when the client API version is below the version that
+          added /users/me/workspace + WorkspaceAmbiguousError handling —
+          old clients wouldn't know how to interpret the new error
+          format, so preserve the legacy permission-denied path that
+          they already handle. The version travels on the RequestBody
+          itself (`client_api_version` field) so it is available in the
+          worker process; `versions.get_remote_api_version()` returns
+          None in workers because the underlying ContextVar set by
+          APIVersionMiddleware does not propagate across process
+          boundaries.
+      (c) skip when active_workspace was explicitly set on the wire
+          (anywhere in the merged config) — respect explicit user intent;
+          preferred MUST be ignored when the user names a workspace.
+    """
+    if is_daemon:
+        return False
+    if (client_api_version is None or client_api_version <
+            server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION):
+        return False
+    return not skypilot_config.is_active_workspace_set()
 
 
 @contextlib.contextmanager
@@ -347,30 +391,62 @@ def override_request_env_and_config(
         request_body: payloads.RequestBody, request_id: str,
         request_name: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
+    # Daemons run AS the server, not as any client. Their persisted
+    # request_body.env_vars came from whichever pod first scheduled them,
+    # which may be a previous deployment generation with stale downward-API
+    # values (e.g. SKYPILOT_POD_MEMORY_BYTES_LIMIT, SKYPILOT_APISERVER_UUID).
+    # Overlaying those would clobber the current pod's actual values. So
+    # for daemons, skip the env overlay and use the current process's
+    # os.environ.
+    is_daemon = daemons.is_daemon_request_id(request_id)
     original_env = os.environ.copy()
     try:
-        # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API
-        # server affecting client requests. If set on the client side, it will
-        # be overridden by the request body.
-        os.environ.pop('SKYPILOT_DEBUG', None)
-        # Remove the db connection uri from client supplied env vars, as the
-        # client should not set the db string on server side.
-        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
-        os.environ.update(request_body.env_vars)
-        # Note: may be overridden by AuthProxyMiddleware.
-        # TODO(zhwu): we need to make the entire request a context available to
-        # the entire request execution, so that we can access info like user
-        # through the execution.
-        user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                           name=request_body.env_vars[constants.USER_ENV_VAR])
-        _, user = global_user_state.add_or_update_user(user, return_user=True)
+        if is_daemon:
+            # The SkyPilot system user is already upserted at scheduling
+            # time by prepare_request_async when is_skypilot_system=True,
+            # so no add_or_update_user round-trip is needed per tick.
+            user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID,
+                               name=constants.SKYPILOT_SYSTEM_USER_ID,
+                               user_type=models.UserType.SYSTEM.value)
+            # Daemons always run in-process on the server, regardless of
+            # what the persisted body recorded.
+            using_remote_api_server = False
+        else:
+            # Unset SKYPILOT_DEBUG by default, to avoid the value set on the
+            # API server affecting client requests. If set on the client
+            # side, it will be overridden by the request body.
+            os.environ.pop('SKYPILOT_DEBUG', None)
+            # Remove the db connection uri from client supplied env vars, as
+            # the client should not set the db string on server side.
+            request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+            # Remove the in-cluster context name from client supplied env
+            # vars. When a client runs inside a Kubernetes pod (e.g., a
+            # managed job with api_server_access), its env has
+            # SKYPILOT_IN_CLUSTER_CONTEXT_NAME set pod template. If this
+            # leaks into the server's os.environ, it causes the server to
+            # attempt in-cluster auth (load_incluster_config) instead of
+            # using its own kubeconfig, which fails when the server is not
+            # running in a Kubernetes pod.
+            request_body.env_vars.pop(
+                kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
+            os.environ.update(request_body.env_vars)
+            # Note: may be overridden by AuthProxyMiddleware.
+            # TODO(zhwu): we need to make the entire request a context
+            # available to the entire request execution, so that we can
+            # access info like user through the execution.
+            user = models.User(
+                id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                name=request_body.env_vars[constants.USER_ENV_VAR])
+            _, user = global_user_state.add_or_update_user(user,
+                                                           return_user=True)
+            using_remote_api_server = request_body.using_remote_api_server
 
         # Force color to be enabled.
         os.environ['CLICOLOR_FORCE'] = '1'
         server_common.reload_for_new_request(
             client_entrypoint=request_body.entrypoint,
             client_command=request_body.entrypoint_command,
-            using_remote_api_server=request_body.using_remote_api_server,
+            using_remote_api_server=using_remote_api_server,
             user=user,
             request_id=request_id)
         logger.debug(
@@ -381,20 +457,51 @@ def override_request_env_and_config(
             # Skip permission check for sky.workspaces.get request
             # as it is used to determine which workspaces the user
             # has access to.
-            if request_name != 'sky.workspaces.get':
-                try:
-                    # Reject requests that the user does not have permission
-                    # to access.
-                    workspaces_core.reject_request_for_unauthorized_workspace(
+            if request_name == 'sky.workspaces.get':
+                logger.debug(f'{request_id} skipping workspace check for '
+                             f'{request_name}')
+                yield
+            else:
+                # If the client did not explicitly set active_workspace,
+                # resolve it from the user's memberships (preferred ->
+                # default if accessible -> single-membership) instead of
+                # always landing on the bare 'default' literal. Explicit
+                # intent (any value, including 'default') is passed through
+                # unchanged. See _should_apply_workspace_resolver for the
+                # exact gate conditions (daemon skip, client API version,
+                # explicit-intent respect).
+                workspace_ctx: contextlib.AbstractContextManager = (
+                    contextlib.nullcontext())
+                # Read the client's API version from the request body, not
+                # from versions.get_remote_api_version() — the ContextVar
+                # the latter reads is set by APIVersionMiddleware in the
+                # FastAPI async context but does not propagate into worker
+                # processes (BurstableExecutor = ProcessPoolExecutor).
+                client_api_version = getattr(request_body, 'client_api_version',
+                                             None)
+                if _should_apply_workspace_resolver(is_daemon,
+                                                    client_api_version):
+                    resolution = workspaces_core.resolve_workspace_for_user(
                         user)
-                except exceptions.PermissionDeniedError as e:
-                    logger.debug(
-                        f'{request_id} permission denied to workspace: '
-                        f'{skypilot_config.get_active_workspace()}: {e}')
-                    raise e
-            logger.debug(
-                f'{request_id} permission granted to {request_name} request')
-            yield
+                    workspace_ctx = (skypilot_config.local_active_workspace_ctx(
+                        resolution.workspace))
+                    logger.debug(f'{request_id} resolved workspace '
+                                 f'{resolution.workspace!r} from '
+                                 f'{resolution.source} for user {user.name}')
+                with workspace_ctx:
+                    try:
+                        # Reject requests that the user does not have
+                        # permission to access.
+                        workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
+                            user)
+                    except exceptions.PermissionDeniedError as e:
+                        logger.debug(
+                            f'{request_id} permission denied to workspace: '
+                            f'{skypilot_config.get_active_workspace()}: {e}')
+                        raise e
+                    logger.debug(f'{request_id} permission granted to '
+                                 f'{request_name} request')
+                    yield
     finally:
         # We need to call the save_timeline() since atexit will not be
         # triggered as multiple requests can be sharing the same process.
@@ -402,7 +509,11 @@ def override_request_env_and_config(
         # Restore the original environment variables, so that a new request
         # won't be affected by the previous request, e.g. SKYPILOT_DEBUG
         # setting, etc. This is necessary as our executor is reusing the
-        # same process for multiple requests.
+        # same process for multiple requests. The daemon path also relies
+        # on this: daemons mutate os.environ from inside the with block
+        # (e.g. setting SKYPILOT_DISABLE_LOGGING in
+        # InternalRequestDaemon.run_event), and that mutation must not
+        # leak to whichever request the worker handles next.
         os.environ.clear()
         os.environ.update(original_env)
 
@@ -496,7 +607,13 @@ def _request_execution_wrapper(request_id: str,
             # captured in the log file.
             _redirect_output(f)
 
-            with sky_logging.add_debug_log_handler(request_id), \
+            # Skip debug logging for daemon requests since the daemon
+            # requests has its own log level config and we don't want to
+            # duplicate the daemon logs.
+            debug_log_ctx = (contextlib.nullcontext()
+                             if daemons.is_daemon_request_id(request_id) else
+                             sky_logging.add_debug_log_handler(request_id))
+            with debug_log_ctx, \
                 override_request_env_and_config(
                     request_body, request_id, request_name), \
                 tempstore.tempdir():
@@ -752,16 +869,28 @@ async def prepare_request_async(
             models.User(id=user_id,
                         name=user_id,
                         user_type=models.UserType.SYSTEM.value))
-    request = api_requests.Request(request_id=request_id,
-                                   name=server_constants.REQUEST_NAME_PREFIX +
-                                   request_name,
-                                   entrypoint=func,
-                                   request_body=request_body,
-                                   status=api_requests.RequestStatus.PENDING,
-                                   created_at=time.time(),
-                                   schedule_type=schedule_type,
-                                   user_id=user_id,
-                                   cluster_name=request_cluster_name)
+    # Capture the client's API version from the FastAPI dispatch context
+    # into the request body so it survives the process boundary into the
+    # worker that runs the request. APIVersionMiddleware set the
+    # ContextVar from the X-SkyPilot-API-Version header; reading it here
+    # (still in the async dispatch process) and stamping the body is the
+    # one place where header -> body translation happens, so neither the
+    # Python SDK nor the dashboard need their own stamping logic. Old
+    # clients (no header) yield None, which the worker-side gate treats
+    # as "skip the workspace resolver".
+    request_body.client_api_version = versions.get_remote_api_version()
+    request = api_requests.Request(
+        request_id=request_id,
+        name=server_constants.REQUEST_NAME_PREFIX + request_name,
+        entrypoint=func,
+        request_body=request_body,
+        status=api_requests.RequestStatus.PENDING,
+        created_at=time.time(),
+        schedule_type=schedule_type,
+        user_id=user_id,
+        cluster_name=request_cluster_name,
+        file_mounts_blob_id=getattr(request_body, 'file_mounts_blob_id', None),
+    )
 
     if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
@@ -812,15 +941,15 @@ async def schedule_request_async(
                                                schedule_type,
                                                is_skypilot_system,
                                                auth_user=auth_user)
-    schedule_prepared_request(request_task, ignore_return_value, precondition,
-                              retryable)
+    await schedule_prepared_request(request_task, ignore_return_value,
+                                    precondition, retryable)
 
 
-def schedule_prepared_request(request_task: api_requests.Request,
-                              ignore_return_value: bool = False,
-                              precondition: Optional[
-                                  preconditions.Precondition] = None,
-                              retryable: bool = False) -> None:
+async def schedule_prepared_request(request_task: api_requests.Request,
+                                    ignore_return_value: bool = False,
+                                    precondition: Optional[
+                                        preconditions.Precondition] = None,
+                                    retryable: bool = False) -> None:
     """Enqueue a request to the request queue
 
     Args:
@@ -834,16 +963,21 @@ def schedule_prepared_request(request_task: api_requests.Request,
         retryable: Whether the request should be retried if it fails.
     """
 
-    def enqueue():
+    async def enqueue():
         input_tuple = (request_task.request_id, ignore_return_value, retryable)
         logger.info(f'Queuing request: {request_task.request_id}')
-        _get_queue(request_task.schedule_type).put(input_tuple)
+        await _get_queue(request_task.schedule_type).put_async(input_tuple)
 
     if precondition is not None:
-        # Wait async to avoid blocking caller.
-        precondition.wait_async(on_condition_met=enqueue)
+        # Schedule precondition wait as a background task so the caller
+        # returns immediately.  The task reference is stored in a
+        # module-level set to prevent garbage collection.
+        task = asyncio.create_task(
+            precondition.wait_async(on_condition_met=enqueue))
+        preconditions.background_tasks.add(task)
+        task.add_done_callback(preconditions.background_tasks.discard)
     else:
-        enqueue()
+        await enqueue()
 
 
 def start(
@@ -858,35 +992,19 @@ def start(
         A tuple of the queue server process and the list of request worker
         threads.
     """
-    global queue_backend
-    queue_backend = config.queue_backend
-    queue_server = None
-    # Setup the queues.
-    if queue_backend == server_config.QueueBackend.MULTIPROCESSING:
-        logger.info('Creating shared request queues')
-        queue_names = [
-            schedule_type.value for schedule_type in api_requests.ScheduleType
-        ]
-        # TODO(aylei): make queue manager port configurable or pick an available
-        # port automatically.
-        port = mp_queue.DEFAULT_QUEUE_MANAGER_PORT
-        if not common_utils.is_port_available(port):
-            raise RuntimeError(
-                f'SkyPilot API server fails to start as port {port!r} is '
-                'already in use by another process.')
-        queue_server = multiprocessing.Process(
-            target=mp_queue.start_queue_manager, args=(queue_names, port))
-        queue_server.start()
-        mp_queue.wait_for_queues_to_be_ready(queue_names,
-                                             queue_server,
-                                             port=port)
-    elif queue_backend == server_config.QueueBackend.LOCAL:
-        # No setup is needed for local queue backend.
-        pass
+    global _queue_factory
+    factory = queue_base.get_queue_backend_factory()
+    # Use specified factory if any, and fallback to default impl
+    if factory is not None:
+        _queue_factory = factory
+    elif config.queue_backend == server_config.QueueBackend.MULTIPROCESSING:
+        _queue_factory = queue_base.MultiprocessingQueueFactory()
+    elif config.queue_backend == server_config.QueueBackend.LOCAL:
+        _queue_factory = queue_base.LocalQueueFactory()
     else:
-        # Should be checked earlier, but just in case.
-        raise RuntimeError(f'Invalid queue backend: {queue_backend}')
+        raise RuntimeError(f'Invalid queue backend: {config.queue_backend}')
 
+    queue_server = _queue_factory.start()
     logger.info('Request queues created')
 
     workers = []

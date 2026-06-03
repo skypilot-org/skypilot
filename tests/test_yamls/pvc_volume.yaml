@@ -3,7 +3,10 @@ resources:
   cpus: 0.1+
 volumes:
   /mnt/data0: pvc0
-  /mnt/data1: existing0
+  /mnt/data1:
+    name: existing0
+    sub_path: subdir/path
+  /mnt/data5: vol-existing1
   /mnt/data2:
     size: 1Gi
     labels:
@@ -23,3 +26,6 @@ run: |
   df -h /mnt/data1 || (echo "df failed" && exit 1)
   touch /mnt/data1/1.txt || (echo "touch failed" && exit 1)
   ls -lart /mnt/data1 || (echo "ls failed" && exit 1)
+  df -h /mnt/data5 || (echo "df failed" && exit 1)
+  touch /mnt/data5/3.txt || (echo "touch failed" && exit 1)
+  ls -lart /mnt/data5 || (echo "ls failed" && exit 1)

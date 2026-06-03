@@ -12,10 +12,10 @@ import yaml
 
 from sky import sky_logging
 from sky.adaptors import kubernetes
-from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import directory_utils
+from sky.utils import gpu_names
 from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -130,7 +130,7 @@ def label(context: Optional[str] = None,
             # Render the Jinja2 template with canonical GPU names
             template = jinja2.Template(template_content)
             manifest_content = template.render(
-                canonical_gpu_names=kubernetes_constants.CANONICAL_GPU_NAMES)
+                canonical_gpu_names=gpu_names.CANONICAL_GPU_NAMES)
         except jinja2.TemplateError as e:
             print(f'Error rendering GPU labeler template: {e}', flush=True)
             return False
@@ -316,7 +316,8 @@ def label_gpus_server(context: Optional[str] = None,
         Dict with 'success' boolean and 'message' string.
     """
     # Check prerequisites
-    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context,
+                                                           cloud='kubernetes')
     if not prereq_ok:
         print(reason, flush=True)  # Will be streamed to client
         return {'success': False, 'message': reason}
@@ -374,7 +375,8 @@ def main():
         context = args.context
 
     # Check if kubectl is installed and kubeconfig is set up
-    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context,
+                                                           cloud='kubernetes')
     if not prereq_ok:
         print(reason)
         sys.exit(1)

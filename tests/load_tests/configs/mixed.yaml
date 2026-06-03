@@ -1,0 +1,68 @@
+# Example config combining all three load modes against a remote API server.
+#
+# Run with:
+#   python tests/load_tests/benchmark_ctl.py \
+#       --config tests/load_tests/configs/mixed.yaml \
+#       --target-endpoint http://user:pass@your-api-server
+#
+# Notes
+# - For HTTP basic auth, embed user:pass@ in the endpoint URL.
+# - For service-account auth, set target.service_account_token (sky_...).
+# - QPS target_qps is GLOBAL: it is split evenly across worker VMs.
+
+target:
+  endpoint: "http://CHANGE_ME"
+  service_account_token: null
+  cloud: kubernetes
+
+workers:
+  count: 8
+  cloud: aws
+  cpus: 8
+  memory: 16
+  reuse: false
+  cleanup: false
+
+# Wall-clock fence for QPS + long_conn generators. Shell generators run to
+# completion bounded by their own timeout_per_run_s.
+duration_s: 600
+
+victim_pool:
+  enabled: true
+  count: 2
+  cloud: kubernetes
+  cpus: 2
+  memory: 4
+  name_prefix: bench-victim
+  provision: true
+  teardown: true
+
+generators:
+  # Heavy lifecycle pressure (slow, closed-loop).
+  - name: shell-lifecycle
+    type: shell
+    workload: workloads/basic.sh
+    threads_per_worker: 10
+    repeats: 2
+    phases: [cluster, jobs]
+    timeout_per_run_s: 3600
+
+  # Constant-rate short reads (open-loop, won't stall on slow ops above).
+  - name: api-read-qps
+    type: qps
+    target_qps: 30
+    max_inflight_per_worker: 20
+    operations:
+      - op: status
+        weight: 5
+
+  # Concurrent long-lived sessions to victims.
+  - name: long-connections
+    type: long_conn
+    health_check_interval_s: 30
+    reconnect_on_drop: true
+    protocols:
+      - kind: ssh_idle
+        connections_per_worker: 10
+      - kind: logs_follow
+        connections_per_worker: 10

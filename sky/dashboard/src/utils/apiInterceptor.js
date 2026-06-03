@@ -37,6 +37,19 @@ function isStaticAssetRequest(input) {
   return staticPatterns.some((pattern) => url.includes(pattern));
 }
 
+// AbortController.abort() and React unmount-driven cancellation both
+// throw a DOMException with name 'AbortError'. They never indicate
+// a server problem.
+function isAbortError(error) {
+  return (
+    error &&
+    (error.name === 'AbortError' ||
+      (typeof DOMException !== 'undefined' &&
+        error instanceof DOMException &&
+        error.code === DOMException.ABORT_ERR))
+  );
+}
+
 /**
  * Wraps fetch to intercept 503 responses and report upgrade status
  */
@@ -48,7 +61,34 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
     try {
       response = await originalFetch(input, init);
     } catch (error) {
-      // Network errors or other fetch failures - don't intercept
+      // Network errors on non-static, non-cancelled, foreground
+      // requests likely indicate the server is down during an
+      // upgrade — especially under the Recreate deployment strategy
+      // where there's a gap between the old pod dying and the new
+      // pod starting (so we get connection refused, not 503).
+      //
+      // Filter out benign throws that don't represent server health:
+      //   - AbortError: caller cancelled (page nav, React unmount,
+      //     superseded poll).
+      //   - Static assets: noisy, and a stale 503 here doesn't tell
+      //     us the API is down.
+      //   - Tab hidden: iOS Safari aborts pending fetches as
+      //     `TypeError: Load failed` when the user switches apps.
+      //     The page just lost foreground; not an upgrade signal.
+      try {
+        const tabHidden =
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'hidden';
+        if (
+          !isAbortError(error) &&
+          !isStaticAssetRequest(input) &&
+          !tabHidden
+        ) {
+          reportUpgrade();
+        }
+      } catch (e) {
+        console.error('Error in upgrade detection interceptor:', e);
+      }
       throw error;
     }
 
@@ -59,24 +99,14 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
         return response;
       }
 
-      // Check if this is a 503 response indicating server upgrade
+      // Check if this is a 503 response indicating server upgrade.
+      // This can come from the SkyPilot API server's
+      // GracefulShutdownMiddleware (JSON with detail message) or from
+      // the NGINX ingress controller when no backends are available
+      // (typically an HTML error page). Both cases indicate the server
+      // is unavailable during an upgrade.
       if (response.status === 503) {
-        // Try to read the response to check if it's an upgrade message
-        const clonedResponse = response.clone();
-        try {
-          const data = await clonedResponse.json();
-          if (
-            data.detail &&
-            (data.detail.includes('shutting down') ||
-              data.detail.includes('try again later'))
-          ) {
-            reportUpgrade();
-          }
-        } catch (e) {
-          // If we can't parse JSON, it's probably not an API response
-          // (could be a script load failure), so ignore it
-          console.debug('Non-JSON 503 response, ignoring.');
-        }
+        reportUpgrade();
       } else if (
         response.ok ||
         (response.status >= 200 && response.status < 300)

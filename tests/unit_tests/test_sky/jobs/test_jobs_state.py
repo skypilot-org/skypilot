@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import datetime
 import time
 from unittest import mock
 
@@ -35,8 +36,8 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(state.migration_utils, 'db_lock', _tmp_db_lock)
 
     # Monkeypatch module-level engines used by state
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE', engine)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE_ASYNC', async_engine)
+    monkeypatch.setattr(state._db_manager, '_engine', engine)
+    monkeypatch.setattr(state._db_manager, '_engine_async', async_engine)
 
     # Create schema
     state.create_table(engine)
@@ -153,7 +154,11 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
             'job_id5': job_id5,
         }
 
-    return asyncio.get_event_loop().run_until_complete(create_job_states())
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
 
 
 class TestMapResponseFieldToDbColumn:
@@ -338,7 +343,11 @@ class TestGetManagedJobsHighestPriority:
                                         500)
             state.scheduler_set_done(job_id3)
 
-        asyncio.get_event_loop().run_until_complete(setup_jobs())
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(setup_jobs())
+        finally:
+            loop.close()
 
         priority = state.get_managed_jobs_highest_priority()
         # Should return 250 (highest among WAITING and LAUNCHING jobs)
@@ -705,3 +714,69 @@ class TestGetManagedJobsWithFilters:
         # All jobs have workspaces starting with 'ws'
         assert len(jobs) == 5
         assert total == 5
+
+
+class TestGetLatestRecoveryReasons:
+    """Tests for get_latest_recovery_reasons."""
+
+    def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
+        assert state.get_latest_recovery_reasons([]) == {}
+
+    def test_latest_reason_wins_and_filters(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # Job 1: two RECOVERING events -> the latest reason wins.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'older reason',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'OOMKilled (exit code 137)',
+                            timestamp=late)
+        # Job 2: a RUNNING event is ignored; only the RECOVERING reason returns.
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job has recovered',
+                            timestamp=late)
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'preempted',
+                            timestamp=early)
+        # Job 3 has a RECOVERING event but is not requested.
+        state.add_job_event(3,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'unrelated',
+                            timestamp=late)
+        result = state.get_latest_recovery_reasons([1, 2])
+        assert result == {
+            1: 'OOMKilled (exit code 137)',
+            2: 'preempted',
+        }
+
+    def test_empty_reason_skipped(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # The most recent RECOVERING event has an empty reason -> fall back to
+        # the most recent non-empty one.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'real reason',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            '',
+                            timestamp=late)
+        assert state.get_latest_recovery_reasons([1]) == {1: 'real reason'}
+
+    def test_no_recovering_events_returns_empty(self,
+                                                _mock_managed_jobs_db_conn):
+        state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
+        assert state.get_latest_recovery_reasons([1]) == {}

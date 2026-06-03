@@ -6,7 +6,7 @@ import os
 import tempfile
 import time
 import typing
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 
@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -30,9 +31,25 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
-    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
-os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
+# Catalogs are a regeneratable cache, downloaded from the hosted catalog
+# mirror on first read. Route them through SKY_RUNTIME_DIR (per the
+# pattern documented at sky/skylet/constants.py:9-22) so they live on
+# the SKY_RUNTIME_DIR-rooted location rather than the user's $HOME. On
+# environments where $HOME is a shared NFS mount (e.g. Slurm), this
+# avoids both the SQLite-on-NFS class of issue and cross-user
+# collisions on the catalogs directory itself.
+#
+# Note: constants.CATALOG_DIR is kept at '~/.sky/catalogs' for the
+# remote_path used by get_modified_catalog_file_mounts() below, where
+# the '~' is expanded by the receiving controller pod's shell.
+_ABSOLUTE_VERSIONED_CATALOG_DIR = runtime_utils.get_runtime_dir_path(
+    os.path.join('.sky/catalogs', constants.CATALOG_SCHEMA_VERSION))
+# The catalog dir is created lazily at the call sites that actually
+# write a file (e.g. _update_catalog below, _get_az_mappings,
+# initialize_vsphere_data). Creating it eagerly at module load is
+# unnecessary FS contact, and on shared-NFS $HOME setups it used to
+# crash `import sky` outright if the dir existed but was owned by a
+# different user.
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -63,9 +80,11 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_catalog_path(filename: str) -> str:
-    catalog_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
-    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-    return catalog_path
+    # Pure path getter, no side effects. Callers that intend to write
+    # to the returned path must create the parent dir themselves. This
+    # keeps `import sky` (and read-only commands) from touching the
+    # filesystem when ~/.sky/catalogs is not writable by the caller.
+    return os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
 
 
 def is_catalog_modified(filename: str) -> bool:
@@ -115,10 +134,17 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     modified_catalog_list = _get_modified_catalogs()
     modified_catalog_path_map = {}  # Map of remote: local catalog paths
     for catalog in modified_catalog_list:
-        # Use relative paths for remote to handle varying usernames on the cloud
+        # remote_path stays as '~/.sky/catalogs/<version>/<catalog>' so the
+        # file_mounts upload lands at the controller pod's $HOME (controllers
+        # don't set SKY_RUNTIME_DIR, so its catalog lookup also resolves to
+        # $HOME via the default in runtime_utils.get_runtime_dir_path).
         remote_path = os.path.join(constants.CATALOG_DIR,
                                    constants.CATALOG_SCHEMA_VERSION, catalog)
-        local_path = os.path.expanduser(remote_path)
+        # local_path comes from the same SKY_RUNTIME_DIR-aware resolution
+        # used to populate _ABSOLUTE_VERSIONED_CATALOG_DIR above, so that
+        # locally-modified catalogs are picked up from wherever they
+        # actually live (which may be SKY_RUNTIME_DIR-rooted, not $HOME).
+        local_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, catalog)
         modified_catalog_path_map[remote_path] = local_path
     return modified_catalog_path_map
 
@@ -184,7 +210,9 @@ def read_catalog(filename: str,
         cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
 
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    # The meta dir is created lazily inside _update_catalog before the
+    # filelock is acquired; see comment on _ABSOLUTE_VERSIONED_CATALOG_DIR.
 
     def _need_update() -> bool:
         if not os.path.exists(catalog_path):
@@ -204,6 +232,10 @@ def read_catalog(filename: str,
         if not _need_update():
             return False
 
+        # The meta dir must exist before the filelock + md5 file write
+        # below. Create it lazily here so module-level read_catalog()
+        # calls remain side-effect-free on the filesystem.
+        os.makedirs(os.path.dirname(meta_path), exist_ok=True)
         # Atomic check, to avoid conflicts with other processes.
         with filelock.FileLock(meta_path + '.lock'):
             # Double check after acquiring the lock.
@@ -299,7 +331,7 @@ def validate_region_zone_impl(
     """
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
-        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
+        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.6)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
         if candidate_loc:
@@ -310,7 +342,7 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(
-            df['Region'].str.lower().unique().tolist())
+            df['Region'].dropna().str.lower().unique().tolist())
         return (f'\nList of supported {cloud_name} regions: '
                 f'{", ".join(all_regions)!r}')
 
@@ -323,7 +355,8 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
                 candidate_strs = _get_candidate_str(
-                    region.lower(), df['Region'].str.lower().unique())
+                    region.lower(),
+                    df['Region'].dropna().str.lower().unique().tolist())
                 if not candidate_strs:
                     if cloud_name in ('azure', 'gcp'):
                         faq_msg = (
@@ -349,7 +382,7 @@ def validate_region_zone_impl(
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid zone {zone!r}{region_str}')
                 error_msg += _get_candidate_str(
-                    zone, maybe_region_df['AvailabilityZone'].unique())
+                    zone, maybe_region_df['AvailabilityZone'].unique().tolist())
                 raise ValueError(error_msg)
         region_df = filter_df['Region'].unique()
         assert len(region_df) == 1, 'Zone should be unique across regions.'
@@ -520,8 +553,17 @@ def get_instance_type_for_cpus_mem_impl(
         cpus: Optional[str],
         memory_gb_or_ratio: Optional[str],
         region: Optional[str] = None,
-        zone: Optional[str] = None) -> Optional[str]:
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     """Returns the cheapest instance type that satisfies the requirements.
+
+    Note: `use_spot` only takes into effect if `max_hourly_cost` is also
+    provided. This is to prevent situations in clouds where spot instances
+    are only available for GPU vms (whose spot prices are much higher
+    than on-demand compute vms). To prevent a situation where the user
+    requests a cheap spot instance and ends up with an expensive vm,
+    we only sort with spot price when there is a price ceiling set.
 
     Args:
         df: The catalog cloud catalog data frame.
@@ -535,14 +577,28 @@ def get_instance_type_for_cpus_mem_impl(
             have at least the given number of vCPUs times the given ratio.
         region: The region to filter by.
         zone: The zone to filter by.
+        use_spot: Whether to use spot instance pricing for sorting.
+        max_hourly_cost: Maximum hourly cost filter. When provided with
+            use_spot=True, sorts/filters by spot price; otherwise uses
+            on-demand price.
     """
     df = _filter_region_zone(df, region, zone)
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
-    # Sort by the price.
-    df = df.sort_values(by=['Price'], ascending=True)
+    # Sort by spot price only when both use_spot and max_hourly_cost are set.
+    # Without a cost cap, sorting by spot price could select expensive
+    # instances (e.g., GPU instances on clouds where only GPUs have spot).
+    price_str = ('SpotPrice'
+                 if use_spot and max_hourly_cost is not None else 'Price')
+    if price_str not in df.columns or pd.isna(df[price_str]).all():
+        return None
+    if max_hourly_cost is not None:
+        df = df[df[price_str] <= max_hourly_cost]
+        if df.empty:
+            return None
+    df = df.sort_values(by=[price_str], ascending=True)
     return df['InstanceType'].iloc[0]
 
 
@@ -624,6 +680,7 @@ def get_instance_type_for_accelerator_impl(
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
@@ -661,6 +718,10 @@ def get_instance_type_for_accelerator_impl(
     price_str = 'SpotPrice' if use_spot else 'Price'
     if pd.isna(result[price_str]).all():
         return ([], [])
+    if max_hourly_cost is not None:
+        result = result[result[price_str] <= max_hourly_cost]
+        if result.empty:
+            return ([], [])
     result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])
@@ -810,3 +871,94 @@ def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
     df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
     return not df.empty
+
+
+# ---------------------------------------------------------------------------
+# Config-based pricing for virtual instance types (Kubernetes, Slurm)
+# ---------------------------------------------------------------------------
+
+
+def merge_pricing_dicts(base: Dict[str, Any],
+                        override: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep-merge *override* into *base*, returning a new dict.
+
+    Top-level scalar keys (``cpu``, ``memory``) are replaced.
+    The ``accelerators`` sub-dict is merged key-by-key so that
+    unmentioned accelerators are preserved from *base*.
+    """
+    merged = dict(base)
+    for key in ('cpu', 'memory'):
+        if key in override:
+            merged[key] = override[key]
+    if 'accelerators' in override:
+        merged_accels = dict(merged.get('accelerators', {}))
+        merged_accels.update(override['accelerators'])
+        merged['accelerators'] = merged_accels
+    return merged
+
+
+def resolve_pricing_config(
+        *config_key_paths: Tuple[str, ...]) -> Dict[str, Any]:
+    """Fetch pricing from config key paths and merge in priority order.
+
+    Each path is a tuple of strings looked up via
+    ``skypilot_config.get_nested``.  Later paths override earlier ones,
+    with deep-merge semantics for the ``accelerators`` sub-dict.
+
+    Example::
+
+        resolve_pricing_config(
+            ('kubernetes', 'pricing'),
+            ('kubernetes', 'context_configs', ctx, 'pricing'),
+        )
+    """
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
+
+    pricing: Dict[str, Any] = {}
+    for path in config_key_paths:
+        level = skypilot_config.get_nested(path, default_value=None)
+        if level is not None:
+            pricing = merge_pricing_dicts(pricing, level)
+    return pricing
+
+
+def get_hourly_cost_from_pricing(
+    pricing: Dict[str, Any],
+    cpus: float,
+    memory: float,
+    accelerator_name: Optional[str],
+    accelerator_count: Optional[int],
+) -> float:
+    """Compute hourly cost from a pricing config dict.
+
+    The pricing dict has the structure::
+
+        {
+            'cpu': <$/vCPU/hour>,
+            'memory': <$/GB/hour>,
+            'accelerators': {
+                '<AcceleratorName>': <$/accelerator/hour>,
+                ...
+            },
+        }
+
+    The two tiers are mutually exclusive:
+
+    - **Accelerator instances**: if the instance has an accelerator, the cost
+      is ``accel_count * accel_rate``.  The ``cpu`` and ``memory`` rates are
+      ignored because GPU/accelerator pricing is all-in per device.  If the
+      accelerator is not listed in the config, the cost is ``$0.00``.
+    - **CPU-only instances**: if there is no accelerator, the cost is
+      ``cpus * cpu_rate + memory * mem_rate``.
+
+    Missing keys default to 0.0.
+    """
+    if accelerator_name and accelerator_count:
+        accels = pricing.get('accelerators', {})
+        accel_rate = next((rate for name, rate in accels.items()
+                           if name.lower() == accelerator_name.lower()), 0.0)
+        return accelerator_count * accel_rate
+
+    cpu_rate = pricing.get('cpu', 0.0)
+    mem_rate = pricing.get('memory', 0.0)
+    return cpus * cpu_rate + memory * mem_rate

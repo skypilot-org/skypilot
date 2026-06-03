@@ -110,8 +110,18 @@ def serialize_exception(e: BaseException) -> Dict[str, Any]:
     return data
 
 
-def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
-    """Deserialize the exception."""
+def deserialize_exception(serialized: Any) -> Exception:
+    """Deserialize the exception.
+
+    Handles non-standard inputs gracefully (None, str, partial dicts) to
+    avoid crashing when the server returns unexpected error responses.
+    """
+    if serialized is None:
+        return RuntimeError('Unknown server error (no detail in response)')
+    if isinstance(serialized, str):
+        return RuntimeError(serialized)
+    if not isinstance(serialized, dict) or 'type' not in serialized:
+        return RuntimeError(f'Server error: {serialized}')
     exception_type = serialized['type']
     if hasattr(builtins, exception_type):
         exception_class = getattr(builtins, exception_type)
@@ -119,10 +129,13 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
         exception_class = globals().get(exception_type, None)
     if exception_class is None:
         # Unknown exception type.
-        return Exception(f'{exception_type}: {serialized["message"]}')
-    e = exception_class(*serialized['args'], **serialized['attributes'])
-    if serialized['stacktrace'] is not None:
-        setattr(e, 'stacktrace', serialized['stacktrace'])
+        return Exception(
+            f'{exception_type}: {serialized.get("message", serialized)}')
+    e = exception_class(*serialized.get('args', ()),
+                        **serialized.get('attributes', {}))
+    stacktrace = serialized.get('stacktrace')
+    if stacktrace is not None:
+        setattr(e, 'stacktrace', stacktrace)
     return e
 
 
@@ -430,6 +443,50 @@ class InvalidRecipeNameError(Exception):
     pass
 
 
+class InvalidWorkspaceNameError(Exception):
+    """Raised when the workspace name is invalid."""
+    pass
+
+
+class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
+    """Raised when a user belongs to multiple workspaces and none is chosen.
+
+    Carries the list of accessible workspace names so callers (CLI / API
+    handlers) can format consistent guidance pointing the user at
+    `sky workspace use <name>`, `--workspace`, or `~/.sky/config.yaml`.
+
+    `note` is an optional drift explanation populated when the user has a
+    saved preference that is no longer accessible — so the user understands
+    why their previous default stopped working.
+    """
+
+    def __init__(self, accessible: List[str], note: Optional[str] = None):
+        self.accessible = sorted(accessible)
+        self.note = note
+        names = ', '.join(self.accessible)
+        note_line = f'\nNote: {note}.' if note else ''
+        super().__init__(
+            f'You belong to multiple workspaces: {names}.{note_line}\n'
+            f'To proceed:\n'
+            f'  - run `sky workspace use <name>` to set your default, or\n'
+            f'  - pass `--workspace <name>` on this command, or\n'
+            f'  - set `active_workspace:` in `~/.sky/config.yaml`.')
+
+    def __reduce__(self):
+        # SkyPilot's request executor pickles exceptions raised by a
+        # request (see sky/server/requests/serializers/encoders.py)
+        # and unpickles them in the client. The default exception
+        # pickle protocol reconstructs via `cls(*self.args)`, where
+        # `self.args` is the (already-formatted) message string set
+        # by super().__init__ above. Reconstructing via
+        # `WorkspaceAmbiguousError(message_string)` would then sort
+        # the individual characters of that string into `accessible`
+        # and rebuild a garbled guidance message. Override
+        # `__reduce__` to preserve the real constructor arguments
+        # across the round-trip.
+        return (self.__class__, (self.accessible, self.note))
+
+
 class RecipeAlreadyExistsError(Exception):
     """Raised when attempting to create a recipe with an existing name."""
     pass
@@ -458,6 +515,7 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
 
         AUTH_FAILURE = 'AUTH_FAILURE'
         AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'
+        ENDPOINT_CONNECTION_ERROR = 'ENDPOINT_CONNECTION_ERROR'
 
         @property
         def message(self) -> str:
@@ -471,6 +529,10 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'action is enabled for your AWS account in IAM. '
                     'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
                 )
+            elif self == self.ENDPOINT_CONNECTION_ERROR:
+                return ('Failed to connect to the AWS EC2 endpoint. '
+                        'This may be due to network issues or the region being '
+                        'unreachable from the current network environment.')
             else:
                 raise ValueError(f'Unknown reason {self}')
 
@@ -641,6 +703,16 @@ class PermissionDeniedError(Exception):
     pass
 
 
+class NoWorkspaceAccessError(PermissionDeniedError):
+    """Raised when the user has no accessible workspaces at all.
+
+    A subclass of PermissionDeniedError so existing handlers still catch it,
+    while specific tests / UI can distinguish "zero accessible workspaces"
+    from a per-workspace permission denial.
+    """
+    pass
+
+
 class VolumeNotReadyError(Exception):
     """Raised when a volume is not ready."""
     pass
@@ -694,6 +766,19 @@ class SkyletInternalError(Exception):
 class SkyletMethodNotImplementedError(Exception):
     """Raised when a Skylet gRPC method is not implemented on the server."""
     pass
+
+
+class SkyletUnavailableError(Exception):
+    """Raised when the Skylet gRPC server is unreachable."""
+    pass
+
+
+# Exception types that indicate gRPC failed and the caller should fall
+# back to the legacy SSH code path.
+SKYLET_GRPC_FALLBACK_ERRORS = (
+    SkyletMethodNotImplementedError,
+    SkyletUnavailableError,
+)
 
 
 class ClientError(Exception):

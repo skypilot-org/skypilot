@@ -161,22 +161,28 @@ class DO(clouds.Cloud):
         return self._REPR
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
         """Returns the default instance type for DO."""
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 local_disk=local_disk,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='DO')
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='DO')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -208,13 +214,13 @@ class DO(clouds.Cloud):
         else:
             custom_resources = None
         image_id = None
-        if (resources.image_id is not None and
-                resources.extract_docker_image() is None):
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is not None:
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                assert region.name in resources.image_id
-                image_id = resources.image_id[region.name]
+                assert region.name in cloud_image_id
+                image_id = cloud_image_id[region.name]
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -259,7 +265,9 @@ class DO(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -278,6 +286,7 @@ class DO(clouds.Cloud):
              local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='DO',
          ))
         if instance_list is None:

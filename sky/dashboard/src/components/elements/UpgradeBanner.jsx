@@ -11,7 +11,7 @@ export function UpgradeBanner() {
   }
 
   return (
-    <div className="fixed top-[56px] left-0 right-0 z-40 bg-yellow-50 border-b border-yellow-200">
+    <div className="fixed top-0 left-0 right-0 z-[60] bg-yellow-50 border-b border-yellow-200">
       <div className="max-w-7xl mx-auto py-3 px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-center">
           <div className="flex items-center">

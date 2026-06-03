@@ -6,6 +6,8 @@ from click import testing as cli_testing
 import pytest
 
 from sky import clouds as sky_clouds
+from sky import exceptions
+from sky import models
 import sky.check as sky_check
 from sky.client.cli import command
 from sky.clouds import cloud as sky_cloud
@@ -231,8 +233,10 @@ def _mock_k8s_env(monkeypatch,
         lambda: False)
 
     # Mock per-context credential checks as enabled
-    def mock_check_credentials(context, run_optional_checks=True):
-        del run_optional_checks
+    def mock_check_credentials(context,
+                               run_optional_checks=True,
+                               cloud='kubernetes'):
+        del run_optional_checks, cloud
         return True, check_note
 
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_credentials',
@@ -266,6 +270,8 @@ def _mock_k8s_env(monkeypatch,
         'default': {},
         'ws1': {}
     })
+    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
+                        lambda: {'default', 'ws1'})
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
@@ -324,26 +330,28 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     )
     out = strip_ansi(capsys.readouterr().out)
 
+    # Helper to extract a workspace section from the output, bounded by the
+    # next "Checking enabled infra" header (or end of string). This makes the
+    # test independent of workspace processing order.
+    def _get_workspace_section(output, ws_name):
+        marker = f"Enabled infra for workspace: '{ws_name}'"
+        assert marker in output, f'{marker!r} not found in output'
+        start = output.index(marker)
+        # Find the next workspace boundary after this section
+        next_check = output.find('Checking enabled infra for workspace:',
+                                 start + len(marker))
+        end = next_check if next_check != -1 else len(output)
+        return output[start:end]
+
     # default workspace section should include ctx-a and ctx-b only
-    assert "Enabled infra for workspace: 'default'" in out
-    start = out.index("Enabled infra for workspace: 'default'")
-    # Bound the section to before the next workspace's "Checking" header
-    try:
-        end = out.index("Checking enabled infra for workspace: 'ws1'", start)
-    except ValueError:
-        end = len(out)
-    default_section = out[start:end]
+    default_section = _get_workspace_section(out, 'default')
     assert 'Kubernetes [compute]' in default_section
     assert 'ctx-a' in default_section
     assert 'ctx-b' in default_section
     assert 'ctx-c' not in default_section
 
     # ws1 workspace section should include ctx-c only
-    assert "Enabled infra for workspace: 'ws1'" in out
-    start = out.index("Enabled infra for workspace: 'ws1'")
-    # Bound to end of string
-    end = len(out)
-    ws1_section = out[start:end]
+    ws1_section = _get_workspace_section(out, 'ws1')
     assert 'Kubernetes [compute]' in ws1_section
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
@@ -472,3 +480,134 @@ def test_enabled_capabilities_detection():
                     workspace=None,
                 )
                 assert 'AWS' not in capabilities_result['default']
+
+
+# ============ JSON Output Tests ============
+
+
+class TestCheckJsonOutput:
+    """Tests for `sky check -o json` output format."""
+
+    def test_cli_check_json_output_structure(self, monkeypatch):
+        """Test that -o json produces valid JSON with expected structure."""
+        import json
+
+        mock_result = {
+            'default': {
+                'AWS': ['compute', 'storage'],
+                'GCP': ['compute', 'storage'],
+            },
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert 'default' in parsed
+        assert parsed['default']['AWS'] == ['compute', 'storage']
+        assert parsed['default']['GCP'] == ['compute', 'storage']
+
+    def test_cli_check_json_output_multiple_workspaces(self, monkeypatch):
+        """Test that JSON output includes multiple workspaces."""
+        import json
+
+        mock_result = {
+            'default': {
+                'AWS': ['compute', 'storage'],
+                'GCP': ['compute', 'storage'],
+            },
+            'staging': {
+                'Kubernetes': ['compute'],
+            },
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed['default']['AWS'] == ['compute', 'storage']
+        assert parsed['staging']['Kubernetes'] == ['compute']
+
+    def test_cli_check_json_no_table_output(self, monkeypatch):
+        """Test that -o json suppresses table output."""
+        mock_result = {'default': {'AWS': ['compute', 'storage']}}
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        # Should not contain the API server line
+        assert 'Using SkyPilot API server' not in result.output
+
+    def test_cli_check_default_output_still_works(self, monkeypatch):
+        """Test that default output (no -o flag) still works as before."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, [])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+    def test_cli_check_table_output_explicit(self, monkeypatch):
+        """Test that -o table produces normal output."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'table'])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+
+class TestCheckWorkspacePermission:
+    """Tests for workspace permission check in sky.check.check."""
+
+    @mock.patch('sky.check.check_capabilities', return_value={})
+    @mock.patch('sky.workspaces.core.check_workspace_permission')
+    def test_rejects_unauthorized_workspace(self, mock_check, _):
+        mock_check.side_effect = exceptions.PermissionDeniedError('no access')
+        mock_user = models.User(id='user-1', name='User1')
+        with mock.patch('sky.check.common_utils.get_current_user',
+                        return_value=mock_user):
+            with pytest.raises(exceptions.PermissionDeniedError,
+                               match='no access'):
+                sky_check.check(workspace='restricted')
+        mock_check.assert_called_once_with(mock_user, 'restricted')
+
+    @mock.patch('sky.check.check_capabilities', return_value={})
+    @mock.patch('sky.workspaces.core.check_workspace_permission')
+    def test_skips_check_when_workspace_is_none(self, mock_check, _):
+        sky_check.check(workspace=None)
+        mock_check.assert_not_called()

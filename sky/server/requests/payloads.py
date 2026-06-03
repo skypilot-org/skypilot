@@ -32,6 +32,7 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -85,6 +86,10 @@ def request_body_env_vars() -> dict:
     env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
+    # Send client user hash for basic auth at API server case, so the server
+    # can include it in its own usage report.
+    if common.basic_auth_enabled and common.client_user_hash is not None:
+        env_vars[constants.CLIENT_USER_HASH_ENV_VAR] = common.client_user_hash
     if not common.is_api_server_local():
         # Used in job controller, for local API server, keep the
         # SKYPILOT_CONFIG env var to use the config for the managed job.
@@ -98,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # Remove the in-cluster context name - this is only meaningful for the
+    # local Kubernetes environment and should not be forwarded to the server,
+    # which has its own cluster context configuration.
+    env_vars.pop(kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
     return env_vars
 
 
@@ -146,6 +155,21 @@ class RequestBody(BasePayload):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
+    # Blob ID for uploaded file mounts
+    file_mounts_blob_id: Optional[str] = None
+    # The client's API_VERSION as captured server-side from the
+    # `X-SkyPilot-API-Version` request header in `prepare_request_async`
+    # (the FastAPI dispatch context, where the `_remote_api_version`
+    # ContextVar set by APIVersionMiddleware is visible). The field
+    # exists because the worker process that later runs the request
+    # cannot see that ContextVar — it crosses a process boundary via
+    # the persisted request body. Clients themselves do NOT populate
+    # this field; the server fills it in from the wire header so any
+    # client that already sets the header (Python SDK already does; the
+    # dashboard apiClient also sets it) gets the right value without
+    # client-specific code. `None` means the request arrived without
+    # the header — i.e. an old client.
+    client_api_version: Optional[int] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -178,6 +202,8 @@ class RequestBody(BasePayload):
         kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
+        kwargs.pop('file_mounts_blob_id')
+        kwargs.pop('client_api_version', None)
         return kwargs
 
     @property
@@ -195,6 +221,12 @@ class CheckBody(RequestBody):
 class EnabledCloudsBody(RequestBody):
     """The request body for the enabled clouds endpoint."""
     workspace: Optional[str] = None
+    expand: bool = False
+
+
+class EnabledCloudsBatchBody(RequestBody):
+    """The request body for the batch enabled clouds endpoint."""
+    workspaces: List[str]
     expand: bool = False
 
 
@@ -275,13 +307,23 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    extra_launch_context: Dict[str, Any] = {}
+    # When True and the server supports it (API_VERSION >=
+    # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
+    # 3-tuple (job_id, handle, credentials) instead of (job_id, handle).
+    # Old servers ignore this field via Pydantic ``extra='ignore'`` and
+    # continue to return the 2-tuple, so it is safe for new clients to
+    # set against any server.
+    include_credentials: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
 
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
@@ -294,6 +336,8 @@ class LaunchBody(RequestBody):
             'is_launched_by_sky_serve_controller')
         kwargs['_disable_controller_check'] = kwargs.pop(
             'disable_controller_check')
+        kwargs['_extra_launch_context'] = kwargs.pop('extra_launch_context')
+        kwargs['_include_credentials'] = kwargs.pop('include_credentials')
         return kwargs
 
 
@@ -308,9 +352,11 @@ class ExecBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=True)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=True,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
@@ -389,9 +435,14 @@ class ProvisionLogsBody(RequestBody):
     worker: Optional[int] = None
 
 
-class AutostopLogsBody(RequestBody):
-    """Autostop logs request body."""
+class HookLogsBody(RequestBody):
+    """Per-event lifecycle-hook logs request body.
+
+    ``event`` is optional — when None, the server auto-selects
+    whichever per-event log exists on the cluster.
+    """
     cluster_name: str
+    event: Optional[str] = None
     follow: bool = True
     tail: int = 0
 
@@ -439,6 +490,12 @@ class UserUpdateBody(RequestBody):
 class UserImportBody(RequestBody):
     """The request body for the user import endpoint."""
     csv_content: str
+
+
+class UserBatchUpdateBody(RequestBody):
+    """The request body for the user batch update endpoint."""
+    user_ids: List[str]
+    role: str
 
 
 class ServiceAccountTokenCreateBody(RequestBody):
@@ -495,6 +552,7 @@ class VolumeApplyBody(RequestBody):
     config: Optional[Dict[str, Any]] = None
     labels: Optional[Dict[str, str]] = None
     use_existing: Optional[bool] = None
+    creation_yaml: Optional[str] = None
 
 
 class VolumeDeleteBody(RequestBody):
@@ -546,7 +604,14 @@ class JobsLaunchBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
         kwargs['task'] = common.process_mounts_in_task_on_api_server(
-            self.task, self.env_vars, workdir_only=False)
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
+        # Pass the blob id through so that consolidation-mode submissions can
+        # record it on the job and keep the blob alive until the job is
+        # terminal.
+        kwargs['file_mounts_blob_id'] = self.file_mounts_blob_id
         return kwargs
 
 
@@ -586,6 +651,8 @@ class JobsCancelBody(RequestBody):
     all: bool = False
     all_users: bool = False
     pool: Optional[str] = None
+    graceful: bool = False
+    graceful_timeout: Optional[int] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -596,7 +663,24 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Skip the last `tail_offset` lines from the end of the file before
+    # taking `tail` lines. Used by the dashboard live-tail UI to fetch
+    # progressively older windows without re-reading the whole file.
+    tail_offset: Optional[int] = None
     # Task identifier: int for task_id, str for task_name
+    task: Optional[Union[str, int]] = None
+
+
+class JobsWaitBody(RequestBody):
+    """The request body for the jobs wait endpoint."""
+    name: Optional[str] = None
+    job_id: Optional[int] = None
+    # Timeout in seconds. None means wait forever.
+    timeout: Optional[int] = None
+    # Polling interval in seconds. Minimum 5, default 15.
+    poll_interval: int = 15
+    # Task identifier for JobGroups: int for task_id, str for task_name.
+    # If None, waits for all tasks.
     task: Optional[Union[str, int]] = None
 
 
@@ -623,9 +707,11 @@ class ServeUpBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -641,9 +727,11 @@ class ServeUpdateBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -779,7 +867,10 @@ class JobsPoolApplyBody(RequestBody):
         kwargs = super().to_kwargs()
         if self.task is not None:
             dag = common.process_mounts_in_task_on_api_server(
-                self.task, self.env_vars, workdir_only=False)
+                self.task,
+                self.env_vars,
+                workdir_only=False,
+                file_mounts_blob_id=self.file_mounts_blob_id)
             assert len(
                 dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                   'a pool.', dag)
@@ -843,6 +934,18 @@ class DeleteWorkspaceBody(RequestBody):
     workspace_name: str
 
 
+class WorkspaceBatchAddUsersBody(RequestBody):
+    """The request body for adding users to multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
+class WorkspaceBatchRemoveUsersBody(RequestBody):
+    """The request body for removing users from multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
 class UpdateConfigBody(RequestBody):
     """The request body for updating the entire SkyPilot configuration."""
     config: Dict[str, Any]
@@ -853,15 +956,40 @@ class GetConfigBody(RequestBody):
     pass
 
 
+class UserPreferredWorkspaceBody(RequestBody):
+    """Request body for POST /users/me/workspace.
+
+    `preferred` is the workspace name to set as the user's default, or None
+    to clear the preference. RBAC is validated server-side in
+    sky/workspaces/core.set_user_preferred_workspace().
+    """
+    preferred: Optional[str] = None
+
+
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
     # we use hashes instead of names to avoid the case where
     # the name is not unique
     cluster_hashes: Optional[List[str]] = None
+    # Filter by cluster name. Useful for the dashboard, which routes a
+    # torn-down cluster's detail page by name (the URL param is the
+    # cluster name, not the hash). When both cluster_hashes and
+    # cluster_names are set, rows matching either are returned.
+    cluster_names: Optional[List[str]] = None
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False
+
+
+class CreateDebugDumpBody(RequestBody):
+    """The request body for the debug dump init endpoint."""
+    request_ids: Optional[List[str]] = None
+    cluster_names: Optional[List[str]] = None
+    managed_job_ids: Optional[List[int]] = None
+    recent_minutes: Optional[float] = None
+    # Client-side info for troubleshooting (version, config, environment)
+    client_info: Optional[Dict[str, Any]] = None
 
 
 class RequestPayload(BasePayload):
@@ -884,6 +1012,7 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+    file_mounts_blob_id: Optional[str] = None
 
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):

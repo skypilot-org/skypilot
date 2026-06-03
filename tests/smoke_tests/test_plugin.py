@@ -103,7 +103,7 @@ def test_plugin_upload_to_jobs_controller(generic_cloud: str):
                 # It is possible this timeout is not enough
                 # (since the jobs controller needs to be created from scratch).
                 # Increase this as needed.
-                timeout=200,
+                timeout=400,
             ),
             # Controller setup includes "uv pip install" (or "pip install") for plugin wheels
             (

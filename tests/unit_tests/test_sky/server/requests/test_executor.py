@@ -3,6 +3,7 @@ import asyncio
 import concurrent.futures
 import functools
 import os
+import pathlib
 import queue as queue_lib
 import time
 from typing import List
@@ -14,6 +15,7 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons as server_daemons
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import process
@@ -31,7 +33,7 @@ def isolated_database(tmp_path):
 
     with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
                     str(temp_db_path)):
-        with mock.patch('sky.server.requests.requests.REQUEST_LOG_PATH_PREFIX',
+        with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
             requests_lib._DB = None
             yield
@@ -206,7 +208,7 @@ def _subprocess_initializer(db_path: str, log_path: str, config_path: str):
     from sky.server.requests import requests as requests_lib
 
     server_constants.API_SERVER_REQUEST_DB_PATH = db_path
-    requests_lib.REQUEST_LOG_PATH_PREFIX = log_path
+    server_constants.REQUEST_LOG_PATH_PREFIX = log_path
     requests_lib._DB = None
     skypilot_config._GLOBAL_CONFIG_PATH = config_path
 
@@ -236,7 +238,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         # Get the paths that were set up by the fixtures, as we need to re-apply
         # the same patches in the subprocess created by the BurstableExecutor.
         db_path = server_constants.API_SERVER_REQUEST_DB_PATH
-        log_path_prefix = requests_lib.REQUEST_LOG_PATH_PREFIX
+        log_path_prefix = server_constants.REQUEST_LOG_PATH_PREFIX
 
         proc_executor = process.BurstableExecutor(
             garanteed_workers=5,
@@ -642,3 +644,160 @@ async def test_request_worker_retry_execution_retryable_error(
     assert len(submit_calls) == 1, (
         f'Expected submit_until_success to be called once, got {len(submit_calls)} calls'
     )
+
+
+def test_resolve_blob_valid(tmp_path, monkeypatch):
+    """Test that resolve_blob_dir returns the shared extraction dir."""
+    blob_id = 'a' * 64
+    user_hash = 'testuser'
+
+    # Set up directory structure under tmp_path
+    blobs_dir = tmp_path / user_hash / 'file_mounts' / 'blobs'
+    blobs_dir.mkdir(parents=True)
+
+    # Pre-create the shared extraction dir (simulating upload-time extraction)
+    extraction_dir = blobs_dir / blob_id
+    extraction_dir.mkdir()
+    (extraction_dir / 'hello.txt').write_text('hello world')
+
+    # Monkeypatch API_SERVER_CLIENT_DIR to point to tmp_path
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        pathlib.Path(tmp_path))
+
+    from sky.server import common as server_common
+    result = server_common.resolve_blob_dir(blob_id, user_hash)
+
+    # Verify the shared extraction directory is returned
+    result_path = pathlib.Path(result)
+    assert result_path.exists()
+    assert (result_path / 'hello.txt').exists()
+    assert (result_path / 'hello.txt').read_text() == 'hello world'
+
+    # Verify the path is the shared extraction dir, not per-request
+    assert result_path == extraction_dir
+
+
+def test_resolve_blob_invalid_id(tmp_path, monkeypatch):
+    """Test that resolve_blob_dir raises ValueError for invalid blob IDs."""
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        pathlib.Path(tmp_path))
+
+    with pytest.raises(ValueError, match='Invalid file_mounts_blob_id'):
+        from sky.server import common as server_common
+        server_common.resolve_blob_dir('not-a-hash', 'testuser')
+
+
+@pytest.fixture()
+def stub_override_request_env_deps(monkeypatch):
+    """Stub out reload/permissions/user upsert for override_request_env tests.
+
+    Lets the tests assert only what override_request_env_and_config does to
+    os.environ, without needing a real DB / context / permission backend.
+    """
+    monkeypatch.setattr('sky.server.common.reload_for_new_request', mock.Mock())
+    monkeypatch.setattr(
+        'sky.workspaces.core.reject_request_for_unauthorized_workspace',
+        mock.Mock())
+
+    fake_user = mock.Mock()
+    fake_user.id = 'client-user-id'
+    fake_user.name = 'client-user'
+
+    def fake_add_or_update_user(user, return_user=False, **kwargs):
+        if return_user:
+            return True, fake_user
+        return True
+
+    monkeypatch.setattr('sky.global_user_state.add_or_update_user',
+                        fake_add_or_update_user)
+
+
+def test_override_env_skipped_for_daemon_request(stub_override_request_env_deps,
+                                                 monkeypatch):
+    """Daemon request_ids must NOT have their persisted env_vars overlaid.
+
+    Reproduces SKY-5502: a daemon row in PG carrying stale downward-API
+    values from a previous deployment generation must not clobber the
+    current pod's os.environ.
+    """
+    # Seed the "current pod" env with realistic downward-API values.
+    monkeypatch.setenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT', str(300 * 1024**3))
+    monkeypatch.setenv('SKYPILOT_APISERVER_UUID', 'current-pod-uuid')
+
+    # Persisted daemon body has STALE values from a now-dead pod.
+    body = payloads.RequestBody(
+        env_vars={
+            'SKYPILOT_POD_MEMORY_BYTES_LIMIT': str(100 * 1024 * 1024),
+            'SKYPILOT_APISERVER_UUID': 'stale-pod-uuid',
+            constants.USER_ID_ENV_VAR: 'irrelevant',
+            constants.USER_ENV_VAR: 'irrelevant',
+        })
+
+    # Pick a real daemon id so daemons.is_daemon_request_id returns True.
+    daemon_id = server_daemons.INTERNAL_REQUEST_DAEMONS[0].id
+
+    with executor.override_request_env_and_config(body,
+                                                  request_id=daemon_id,
+                                                  request_name='daemon'):
+        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(
+            300 * 1024**3), ('daemon override clobbered the current pod env')
+        assert os.environ['SKYPILOT_APISERVER_UUID'] == 'current-pod-uuid'
+
+
+def test_override_env_applied_for_client_request(stub_override_request_env_deps,
+                                                 monkeypatch):
+    """Regression guard: client requests must still have env_vars applied."""
+    monkeypatch.setenv('SKYPILOT_POD_MEMORY_BYTES_LIMIT', str(300 * 1024**3))
+
+    body = payloads.RequestBody(
+        env_vars={
+            'SKYPILOT_POD_MEMORY_BYTES_LIMIT': str(100 * 1024 * 1024),
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+
+    with executor.override_request_env_and_config(
+            body, request_id='not-a-daemon-uuid', request_name='sky.launch'):
+        assert os.environ['SKYPILOT_POD_MEMORY_BYTES_LIMIT'] == str(100 * 1024 *
+                                                                    1024)
+
+
+def test_daemon_env_mutations_reverted_on_exit(stub_override_request_env_deps,
+                                               monkeypatch):
+    """Daemon env mutations inside the with block must be reverted on exit.
+
+    Daemons (e.g. InternalRequestDaemon.run_event) set
+    SKYPILOT_DISABLE_LOGGING from inside the with block. If that mutation
+    leaked, the next request handled by the same worker would inherit it.
+    """
+    monkeypatch.setenv('SKYPILOT_PRE_EXISTING', 'before')
+    monkeypatch.delenv('SKYPILOT_NEW_VAR', raising=False)
+
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'irrelevant',
+            constants.USER_ENV_VAR: 'irrelevant',
+        })
+
+    daemon_id = server_daemons.INTERNAL_REQUEST_DAEMONS[0].id
+
+    with executor.override_request_env_and_config(body,
+                                                  request_id=daemon_id,
+                                                  request_name='daemon'):
+        os.environ['SKYPILOT_NEW_VAR'] = 'inside'
+        del os.environ['SKYPILOT_PRE_EXISTING']
+
+    assert 'SKYPILOT_NEW_VAR' not in os.environ
+    assert os.environ['SKYPILOT_PRE_EXISTING'] == 'before'
+
+
+def test_resolve_blob_missing_file(tmp_path, monkeypatch):
+    """Test that resolve_blob_dir raises FileNotFoundError when blob is missing."""
+    blob_id = 'b' * 64
+
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        pathlib.Path(tmp_path))
+
+    from sky.server import common as server_common
+    with pytest.raises(FileNotFoundError, match='Blob not found'):
+        server_common.resolve_blob_dir(blob_id, 'testuser')

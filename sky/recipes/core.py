@@ -3,7 +3,7 @@
 This module provides the main entry points for recipe operations,
 including CRUD operations and deployment functionality.
 """
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
@@ -11,9 +11,11 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.data import data_utils
 from sky.recipes import db as recipes_db
+from sky.recipes.utils import recipe_type_to_str
 from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils import schemas
+from sky.utils.plugin_extensions import RecipeValidator
 
 logger = sky_logging.init_logger(__name__)
 
@@ -53,7 +55,8 @@ def _validate_no_local_paths(config: Dict[str, Any]) -> None:
                         f'{source!r}')
 
 
-def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
+def _validate_skypilot_yaml(content: str, recipe_type: Union[RecipeType,
+                                                             str]) -> None:
     """Validate YAML content against SkyPilot schema.
 
     Args:
@@ -71,6 +74,12 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
         if not isinstance(config, dict):
             raise ValueError(
                 'YAML must be a dictionary/mapping at the top level')
+
+        # Check if a plugin provides validation for this recipe type
+        type_str = recipe_type_to_str(recipe_type)
+        if RecipeValidator.has_validator(type_str):
+            RecipeValidator.validate(type_str, content)
+            return
 
         # Validate no local paths in recipes (workdir must be git, file_mounts
         # must be cloud storage)
@@ -120,7 +129,7 @@ def get_recipe_content(recipe_name: str) -> Tuple[str, str]:
     template = recipes_db.get_recipe(recipe_name)
     if template is None:
         raise ValueError(f'Recipe not found: {recipe_name}')
-    return (template.content, template.recipe_type.value)
+    return (template.content, recipe_type_to_str(template.recipe_type))
 
 
 def list_recipes(

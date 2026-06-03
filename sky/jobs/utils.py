@@ -6,18 +6,25 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
+import concurrent.futures
+import contextlib
 from datetime import datetime
 import enum
+import json
 import os
 import pathlib
 import re
+import select
 import shlex
+import signal
+import sys
 import textwrap
+import threading
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
-                    TextIO, Tuple, Union)
+from typing import (Any, Dict, Iterable, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import filelock
@@ -33,16 +40,20 @@ from sky.backends import cloud_vm_ray_backend
 from sky.dag import DagExecution
 from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -81,12 +92,31 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+# While a managed job is provisioning, we poll the jobs controller log this
+# often to relay the cluster-launch spinner messages (e.g. "Preparing SkyPilot
+# runtime (1/3)") to the user. This is faster than JOB_STATUS_CHECK_GAP_SECONDS
+# so the spinner feels responsive without polling the job-status DB as often.
+_PROVISION_LOG_POLL_GAP_SECONDS = 1
+
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
+# Pattern matching the "From controller <UUID>" line that the controller
+# emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
+# the debug-dump manifest to scope controller_system/*.log files to the
+# controllers that actually ran the requested jobs. HA recovery causes
+# the per-job log (opened in append mode at sky/utils/context.py:146) to
+# receive a fresh "From controller …" line each time a new controller
+# picks up the job — and that line can land arbitrarily far into the
+# file after hours of intervening status-check output, so we scan the
+# whole file rather than just the head.
+_CONTROLLER_UUID_LOG_RE = re.compile(
+    r'From controller ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
+    r'[0-9a-f]{4}-[0-9a-f]{12})')
+
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
-    '{status_str}. It may take a few minutes.\n'
+    '{status_str}. It may take a few minutes.{provision_str}\n'
     '  [dim]View controller logs: sky jobs logs --controller {job_id}')
 _JOB_CANCELLED_MESSAGE = (
     ux_utils.spinner_message('Waiting for task status to be updated.') +
@@ -100,12 +130,8 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
-# After enabling consolidation mode, we need to restart the API server to get
-# the jobs refresh deamon and correct number of executors. We use this file to
-# indicate that the API server has been restarted after enabling consolidation
-# mode.
-_JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
-    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
+# Content written to the jobs cancel signal file.
+_JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
 
 # The response fields for managed jobs that require cluster handle
 _CLUSTER_HANDLE_FIELDS = [
@@ -118,6 +144,9 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
+    # Network endpoint information (extracted from cluster handle)
+    'internal_external_ips',
+    'internal_services',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -148,6 +177,8 @@ class UserSignal(enum.Enum):
 def terminate_cluster(
     cluster_name: str,
     max_retry: int = 6,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
@@ -167,7 +198,9 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            core.down(cluster_name)
+            core.down(cluster_name,
+                      graceful=graceful,
+                      graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
@@ -186,82 +219,120 @@ def terminate_cluster(
             time.sleep(backoff.current_backoff())
 
 
-def _validate_consolidation_mode_config(
-        current_is_consolidation_mode: bool) -> None:
-    """Validate the consolidation mode config."""
-    # Check whether the consolidation mode config is changed.
-    if current_is_consolidation_mode:
-        controller_cn = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
-        if global_user_state.cluster_with_name_exists(controller_cn):
-            logger.warning(
-                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
-                f'but the controller cluster {controller_cn} is still running. '
-                'Please terminate the controller cluster first.'
-                f'{colorama.Style.RESET_ALL}')
+def setup_consolidation_mode_on_startup(deploy: bool) -> None:
+    """Set up consolidation mode signal file on API server startup.
+
+    Must be called AFTER global_user_state DB is initialized and
+    server user hash is restored, so we can query for existing controller
+    clusters.
+
+    For explicit config (True/False): touches or removes signal file.
+    For unset config (None):
+      - in local mode (deploy=False): default to disabled
+      - in deploy mode: default to enabled if no existing controller clusters
+        found in DB, otherwise disabled (to continue using existing controller)
+    """
+    config_value = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+    signal_file = pathlib.Path(
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+
+    if config_value is not None:
+        assert isinstance(config_value, bool), config_value
+        enabled = config_value
     else:
-        total_jobs = managed_job_state.get_managed_jobs_total()
-        if total_jobs > 0:
-            nonterminal_jobs = (
-                managed_job_state.get_nonterminal_job_ids_by_name(
-                    None, None, all_users=True))
-            if nonterminal_jobs:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are still {len(nonterminal_jobs)} managed jobs '
-                    'running. Please terminate those jobs first.'
-                    f'{colorama.Style.RESET_ALL}')
+        # config_value is None — not explicitly set
+        if deploy:
+            # Deploy mode, config not set: auto-enable unless controllers exist
+            existing = global_user_state.get_cluster_names_start_with(
+                common_lib.JOB_CONTROLLER_PREFIX)
+            if existing:
+                logger.info(
+                    'Found existing jobs controller cluster(s): '
+                    f'{existing}. Not auto-enabling consolidation mode.')
+                enabled = False
             else:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {total_jobs} jobs from previous '
-                    'consolidation mode. Reset the `jobs.controller.'
-                    'consolidation_mode` to `true` and run `sky jobs queue` '
-                    'to see those jobs. Switching to normal mode will '
-                    f'lose the job history.{colorama.Style.RESET_ALL}')
+                logger.info('Auto-enabling jobs consolidation mode for deploy '
+                            'mode server.')
+                enabled = True
+        else:
+            # Local API server: don't auto-enable
+            enabled = False
+
+    controller_utils.warn_jobs_consolidation_mode_intent(enabled)
+
+    if enabled:
+        signal_file.touch()
+    elif signal_file.exists():
+        signal_file.unlink()
 
 
 # Whether to use consolidation mode or not. When this is enabled, the managed
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
-# Use LRU Cache so that the check is only done once.
-@annotations.lru_cache(scope='request', maxsize=2)
-def is_consolidation_mode(on_api_restart: bool = False) -> bool:
-    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
-        return True
+# Thin wrapper around controller_utils.is_jobs_consolidation_mode — the helper
+# owns the signal-file read, the config-vs-signal restart warning, and the
+# jobs validator call. See controller_utils for the full contract.
+# INVARIANT: serve_utils.is_consolidation_mode(pool=True) routes through the
+# same helper, so pool and managed-jobs readers cannot diverge.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
+    return controller_utils.is_jobs_consolidation_mode()
 
-    config_consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
 
-    signal_file = pathlib.Path(
-        _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
+_MANAGED_JOB_TOKEN_NAME_RE = re.compile(
+    f'^{re.escape(managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX)}'
+    r'.+-[0-9a-f]{8}$')
 
-    if on_api_restart:
-        if config_consolidation_mode:
-            signal_file.touch()
-    else:
-        restart_signal_file_exists = signal_file.exists()
-        if not restart_signal_file_exists:
-            if config_consolidation_mode:
-                logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
-                               'managed jobs is enabled in the server config, '
-                               'but the API server has not been restarted yet. '
-                               'Please restart the API server to enable it.'
-                               f'{colorama.Style.RESET_ALL}')
-                return False
-        elif not config_consolidation_mode:
-            # Cleanup the signal file if the consolidation mode is disabled in
-            # the config. This allow the user to disable the consolidation mode
-            # without restarting the API server.
-            signal_file.unlink()
 
-    # We should only do this check on API server, as the controller will not
-    # have related config and will always seemingly disabled for consolidation
-    # mode. Check #6611 for more details.
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(config_consolidation_mode)
-    return config_consolidation_mode
+def cleanup_expired_api_access_tokens() -> int:
+    """Delete expired managed-job API access tokens.
+
+    Scans the service_account_tokens table for any token whose name starts
+    with the managed-job prefix and whose expires_at is in the past, then
+    requires the name to also end with the 8-hex-char dag_uuid suffix
+    produced by _create_job_api_token. Matching tokens are deleted.
+
+    Driving the sweep off the name shape means tokens that leaked due to
+    a controller crash mid-cleanup, or that were issued by older code
+    paths, are still reaped once their TTL passes.
+
+    Limitation: a user could in principle create a custom service-account
+    token whose name happens to match `managed-job-<anything>-<8 hex>` and
+    let it expire. The daemon would treat such a token as a leaked
+    managed-job token and remove it once expired. The prefix + 8-hex-char
+    suffix combination makes accidental collisions unlikely in practice,
+    but custom token names should avoid this shape if expired tokens are
+    meant to be retained for audit.
+
+    Returns the number of tokens removed.
+    """
+    now = int(time.time())
+    prefix = managed_job_constants.MANAGED_JOB_TOKEN_NAME_PREFIX
+    expired = (
+        global_user_state.get_expired_service_account_tokens_by_name_prefix(
+            prefix, now))
+    removed = 0
+    for token in expired:
+        token_name = token.get('token_name') or ''
+        if not _MANAGED_JOB_TOKEN_NAME_RE.match(token_name):
+            # Prefix matched but the suffix does not look like a managed-job
+            # dag_uuid; leave it alone to avoid touching user-created tokens
+            # that happen to share the prefix.
+            continue
+        token_id = token['token_id']
+        try:
+            global_user_state.delete_service_account_token(token_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to delete expired managed-job token {token_id}: {e}')
+            continue
+        removed += 1
+        logger.info(f'Cleaned up expired managed-job API access token '
+                    f'{token_id} ({token_name})')
+    return removed
 
 
 def ha_recovery_for_consolidation_mode() -> None:
@@ -355,6 +426,24 @@ async def get_job_status(
     # TODO(luca) make this async
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
+
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
+        logger.info('=' * 34)
+
+    logger.info('=== Checking the job status... ===')
+
+    if managed_job_runtime.is_registered():
+        result = await asyncio.to_thread(managed_job_runtime.get_job_status,
+                                         handle, cluster_name)
+        if result is not None:
+            status, _ = result
+            _log_job_status(status)
+            return result
+
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
@@ -363,7 +452,6 @@ async def get_job_status(
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
     try:
-        logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
             asyncio.to_thread(backend.get_job_status,
                               handle,
@@ -371,11 +459,7 @@ async def get_job_status(
                               stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
-        if status is None:
-            logger.info('No job found.')
-        else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+        _log_job_status(status)
         return status, None
     except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
             ValueError, TypeError, asyncio.TimeoutError) as e:
@@ -521,6 +605,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
+            cluster_name: Optional[str] = None
             if pool is None:
                 task_name = task['job_name']
                 cluster_name = generate_managed_job_cluster_name(
@@ -528,6 +613,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             else:
                 cluster_name, _ = (
                     managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is None:
+                continue
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
@@ -718,6 +805,12 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
     If the job is preempted or we can't connect to the instance for whatever
     reason, fall back to the current time.
     """
+    if managed_job_runtime.is_registered():
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        runtime_ended_at = managed_job_runtime.get_job_ended_at(
+            handle, cluster_name)
+        if runtime_ended_at is not None:
+            return runtime_ended_at
     try:
         return get_job_timestamp(backend,
                                  cluster_name,
@@ -791,6 +884,248 @@ def event_callback_func(
 # ======== user functions ========
 
 
+def _full_traceback() -> str:
+    """Capture the full traceback, bypassing any tracebacklimit."""
+    with ux_utils.enable_traceback():
+        return traceback.format_exc()
+
+
+@contextlib.contextmanager
+def _catch_to_errors(errors: List[Dict[str, str]], component: str,
+                     resource: str):
+    """Catch exceptions and append to errors list with traceback."""
+    try:
+        yield
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': component,
+            'resource': resource,
+            'error': str(e),
+            'traceback': _full_traceback(),
+        })
+
+
+def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
+    """Collect a debug dump manifest from the controller.
+
+    This function runs ON the controller via CodeGen/SSH. It gathers small
+    DB-derived data inline (as JSON strings) and returns remote file paths
+    for large log files (to be rsynced by the caller).
+
+    Returns:
+        Dict with:
+          'inline_data': list of {'relative_path': str, 'content': str}
+          'file_paths': list of {'remote_path': str, 'relative_path': str}
+          'errors': list of {'component': str, 'resource': str, 'error': str}
+    """
+    inline_data: List[Dict[str, str]] = []
+    file_paths: List[Dict[str, str]] = []
+    errors: List[Dict[str, str]] = []
+
+    # Collect per-job data in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(_collect_job_debug_manifest, job_ids))
+
+    # Merge results and collect cluster info for unique clusters
+    seen_cluster_names: Set[str] = set()
+    seen_controller_uuids: Set[str] = set()
+    for job_id, (job_inline, job_files, job_errors, cluster_name,
+                 controller_uuids) in zip(job_ids, results):
+        inline_data.extend(job_inline)
+        file_paths.extend(job_files)
+        errors.extend(job_errors)
+        seen_controller_uuids.update(controller_uuids)
+        if cluster_name and cluster_name not in seen_cluster_names:
+            seen_cluster_names.add(cluster_name)
+            job_prefix = f'managed_jobs/{job_id}'
+            _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                            inline_data, errors)
+
+    # Collect controller system log paths (shared, not per-job). Scope to
+    # the controllers that actually ran the requested jobs — globbing the
+    # whole directory would drag in thousands of unrelated controller
+    # processes' logs.
+    _collect_controller_system_log_paths(file_paths, errors,
+                                         seen_controller_uuids)
+
+    return {
+        'inline_data': inline_data,
+        'file_paths': file_paths,
+        'errors': errors,
+    }
+
+
+def _collect_job_debug_manifest(
+    job_id: int,
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
+           Optional[str], Set[str]]:
+    """Collect debug manifest entries for a single managed job.
+
+    Returns:
+        (inline_data, file_paths, errors, cluster_name, controller_uuids)
+        for this job. ``controller_uuids`` is the set of parent controller
+        UUIDs that ran this job (empty if no <jobid>.log exists yet or the
+        log doesn't contain the marker — e.g., the job never started).
+    """
+    inline_data: List[Dict[str, str]] = []
+    file_paths: List[Dict[str, str]] = []
+    errors: List[Dict[str, str]] = []
+    controller_uuids: Set[str] = set()
+    job_prefix = f'managed_jobs/{job_id}'
+
+    # 1. Controller log for this job (FILE — needs rsync). Also parse its
+    # head for "From controller <UUID>" so the caller can scope the
+    # shared controller_system/*.log set to only the controllers that
+    # actually ran this job.
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
+        controller_logs_dir = pathlib.Path(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        log_file = controller_logs_dir / f'{job_id}.log'
+        if log_file.is_file():
+            file_paths.append({
+                'remote_path': str(log_file),
+                'relative_path': f'{job_prefix}/{job_id}.log',
+            })
+            try:
+                # Stream the file line by line: HA recovery appends a
+                # fresh "From controller <UUID>" line after the prior
+                # controller's entire output, which can be many MB into
+                # the file. Bounded memory regardless of file size.
+                with open(log_file, 'r', encoding='utf-8',
+                          errors='replace') as f:
+                    for line in f:
+                        match = _CONTROLLER_UUID_LOG_RE.search(line)
+                        if match is not None:
+                            controller_uuids.add(match.group(1))
+            except OSError:
+                # File disappeared / unreadable between is_file() and open;
+                # leave controller_uuids unchanged.
+                pass
+
+    # 2. Job info from DB (inline — small data)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/job_info'):
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
+        if tasks:
+            for t in tasks:
+                user_yaml = t.get('user_yaml')
+                if isinstance(user_yaml, str):
+                    t['user_yaml'] = debug_dump_helpers.redact_task_yaml(
+                        user_yaml)
+            inline_data.append({
+                'relative_path': f'{job_prefix}/job_info.json',
+                'content': json.dumps(tasks, indent=2, default=str),
+            })
+
+    # 3. Job events from DB (inline — small data)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/events'):
+        events = managed_job_state.get_job_events(job_id, limit=1000)
+        if events:
+            serializable_events = []
+            for e in events:
+                serializable_events.append({
+                    'spot_job_id': e.get('spot_job_id'),
+                    'task_id': e.get('task_id'),
+                    'new_status': str(e.get('new_status')),
+                    'code': e.get('code'),
+                    'reason': e.get('reason'),
+                    'timestamp': str(e.get('timestamp')),
+                })
+            inline_data.append({
+                'relative_path': f'{job_prefix}/job_events.json',
+                'content': json.dumps(serializable_events,
+                                      indent=2,
+                                      default=str),
+            })
+
+    # 4. Job run logs (FILE — needs rsync)
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/run_logs'):
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        for task_idx, (_, _, _, local_log_file, _) in enumerate(task_info):
+            if local_log_file and os.path.exists(local_log_file):
+                suffix = f'_task{task_idx}' if len(task_info) > 1 else ''
+                file_paths.append({
+                    'remote_path': str(pathlib.Path(local_log_file)),
+                    'relative_path': f'{job_prefix}/run{suffix}.log',
+                })
+
+    # 5. Resolve cluster name (cluster info collected in caller for dedup)
+    cluster_name = None
+    with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/cluster_info'):
+        cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
+        if cluster_name is None:
+            # Fall back to generated name
+            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+                job_id)
+            if task_info:
+                _, task_name, _, _, _ = task_info[0]
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id)
+
+    return inline_data, file_paths, errors, cluster_name, controller_uuids
+
+
+def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
+                                    inline_data: List[Dict[str, str]],
+                                    errors: List[Dict[str, str]]) -> None:
+    """Collect cluster info and events for a managed job's cluster."""
+    cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
+
+    with _catch_to_errors(errors, 'managed_jobs',
+                          f'{cluster_name}/cluster_info'):
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        if cluster_record is None:
+            return
+        cluster_info = debug_dump_helpers.serialize_cluster_record(
+            cluster_record)
+        inline_data.append({
+            'relative_path': f'{cluster_prefix}/cluster_info.json',
+            'content': json.dumps(cluster_info, indent=2, default=str),
+        })
+
+        cluster_hash = cluster_record.get('cluster_hash')
+        if not cluster_hash:
+            return
+        for event_data in debug_dump_helpers.get_cluster_events_data(
+                cluster_hash):
+            inline_data.append({
+                'relative_path': f'{cluster_prefix}/'
+                                 f'events_{event_data["event_type"]}.json',
+                'content': json.dumps(event_data['events'],
+                                      indent=2,
+                                      default=str),
+            })
+
+
+def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
+                                         errors: List[Dict[str, str]],
+                                         relevant_uuids: Set[str]) -> None:
+    """Collect controller system log file paths (controller_*.log files).
+
+    Only the controllers whose UUIDs appear in ``relevant_uuids`` are
+    included. UUIDs are sourced from "From controller <UUID>" lines in
+    each requested job's <jobid>.log (see _collect_job_debug_manifest).
+    If ``relevant_uuids`` is empty (no requested job has a log yet, or
+    none of them recorded a controller marker), no controller_system
+    files are included — we do not fall back to globbing.
+    """
+    if not relevant_uuids:
+        return
+    with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
+        controller_logs_dir = pathlib.Path(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        if not controller_logs_dir.exists():
+            return
+        for uuid_str in relevant_uuids:
+            log_file = controller_logs_dir / f'controller_{uuid_str}.log'
+            if log_file.is_file():
+                file_paths.append({
+                    'remote_path': str(log_file),
+                    'relative_path': f'managed_jobs/controller_system/'
+                                     f'{log_file.name}',
+                })
+
+
 def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     """Generate managed job cluster name."""
     # Truncate the task name to 30 chars to avoid the cluster name being too
@@ -806,7 +1141,9 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
                       current_workspace: Optional[str] = None,
-                      user_hash: Optional[str] = None) -> str:
+                      user_hash: Optional[str] = None,
+                      graceful: bool = False,
+                      graceful_timeout: Optional[int] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
@@ -860,12 +1197,22 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 with signal_file.open('w', encoding='utf-8') as f:
                     f.write(UserSignal.CANCEL.value)
                     f.flush()
+            if graceful:
+                logger.warning(f'Job {job_id} is on legacy controller, '
+                               'graceful shutdown not supported.')
         else:
             # New controller process.
             try:
                 signal_file = pathlib.Path(
                     managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                signal_file.touch()
+                with filelock.FileLock(str(signal_file) + '.lock'):
+                    if graceful:
+                        content = _JOBS_GRACEFUL_CANCEL_SIGNAL
+                        if graceful_timeout is not None:
+                            content += f':{graceful_timeout}'
+                        signal_file.write_text(content, encoding='utf-8')
+                    else:
+                        signal_file.touch()
             except OSError as e:
                 logger.error(f'Failed to cancel job {job_id}: {e}')
                 # Don't add it to the to be cancelled job ids
@@ -896,7 +1243,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
 
 def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None) -> str:
+                       current_workspace: Optional[str] = None,
+                       graceful: bool = False,
+                       graceful_timeout: Optional[int] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -905,7 +1254,10 @@ def cancel_job_by_name(job_name: str,
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    msg = cancel_jobs_by_id(job_ids,
+                            current_workspace=current_workspace,
+                            graceful=graceful,
+                            graceful_timeout=graceful_timeout)
     return f'{job_name!r} {msg}'
 
 
@@ -918,6 +1270,56 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def cancel_managed_jobs(
+    *,
+    name: Optional[str] = None,
+    job_ids: Optional[List[int]] = None,
+    pool: Optional[str] = None,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+    current_workspace: Optional[str] = None,
+    user_hash: Optional[str] = None,
+) -> str:
+    """Dispatch to the correct cancel variant based on selector args.
+
+    One of ``job_ids``/``name``/``pool``/``all``/``all_users`` should be set.
+    Precedence:
+
+      - ``all_users`` or ``all`` or ``job_ids`` -> ``cancel_jobs_by_id``
+      - ``name`` -> ``cancel_job_by_name``
+      - ``pool`` -> ``cancel_jobs_by_pool``
+
+    Single source of truth for the dispatch precedence. Direct callers
+    (including plugins registering a custom ``ManagedJobRunner``) invoke
+    this function; the codegen path
+    (``ManagedJobCodeGen.cancel_managed_jobs``) also references it by
+    name on controllers running ``MANAGED_JOBS_VERSION >= 19``.
+    """
+    if all_users or all or job_ids:
+        return cancel_jobs_by_id(
+            job_ids,
+            all_users=all_users,
+            current_workspace=current_workspace,
+            user_hash=user_hash,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    if name is not None:
+        return cancel_job_by_name(
+            name,
+            current_workspace=current_workspace,
+            graceful=graceful,
+            graceful_timeout=graceful_timeout,
+        )
+    assert pool is not None, (job_ids, name, pool, all)
+    return cancel_jobs_by_pool(
+        pool,
+        current_workspace=current_workspace,
+    )
+
+
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -926,10 +1328,126 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
+def read_provision_status_from_log(
+        log_path: str, pos: int,
+        current_msg: Optional[str]) -> Tuple[int, Optional[str]]:
+    """Reads rich-status spinner messages relayed into a controller log.
+
+    The jobs controller relays the inner cluster-launch rich-status payloads
+    into its per-job log (see ``recovery_strategy._launch``'s
+    ``relay_rich_status=True``). This decodes any payloads appended since
+    ``pos`` and returns the new read position together with the latest
+    provisioning spinner message, so ``sky jobs launch`` / ``sky jobs logs``
+    can show the same provisioning progress (e.g. "Preparing SkyPilot runtime
+    (1/3)") that ``sky launch`` displays.
+
+    Args:
+        log_path: Path to the jobs controller log for the job.
+        pos: Byte/character offset to resume reading from (0 on first call).
+        current_msg: The previously returned spinner message.
+
+    Returns:
+        A tuple ``(new_pos, latest_msg)``. ``latest_msg`` is ``None`` if
+        provisioning has not emitted a spinner yet, or if it has finished
+        (an EXIT control clears the message).
+    """
+    msg = current_msg
+    try:
+        # If the log was truncated or recreated (e.g. controller recovery or a
+        # job retry), the saved offset can be past the new EOF; restart from the
+        # beginning so following doesn't get stuck reading nothing.
+        if os.path.exists(log_path) and pos > os.path.getsize(log_path):
+            pos = 0
+            msg = None
+        with open(log_path, 'r', encoding='utf-8') as f:
+            f.seek(pos)
+            while True:
+                line_start = f.tell()
+                line = f.readline()
+                if line == '':
+                    # EOF.
+                    break
+                if not line.endswith('\n'):
+                    # Partial line still being written; re-read it next time.
+                    f.seek(line_start)
+                    break
+                pos = f.tell()
+                is_payload, decoded = message_utils.decode_payload(
+                    line, raise_for_mismatch=False)
+                if not is_payload:
+                    continue
+                control, encoded_status = rich_utils.Control.decode(decoded)
+                if control in (rich_utils.Control.INIT,
+                               rich_utils.Control.UPDATE):
+                    # INIT/UPDATE carry the live spinner text.
+                    msg = encoded_status
+                elif control == rich_utils.Control.EXIT:
+                    # The spinner is done.
+                    msg = None
+                # START/STOP only toggle the spinner's visibility and carry the
+                # original (possibly stale) init message rather than the live
+                # one: entering a nested status emits UPDATE(nested) then
+                # START(original), so updating `msg` on START would revert the
+                # headline to the stale text. Leave `msg` unchanged for both.
+    except (OSError, ValueError):
+        # Best-effort: the log may not exist yet (FileNotFoundError) or be
+        # mid-write; never let log following break job-log streaming.
+        pass
+    return pos, msg
+
+
+def _is_relayed_status_payload_line(line: str) -> bool:
+    """Whether a controller-log line is a relayed rich-status payload.
+
+    With ``relay_rich_status=True``, the jobs controller writes the inner
+    cluster launch's encoded rich-status payloads into its per-job log to drive
+    the provisioning spinner (see ``read_provision_status_from_log``). These
+    encoded ``<sky-payload>`` lines are control-plane only and must be hidden
+    from the human-readable ``sky jobs logs --controller`` output.
+    """
+    is_payload, _ = message_utils.decode_payload(line, raise_for_mismatch=False)
+    return is_payload
+
+
+def _provision_status_headline(provision_msg: str) -> Optional[str]:
+    """Returns the blue headline of a provisioning spinner message.
+
+    Provisioning messages from the cluster launch are built by
+    ``ux_utils.spinner_message`` and look like
+    ``[bold cyan]Preparing SkyPilot runtime (1/3)[/]  <dim log hint>``, where
+    the trailing hint is colored with raw ANSI (colorama) codes rather than
+    rich markup -- so the message does *not* end at the headline's ``[/]``. We
+    keep only the ``[bold cyan]...[/]`` headline and drop the trailing hint, so
+    the caller can show it as a secondary detail under the "Waiting for task to
+    start" line. Returns ``None`` when the message has no ``[bold cyan]``
+    headline, so the caller can show nothing rather than a raw/unstyled message.
+    """
+    open_tag = '[bold cyan]'
+    start = provision_msg.find(open_tag)
+    if start == -1:
+        return None
+    start += len(open_tag)
+    # Walk the rich-markup tags after the opening tag, tracking nesting depth,
+    # and stop at the ``[/]`` that closes this ``[bold cyan]``. This keeps any
+    # nested markup (e.g. ``[bold]X[/]``) inside the headline intact -- instead
+    # of truncating at the first ``[/]`` -- and ignores the trailing log hint
+    # (which is ANSI-colored and contains no rich tags).
+    depth = 1
+    for match in re.finditer(r'\[[^\]]*\]', provision_msg[start:]):
+        if match.group(0).startswith('[/'):
+            depth -= 1
+            if depth == 0:
+                return provision_msg[start:start + match.start()]
+        else:
+            depth += 1
+    return None
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
         tail: Optional[int] = None,
+        tail_offset: Optional[int] = None,
         task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
@@ -937,6 +1455,9 @@ def stream_logs_by_id(
         job_id: The job ID to stream logs for.
         follow: Whether to follow the logs.
         tail: Number of lines to tail from the end of the log file.
+        tail_offset: Skip the last ``tail_offset`` lines before applying
+            ``tail``. Used by the dashboard live-tail UI to fetch a window
+            of older history without re-reading the whole file.
         task: Task identifier to view logs for a specific task in a JobGroup.
             If an int, it is treated as a task ID. If a str, it is treated as
             a task name. If None, logs for all tasks are shown.
@@ -946,6 +1467,78 @@ def stream_logs_by_id(
         failure of the job. 0 if success, 100 if the job failed.
         See exceptions.JobExitCode for possible exit codes.
     """
+
+    # Start a background watchdog thread that detects when the kubectl
+    # exec connection has been dropped (client disconnect). On Kubernetes,
+    # kubectl exec -i does not allocate a PTY, so no SIGHUP is sent when
+    # the connection drops. The only signal is that stdin reaches EOF
+    # (the kubelet closes the stdin pipe). This thread monitors stdin and
+    # terminates the process when disconnection is detected, preventing
+    # leaked stream_logs processes on the controller. Changing the exec call to
+    # also include -t does not result in the kubelet sending a SIGHUP to the
+    # remote end of the connection.
+    #
+    # The API server now passes stdin=subprocess.PIPE (instead of
+    # DEVNULL) to kubectl exec -i, so stdin on the controller is a live
+    # pipe that only reaches EOF when the connection actually drops.
+    #
+    # For SSH controllers, stdin is a PTY (from ssh -tt), so SIGHUP
+    # handles cleanup natively. For consolidation mode or other local
+    # invocations, stdin may be /dev/null or already closed (EOF). We
+    # check at startup: if stdin is already at EOF, we skip stdin
+    # monitoring entirely to avoid false positives. Only a live stdin
+    # (not yet at EOF) is worth monitoring this is the case for
+    # kubectl exec -i with stdin=subprocess.PIPE.
+    check_stdin_eof = False
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+        if readable:
+            # stdin is immediately readable check if it's already EOF
+            data = os.read(sys.stdin.fileno(), 1)
+            if data:
+                # Got actual data (unexpected but harmless); stdin is live
+                check_stdin_eof = True
+            # else: EOF at startup, don't monitor
+        else:
+            # stdin is not immediately readable it's a live pipe/TTY
+            # waiting for input, meaning we have a real connection
+            check_stdin_eof = True
+    except (ValueError, OSError):
+        # stdin is already closed or invalid — not useful for monitoring
+        pass
+
+    def _orphan_watchdog() -> None:
+        """Background thread that monitors for connection drop."""
+        initial_parent_pid = os.getppid()
+        while True:
+            time.sleep(5)
+            # Check 1: Parent PID changed (reparented to init/subreaper)
+            if os.getppid() != initial_parent_pid:
+                logger.info('Parent process died, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+            # Check 2: stdin EOF (kubectl exec -i connection dropped).
+            # Only checked when stdin is a pipe (Kubernetes), not a TTY
+            # (SSH). With SSH -tt, the PTY delivers SIGHUP on disconnect,
+            # so this check is unnecessary and could cause false positives.
+            if not check_stdin_eof:
+                continue
+            try:
+                readable, _, _ = select.select([sys.stdin], [], [], 0)
+                if readable:
+                    data = os.read(sys.stdin.fileno(), 1)
+                    if not data:
+                        logger.info('stdin EOF detected (connection dropped), '
+                                    'terminating.')
+                        os.kill(os.getpid(), signal.SIGTERM)
+                        return
+            except (ValueError, OSError):
+                logger.info('stdin closed, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+    watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -967,7 +1560,9 @@ def stream_logs_by_id(
         # task_filter is a str, match by task name
         return task_name == task_filter
 
-    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
+    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='',
+                                             provision_str='',
+                                             job_id=job_id)
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
@@ -990,6 +1585,21 @@ def stream_logs_by_id(
             return (f'No task found matching {task!r} in job {job_id}. '
                     f'Valid task IDs are {valid_range}.',
                     exceptions.JobExitCode.NOT_FOUND)
+
+    # Follow the jobs controller log during provisioning so the user sees the
+    # same spinner messages that `sky launch` shows. The controller relays the
+    # inner cluster-launch rich-status payloads into its per-job log (see
+    # recovery_strategy._launch's relay_rich_status=True); here we decode them
+    # to drive the single status spinner.
+    controller_log_path = controller_log_file_for_job(job_id)
+    provision_pos = 0
+    provision_msg: Optional[str] = None
+
+    def _latest_provision_status_msg() -> Optional[str]:
+        nonlocal provision_pos, provision_msg
+        provision_pos, provision_msg = read_provision_status_from_log(
+            controller_log_path, provision_pos, provision_msg)
+        return provision_msg
 
     with status_display:
         prev_msg = msg
@@ -1041,29 +1651,43 @@ def stream_logs_by_id(
                     # Show task header when multiple tasks OR when filtering
                     if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
-                    with open(os.path.expanduser(log_file),
-                              'r',
-                              encoding='utf-8') as f:
-                        # Stream the logs to the console without reading the
-                        # whole file into memory.
-                        start_streaming = False
-                        read_from: Union[TextIO, Deque[str]] = f
-                        if tail is not None:
-                            assert tail > 0
-                            # Read only the last 'tail' lines using deque
-                            read_from = collections.deque(f, maxlen=tail)
-                            # We set start_streaming to True here in case
-                            # truncating the log file removes the line that
-                            # contains LOG_FILE_START_STREAMING_AT. This does
-                            # not cause issues for log files shorter than tail
-                            # because tail_logs in sky/skylet/log_lib.py also
-                            # handles LOG_FILE_START_STREAMING_AT.
-                            start_streaming = True
-                        for line in read_from:
+                    log_path = os.path.expanduser(log_file)
+                    if tail is not None:
+                        assert tail > 0
+                        # Backward-seek tail: O(tail × line) instead of
+                        # scanning the whole file. The previous
+                        # `collections.deque(f, maxlen=tail)` scanned every
+                        # byte of the cached log, making dashboard log
+                        # loading 10+ s for multi-GB cancelled jobs.
+                        offset = max(tail_offset or 0, 0)
+                        lines, _ = log_lib.tail_lines_from_end(
+                            log_path, tail, offset)
+                        # Apply the same start-stream-marker filter that
+                        # log_lib.tail_logs_iter uses: when the marker
+                        # appears in both the head of the file and the
+                        # tail window (small log fully covered), filter
+                        # so pre-marker boilerplate (Ray INFO lines etc.)
+                        # is hidden.
+                        with open(log_path, 'r', encoding='utf-8') as peek_f:
+                            head_lines = log_lib._peek_head_lines(peek_f)  # type: ignore[attr-defined] # pylint: disable=protected-access
+                        start_streaming = (
+                            log_lib._should_stream_the_whole_tail_lines(  # type: ignore[attr-defined] # pylint: disable=protected-access
+                                head_lines, lines,
+                                log_lib.LOG_FILE_START_STREAMING_AT))
+                        for line in lines:
                             if log_lib.LOG_FILE_START_STREAMING_AT in line:
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
+                    else:
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            start_streaming = False
+                            for line in f:
+                                if (log_lib.LOG_FILE_START_STREAMING_AT
+                                        in line):
+                                    start_streaming = True
+                                if start_streaming:
+                                    print(line, end='', flush=True)
                     # Show task finished message for multi-task or filtering
                     if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
@@ -1088,20 +1712,33 @@ def stream_logs_by_id(
                     f'{job_msg}',
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
+        # Batch coordinator jobs run inline on the controller — no
+        # separate cluster is provisioned. Stream controller logs instead
+        # of trying to find a worker cluster handle.
+        if managed_job_state.is_batch_job(job_id):
+            return stream_logs(job_id,
+                               job_name=None,
+                               controller=True,
+                               follow=follow,
+                               tail=tail,
+                               tail_offset=tail_offset)
+
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
+        latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
 
         # If a task filter was specified, use the filtered task_id instead of
         # the latest task_id. This allows viewing logs for a specific task in
         # a JobGroup with parallel execution.
         if filtered_task_id is not None:
-            task_id = filtered_task_id
+            latest_task_id = filtered_task_id
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
-        assert managed_job_status is not None, (job_id, task_id,
+        assert managed_job_status is not None, (job_id, latest_task_id,
                                                 managed_job_status)
+        assert latest_task_id is not None, (job_id, latest_task_id)
+        task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
             handle = None
@@ -1132,38 +1769,90 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
-                                                         job_id=job_id)
-                if msg != prev_msg:
-                    status_display.update(msg)
-                    prev_msg = msg
-                time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
+                # Poll the controller log frequently for provisioning spinner
+                # updates, but only re-check the (more expensive) managed job
+                # status every JOB_STATUS_CHECK_GAP_SECONDS.
+                waited = 0.0
+                while True:
+                    # Keep the "Waiting for task to start" context and append
+                    # the live cluster-launch status, so it's clear the job is
+                    # waiting on its cluster to be provisioned.
+                    provision_msg = _latest_provision_status_msg()
+                    # Show only the blue headline of the cluster-launch status
+                    # as a secondary detail under the waiting line; show nothing
+                    # when there is no headline to display.
+                    headline = (None if provision_msg is None else
+                                _provision_status_headline(provision_msg))
+                    provision_str = (''
+                                     if headline is None else f'\n  {headline}')
+                    msg = _JOB_WAITING_STATUS_MESSAGE.format(
+                        status_str=status_str,
+                        provision_str=provision_str,
+                        job_id=job_id)
+                    if msg != prev_msg:
+                        status_display.update(msg)
+                        prev_msg = msg
+                    if waited >= JOB_STATUS_CHECK_GAP_SECONDS:
+                        break
+                    time.sleep(_PROVISION_LOG_POLL_GAP_SECONDS)
+                    waited += _PROVISION_LOG_POLL_GAP_SECONDS
+                latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
                 if filtered_task_id is not None:
-                    task_id = filtered_task_id
-                assert managed_job_status is not None, (job_id, task_id,
+                    latest_task_id = filtered_task_id
+                assert managed_job_status is not None, (job_id, latest_task_id,
                                                         managed_job_status)
+                assert latest_task_id is not None, (job_id, latest_task_id)
+                task_id = latest_task_id
                 continue
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
-            tail_param = tail if tail is not None else 0
-            returncode = backend.tail_logs(handle,
-                                           job_id=job_id_to_tail,
-                                           managed_job_id=job_id,
-                                           follow=follow,
-                                           tail=tail_param)
+            returncode = None
+            if managed_job_runtime.is_registered():
+                returncode = managed_job_runtime.tail_logs(
+                    handle,
+                    backend=backend,
+                    job_id=job_id,
+                    task_id=task_id,
+                    job_id_on_cluster=job_id_to_tail,
+                    follow=follow,
+                    tail=tail,
+                    tail_offset=tail_offset)
+            if returncode is None:
+                # OSS default: stream via backend.tail_logs (skylet/SSH/gRPC).
+                # require_outputs defaults to False, so the return is int
+                # (not Tuple[int, str, str]).
+                tail_param = tail if tail is not None else 0
+                returncode = typing.cast(
+                    int,
+                    backend.tail_logs(handle,
+                                      job_id=job_id_to_tail,
+                                      managed_job_id=job_id,
+                                      follow=follow,
+                                      tail=tail_param,
+                                      tail_offset=tail_offset))
             if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
                 # succeeded (even though the real job can be SUCCEEDED or
                 # FAILED). We use the status in job queue to show the
                 # information, as the ManagedJobStatus is not updated yet.
-                job_statuses = backend.get_job_status(handle, stream_logs=False)
-                job_status = list(job_statuses.values())[0]
+                job_status: Optional[job_lib.JobStatus] = None
+                # handle being non-None implies cluster_name was set.
+                assert cluster_name is not None, (job_id, task_id)
+                if managed_job_runtime.is_registered():
+                    runtime_result = managed_job_runtime.get_job_status(
+                        handle, cluster_name, returncode=returncode)
+                    if runtime_result is not None:
+                        job_status, _ = runtime_result
+                if job_status is None:
+                    # OSS default: query skylet via backend.
+                    job_statuses = backend.get_job_status(handle,
+                                                          stream_logs=False)
+                    job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
 
@@ -1231,13 +1920,16 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
-                        task_id, managed_job_status = (
+                        latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
-                        if original_task_id != task_id:
+                        if original_task_id != latest_task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    assert managed_job_status is not None, (job_id, task_id,
+                    assert managed_job_status is not None, (job_id,
+                                                            latest_task_id,
                                                             managed_job_status)
+                    assert latest_task_id is not None, (job_id, latest_task_id)
+                    task_id = latest_task_id
                     continue
 
                 # The job can be cancelled by the user or the controller (when
@@ -1299,6 +1991,7 @@ def stream_logs(job_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None,
+                tail_offset: Optional[int] = None,
                 task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
@@ -1376,25 +2069,45 @@ def stream_logs(job_id: Optional[int],
         # This code is based on log_lib.tail_logs. We can't use that code
         # exactly because state works differently between managed jobs and
         # normal jobs.
-        with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
-            # Note: we do not need to care about start_stream_at here, since
-            # that should be in the job log printed above.
-            read_from: Union[TextIO, Deque[str]] = f
-            if tail is not None:
-                assert tail > 0
-                # Read only the last 'tail' lines efficiently using deque
-                read_from = collections.deque(f, maxlen=tail)
-            for line in read_from:
+        offset_arg = (tail_offset
+                      if tail_offset is not None and tail_offset > 0 else 0)
+        # Phase 1: emit the historical window. For tail!=None we use a
+        # backward-seek read so cost is O(tail) instead of O(file_size);
+        # otherwise stream the whole file (this is the legacy `tail=None`
+        # behavior used by `sky jobs logs --controller`).
+        end_pos = 0
+        if tail is not None:
+            assert tail > 0
+            tail_lines, end_pos = log_lib.tail_lines_from_end(
+                controller_log_path, tail, offset_arg)
+            for line in tail_lines:
+                if _is_relayed_status_payload_line(line):
+                    continue
                 print(line, end='')
-            # Flush.
             print(end='', flush=True)
+        else:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                for line in f:
+                    if _is_relayed_status_payload_line(line):
+                        continue
+                    print(line, end='')
+                end_pos = f.tell()
+                print(end='', flush=True)
 
-            if follow:
+        # Phase 2: optionally follow new bytes from where the tail read
+        # stopped. Reopen so the prior file handle (which may have been
+        # binary in the seek branch) doesn't leak.
+        if follow:
+            with open(controller_log_path, 'r', newline='',
+                      encoding='utf-8') as f:
+                f.seek(end_pos)
                 while True:
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':
-                        print(line, end='')
+                        if not _is_relayed_status_payload_line(line):
+                            print(line, end='')
                         line = f.readline()
 
                     # Flush.
@@ -1415,8 +2128,14 @@ def stream_logs(job_id: Optional[int],
                 # Wait for final logs to be written.
                 time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
-            # Print any remaining logs including incomplete line.
-            print(f.read(), end='', flush=True)
+                # Print any remaining logs including incomplete line.
+                remaining = f.read()
+                if remaining:
+                    print(''.join(
+                        line for line in remaining.splitlines(keepends=True)
+                        if not _is_relayed_status_payload_line(line)),
+                          end='',
+                          flush=True)
 
         if follow:
             return ux_utils.finishing_message(
@@ -1436,7 +2155,7 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow, tail, task)
+    return stream_logs_by_id(job_id, follow, tail, tail_offset, task)
 
 
 def dump_managed_job_queue(
@@ -1540,9 +2259,11 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
-def _format_job_details(*, job: Dict[str, Any],
-                        highest_blocking_priority: int) -> None:
-    """Add details about schedule state / backoff."""
+def _format_job_details(*,
+                        job: Dict[str, Any],
+                        highest_blocking_priority: int,
+                        recovery_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery."""
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -1560,6 +2281,25 @@ def _format_job_details(*, job: Dict[str, Any],
         job['details'] = state_details
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
+    elif recovery_reason:
+        # Surface why a job is recovering (e.g. an OOMKilled pod) so the
+        # transient recovery cause is visible in the CLI and dashboard, not
+        # just the controller logs. The reason (e.g. from
+        # _get_pod_termination_reason) may be multi-line; collapse whitespace
+        # so it renders as a single line in the details column.
+        flattened = ' '.join(recovery_reason.split())
+        detail = f'Recovering: {flattened}'
+        # Append an actionable remediation hint when the cause is a known
+        # Kubernetes pod failure (e.g. OOMKilled -> raise resources.memory).
+        # Guarded on the job's cloud (job['cloud'] is str(cloud), exactly
+        # 'Kubernetes') so a non-k8s reason that happens to contain a matched
+        # word (e.g. 'Insufficient') is not mis-hinted.
+        if str(job.get('cloud', '')).lower() == 'kubernetes':
+            hint = kubernetes_utils.match_kubernetes_failure_hint_text(
+                flattened)
+            if hint is not None:
+                detail += f' ({hint})'
+        job['details'] = detail
     else:
         job['details'] = None
 
@@ -1594,6 +2334,18 @@ def _populate_job_record_from_handle(
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+    # Network endpoint information
+    job['internal_external_ips'] = handle.stable_internal_external_ips
+    # Extract internal_svc entries if available
+    internal_services = None
+    if handle.cached_cluster_info is not None:
+        internal_services = {}
+        for instance_id, instance_infos in (
+                handle.cached_cluster_info.instances.items()):
+            for info in instance_infos:
+                if info.internal_svc is not None:
+                    internal_services[instance_id] = info.internal_svc
+    job['internal_services'] = internal_services
 
 
 def get_managed_job_queue(
@@ -1731,13 +2483,30 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
+                job['internal_services'] = None
+                job['internal_external_ips'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
+
+    # Batch-fetch the reason a recovering job is recovering (e.g. an OOMKilled
+    # pod), so it can be surfaced in `details`. Scoped to RECOVERING jobs (a
+    # small, transient subset) and done in one query to stay off the per-job
+    # path. `job['status']` is already stringified above.
+    recovery_reasons: Dict[int, str] = {}
+    if not fields or 'details' in fields:
+        recovering_job_ids = [
+            job['job_id'] for job in jobs if job['status'] ==
+            managed_job_state.ManagedJobStatus.RECOVERING.value
+        ]
+        recovery_reasons = managed_job_state.get_latest_recovery_reasons(
+            recovering_job_ids)
 
     for job in jobs:
         if not fields or 'details' in fields:
             _format_job_details(
-                job=job, highest_blocking_priority=highest_blocking_priority)
+                job=job,
+                highest_blocking_priority=highest_blocking_priority,
+                recovery_reason=recovery_reasons.get(job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
@@ -1972,6 +2741,10 @@ def format_job_table(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
         """Create a mapping from job_id to worker replica_id.
 
+        Jobs that appear on multiple workers (e.g. batch coordinators
+        that orchestrate across the whole pool) are excluded — they
+        should not display a single ``(worker=N)`` annotation.
+
         Args:
             pool_status: List of pool status dictionaries with replica_info.
 
@@ -1979,6 +2752,7 @@ def format_job_table(
             Dictionary mapping job_id to replica_id (worker ID).
         """
         job_to_worker: Dict[int, int] = {}
+        multi_worker_jobs: Set[int] = set()
         if pool_status is None:
             return job_to_worker
         for pool in pool_status:
@@ -1987,7 +2761,11 @@ def format_job_table(
                 used_by = replica.get('used_by')
                 if used_by is not None:
                     for job_id in used_by:
+                        if job_id in job_to_worker:
+                            multi_worker_jobs.add(job_id)
                         job_to_worker[job_id] = replica.get('replica_id')
+        for job_id in multi_worker_jobs:
+            del job_to_worker[job_id]
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id
@@ -2011,6 +2789,23 @@ def format_job_table(
         if show_all:
             user_cols.append('USER_ID')
 
+    def _fmt_batch_progress(task_or_tasks) -> str:
+        """Format batch progress as 'completed/total' or '-' if not a batch."""
+        if isinstance(task_or_tasks, list):
+            t = task_or_tasks[0]
+        else:
+            t = task_or_tasks
+        total = t.get('batch_total_batches')
+        if not total:
+            return '-'
+        status = t.get('status')
+        if (isinstance(status, managed_job_state.ManagedJobStatus) and
+                status == managed_job_state.ManagedJobStatus.WINDING_DOWN):
+            return 'Winding down'
+        completed = t.get('batch_completed_batches') or 0
+        pct = int(completed * 100 / total)
+        return f'{pct}% {completed}/{total}'
+
     columns = [
         'ID',
         'TASK',
@@ -2023,6 +2818,7 @@ def format_job_table(
         'JOB DURATION',
         '#RECOVERIES',
         'STATUS',
+        'PROGRESS',
         'POOL',
     ]
     if show_all:
@@ -2154,6 +2950,7 @@ def format_job_table(
                 job_duration,
                 recovery_cnt,
                 status_str,
+                _fmt_batch_progress(job_tasks),
                 pool,
             ]
             if show_all:
@@ -2217,6 +3014,7 @@ def format_job_table(
                 job_duration,
                 task['recovery_count'],
                 task['status'].colored_str(),
+                _fmt_batch_progress(task),
                 pool,
             ]
             if show_all:
@@ -2333,7 +3131,45 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Convert internal_external_ips from list of dicts to list of tuples
+    # MessageToDict converts IpPair messages to dicts like
+    # {"internal_ip": "...", "external_ip": "..."}, but ManagedJobRecord
+    # expects a list of (internal_ip, external_ip) tuples.
+    if 'internal_external_ips' in job_dict:
+        ip_pairs = job_dict['internal_external_ips']
+        if ip_pairs:
+            job_dict['internal_external_ips'] = [
+                (ip_pair.get('internal_ip', ''), ip_pair.get('external_ip', ''))
+                for ip_pair in ip_pairs
+            ]
+        else:
+            job_dict['internal_external_ips'] = None
+    # Convert empty internal_services dict to None for consistency
+    if 'internal_services' in job_dict and not job_dict['internal_services']:
+        job_dict['internal_services'] = None
     return job_dict
+
+
+def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
+    """Parse the job cancel signal file to check if graceful cancel is enabled.
+
+    Args:
+        content: content of the signal file, if any.
+
+    Returns:
+        A tuple of whether graceful cancel is enabled, and cancel timeout if
+        present.
+    """
+    graceful, graceful_timeout = False, None
+    if content and content.startswith(_JOBS_GRACEFUL_CANCEL_SIGNAL):
+        graceful = True
+        if ':' in content:
+            try:
+                graceful_timeout = int(content.split(':')[1])
+            except (ValueError, IndexError):
+                logger.warning('Incorrect graceful signal contents. Got: '
+                               f'{content}. Ignoring timeout...')
+    return graceful, graceful_timeout
 
 
 class ManagedJobCodeGen:
@@ -2352,9 +3188,20 @@ class ManagedJobCodeGen:
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
 
         # Plugins are only loaded for managed jobs version 13 and above.
-        if managed_job_version >= 13:
+        # Context-aware loading (PluginContext) was introduced in version 20.
+        if managed_job_version >= 20:
+            from sky import sky_logging as _sky_logging
             from sky.server import plugins
-            plugins.load_plugins(plugins.ExtensionContext())
+            # Suppress logging during plugin loading to prevent installation
+            # logs from leaking into codegen output.
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext(
+                    context=plugins.PluginContext.CONTROLLER))
+        elif managed_job_version >= 13:
+            from sky import sky_logging as _sky_logging
+            from sky.server import plugins
+            with _sky_logging.silent():
+                plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod
@@ -2379,6 +3226,10 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
+        # Filter out batch fields for older controllers (< 18)
+        _BATCH_FIELDS = {{'is_batch', 'batch_total_batches', 'batch_completed_batches'}}
+        if managed_job_version < 18 and _fields is not None:
+            _fields = [f for f in _fields if f not in _BATCH_FIELDS]
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
@@ -2440,50 +3291,104 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls,
-                          job_ids: Optional[List[int]],
-                          all_users: bool = False) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        else:
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
-                            current_workspace={active_workspace!r})
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
+    def cancel_managed_jobs(
+        cls,
+        *,
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        pool: Optional[str] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
+    ) -> str:
+        """Unified cancel codegen.
 
-    @classmethod
-    def cancel_job_by_name(cls, job_name: str) -> str:
+        On controllers running ``MANAGED_JOBS_VERSION >= 19``, emits a
+        single call to ``utils.cancel_managed_jobs`` — the one dispatch
+        function that direct callers also use. On older controllers
+        (``< 19``) that don't have the dispatcher, falls back to a
+        targeted call to the underlying ``utils.cancel_jobs_by_id`` /
+        ``cancel_job_by_name`` / ``cancel_jobs_by_pool`` chosen
+        client-side based on the selector args.
+        """
         active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        else:
-            msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
-        print(msg, end="", flush=True)
-        """)
-        return cls._build(code)
 
-    @classmethod
-    def cancel_jobs_by_pool(cls, pool_name: str) -> str:
-        active_workspace = skypilot_config.get_active_workspace()
-        code = textwrap.dedent(f"""\
-            msg = utils.cancel_jobs_by_pool({pool_name!r}, {active_workspace!r})
-            print(msg, end="", flush=True)
-        """)
+        # ``user_hash`` is intentionally omitted below — the controller runs
+        # the generated code under ``_build()``, which exports
+        # ``USER_ID_ENV_VAR`` to the caller's hash. The dispatcher defaults
+        # ``user_hash=None``, and ``state.get_nonterminal_job_ids_by_name``
+        # falls back to ``common_utils.get_user_hash()`` (reading the env
+        # var) when ``user_hash`` is None — matching the old per-variant
+        # codegens, which also never passed it.
+
+        # Client-side pick of which legacy variant to emit for controllers
+        # running ``managed_job_version < 19``. Each variant preserves the
+        # per-version gating that its dedicated codegen method used before
+        # we consolidated everything into ``cancel_managed_jobs``: older
+        # controllers predate args like ``current_workspace``/``graceful``
+        # and must not receive them. Lines are at column 0 here; the final
+        # assembly indents them by 4 spaces so they nest under
+        # ``if managed_job_version < 19:`` in the generated code.
+        if all_users or all or job_ids:
+            legacy_call_lines = [
+                'if managed_job_version < 2:',
+                # #4787: all_users not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r})',
+                'elif managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_jobs_by_id({job_ids!r}, '
+                f'all_users={all_users!r}, '
+                f'current_workspace={active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        elif name is not None:
+            legacy_call_lines = [
+                'if managed_job_version < 4:',
+                # #5660: current_workspace not supported.
+                f'    msg = utils.cancel_job_by_name({name!r})',
+                'elif managed_job_version < 16:',
+                # graceful/graceful_timeout not supported.
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r})',
+                'else:',
+                f'    msg = utils.cancel_job_by_name({name!r}, '
+                f'{active_workspace!r}, '
+                f'graceful={graceful!r}, '
+                f'graceful_timeout={graceful_timeout!r})',
+            ]
+        else:
+            assert pool is not None, (job_ids, name, pool, all)
+            # cancel_jobs_by_pool had no historical version gating.
+            legacy_call_lines = [
+                f'msg = utils.cancel_jobs_by_pool({pool!r}, '
+                f'{active_workspace!r})',
+            ]
+
+        legacy_block = '\n'.join(f'    {line}' for line in legacy_call_lines)
+        code = (f'if managed_job_version < 19:\n'
+                f'{legacy_block}\n'
+                f'else:\n'
+                f'    msg = utils.cancel_managed_jobs(\n'
+                f'        name={name!r},\n'
+                f'        job_ids={job_ids!r},\n'
+                f'        pool={pool!r},\n'
+                f'        all={all!r},\n'
+                f'        all_users={all_users!r},\n'
+                f'        graceful={graceful!r},\n'
+                f'        graceful_timeout={graceful_timeout!r},\n'
+                f'        current_workspace={active_workspace!r},\n'
+                f'    )\n'
+                f'print(msg, end="", flush=True)\n')
         return cls._build(code)
 
     @classmethod
@@ -2524,12 +3429,29 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_debug_dump_manifest(cls, job_ids: List[int]) -> str:
+        code = textwrap.dedent(f"""\
+        from sky.utils import message_utils
+        if managed_job_version >= 17:
+            result = utils.collect_debug_dump_manifest({job_ids!r})
+            print(message_utils.encode_payload(result), end="", flush=True)
+        else:
+            print(message_utils.encode_payload({{
+                'inline_data': [], 'file_paths': [], 'errors': [
+                {{'component': 'managed_jobs', 'resource': 'debug_dump',
+                  'error': 'Controller version too old (requires >= 17)'}}
+            ]}}), end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def stream_logs(cls,
                     job_name: Optional[str],
                     job_id: Optional[int],
                     follow: bool = True,
                     controller: bool = False,
                     tail: Optional[int] = None,
+                    tail_offset: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
@@ -2540,10 +3462,15 @@ class ManagedJobCodeGen:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
-        else:
+        elif managed_job_version < 21:
+            # Versions before 21 did not support tail_offset parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r},
+                                    tail_offset={tail_offset!r}, task={task!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

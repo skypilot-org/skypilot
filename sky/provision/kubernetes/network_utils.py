@@ -2,7 +2,7 @@
 import os
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import sky_logging
@@ -55,9 +55,14 @@ def get_port_mode(
     return port_mode
 
 
-def fill_loadbalancer_template(namespace: str, context: Optional[str],
-                               service_name: str, ports: List[int],
-                               selector_key: str, selector_value: str) -> Dict:
+def fill_loadbalancer_template(
+        namespace: str,
+        context: Optional[str],
+        service_name: str,
+        ports: List[int],
+        selector_key: str,
+        selector_value: str,
+        cluster_config_overrides: Optional[Dict[str, Any]] = None) -> Dict:
     template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _LOADBALANCER_TEMPLATE_NAME)
     if not os.path.exists(template_path):
@@ -72,12 +77,14 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
         cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'annotations'),
-        default_value={})
+        default_value={},
+        override_configs=cluster_config_overrides)
     labels = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'labels'),
-        default_value={})
+        default_value={},
+        override_configs=cluster_config_overrides)
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -92,10 +99,14 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
     return content
 
 
-def fill_ingress_template(namespace: str, context: Optional[str],
-                          service_details: List[Tuple[str, int,
-                                                      str]], ingress_name: str,
-                          selector_key: str, selector_value: str) -> Dict:
+def fill_ingress_template(
+        namespace: str,
+        context: Optional[str],
+        service_details: List[Tuple[str, int, str]],
+        ingress_name: str,
+        selector_key: str,
+        selector_value: str,
+        cluster_config_overrides: Optional[Dict[str, Any]] = None) -> Dict:
     template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
@@ -109,12 +120,14 @@ def fill_ingress_template(namespace: str, context: Optional[str],
         cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'annotations'),
-        default_value={})
+        default_value={},
+        override_configs=cluster_config_overrides)
     labels = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'labels'),
-        default_value={})
+        default_value={},
+        override_configs=cluster_config_overrides)
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,

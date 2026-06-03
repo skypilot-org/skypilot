@@ -60,6 +60,14 @@ regenerate_user_hash() {
 # if TEMP_FILE_FOR_TEST exists, skip the following steps
 if [ -f "$HOME/TEMP_FILE_FOR_TEST" ]; then
     echo "TEMP_FILE_FOR_TEST exists, skipping the following steps"
+    # Match the CWD used on first-run below so Python resolves `sky` to the
+    # editable install at /skypilot (buildkite-owned) rather than the
+    # root-owned copy left by the Dockerfile at ~/sky_workdir/skypilot.
+    # Without this, `docker restart` (e.g. from test_api_server_memory)
+    # leaves CWD at the Dockerfile's WORKDIR, and sys.path[0]='' picks up
+    # the root-owned tree, making every k8s rsync's `chmod +x
+    # rsync_helper.sh` fail with "Operation not permitted".
+    cd /skypilot
     start_sky_api_server
     exit 0
 fi
@@ -95,7 +103,7 @@ fi
 
 cd /skypilot
 uv pip uninstall --system skypilot
-uv pip install --system --prerelease=allow "azure-cli>=2.65.0"
+uv pip install --system --prerelease=allow "azure-cli>=2.65.0,<2.87.0"
 uv pip install --system -r requirements-dev.txt
 uv pip install --system -e ".[all]"
 sky api start

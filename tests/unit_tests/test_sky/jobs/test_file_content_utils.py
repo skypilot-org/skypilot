@@ -30,8 +30,8 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
             yield
 
     monkeypatch.setattr(state.migration_utils, 'db_lock', _tmp_db_lock)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE', engine)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE_ASYNC', async_engine)
+    monkeypatch.setattr(state._db_manager, '_engine', engine)
+    monkeypatch.setattr(state._db_manager, '_engine_async', async_engine)
 
     state.create_table(engine)
 
@@ -76,7 +76,7 @@ def _create_basic_job(tmp_path,
                                     priority=100)
 
     if set_paths:
-        with state._SQLALCHEMY_ENGINE.begin() as conn:  # pylint: disable=protected-access
+        with state._db_manager.get_engine().begin() as conn:  # pylint: disable=protected-access
             conn.execute(
                 sqlalchemy.update(state.job_info_table).where(  # pylint: disable=protected-access
                     state.job_info_table.c.spot_job_id == job_id).values(
@@ -134,7 +134,7 @@ def test_get_job_env_content_missing_returns_none(_mock_managed_jobs_db_conn,
     job_info = _create_basic_job(tmp_path, name='missing-env')
     job_id = job_info['job_id']
 
-    with state._SQLALCHEMY_ENGINE.begin() as conn:  # pylint: disable=protected-access
+    with state._db_manager.get_engine().begin() as conn:  # pylint: disable=protected-access
         conn.execute(
             sqlalchemy.update(state.job_info_table).where(  # pylint: disable=protected-access
                 state.job_info_table.c.spot_job_id == job_id).values(
@@ -150,7 +150,7 @@ def test_get_job_dag_content_missing_returns_none(_mock_managed_jobs_db_conn,
     job_info = _create_basic_job(tmp_path, name='missing-dag')
     job_id = job_info['job_id']
 
-    with state._SQLALCHEMY_ENGINE.begin() as conn:  # pylint: disable=protected-access
+    with state._db_manager.get_engine().begin() as conn:  # pylint: disable=protected-access
         conn.execute(
             sqlalchemy.update(state.job_info_table).where(  # pylint: disable=protected-access
                 state.job_info_table.c.spot_job_id == job_id).values(

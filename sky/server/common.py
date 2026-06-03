@@ -37,6 +37,7 @@ from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
+from sky.server.blob import blob_storage as bs
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -106,6 +107,11 @@ logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
 _upgrade_hint_shown = False
+# Cached from the latest health check response. Used to determine whether
+# to include client user hash in usage reports and request env vars.
+basic_auth_enabled: bool = False
+# Cached client user hash (machine-local identity), computed once.
+client_user_hash: Optional[str] = None
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -475,12 +481,38 @@ def _handle_non_200_server_status(
                                              ttl=5.0,
                                              timer=time.time),
                    lock=threading.RLock())
+def get_api_server_status_response(
+        endpoint: Optional[str] = None) -> Optional['requests.Response']:
+    # Cache the response to set the api version across multiple threads.
+    # Refer to https://github.com/skypilot-org/skypilot/issues/8879
+    time_out_try_count = 1
+    server_url = endpoint if endpoint is not None else get_server_url()
+    while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
+        try:
+            return make_authenticated_request('GET',
+                                              '/api/health',
+                                              server_url=server_url,
+                                              timeout=2.5)
+        except requests.exceptions.Timeout:
+            if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
+                return None
+            time_out_try_count += 1
+            continue
+        except requests.exceptions.ConnectionError:
+            return None
+    return None
+
+
 def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     """Retrieve the status of the API server.
 
     This function checks the health of the API server by sending a request
     to the server's health endpoint. It retries the connection a specified
     number of times in case of a timeout.
+
+    As a side effect, this function will set the remote api version and
+    remote version to this thread's context vars (will not set to the
+    thread's parent's context vars).
 
     Args:
         endpoint (Optional[str]): The endpoint of the API server.
@@ -491,92 +523,90 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         of the server. The status can be HEALTHY, UNHEALTHY
         or VERSION_MISMATCH.
     """
-    time_out_try_count = 1
-    server_url = endpoint if endpoint is not None else get_server_url()
-    while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
-        try:
-            response = make_authenticated_request('GET',
-                                                  '/api/health',
-                                                  server_url=server_url,
-                                                  timeout=2.5)
-        except requests.exceptions.Timeout:
-            if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
-                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
-            time_out_try_count += 1
-            continue
-        except requests.exceptions.ConnectionError:
-            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+    response = get_api_server_status_response(endpoint)
+    if response is None:
+        return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
-        logger.debug(f'Health check status: {response.status_code}')
+    logger.debug(f'Health check status: {response.status_code}')
 
-        if response.status_code != 200:
-            return _handle_non_200_server_status(response)
+    if response.status_code != 200:
+        return _handle_non_200_server_status(response)
 
-        # The response is 200, so we can parse the response.
-        try:
-            result = response.json()
-            server_status = result.get('status')
-            api_version = result.get('api_version')
-            version = result.get('version')
-            version_on_disk = result.get('version_on_disk')
-            commit = result.get('commit')
-            user = result.get('user')
-            basic_auth_enabled = result.get('basic_auth_enabled')
-            latest_version = result.get('latest_version')
-            vm_ssh_proxy_mode = result.get('vm_ssh_proxy_mode', 'only-internal')
-            server_info = ApiServerInfo(status=ApiServerStatus(server_status),
-                                        api_version=api_version,
-                                        version=version,
-                                        version_on_disk=version_on_disk,
-                                        commit=commit,
-                                        user=user,
-                                        basic_auth_enabled=basic_auth_enabled,
-                                        latest_version=latest_version,
-                                        vm_ssh_proxy_mode=vm_ssh_proxy_mode)
-            if api_version is None or version is None or commit is None:
-                logger.warning(f'API server response missing '
-                               f'version info. {server_url} may '
-                               f'not be running SkyPilot API server.')
-                server_info.status = ApiServerStatus.UNHEALTHY
-            version_info = versions.check_compatibility_at_client(
-                response.headers)
-            if version_info is None:
-                # Backward compatibility for server prior to v0.11.0 which
-                # does not check compatibility at server side.
-                # TODO(aylei): remove this after v0.13.0 is released.
-                return ApiServerInfo(
-                    status=ApiServerStatus.VERSION_MISMATCH,
-                    error=versions.SERVER_TOO_OLD_ERROR.format(
-                        remote_version=version,
-                        local_version=versions.get_local_readable_version(),
-                        min_version=server_constants.MIN_COMPATIBLE_VERSION,
-                        command=versions.install_version_command(
-                            version, commit)))
-            if version_info.error is not None:
-                return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
-                                     error=version_info.error)
+    # The response is 200, so we can parse the response.
+    try:
+        result = response.json()
+        server_status = result.get('status')
+        api_version = result.get('api_version')
+        version = result.get('version')
+        version_on_disk = result.get('version_on_disk')
+        commit = result.get('commit')
+        user = result.get('user')
+        latest_version = result.get('latest_version')
+        vm_ssh_proxy_mode = result.get('vm_ssh_proxy_mode', 'only-internal')
+        # Cache basic_auth_enabled and set client user hash on the
+        # client-side usage singleton.
+        global basic_auth_enabled, client_user_hash
+        basic_auth_enabled = bool(result.get('basic_auth_enabled'))
+        if basic_auth_enabled:
+            if client_user_hash is None:
+                client_user_hash = common_utils.generate_user_hash()
+            usage_lib.messages.usage.client_user_hash = client_user_hash
+        server_info = ApiServerInfo(status=ApiServerStatus(server_status),
+                                    api_version=api_version,
+                                    version=version,
+                                    version_on_disk=version_on_disk,
+                                    commit=commit,
+                                    user=user,
+                                    basic_auth_enabled=basic_auth_enabled,
+                                    latest_version=latest_version,
+                                    vm_ssh_proxy_mode=vm_ssh_proxy_mode)
+        if api_version is None or version is None or commit is None:
+            server_url = endpoint if endpoint is not None else get_server_url()
+            logger.warning(f'API server response missing '
+                           f'version info. {server_url} may '
+                           f'not be running SkyPilot API server.')
+            server_info.status = ApiServerStatus.UNHEALTHY
+        version_info = versions.check_compatibility_at_client(response.headers)
+        if version_info is None:
+            # Backward compatibility for server prior to v0.11.0 which
+            # does not check compatibility at server side.
+            # TODO(aylei): remove this after v0.13.0 is released.
+            return ApiServerInfo(
+                status=ApiServerStatus.VERSION_MISMATCH,
+                error=versions.SERVER_TOO_OLD_ERROR.format(
+                    remote_version=version,
+                    local_version=versions.get_local_readable_version(),
+                    min_version=server_constants.MIN_COMPATIBLE_VERSION,
+                    command=versions.install_version_command(version, commit)))
+        # Set the SkyPilot version and api server explicitly because returned
+        # response may have been cached.
+        # Refer to https://github.com/skypilot-org/skypilot/issues/8879
+        versions.set_remote_api_version(version_info.api_version)
+        versions.set_remote_version(version_info.version)
 
-            cookies = get_cookies_from_response(response)
-            # Save or refresh the cookie jar in case of session affinity and
-            # OAuth.
-            set_api_cookie_jar(cookies, create_if_not_exists=True)
-            return server_info
-        except (requests.JSONDecodeError, AttributeError) as e:
-            # Try to check if we got redirected to a login page.
-            for prev_response in response.history:
-                logger.debug(f'Previous response: {prev_response.url}')
-                # Heuristic: check if the url looks like a login page or
-                # oauth flow.
-                if any(key in prev_response.url for key in ['login', 'oauth2']):
-                    logger.debug(f'URL {prev_response.url} looks like '
-                                 'a login page or oauth flow, so try to '
-                                 'get the cookie.')
-                    return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
-            logger.warning('Failed to parse API server response: '
-                           f'{str(e)}')
-            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+        if version_info.error is not None:
+            return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
+                                 error=version_info.error)
 
-    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
+        cookies = get_cookies_from_response(response)
+        # Save or refresh the cookie jar in case of session affinity and
+        # OAuth.
+        set_api_cookie_jar(cookies, create_if_not_exists=True)
+        return server_info
+    except (requests.JSONDecodeError, AttributeError) as e:
+        # Try to check if we got redirected to a login page.
+        for prev_response in response.history:
+            logger.debug(f'Previous response: {prev_response.url}')
+            # Heuristic: check if the url looks like a login page or
+            # oauth flow.
+            if any(key in prev_response.url for key in ['login', 'oauth2']):
+                logger.debug(f'URL {prev_response.url} looks like '
+                             'a login page or oauth flow, so try to '
+                             'get the cookie.')
+                return ApiServerInfo(status=ApiServerStatus.NEEDS_AUTH)
+        logger.warning('Failed to parse API server response: '
+                       f'{str(e)}')
+        return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
 
 def handle_request_error(response: 'requests.Response') -> None:
@@ -640,28 +670,23 @@ def _start_api_server(deploy: bool = False,
             raise RuntimeError(f'Cannot start API server: {get_server_url()} '
                                'is not a local URL')
 
-        # Check available memory before starting the server.
-        # Skip this warning if postgres is used, as:
-        #   1) that's almost certainly a remote API server;
-        #   2) the actual consolidation mode config is stashed in the database,
-        #      and the value of `job_utils.is_consolidation_mode` will not be
-        #      the actual value in the db, but only None as in this case, the
-        #      whole YAML config is really just `db: <URI>`.
-        if skypilot_config.get_nested(('db',), None) is None:
-            avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-            # pylint: disable=import-outside-toplevel
-            import sky.jobs.utils as job_utils
-            max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                          if job_utils.is_consolidation_mode(
-                              on_api_restart=True) else
-                          server_constants.MIN_AVAIL_MEM_GB)
-            if avail_mem_size_gb <= max_memory:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}Your SkyPilot API server machine '
-                    f'only has {avail_mem_size_gb:.1f}GB memory available. '
-                    f'At least {max_memory}GB is recommended to support higher '
-                    'load with better performance.'
-                    f'{colorama.Style.RESET_ALL}')
+        # At this point, we cannot reliably tell if we will be using
+        # consolidation mode, because that requires accessing the db
+        # 1) to pull config if we are using postgres
+        # 2) to check if there is an existing jobs controller
+        # See job_utils.setup_consolidation_mode_on_startup for the logic...
+        # Instead, we will just assume consolidation mode is enabled if using
+        # deploy mode. This only affects the warning message.
+        avail_mem_size_gb: float = common_utils.get_mem_size_gb()
+        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                      if deploy else server_constants.MIN_AVAIL_MEM_GB)
+        if avail_mem_size_gb <= max_memory:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
+                f'has {avail_mem_size_gb:.1f}GB memory available. '
+                f'At least {max_memory}GB is recommended to support higher '
+                'load with better performance.'
+                f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
         if deploy:
@@ -731,7 +756,7 @@ def _start_api_server(deploy: bool = False,
                         f'View logs at: {constants.API_SERVER_LOGS}')
             try:
                 # Clear the cache to ensure fresh checks during startup
-                get_api_server_status.cache_clear()  # type: ignore
+                get_api_server_status_response.cache_clear()  # type: ignore
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
@@ -875,6 +900,8 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                                      metrics: bool = False,
                                      metrics_port: Optional[int] = None,
                                      enable_basic_auth: bool = False):
+    # This function will set remote api version and remote version
+    # on the current thread's ContextVars.
     api_server_status = None
     try:
         api_server_status, _ = check_server_healthy()
@@ -893,7 +920,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
-            get_api_server_status.cache_clear()  # type: ignore[attr-defined]
+            get_api_server_status_response.cache_clear()  # type: ignore
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
                 _start_api_server(deploy, host, foreground, metrics,
@@ -910,8 +937,31 @@ def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
     return cast(Callable[P, T], wrapper)
 
 
-def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
-                                         workdir_only: bool) -> 'dag_lib.Dag':
+def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
+    """Resolve the shared extraction directory for a blob.
+
+    Returns the extraction directory path. The extraction dir is created
+    at upload time by the server handler (/upload_v2).
+
+    Args:
+        blob_id: The content-addressed blob ID (64-char hex string).
+        user_hash: The user hash for locating the client directory.
+
+    Raises:
+        ValueError: If blob_id is not a valid 64-char hex string.
+        FileNotFoundError: If the blob directory does not exist.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
+    storage = bs.get_blob_storage()
+    return storage.resolve_blob_to_dir(user_hash, blob_id)
+
+
+def process_mounts_in_task_on_api_server(
+        task: str,
+        env_vars: Dict[str, str],
+        workdir_only: bool,
+        file_mounts_blob_id: Optional[str] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -925,6 +975,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         env_vars: The environment variables of the task.
         workdir_only: Whether to only translate the workdir, which is used for
             `exec`, as it does not need other files/folders in file_mounts.
+        file_mounts_blob_id: If set, resolve file mount paths relative to the
+            blob directory instead of the default client_file_mounts_dir.
 
     Returns:
         The translated task as a single-task dag.
@@ -948,9 +1000,17 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
+    # Use the blob directory for file mounts, if a blob ID is provided.
+    if file_mounts_blob_id is not None:
+        file_mounts_base = pathlib.Path(
+            resolve_blob_dir(file_mounts_blob_id, user_hash))
+    else:
+        file_mounts_base = client_file_mounts_dir
+    file_mounts_base.mkdir(parents=True, exist_ok=True)
+
     def _get_client_file_mounts_path(
             original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(client_file_mounts_dir /
+        return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
     task_configs = yaml_utils.read_yaml_all(str(client_task_path))
@@ -966,8 +1026,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             workdir = task_config['workdir']
             if isinstance(workdir, str):
                 task_config['workdir'] = str(
-                    client_file_mounts_dir /
-                    file_mounts_mapping[workdir].lstrip('/'))
+                    file_mounts_base / file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:
@@ -1058,6 +1117,48 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
+
+
+def refresh_workspace_state_for_sync_handler() -> None:
+    """Refresh workspace/RBAC state for a sync handler in the API process.
+
+    Call this at the top of any plugin endpoint that:
+      * runs as a sync FastAPI handler in the main API-server process
+        (i.e. is NOT queued via ``executor.schedule_request_async`` /
+        ``prepare_request_async``), AND
+      * reads ``workspaces_core.get_workspaces()`` /
+        ``get_accessible_workspace_names()`` /
+        ``permission_service.check_workspace_permission(...)`` to filter
+        results.
+
+    The executor's ``reload_for_new_request`` pipeline refreshes config
+    and the request-scoped lru cache on every queued worker request, but
+    handlers that respond synchronously bypass it and would
+    otherwise see whatever workspace config was loaded into this
+    process's ``_global_config_context`` at boot (or the last time
+    something explicitly reloaded).
+    After workspace create/update runs on a worker process, the YAML
+    /DB state moves forward but this process's cached snapshot does
+    not — so a sync handler filtering by ``accessible_workspaces`` will
+    exclude newly-created workspaces (e.g. jobs land in a workspace the
+    handler doesn't yet know about) and include workspaces that were
+    removed.
+
+    Casbin's in-memory enforcer is refreshed lazily by
+    ``permission_service.get_user_roles`` (called inside
+    ``get_accessible_workspace_names``), so we only need to reload the
+    config + clear the request-scoped lru cache here.
+    """
+    # File-locked variant — sync handlers run in the FastAPI thread pool
+    # and can hit this concurrently; the lock keeps the on-disk read +
+    # in-memory swap atomic with respect to concurrent writers.
+    skypilot_config.safe_reload_config()
+    # `_load_workspaces` (and any other ``@annotations.lru_cache(scope=
+    # 'request')`` function) caches its result for the lifetime of one
+    # request. Plugin sync handlers don't go through the executor's
+    # ``clear_request_level_cache()`` call, so stale entries survive
+    # across requests unless we drop them here.
+    annotations.clear_request_level_cache()
 
 
 def clear_local_api_server_database() -> None:

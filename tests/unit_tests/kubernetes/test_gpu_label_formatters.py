@@ -2,9 +2,9 @@
 
 Tests verify correct GPU detection from Kubernetes labels.
 """
-from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes.utils import _accelerator_name_matches
 from sky.provision.kubernetes.utils import GFDLabelFormatter
+from sky.utils import gpu_names
 
 
 class TestCanonicalGPUNames:
@@ -17,7 +17,7 @@ class TestCanonicalGPUNames:
         For example, 'L40S' must come before 'L40' which must come before 'L4',
         otherwise 'L4' would incorrectly match 'L40S'.
         """
-        names = kubernetes_constants.CANONICAL_GPU_NAMES
+        names = gpu_names.CANONICAL_GPU_NAMES
 
         # L40S must come before L40 and L4
         assert names.index('L40S') < names.index('L40')
@@ -37,7 +37,7 @@ class TestCanonicalGPUNames:
 
     def test_canonical_gpu_names_contains_latest_gpus(self):
         """Test that all latest generation GPUs are included."""
-        names = kubernetes_constants.CANONICAL_GPU_NAMES
+        names = gpu_names.CANONICAL_GPU_NAMES
 
         # Blackwell architecture
         assert 'B200' in names
@@ -206,7 +206,7 @@ class TestGPULabelerMatching:
 
     def _simulate_labeler_match(self, gpu_name: str) -> str:
         """Simulate the GPU labeler matching logic."""
-        for canonical_name in kubernetes_constants.CANONICAL_GPU_NAMES:
+        for canonical_name in gpu_names.CANONICAL_GPU_NAMES:
             if canonical_name.lower() in gpu_name.lower():
                 return canonical_name.lower()
         # Fallback logic from the labeler

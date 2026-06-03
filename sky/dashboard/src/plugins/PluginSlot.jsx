@@ -16,6 +16,7 @@ export function PluginSlot({
   context = {},
   fallback = null,
   wrapperClassName = '',
+  prefix = null,
 }) {
   const components = usePluginComponents(name);
 
@@ -25,6 +26,7 @@ export function PluginSlot({
 
   return (
     <div className={wrapperClassName || undefined}>
+      {prefix}
       {components.map((config) => {
         const Component = config.component;
         return <Component key={config.id} {...context} />;

@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
@@ -294,16 +295,21 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
     'sky queue {cluster_name}', 'sky jobs queue').replace(
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+            _ALL_JOB_STATUSES,
+            _ALL_MANAGED_JOB_STATUSES).replace('sleep 10',
+                                               'sleep {gap_seconds}')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: Sequence[sky.ManagedJobStatus],
-        timeout: int):
+        job_name: str,
+        job_status: Sequence[sky.ManagedJobStatus],
+        timeout: int,
+        gap_seconds: int = 10):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
-        timeout=timeout)
+        timeout=timeout,
+        gap_seconds=gap_seconds)
 
 
 _WAIT_UNTIL_PIPELINE_TASK_STATUS = (
@@ -432,6 +438,29 @@ def is_eks_cluster() -> bool:
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     return result.returncode == 0
+
+
+def kubectl_for_cluster(cluster_name: str) -> str:
+    """``kubectl --context <ctx>`` with <ctx> resolved at *shell* runtime
+    to the kubeconfig context that contains a pod for ``cluster_name``.
+
+    Smoke pipelines fall into two shapes:
+
+    * Single-context (kind-based): only ``kind-skypilot`` exists, so the
+      discovery loop short-circuits on the first iteration.
+    * Multi-context (shared-GKE): the runner has the API server's
+      cluster as current-context and the workload cluster as a second
+      entry; the loop picks the one that actually owns the pod.
+
+    The returned string is meant to be interpolated into an f-string
+    command, e.g. ``f'{kubectl_for_cluster(name)} delete pod foo'``.
+    The context lookup runs at command-execution time (not test-collection
+    time), so it sees the pod created by an earlier ``sky launch`` step.
+    """
+    return (
+        f'kubectl --context "$(for c in $(kubectl config get-contexts -o name); '
+        f'do kubectl --context "$c" get pods -o name 2>/dev/null '
+        f'| grep -q {cluster_name} && echo "$c" && break; done)"')
 
 
 def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
@@ -1132,10 +1161,10 @@ def get_dashboard_cluster_status_request_id() -> str:
 
 def get_dashboard_jobs_queue_request_id() -> str:
     """Get the jobs queue from the dashboard."""
-    body = payloads.JobsQueueBody(all_users=True,)
+    body = payloads.JobsQueueV2Body(all_users=True, limit=1000)
     response = server_common.make_authenticated_request(
         'POST',
-        '/internal/dashboard/jobs/queue',
+        '/internal/dashboard/jobs/queue/v2',
         json=json.loads(body.model_dump_json()),
         server_url=get_api_server_url())
     return server_common.get_request_id(response)
@@ -1202,20 +1231,39 @@ def kill_and_wait_controller(test_cluster_name: str,
 
 
 def server_side_is_consolidation_mode() -> bool:
-    """Returns whether the consolidation mode is enabled on the server side.
+    """Returns whether consolidation mode is active on the server side.
 
-    This is required because when --postgres and --jobs-consolidation specified
-    at the same time, the server side will have config for consolidation mode,
-    but the client side will only have a config to specify the db url for
-    postgres. Here we manually retrieve the config from the server side to
-    check if the consolidation mode is enabled.
+    Consolidation mode is determined by a signal file on the server, which
+    may be auto-enabled for deploy-mode servers. We detect this by checking
+    whether the server has any jobs controller clusters — if not, jobs are
+    running in consolidation mode.
+
+    For local (non-remote) servers without an existing jobs controller, we
+    also check the local signal file directly.
     """
     if is_remote_server_test():
-        # The buildkite pre_command setup does not affect the remote server
-        # config. So --postgres and --jobs-consolidation will not be enabled
-        # even if they are specified.
-        # (TODO: zeping) support this in the future.
-        return False
+        # For remote servers, we can't check the signal file directly.
+        # Instead, check if a jobs controller cluster exists. If it does,
+        # we're not in consolidation mode.
+        result = subprocess.run(
+            ['sky', 'status', '-u'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # If we see a jobs controller cluster, consolidation is off.
+        for line in result.stdout.splitlines():
+            if 'sky-jobs-controller-' in line:
+                return False
+        # No controller cluster found. Check if managed jobs work (i.e.
+        # consolidation mode is active) by checking if jobs queue succeeds.
+        result = subprocess.run(
+            ['sky', 'jobs', 'queue'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0
     response = server_common.make_authenticated_request(
         'GET', '/workspaces/config', server_url=get_api_server_url())
     request_id = server_common.get_request_id(response)
@@ -1292,3 +1340,23 @@ def write_blob(file: BinaryIO, total_size: int):
     if remaining_size > 0:
         file.write(os.urandom(remaining_size))
     file.flush()
+
+
+def wait_for_managed_job_status_sdk(job_name: str,
+                                    target_statuses: list,
+                                    timeout: int = 360) -> dict:
+    """Wait for a managed job to reach one of the target statuses.
+
+    Returns the job record when the status is reached.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        for job in jobs_list:
+            if job['job_name'] == job_name:
+                if job['status'] in target_statuses:
+                    return job
+            print(f'Job {job_name} status: {job["status"]}')
+        time.sleep(5)
+    raise TimeoutError(
+        f'Timeout waiting for job {job_name} to reach {target_statuses}')

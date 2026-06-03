@@ -48,6 +48,9 @@ RUN echo "Building for user: $USERNAME"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Feature Flags
+ENV ENABLE_SERVICE_ACCOUNTS=true
+
 # Install dependencies
 RUN apt update -y && \
     apt install -y \
@@ -87,6 +90,13 @@ RUN ARCH=$(case "${TARGETARCH:-$(uname -m)}" in \
     curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_${ARCH}/session-manager-plugin.deb" -o "session-manager-plugin.deb" && \
     sudo dpkg -i session-manager-plugin.deb && \
     rm session-manager-plugin.deb
+
+# Pre-install azcopy (Azure CLI's runtime download is unreliable)
+RUN curl -sL "https://aka.ms/downloadazcopy-v10-linux" -o /tmp/azcopy.tar.gz && \
+    tar xzf /tmp/azcopy.tar.gz -C /tmp && \
+    cp /tmp/azcopy_linux_amd64_*/azcopy /usr/local/bin/azcopy && \
+    chmod +x /usr/local/bin/azcopy && \
+    rm -rf /tmp/azcopy*
 
 # Add a custom user with sudo privileges
 RUN useradd -m ${USERNAME} && \
@@ -140,7 +150,7 @@ RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     conda activate base && \
     export PATH="$PATH:$HOME/.local/bin" && \
     uv pip uninstall skypilot --system && \
-    uv pip install --prerelease=allow "azure-cli>=2.65.0" --system && \
+    uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0" --system && \
     uv pip install -r requirements-dev.txt --system && \
     uv pip install -e ".[all]" --system && \
     # Install httpx with SOCKS support for proxy environments - necessary when system has proxy enabled

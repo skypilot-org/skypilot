@@ -52,7 +52,14 @@ export default function PluginRoutePage() {
   const containerRef = useRef(null);
   const [mountError, setMountError] = useState(null);
   const pathname = derivePathname(router);
-  const route = usePluginRoute(pathname);
+  // Try with /plugins/ prefix first (legacy), then without for new-style routes
+  const prefixedRoute = usePluginRoute(pathname);
+  const strippedPath =
+    pathname && pathname.startsWith('/plugins/')
+      ? pathname.slice('/plugins'.length)
+      : null;
+  const strippedRoute = usePluginRoute(strippedPath);
+  const route = prefixedRoute || strippedRoute;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -98,9 +105,9 @@ export default function PluginRoutePage() {
           );
         }
       }
-      if (container) {
-        container.innerHTML = '';
-      }
+      // Don't manually clear container.innerHTML — see comment in
+      // pages/[...path].js for the same fix. Manual wipe races with
+      // React's own unmount and aborts in-flight navigations.
     };
   }, [route, pathname]);
 

@@ -97,7 +97,7 @@ managedNodeGroups:
   - name: ng-default
     instanceType: ${INSTANCE_TYPE}
     desiredCapacity: ${NODE_COUNT}
-    amiFamily: AmazonLinux2
+    amiFamily: AmazonLinux2023
 addons:
   - name: aws-ebs-csi-driver
 EOF

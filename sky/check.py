@@ -1,9 +1,11 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import collections
 import os
+import re
 import traceback
 from types import ModuleType
-from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import click
 import colorama
@@ -15,6 +17,8 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import huggingface
+from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -25,8 +29,71 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME,
+                       huggingface.NAME)
 
 logger = sky_logging.init_logger(__name__)
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub('', s) if isinstance(s, str) else ''
+
+
+def _build_check_results(
+    cloud2ctx2text: Dict[str, Dict[str, str]],
+    check_results_dict: Dict[Any, List[Tuple]],
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Construct the persistable {cloud: {ctx: {enabled, reason}}} dict.
+
+    Combines two sources because cloud2ctx2text is only populated for
+    per-context (k8s/SSH) checks; non-k8s clouds' string reasons live in
+    check_results_dict.
+    """
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    # Per-context entries (k8s, SSH).
+    for cloud_repr, ctx2text in cloud2ctx2text.items():
+        out.setdefault(cloud_repr, {})
+        for ctx, text in ctx2text.items():
+            stripped = _strip_ansi(text)
+            # Match a positive 'enabled.' prefix so that exception messages
+            # (which start with neither 'enabled.' nor 'disabled.') are
+            # correctly classified as not-enabled. The trailing period is
+            # intentional: it matches 'enabled.' and 'enabled. Reason: ...'
+            # but not hypothetical future variants like 'enabled but degraded'.
+            out[cloud_repr][ctx] = {
+                'enabled': stripped.lower().startswith('enabled.'),
+                'reason': stripped,
+            }
+
+    # Non-k8s clouds: aggregate string reasons across capabilities. A cloud
+    # isn't fully usable if ANY capability fails, so prefer a failure reason
+    # when present; only show a success reason if every capability succeeded.
+    for cloud_tuple, result_list in check_results_dict.items():
+        cloud_repr = cloud_tuple[0]
+        if cloud_repr in out:
+            # k8s / SSH already populated above; don't overwrite.
+            continue
+        string_reasons = [(ok, reason)
+                          for _, ok, reason in result_list
+                          if not isinstance(reason, dict)]
+        if not string_reasons:
+            continue
+        all_ok = all(ok for ok, _ in string_reasons)
+        # Prefer the first failure reason if any; otherwise the first
+        # success reason.
+        failure_reasons = [r for ok, r in string_reasons if not ok]
+        chosen_reason = (failure_reasons[0]
+                         if failure_reasons else string_reasons[0][1])
+        out.setdefault(cloud_repr, {})
+        out[cloud_repr][''] = {
+            'enabled': all_ok,
+            'reason': _strip_ansi(chosen_reason or ''),
+        }
+
+    return out
 
 
 def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
@@ -35,7 +102,7 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
         [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-        [cloudflare.NAME, coreweave.NAME])
+        list(STORAGE_ONLY_CLOUDS))
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -94,7 +161,7 @@ def check_capabilities(
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(core.get_workspaces().keys())
+    available_workspaces = list(core.get_accessible_workspace_names())
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])
@@ -109,7 +176,7 @@ def check_capabilities(
 
     def get_all_clouds() -> Tuple[str, ...]:
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-                     [cloudflare.NAME, coreweave.NAME])
+                     list(STORAGE_ONLY_CLOUDS))
 
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
@@ -149,14 +216,24 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare and
-            # CoreWeave.
+            # the cloud object. Includes special handling for storage-only
+            # providers (Cloudflare, CoreWeave, VastData, HuggingFace).
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
             elif cloud_name.lower().startswith('coreweave'):
                 return coreweave.NAME, coreweave
+            elif cloud_name.lower().startswith('vastdata'):
+                return vastdata.NAME, vastdata
+            elif cloud_name.lower().startswith('huggingface'):
+                return huggingface.NAME, huggingface
             else:
-                cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                try:
+                    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                except ValueError:
+                    all_clouds = sorted(c.lower() for c in get_all_clouds())
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Cloud {cloud_name!r} is not a valid '
+                                         f'cloud among {all_clouds}') from None
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
                 return repr(cloud_obj), cloud_obj
 
@@ -271,24 +348,24 @@ def check_capabilities(
         # allowed_clouds in config.yaml, it will be disabled.
         all_enabled_clouds: Set[str] = set()
         for capability in capabilities:
-            # Cloudflare and CoreWeave are not real clouds in
-            # registry.CLOUD_REGISTRY, and should not be inserted into the DB
+            # Cloudflare, CoreWeave, VastData, and HuggingFace are not real
+            # clouds in registry.CLOUD_REGISTRY, and should not be inserted
+            # into the DB
             # (otherwise `sky launch` and other code would error out when it's
             # trying to look it up in the registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and not cloud.startswith(
-                    'Cloudflare') and not cloud.startswith('CoreWeave')
+                if capability in capabilities and not any(
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and not cloud.startswith(
-                    'Cloudflare') and not cloud.startswith('CoreWeave')
+                if capability in capabilities and not any(
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not cloud.startswith('Cloudflare') and
-                not cloud.startswith('CoreWeave')
+                if not any(cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             previously_enabled_clouds_set = {
                 repr(cloud)
@@ -304,6 +381,27 @@ def check_capabilities(
                 current_workspace_name)
             all_enabled_clouds = all_enabled_clouds.union(
                 enabled_clouds_for_capability)
+
+        # Persist the per-(cloud, context) status so downstream consumers
+        # (dashboard endpoints, plugins, etc.) can read it without
+        # re-running cloud probes. Full-workspace runs replace the row;
+        # scoped runs (clouds is not None) merge at cloud granularity.
+        # Wrapped in try/except: this row is a cache, and the
+        # source-of-truth enabled_clouds_<workspace>_<cap> rows have
+        # already been written above. A transient DB failure or
+        # unsupported dialect must not fail the user-visible
+        # `sky check` command.
+        try:
+            results_to_persist = _build_check_results(cloud2ctx2text,
+                                                      check_results_dict)
+            global_user_state.set_check_results(
+                results_to_persist,
+                current_workspace_name,
+                is_full_workspace_run=(clouds is None),
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to persist check_results for workspace '
+                           f'{current_workspace_name!r}: {e}')
 
         echo(
             _summary_message(enabled_clouds, cloud2ctx2text,
@@ -380,30 +478,24 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
-) -> Dict[str, List[str]]:
-    enabled_clouds_by_workspace: Dict[str,
-                                      List[str]] = collections.defaultdict(list)
+) -> Dict[str, Dict[str, List[str]]]:
+    if workspace is not None:
+        # Import here to avoid circular import:
+        # pylint: disable=import-outside-toplevel
+        from sky.workspaces import core as workspaces_core
+        workspaces_core.check_workspace_permission(
+            common_utils.get_current_user(), workspace)
     capabilities_result = check_capabilities(quiet, verbose, clouds,
                                              sky_cloud.ALL_CAPABILITIES,
                                              workspace)
-    for ws_name, enabled_clouds_with_capabilities in capabilities_result.items(
-    ):
-        # For each workspace, get a list of cloud names that have any
-        # capabilities enabled.
-        # The inner dict enabled_clouds_with_capabilities maps cloud_name to
-        # List[CloudCapability].
-        # If the list of capabilities is non-empty, the cloud is considered
-        # enabled.
-        # We are interested in the keys (cloud names) of this dict if their
-        # value (list of capabilities) is not empty.
-        # However, check_capabilities already ensures that only clouds with
-        # *some* enabled capabilities (from the ones being checked, i.e.
-        # ALL_CAPABILITIES here) are included in its return value.
-        # So, the keys of enabled_clouds_with_capabilities are the enabled cloud
-        # names for that workspace.
-        enabled_clouds_by_workspace[ws_name] = list(
-            enabled_clouds_with_capabilities.keys())
-    return enabled_clouds_by_workspace
+    # Convert CloudCapability enums to strings for JSON serialization.
+    result: Dict[str, Dict[str, List[str]]] = {}
+    for ws_name, clouds_with_caps in capabilities_result.items():
+        result[ws_name] = {
+            cloud: [cap.value for cap in caps
+                   ] for cloud, caps in clouds_with_caps.items()
+        }
+    return result
 
 
 def get_cached_enabled_clouds_or_refresh(
@@ -476,19 +568,29 @@ def get_cloud_credential_file_mounts(
             if os.path.exists(os.path.expanduser(local_path)):
                 file_mounts[remote_path] = os.path.realpath(
                     os.path.expanduser(local_path))
-    # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
-    # only clouds with computing instances are marked as enabled by skypilot.
-    # This will be removed when cloudflare/r2 is added as a 'cloud'.
+    # Currently, get_cached_enabled_clouds_or_refresh() does not support
+    # storage-only clouds as only clouds with computing instances are
+    # marked as enabled by skypilot.
+    # TODO (kyuds): recognize storage-only clouds as clouds.
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
 
-    # Similarly, handle CoreWeave storage credentials
     coreweave_is_enabled, _ = coreweave.check_storage_credentials()
     if coreweave_is_enabled:
         coreweave_credential_mounts = coreweave.get_credential_file_mounts()
         file_mounts.update(coreweave_credential_mounts)
+
+    vastdata_is_enabled, _ = vastdata.check_storage_credentials()
+    if vastdata_is_enabled:
+        vastdata_credential_mounts = vastdata.get_credential_file_mounts()
+        file_mounts.update(vastdata_credential_mounts)
+
+    hf_is_enabled, _ = huggingface.check_storage_credentials()
+    if hf_is_enabled:
+        hf_credential_mounts = huggingface.get_credential_file_mounts()
+        file_mounts.update(hf_credential_mounts)
     return file_mounts
 
 
@@ -554,7 +656,7 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if verbose and cloud is not cloudflare and cloud is not coreweave:
+        if verbose and isinstance(cloud, sky_cloud.Cloud):
             activated_account = cloud.get_active_user_identity_str()
         if isinstance(
                 cloud_tuple[1],

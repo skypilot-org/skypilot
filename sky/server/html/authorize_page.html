@@ -140,8 +140,8 @@
             Click <strong>Authorize</strong> to link the SkyPilot CLI to your account.
         </p>
         <div class="button-group">
-            <button class="cancel-button" onclick="cancelAuth()">Cancel</button>
-            <button id="authorize-btn" class="authorize-button" onclick="authorize()">Authorize</button>
+            <button id="cancel-btn" class="cancel-button">Cancel</button>
+            <button id="authorize-btn" class="authorize-button">Authorize</button>
         </div>
         <p id="error-message" class="error-message"></p>
         <p class="footer-text">Only authorize if you initiated this request from the SkyPilot CLI.</p>
@@ -199,6 +199,9 @@
         function cancelAuth() {
             showMessage('Authorization Cancelled', 'You can close this tab.');
         }
+
+        document.getElementById('cancel-btn').addEventListener('click', cancelAuth);
+        authorizeBtn.addEventListener('click', authorize);
     </script>
 </body>
 </html>

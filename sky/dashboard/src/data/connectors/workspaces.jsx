@@ -542,6 +542,58 @@ async function pollForTaskCompletion(requestId, taskName) {
 }
 
 // Update workspace configuration
+export async function getEnabledCloudsBatch(
+  workspaceNames = [],
+  expand = false
+) {
+  try {
+    const params = new URLSearchParams();
+    if (workspaceNames.length > 0) {
+      params.append('workspaces', workspaceNames.join(','));
+    }
+    if (expand) {
+      params.append('expand', 'true');
+    }
+    const url = `/enabled_clouds/batch?${params.toString()}`;
+
+    const scheduleResponse = await apiClient.get(url);
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling getEnabledCloudsBatch: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('X-Skypilot-Request-ID header not found in response.');
+    }
+
+    const resultResponse = await apiClient.get(
+      `/api/get?request_id=${requestId}`
+    );
+    if (!resultResponse.ok) {
+      throw new Error(
+        `Error fetching enabled_clouds_batch result for request ID ${requestId}: ${resultResponse.statusText}`
+      );
+    }
+
+    const resultData = await resultResponse.json();
+    if (resultData.status === 'FAILED') {
+      throw new Error(
+        resultData.error || 'Unknown error during enabled_clouds_batch'
+      );
+    }
+
+    if (resultData.status === 'SUCCEEDED' && resultData.return_value) {
+      return JSON.parse(resultData.return_value);
+    }
+    return {};
+  } catch (error) {
+    console.error('Failed to fetch enabled_clouds_batch:', error.message);
+    throw error;
+  }
+}
+
 export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
@@ -688,6 +740,63 @@ export async function updateConfig(config) {
     return await pollForTaskCompletion(requestId, 'updateConfig');
   } catch (error) {
     console.error('Failed to update config:', error);
+    throw error;
+  }
+}
+
+export async function batchAddUsersToWorkspaces(workspaceNames, userIds) {
+  try {
+    const scheduleResponse = await apiClient.post(
+      `/workspaces/batch_add_users`,
+      {
+        workspace_names: workspaceNames,
+        user_ids: userIds,
+      }
+    );
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling batchAddUsersToWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error(
+        'Failed to obtain request ID for batchAddUsersToWorkspaces'
+      );
+    }
+    return await pollForTaskCompletion(requestId, 'batchAddUsersToWorkspaces');
+  } catch (error) {
+    console.error('Failed to batch add users to workspaces:', error);
+    throw error;
+  }
+}
+
+export async function batchRemoveUsersFromWorkspaces(workspaceNames, userIds) {
+  try {
+    const scheduleResponse = await apiClient.post(
+      `/workspaces/batch_remove_users`,
+      {
+        workspace_names: workspaceNames,
+        user_ids: userIds,
+      }
+    );
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling batchRemoveUsersFromWorkspaces: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error(
+        'Failed to obtain request ID for batchRemoveUsersFromWorkspaces'
+      );
+    }
+    return await pollForTaskCompletion(
+      requestId,
+      'batchRemoveUsersFromWorkspaces'
+    );
+  } catch (error) {
+    console.error('Failed to batch remove users from workspaces:', error);
     throw error;
   }
 }

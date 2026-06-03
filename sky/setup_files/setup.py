@@ -162,7 +162,7 @@ if __name__ == '__main__':
         author='SkyPilot Team',
         license='Apache 2.0',
         readme='README.md',
-        description='SkyPilot: Run AI on Any Infra — Unified, Faster, Cheaper.',
+        description='SkyPilot: Manage all your AI compute.',
         long_description=long_description,
         long_description_content_type='text/markdown',
         setup_requires=['wheel'],

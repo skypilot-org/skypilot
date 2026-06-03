@@ -6,6 +6,7 @@ import { apiClient } from '@/data/connectors/client';
 import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
+import { trackClusterAction } from '@/lib/analytics';
 
 // ============ Pagination Plugin Integration ============
 
@@ -124,9 +125,16 @@ export async function getClusters({ clusterNames = null } = {}) {
         workspace: cluster.workspace,
         autostop: cluster.autostop,
         last_event: cluster.last_event,
+        statusTooltip:
+          cluster.status === 'INIT' ? cluster.launch_status_reason : null,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},
+        node_names: cluster.node_names || null,
+        // Persisted external links from the cluster row (currently
+        // populated with cloud-provider instance console URLs at launch
+        // time). Shape: {label: url}.
+        links: cluster.links || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -153,7 +161,11 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function getClusterHistory(clusterHash = null, days = 30) {
+export async function getClusterHistory(
+  clusterHash = null,
+  days = 30,
+  clusterName = null
+) {
   try {
     const requestBody = {
       days: days,
@@ -163,6 +175,13 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
     // If a specific cluster hash is provided, include it in the request
     if (clusterHash) {
       requestBody.cluster_hashes = [clusterHash];
+    }
+    // The server filters on hash OR name when both are set, which lets the
+    // dashboard look up a cluster by either identifier in a single call.
+    // This avoids fetching the entire history (potentially tens of
+    // thousands of rows) just to resolve a name-keyed URL.
+    if (clusterName) {
+      requestBody.cluster_names = [clusterName];
     }
 
     const history = await apiClient.fetch('/cost_report', requestBody);
@@ -204,6 +223,7 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
         last_event: cluster.last_event,
         to_down: false,
         cluster_name_on_cloud: null,
+        node_names: cluster.node_names || null,
         usage_intervals: cluster.usage_intervals,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -237,6 +257,7 @@ export async function streamClusterJobLogs({
   onNewLog,
   workspace,
   signal,
+  tail = DEFAULT_TAIL_LINES,
 }) {
   try {
     await apiClient.stream(
@@ -245,7 +266,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
-        tail: DEFAULT_TAIL_LINES,
+        tail,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
@@ -260,6 +281,31 @@ export async function streamClusterJobLogs({
     }
     console.error('Error in streamClusterJobLogs:', error);
     showToast(`Error in streamClusterJobLogs: ${error.message}`, 'error');
+  }
+}
+
+export async function streamClusterProvisionLogs({
+  clusterName,
+  worker = null,
+  onNewLog,
+  signal,
+}) {
+  try {
+    // provision_logs takes follow and tail as query params, not body fields.
+    const params = `follow=false&tail=${DEFAULT_TAIL_LINES}`;
+    const body = { cluster_name: clusterName };
+    if (worker !== null) {
+      body.worker = worker;
+    }
+    await apiClient.stream(`/provision_logs?${params}`, body, onNewLog, {
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      return;
+    }
+    console.error('Error in streamClusterProvisionLogs:', error);
+    showToast(`Error fetching provision logs: ${error.message}`, 'error');
   }
 }
 
@@ -291,12 +337,8 @@ export async function downloadJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
-    const resp = await fetch(`${fullUrl}?relative=items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_paths: folderPaths }),
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
     });
     if (!resp.ok) {
       const text = await resp.text();
@@ -309,11 +351,15 @@ export async function downloadJobLogs({
     const namePart =
       jobIds && jobIds.length === 1 ? `job-${jobIds[0]}` : 'jobs';
     a.href = url;
-    a.download = `${clusterName}-${namePart}-logs-${ts}.zip`;
+    const filename = `${clusterName}-${namePart}-logs-${ts}.zip`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
+    trackClusterAction('download_logs', {
+      job_count: jobIds?.length ?? 0,
+    });
   } catch (error) {
     console.error('Error downloading logs:', error);
     showToast(`Error downloading logs: ${error.message}`, 'error');
@@ -589,8 +635,6 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
-    const activeClusters = await dashboardCache.get(getClusters);
-
     let allClusters;
     if (showHistory) {
       let historyClusters = [];
@@ -603,22 +647,14 @@ export function useClusterData(options = {}) {
         console.error('Error fetching cluster history:', historyError);
       }
 
-      const markedActive = activeClusters.map((c) => ({
-        ...c,
-        isHistorical: false,
-      }));
-      const markedHistory = historyClusters.map((c) => ({
-        ...c,
-        isHistorical: true,
-      }));
-
-      allClusters = [...markedActive];
-      markedHistory.forEach((hist) => {
-        if (!activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)) {
-          allClusters.push(hist);
-        }
-      });
+      // "Show history" surfaces only truly terminated clusters within the
+      // selected time window. cost_report also returns active clusters, so
+      // drop anything still present in cluster_table (status !== TERMINATED).
+      allClusters = historyClusters
+        .filter((c) => c.status === 'TERMINATED')
+        .map((c) => ({ ...c, isHistorical: true }));
     } else {
+      const activeClusters = await dashboardCache.get(getClusters);
       allClusters = activeClusters.map((c) => ({
         ...c,
         isHistorical: false,

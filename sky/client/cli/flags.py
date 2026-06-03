@@ -1,7 +1,7 @@
 """Flags for the CLI."""
 
 import os
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import click
 import dotenv
@@ -9,6 +9,20 @@ import dotenv
 from sky import skypilot_config
 from sky.skylet import autostop_lib
 from sky.utils import resources_utils
+
+
+def _parse_dotenv_file(path: str) -> Dict[str, Optional[str]]:
+    """Parse a dotenv file, erroring if the path does not exist.
+
+    The raw `dotenv.dotenv_values` accepts a non-existent path and returns
+    an empty dict, which means a typo in `--env-file` silently produces
+    an empty environment. Validate up-front so the user learns early.
+    """
+    if not os.path.isfile(path):
+        raise click.UsageError(
+            f'Dotenv file does not exist: {path}. Provide a path to an '
+            'existing file, or remove the flag.')
+    return dotenv.dotenv_values(path)
 
 
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
@@ -164,7 +178,7 @@ TASK_OPTIONS = [
                        'Passing "none" resets the config.')),
     click.option('--env-file',
                  required=False,
-                 type=dotenv.dotenv_values,
+                 type=_parse_dotenv_file,
                  help="""\
         Path to a dotenv file with environment variables to set on the remote
         node.
@@ -198,7 +212,7 @@ TASK_OPTIONS = [
     click.option(
         '--secret-file',
         required=False,
-        type=dotenv.dotenv_values,
+        type=_parse_dotenv_file,
         help="""\
         Path to a dotenv file with secret variables to set on the remote node.
 
@@ -286,8 +300,12 @@ EXTRA_RESOURCES_OPTIONS = [
         required=False,
         type=str,
         multiple=True,
-        help=('Ports to open on the cluster. '
-              'If specified, overrides the "ports" config in the YAML. '),
+        help=('Ports to open on the cluster. Accepts a single port '
+              '(``--ports 8080``), a range (``--ports 8000-8010``), or '
+              'a comma-separated list (``--ports 8080,9090``). Repeat '
+              'the flag to specify multiple values (``--ports 8080 '
+              '--ports 9090-9100``). If specified, overrides the '
+              '"ports" config in the YAML.'),
     ),
 ]
 
@@ -334,6 +352,28 @@ def config_option(expose_value: bool):
         )(func)
 
     return return_option_decorator
+
+
+def apply_workspace_option_callback(ctx, param, value):
+    """Click callback for the `--workspace`/`-w` flag.
+
+    Translates `--workspace <name>` into the equivalent
+    `--config active_workspace=<name>`, then drops the value (the
+    option's `expose_value=False` keeps it out of the function signature).
+    Decorating commands need only:
+
+        @click.option('--workspace', '-w', expose_value=False,
+                      callback=flags.apply_workspace_option_callback, ...)
+
+    No function-body changes are required: once apply_cli_config runs, the
+    loaded skypilot config has `active_workspace` set, so the override
+    payload sent to the server treats it as an explicit user choice (and
+    the per-user resolver is bypassed).
+    """
+    del ctx, param  # Unused.
+    if value is not None:
+        skypilot_config.apply_cli_config([f'active_workspace={value}'])
+    return value
 
 
 def yes_option(helptext: Optional[str] = None):
@@ -407,5 +447,33 @@ def wait_for_option(pair: str):
             default=None,
             required=False,
             help=autostop_lib.AutostopWaitFor.cli_help_message(pair=pair))(func)
+
+    return return_option_decorator
+
+
+# Output format choices for CLI commands
+OUTPUT_FORMAT_TABLE = 'table'
+OUTPUT_FORMAT_JSON = 'json'
+OUTPUT_FORMAT_CHOICES = [OUTPUT_FORMAT_TABLE, OUTPUT_FORMAT_JSON]
+
+
+def output_format_option(helptext: Optional[str] = None):
+    """A decorator for the --output/-o option.
+
+    This decorator adds an output format option to CLI commands.
+    Supported formats: table (default), json.
+    """
+    if helptext is None:
+        helptext = 'Output format. Choices: table, json. Default: table.'
+
+    def return_option_decorator(func):
+        return click.option('--output',
+                            '-o',
+                            'output_format',
+                            type=click.Choice(OUTPUT_FORMAT_CHOICES,
+                                              case_sensitive=False),
+                            default=OUTPUT_FORMAT_TABLE,
+                            required=False,
+                            help=helptext)(func)
 
     return return_option_decorator

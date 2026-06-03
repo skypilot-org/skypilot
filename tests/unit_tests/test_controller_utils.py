@@ -260,8 +260,6 @@ def test_get_cloud_dependencies_installation_commands_empty_clouds(
     assert len(commands) >= 3
     # Check that uv installation is included
     assert any('uv' in cmd for cmd in commands)
-    # Check that flask is included for dashboard
-    assert any('flask' in cmd for cmd in commands)
     # Should end with "done" message
     assert 'done.' in commands[-1]
 
@@ -354,9 +352,10 @@ def test_get_cloud_dependencies_installation_commands_azure_only(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
 
-    # Mock dependencies
+    # Mock dependencies. Must match the AZURE_CLI value in
+    # extras_require['azure'], since the code removes it from that list.
     monkeypatch.setattr('sky.utils.controller_utils.dependencies.AZURE_CLI',
-                        'azure-cli>=2.65.0')
+                        'azure-cli>=2.65.0,<2.87.0')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
@@ -502,15 +501,11 @@ def test_get_cloud_dependencies_installation_commands_cloudflare_storage(
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    monkeypatch.setattr('sky.utils.controller_utils.cloudflare.NAME',
-                        'cloudflare')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
 
-    # Should include cloudflare dependencies (which are aws dependencies)
-    combined_commands = ' '.join(commands)
     # Cloudflare dependencies include AWS dependencies
     assert any('awscli' in cmd or 'boto3' in cmd for cmd in commands)
 
@@ -543,11 +538,10 @@ def test_get_cloud_dependencies_installation_commands_command_structure(
     assert 'uv' in commands[0]
     assert constants.SKY_UV_INSTALL_CMD in commands[0]
 
-    # Python packages command should include flask
+    # Python packages command should use uv pip
     python_cmd = next(
         (cmd for cmd in commands if 'cloud python packages' in cmd), None)
     assert python_cmd is not None
-    assert 'flask' in python_cmd
     assert constants.SKY_UV_PIP_CMD in python_cmd
 
     # Last command should be the "done" message
@@ -707,6 +701,78 @@ def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     os.unlink(local_config_path)
 
 
+# ---------------------------------------------------------------------------
+# Tests for the SKYPILOT_CONFIG env / file_mount consistency fix.
+#
+# Bug: previously, the SKYPILOT_CONFIG env var on the controller was set
+# whenever `skypilot_config.loaded()` was True (i.e. the API server itself
+# had any config). But the file that env var pointed to was only file_mount'd
+# when `local_user_config` was non-empty. If admin_policy returned an empty
+# dict (or no admin_policy was set and the API server's config happened to
+# load from an empty file), the env var would point to a path that was
+# never created — controller process would FileNotFoundError on startup.
+#
+# Fix: gate the env var on the same condition that gates the file_mount —
+# `local_user_config_path is not None`. These tests pin that contract.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_skypilot_config_env_set_when_local_config_present(
+        controller_type: str, monkeypatch):
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    user_config = {'jobs': {'controller': {'resources': {'cpus': '8+'}}}}
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/config.yaml', user_config.copy())
+
+    # local_user_config non-empty → tempfile written, file_mount populated.
+    assert result['local_user_config_path'] is not None
+    # And SKYPILOT_CONFIG env points to the file_mount target on the
+    # controller side.
+    env_vars = result['controller_envs']
+    assert env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == (
+        '/remote/path/config.yaml')
+
+    os.unlink(result['local_user_config_path'])
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_skypilot_config_env_NOT_set_when_local_config_empty(
+        controller_type: str, monkeypatch):
+    """Regression test: even if the API server's own config is loaded
+    (skypilot_config.loaded() is True), if the config we're passing to the
+    controller is empty, we MUST NOT set SKYPILOT_CONFIG — otherwise the
+    controller process tries to read a non-existent file and crashes."""
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+    # Force the API server's own skypilot_config to look "loaded" — this
+    # used to be the gating condition and would incorrectly set the env
+    # even when the controller-side config is empty.
+    monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/config.yaml', {})
+
+    # Empty local_user_config → no tempfile, no file_mount.
+    assert result['local_user_config_path'] is None
+    # And critically: no SKYPILOT_CONFIG env on the controller (which would
+    # otherwise point at a path that file_mounts won't materialize).
+    env_vars = result['controller_envs']
+    assert skypilot_config.ENV_VAR_SKYPILOT_CONFIG not in env_vars
+
+
 def _run_controller_cluster_name_refresh_test(controller_type: str):
     """Helper function to run in subprocess to avoid module pollution."""
     import importlib
@@ -827,3 +893,189 @@ def test_controller_cluster_name_client_side(controller_type: str):
     proc.start()
     proc.join()
     assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_envs_forward_usage_run_id(controller_type: str,
+                                              monkeypatch):
+    """The client's usage run id is forwarded into controller_envs.
+
+    Regression test for the consolidation-mode bug where a single
+    controller process serves many jobs and so cannot rely on its own
+    usage_lib.messages.usage singleton to identify which client run a
+    worker cluster's heartbeat belongs to.
+    """
+    from sky.usage import constants as usage_constants
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+    monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, 'client-run-xyz')
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', {})
+
+    envs = result['controller_envs']
+    assert envs.get(usage_constants.USAGE_RUN_ID_ENV_VAR) == 'client-run-xyz'
+
+    if 'local_user_config_path' in result and result['local_user_config_path']:
+        os.unlink(result['local_user_config_path'])
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_envs_skip_unset_usage_run_id(controller_type: str,
+                                                 monkeypatch):
+    """When the client did not supply a run id, controller_envs omits it
+    rather than forwarding an empty string."""
+    from sky.usage import constants as usage_constants
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+    monkeypatch.delenv(usage_constants.USAGE_RUN_ID_ENV_VAR, raising=False)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', {})
+
+    envs = result['controller_envs']
+    assert usage_constants.USAGE_RUN_ID_ENV_VAR not in envs
+
+    if 'local_user_config_path' in result and result['local_user_config_path']:
+        os.unlink(result['local_user_config_path'])
+
+
+_JOBS_SIGNAL_CONST = (
+    'sky.jobs.constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE')
+
+
+class TestIsJobsConsolidationMode:
+    """Tests for controller_utils.is_jobs_consolidation_mode.
+
+    Shared helper behind both sky/jobs/utils.py::is_consolidation_mode() and
+    sky/serve/serve_utils.py::is_consolidation_mode(pool=True). Owns:
+    - OVERRIDE_CONSOLIDATION_MODE env short-circuit.
+    - Signal-file read (source of truth).
+    - Config-vs-signal restart warning (server only).
+    - Jobs validator call against intent (server only).
+    - Optional extra_validator call (e.g. pool-specific warnings).
+    """
+
+    def setup_method(self):
+        (controller_utils._effective_jobs_consolidation_with_warnings.
+         cache_clear())
+
+    def test_override_env_short_circuits_to_true(self, monkeypatch, tmp_path):
+        """OVERRIDE_CONSOLIDATION_MODE forces True without reading signal file
+        or config. Used inside the controller process itself."""
+        monkeypatch.setenv('IS_SKYPILOT_JOB_CONTROLLER', '1')
+        signal_file = tmp_path / 'signal'  # does not exist
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch('sky.utils.controller_utils.'
+                        'warn_jobs_consolidation_mode_intent') as mock_validate:
+            assert controller_utils.is_jobs_consolidation_mode() is True
+            mock_config.get_nested.assert_not_called()
+            mock_validate.assert_not_called()
+
+    @pytest.mark.parametrize('signal_exists', [True, False])
+    def test_without_server_env_reads_signal_only(self, monkeypatch,
+                                                  signal_exists, tmp_path):
+        """Without IS_SKYPILOT_SERVER, no config reads or validator calls.
+        Matches the behavior for CLI-only callers and inside controllers."""
+        monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        if signal_exists:
+            signal_file.touch()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch('sky.utils.controller_utils.'
+                        'warn_jobs_consolidation_mode_intent') as mock_validate:
+            assert (controller_utils.is_jobs_consolidation_mode() is
+                    signal_exists)
+            mock_config.get_nested.assert_not_called()
+            mock_validate.assert_not_called()
+
+    @pytest.mark.parametrize(
+        'signal_exists,config_value,expected_effective,expected_warn,'
+        'expected_validator_arg',
+        [
+            # Deploy-mode auto-enable regression: signal on, config None.
+            # Previously diverged between readers; now helper is the single
+            # source of truth.
+            (True, None, True, False, True),
+            (False, None, False, False, False),
+            # Config matches signal: no restart warning. Validator runs
+            # against config (intent).
+            (True, True, True, False, True),
+            (False, False, False, False, False),
+            # Config disagrees with signal: restart warning fires. Validator
+            # runs against config (intent) so user sees warnings that apply
+            # post-restart.
+            (True, False, True, True, False),
+            (False, True, False, True, True),
+        ])
+    def test_server_path_warns_and_validates(self, monkeypatch, tmp_path,
+                                             signal_exists, config_value,
+                                             expected_effective, expected_warn,
+                                             expected_validator_arg):
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        if signal_exists:
+            signal_file.touch()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch(
+                 'sky.utils.controller_utils.'
+                 'warn_jobs_consolidation_mode_intent') as mock_validate, \
+             mock.patch('sky.utils.controller_utils.logger') as mock_logger:
+            mock_config.get_nested.return_value = config_value
+            assert (controller_utils.is_jobs_consolidation_mode() is
+                    expected_effective)
+            mock_config.get_nested.assert_called_once_with(
+                ('jobs', 'controller', 'consolidation_mode'),
+                default_value=None)
+            mock_validate.assert_called_once_with(expected_validator_arg)
+            assert mock_logger.warning.called is expected_warn
+
+    def test_extra_validator_called_with_arg(self, monkeypatch, tmp_path):
+        """extra_validator receives the same intent arg as the jobs validator.
+        Used by pool reader to warn about leftover pools."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        signal_file.touch()
+        extra = mock.Mock()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)), \
+             mock.patch('sky.utils.controller_utils.skypilot_config'
+                       ) as mock_config, \
+             mock.patch('sky.utils.controller_utils.'
+                        'warn_jobs_consolidation_mode_intent'):
+            # Config False disagrees with signal-on — intent arg is False.
+            mock_config.get_nested.return_value = False
+            controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
+            extra.assert_called_once_with(False)
+
+    def test_extra_validator_skipped_without_server_env(self, monkeypatch,
+                                                        tmp_path):
+        """extra_validator is only invoked when on the API server (intent
+        arg is meaningful). Skip off-server to match jobs validator behavior."""
+        monkeypatch.delenv('IS_SKYPILOT_SERVER', raising=False)
+        monkeypatch.delenv('IS_SKYPILOT_JOB_CONTROLLER', raising=False)
+        signal_file = tmp_path / 'signal'
+        extra = mock.Mock()
+        with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):
+            controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
+            extra.assert_not_called()

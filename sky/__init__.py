@@ -83,6 +83,7 @@ _set_http_proxy_env_vars()
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
 from sky import backends
+from sky import batch  # noqa: F401 # pylint: disable=unused-import
 from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
@@ -98,16 +99,20 @@ from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
 from sky.client.sdk import cost_report
+from sky.client.sdk import create_debug_dump
 from sky.client.sdk import down
+from sky.client.sdk import download_debug_dump
 from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
 from sky.client.sdk import exec  # pylint: disable=redefined-builtin
 from sky.client.sdk import get
+from sky.client.sdk import get_user_workspace
 from sky.client.sdk import job_status
 from sky.client.sdk import launch
 from sky.client.sdk import optimize
 from sky.client.sdk import queue
 from sky.client.sdk import reload_config
+from sky.client.sdk import set_preferred_workspace
 from sky.client.sdk import start
 from sky.client.sdk import status
 from sky.client.sdk import stop
@@ -116,6 +121,8 @@ from sky.client.sdk import storage_ls
 from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
 from sky.dag import Dag
+from sky.dag import DagExecution
+from sky.data import FileMountType
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
@@ -153,9 +160,11 @@ Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Mithril = clouds.Mithril
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
 Yotta = clouds.Yotta
+Verda = clouds.Verda
 
 __all__ = [
     '__version__',
@@ -179,6 +188,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Mithril',
     'Shadeform',
     'Seeweb',
     'Yotta',
@@ -187,6 +197,7 @@ __all__ = [
     'backends',
     'list_accelerators',
     '__root_dir__',
+    'FileMountType',
     'Storage',
     'StorageMode',
     'StoreType',
@@ -196,6 +207,7 @@ __all__ = [
     'StatusRefreshMode',
     # APIs
     'Dag',
+    'DagExecution',
     'Task',
     'Resources',
     # core APIs
@@ -226,10 +238,15 @@ __all__ = [
     'api_status',
     'api_cancel',
     'api_info',
+    'set_preferred_workspace',
+    'get_user_workspace',
     'api_login',
     'api_start',
     'api_stop',
     'api_server_logs',
+    # Debug Dump
+    'create_debug_dump',
+    'download_debug_dump',
     # Admin Policy
     'UserRequest',
     'MutatedUserRequest',
@@ -239,4 +256,6 @@ __all__ = [
     # Registry
     'CLOUD_REGISTRY',
     'JOBS_RECOVERY_STRATEGY_REGISTRY',
+    # Batch processing
+    'batch',
 ]

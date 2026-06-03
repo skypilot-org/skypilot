@@ -37,6 +37,7 @@ install_requires = [
     'python-dotenv',
     'rich',
     'tabulate',
+    'tqdm',
     # Light weight requirement, can be removed after we deprecate Python 3.9.
     # ParamSpec is available in typing module starting from Python 3.10, so
     # we can replace "from typing_extensions import ParamSpec" with
@@ -73,7 +74,9 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy>=2.0.0',
+    # 2.0.16 introduced create_async_engine(async_creator=...), which we
+    # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
+    'sqlalchemy>=2.0.16',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
@@ -104,12 +107,13 @@ install_requires = [
 # The grpc version at runtime has to be newer than the version
 # used to generate the code.
 GRPC = 'grpcio>=1.63.0'
-# >= 5.26.1 because the runtime version can't be older than the version
-# used to generate the code.
+# >= 5.29.6 because the runtime version can't be older than the version
+# used to generate the code (see requirements-dev.txt). Bumped from 5.26.1
+# to close CVE-2025-4565 (DoS) and CVE-2026-0994 (JSON recursion bypass).
 # < 7.0.0 because code generated for a major version V will be supported by
 # protobuf runtimes of version V and V+1.
 # https://protobuf.dev/support/cross-version-runtime-guarantee
-PROTOBUF = 'protobuf>=5.26.1, < 7.0.0'
+PROTOBUF = 'protobuf>=5.29.6, < 7.0.0'
 
 server_dependencies = [
     # TODO: Some of these dependencies are also specified in install_requires,
@@ -159,15 +163,23 @@ aws_dependencies = [
 
 # Kubernetes 32.0.0 has an authentication bug:
 # https://github.com/kubernetes-client/python/issues/2333
+# Kubernetes 36.0.0 (released 2026-05-20) broke a number of things for us:
+# in-cluster auth (kubernetes-client/python#2584), bearer token handling
+# (kubernetes-client/python#2582), and a swagger regen that renamed
+# attributes (e.g. V1ServiceSpec.external_i_ps -> external_ips) and
+# changed dict openapi_types from 'dict(K, V)' to 'dict[K, V]'. Pin away
+# from 36.x until upstream resolves these.
 kubernetes_dependencies = [
-    'kubernetes>=20.0.0,!=32.0.0',
+    'kubernetes>=20.0.0,!=32.0.0,<36.0.0',
     'websockets',
     'python-dateutil',
 ]
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in
 # a few places.
-AZURE_CLI = 'azure-cli>=2.65.0'
+# Cap <2.87.0: 2.87.0 pulls azure-mgmt-storage 25.0.0, whose TypeSpec models
+# break our Azure storage code (storage-account create and key listing).
+AZURE_CLI = 'azure-cli>=2.65.0,<2.87.0'
 
 cloud_dependencies: Dict[str, List[str]] = {
     'aws': aws_dependencies,
@@ -195,7 +207,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         'google-cloud-storage',
         # see https://github.com/conda/conda/issues/13619
         # see https://github.com/googleapis/google-api-python-client/issues/2554
-        'pyopenssl >= 23.2.0, <24.3.0',
+        'pyopenssl >= 23.2.0',
     ],
     'ibm': [
         'ibm-cloud-sdk-core',
@@ -207,6 +219,15 @@ cloud_dependencies: Dict[str, List[str]] = {
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'coreweave': aws_dependencies + kubernetes_dependencies,
+    # Hugging Face Buckets require huggingface_hub>=1.5 (first version with
+    # the full buckets API: create_bucket / bucket_info / sync_bucket /
+    # batch_bucket_files / list_bucket_tree / download_bucket_files).
+    # 1.9+ drops Python 3.9 support, so pin to <1.9 there while letting
+    # Python 3.10+ install the latest.
+    'huggingface': [
+        'huggingface_hub>=1.5; python_version>="3.10"',
+        'huggingface_hub>=1.5,<1.9; python_version<"3.10"',
+    ],
     'scp': local_ray,
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
@@ -244,18 +265,21 @@ cloud_dependencies: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'vastdata': aws_dependencies,
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        'nebius>=0.3.12',
+        'nebius>=0.3.59',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
+    'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
     'yotta': [],  # No dependencies needed for Yotta
+    'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.

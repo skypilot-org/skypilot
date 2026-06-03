@@ -1,6 +1,4 @@
 """Persistent KV cache, backed by a sqlite or postgres database."""
-import functools
-import threading
 import time
 from typing import Optional
 
@@ -18,9 +16,6 @@ from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 
 logger = sky_logging.init_logger(__name__)
-
-_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -56,44 +51,9 @@ def create_table(engine: sqlalchemy.engine.Engine):
                                          migration_utils.KV_CACHE_VERSION)
 
 
-# We wrap the sqlalchemy engine initialization in a thread
-# lock to ensure that multiple threads do not initialize the
-# engine which could result in a rare race condition where
-# a session has already been created with _SQLALCHEMY_ENGINE = e1,
-# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
-# which could result in e1 being garbage collected unexpectedly.
-def initialize_and_get_db() -> sqlalchemy.engine.Engine:
-    global _SQLALCHEMY_ENGINE
-
-    if _SQLALCHEMY_ENGINE is not None:
-        return _SQLALCHEMY_ENGINE
-    with _SQLALCHEMY_ENGINE_LOCK:
-        if _SQLALCHEMY_ENGINE is not None:
-            return _SQLALCHEMY_ENGINE
-        # get an engine to the db
-        engine = db_utils.get_engine('kv_cache')
-
-        # run migrations if needed
-        create_table(engine)
-        _SQLALCHEMY_ENGINE = engine
-        return _SQLALCHEMY_ENGINE
+_db_manager = db_utils.DatabaseManager('kv_cache', create_table)
 
 
-def _init_db(func):
-    """Initialize the database."""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        initialize_and_get_db()
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-initialize_and_get_db()
-
-
-@_init_db
 @metrics_lib.time_me
 def add_or_update_cache_entry(
     key: str,
@@ -107,17 +67,15 @@ def add_or_update_cache_entry(
         value: The value of the cache entry.
         expires_at: The timestamp when the cache entry expires.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-    if (_SQLALCHEMY_ENGINE.dialect.name ==
-            db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
         insert_func = sqlite.insert
-    elif (_SQLALCHEMY_ENGINE.dialect.name ==
-          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
         insert_func = postgresql.insert
     else:
         raise ValueError('Unsupported database dialect')
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         insert_stmt = insert_func(kv_cache_table).values(key=key,
                                                          value=value,
                                                          expires_at=expires_at)
@@ -132,7 +90,6 @@ def add_or_update_cache_entry(
         session.commit()
 
 
-@_init_db
 @metrics_lib.time_me
 def get_cache_entry(key: str) -> Optional[str]:
     """Get the value of the cache entry.
@@ -140,10 +97,62 @@ def get_cache_entry(key: str) -> Optional[str]:
     Args:
         key: The key of the cache entry.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         result = session.execute(
             sqlalchemy.select(kv_cache_table.c.value).where(
                 kv_cache_table.c.key == key).where(
                     kv_cache_table.c.expires_at > time.time()))
         return result.scalar()
+
+
+_LIKE_ESCAPE_CHAR = '\\'
+
+
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcard characters (%, _) in a literal value."""
+    return (value.replace(_LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2).replace(
+        '%', f'{_LIKE_ESCAPE_CHAR}%').replace('_', f'{_LIKE_ESCAPE_CHAR}_'))
+
+
+@metrics_lib.time_me
+def delete_cache_entries_by_prefix(prefix: str) -> None:
+    """Delete all cache entries whose key starts with the given prefix.
+
+    Any SQL LIKE wildcards (%, _) in *prefix* are escaped so they are
+    matched literally.
+
+    Args:
+        prefix: The literal prefix to match against cache keys.
+    """
+    escaped = _escape_like(prefix)
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(kv_cache_table).where(
+                kv_cache_table.c.key.like(f'{escaped}%',
+                                          escape=_LIKE_ESCAPE_CHAR)))
+        session.commit()
+
+
+@metrics_lib.time_me
+def delete_cache_entries_by_prefix_suffix(prefix: str, suffix: str) -> None:
+    """Delete all cache entries whose key starts with *prefix* and ends
+    with *suffix*, with any content in between.
+
+    Both *prefix* and *suffix* are treated as literal strings — any SQL
+    LIKE wildcards (%, _) they contain are escaped automatically.
+
+    Args:
+        prefix: Literal prefix to match against cache keys.
+        suffix: Literal suffix to match against cache keys.
+    """
+    escaped_prefix = _escape_like(prefix)
+    escaped_suffix = _escape_like(suffix)
+    pattern = f'{escaped_prefix}%{escaped_suffix}'
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(kv_cache_table).where(
+                kv_cache_table.c.key.like(pattern, escape=_LIKE_ESCAPE_CHAR)))
+        session.commit()

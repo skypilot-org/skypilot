@@ -1,5 +1,6 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
 import copy
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -8,6 +9,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.skylet import constants
 from sky.utils import cluster_utils
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
@@ -156,8 +158,33 @@ def load_chain_dag_from_yaml(
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
       trivial task).
     """
-    configs = yaml_utils.read_yaml_all(path)
-    return _load_chain_dag(configs, env_overrides, secret_overrides)
+    try:
+        with open(os.path.expanduser(path), 'r', encoding='utf-8') as f:
+            yaml_str = f.read()
+    except UnicodeDecodeError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{path!r} is not a valid UTF-8 text file and cannot be '
+                'parsed as YAML.') from e
+    with ux_utils.print_exception_no_traceback():
+        yaml_utils.check_no_duplicate_keys(yaml_str)
+    configs = yaml_utils.read_yaml_all_str(yaml_str)
+    if not any(c for c in configs):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{path!r} is empty or contains no task definition. '
+                'Add at least a `run:` (or `setup:`) field.')
+    dag = _load_chain_dag(configs, env_overrides, secret_overrides)
+    # Capture git commit from the YAML file's directory for tasks that
+    # don't already have one (e.g. from a workdir).
+    yaml_dir = os.path.dirname(os.path.realpath(path))
+    git_commit = common_utils.get_git_commit(yaml_dir)
+    if git_commit is not None:
+        for task in dag.tasks:
+            if 'git_commit' not in task.metadata:
+                # pylint: disable=protected-access
+                task._metadata['git_commit'] = git_commit
+    return dag
 
 
 def load_chain_dag_from_yaml_str(

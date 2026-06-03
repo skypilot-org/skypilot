@@ -4,6 +4,8 @@ import collections
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
+import colorama
+
 from sky import check as sky_check
 from sky import clouds as sky_clouds
 from sky import sky_logging
@@ -23,15 +25,17 @@ def instance_type_exists(instance_type: str) -> bool:
     return slurm_utils.SlurmInstanceType.is_valid_instance_type(instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              local_disk: Optional[str] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     # Delete unused parameters.
-    del disk_tier, region, zone, local_disk
+    del disk_tier, zone, local_disk, use_spot, max_hourly_cost
 
     # Slurm provisions resources via --cpus-per-task and --mem.
     instance_cpus = float(
@@ -44,7 +48,41 @@ def get_default_instance_type(cpus: Optional[str] = None,
         else:
             instance_mem = float(memory)
     else:
-        instance_mem = instance_cpus * _DEFAULT_MEMORY_CPU_RATIO
+        # User did not explicitly request memory. Check whether the cluster
+        # tracks memory as a consumable resource (CR_CPU_Memory /
+        # CR_Core_Memory). When memory is NOT tracked (CR_CPU / CR_Core),
+        # requesting --mem can cause scheduling failures, especially when
+        # admins set RealMemory=0. In that case we set memory to 0, which
+        # translates to omitting --mem from the sbatch script (letting Slurm
+        # use its default allocation).
+        # Check which clusters do NOT track memory.
+        no_mem_clusters: Dict[str, str] = {}  # cluster -> SelectTypeParams
+        clusters_to_check = ([region] if region is not None else
+                             slurm_utils.get_all_slurm_cluster_names())
+        for cluster in clusters_to_check:
+            try:
+                if not slurm_utils.is_memory_scheduling_enabled(cluster):
+                    params = slurm_utils.get_select_type_parameters(
+                        cluster) or 'unknown'
+                    no_mem_clusters[cluster] = params
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to check memory scheduling for cluster '
+                             f'{cluster!r}: {e}')
+
+        all_no_mem = (clusters_to_check and
+                      len(no_mem_clusters) == len(clusters_to_check))
+        if all_no_mem:
+            details = ', '.join(
+                f'{c} ({p})' for c, p in no_mem_clusters.items())
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Some Slurm cluster(s) do not track '
+                f'memory as a consumable resource: {details}. '
+                f'--mem will be omitted from sbatch, and Slurm will use '
+                f'its default allocation.'
+                f'{colorama.Style.RESET_ALL}')
+            instance_mem = 0
+        else:
+            instance_mem = instance_cpus * _DEFAULT_MEMORY_CPU_RATIO
     virtual_instance_type = slurm_utils.SlurmInstanceType(
         instance_cpus, instance_mem).name
     return virtual_instance_type
@@ -105,16 +143,18 @@ def list_accelerators_realtime(
         return {}, {}, {}
 
     if region_filter is None:
-        # Get the first available cluster as default
+        # Query all available clusters and aggregate results
         all_clusters = slurm_utils.get_all_slurm_cluster_names()
         if not all_clusters:
             return {}, {}, {}
-        slurm_cluster = all_clusters[0]
+        clusters_to_query = all_clusters
     else:
-        slurm_cluster = region_filter
+        clusters_to_query = [region_filter]
 
-    slurm_nodes_info = slurm_utils.slurm_node_info(
-        slurm_cluster_name=slurm_cluster)
+    slurm_nodes_info = [
+        info for cluster in clusters_to_query
+        for info in slurm_utils.slurm_node_info(slurm_cluster_name=cluster)
+    ]
 
     if not slurm_nodes_info:
         # Customize error message based on filters
@@ -145,9 +185,11 @@ def list_accelerators_realtime(
 
         # Apply name filter to the determined GPU type
         regex_flags = 0 if case_sensitive else re.IGNORECASE
-        if name_filter and not re.match(
-                name_filter, gpu_type, flags=regex_flags):
-            continue
+        if name_filter:
+            if gpu_type is None:
+                continue
+            if not re.match(name_filter, gpu_type, flags=regex_flags):
+                continue
 
         # Apply quantity filter (total GPUs on node must meet this)
         if quantity_filter and node_total_gpus < quantity_filter:
@@ -159,50 +201,44 @@ def list_accelerators_realtime(
         # if partition_filter and partition != partition_filter:
         #     continue
 
-        # Create InstanceTypeInfo objects for various GPU counts
-        # Similar to Kubernetes, generate powers of 2 up to node_total_gpus
+        # Generate powers-of-2 GPU counts up to node_total_gpus,
+        # plus the actual total if it is not a power of 2.
         if node_total_gpus > 0:
+            pricing = _get_pricing(region=node_info['slurm_cluster_name'],
+                                   zone=partition)
+            per_accel = common.get_hourly_cost_from_pricing(
+                pricing,
+                cpus=0,
+                memory=0,
+                accelerator_name=gpu_type,
+                accelerator_count=1,
+            )
+            counts = []
             count = 1
             while count <= node_total_gpus:
-                instance_info = common.InstanceTypeInfo(
-                    instance_type=None,  # Slurm doesn't have instance types
-                    accelerator_name=gpu_type,
-                    accelerator_count=count,
-                    cpu_count=node_info['vcpu_count'],
-                    memory=node_info['memory_gb'],
-                    price=0.0,  # Slurm doesn't have price info
-                    region=partition,  # Use partition as region
-                    cloud='slurm',  # Specify cloud as 'slurm'
-                    device_memory=0.0,  # No GPU memory info from Slurm
-                    spot_price=0.0,  # Slurm doesn't have spot pricing
-                )
-                qtys_map[gpu_type].add(instance_info)
+                counts.append(count)
                 count *= 2
+            if counts[-1] != node_total_gpus:
+                counts.append(node_total_gpus)
 
-            # Add the actual total if it's not already included
-            # (e.g., if node has 12 GPUs, include counts 1, 2, 4, 8, 12)
-            if count // 2 != node_total_gpus:
-                instance_info = common.InstanceTypeInfo(
-                    instance_type=None,
-                    accelerator_name=gpu_type,
-                    accelerator_count=node_total_gpus,
-                    cpu_count=node_info['vcpu_count'],
-                    memory=node_info['memory_gb'],
-                    price=0.0,
-                    region=partition,
-                    cloud='slurm',
-                    device_memory=0.0,
-                    spot_price=0.0,
-                )
-                qtys_map[gpu_type].add(instance_info)
+            for cnt in counts:
+                qtys_map[gpu_type].add(
+                    common.InstanceTypeInfo(
+                        instance_type=None,
+                        accelerator_name=gpu_type,
+                        accelerator_count=cnt,
+                        cpu_count=node_info['vcpu_count'],
+                        memory=node_info['memory_gb'],
+                        price=per_accel * cnt,
+                        region=partition,
+                        cloud='slurm',
+                        device_memory=0.0,
+                        spot_price=per_accel * cnt,
+                    ))
 
-        # Map of GPU type -> total count across all matched nodes
         total_capacity[gpu_type] += node_total_gpus
-
-        # Map of GPU type -> total *free* count across all matched nodes
         total_available[gpu_type] += node_free_gpus
 
-    # Check if any GPUs were found after applying filters
     if not total_capacity:
         err_msg = 'No matching GPU nodes found in the Slurm cluster'
         filters_applied = []
@@ -216,9 +252,8 @@ def list_accelerators_realtime(
         logger.error(err_msg)
         raise ValueError(err_msg)
 
-    # Convert sets of InstanceTypeInfo to sorted lists
     final_qtys_map = {
-        gpu: sorted(list(instances), key=lambda x: x.accelerator_count)
+        gpu: sorted(instances, key=lambda x: x.accelerator_count)
         for gpu, instances in qtys_map.items()
     }
 
@@ -228,6 +263,46 @@ def list_accelerators_realtime(
                  f'available={dict(total_available)}')
 
     return final_qtys_map, dict(total_capacity), dict(total_available)
+
+
+def _get_pricing(region: Optional[str], zone: Optional[str] = None) -> Dict:
+    """Resolve the pricing dict for a Slurm cluster/partition from config.
+
+    Each level is deep-merged into the previous so that partial overrides
+    inherit unset keys from the parent level:
+
+        cloud-level  <  cluster-level  <  partition-level
+
+    For example, a cluster that only overrides ``accelerators.A100`` still
+    inherits ``cpu`` and ``memory`` rates from the cloud-level default.
+    """
+    paths: List[Tuple[str, ...]] = [('slurm', 'pricing')]
+    if region is not None:
+        paths.append(('slurm', 'cluster_configs', region, 'pricing'))
+    if region is not None and zone is not None:
+        paths.append(('slurm', 'cluster_configs', region, 'partition_configs',
+                      zone, 'pricing'))
+    return common.resolve_pricing_config(*paths)
+
+
+def get_hourly_cost(instance_type: str,
+                    use_spot: bool,
+                    region: Optional[str] = None,
+                    zone: Optional[str] = None) -> float:
+    """Returns the hourly cost for a Slurm virtual instance type.
+
+    Pricing is read from the ``slurm.pricing`` section of
+    ``~/.sky/config.yaml``.
+    """
+    del use_spot  # Slurm has no spot pricing.
+    instance = slurm_utils.SlurmInstanceType.from_instance_type(instance_type)
+    return common.get_hourly_cost_from_pricing(
+        _get_pricing(region, zone),
+        cpus=instance.cpus,
+        memory=instance.memory,
+        accelerator_name=instance.accelerator_type,
+        accelerator_count=instance.accelerator_count,
+    )
 
 
 def validate_region_zone(

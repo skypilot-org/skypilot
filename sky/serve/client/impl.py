@@ -48,12 +48,14 @@ def up(
                               abort=True,
                               show_default=True)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
+        dag, file_mounts_blob_id = (
+            client_common.upload_mounts_to_api_server(dag))
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
         body = payloads.ServeUpBody(
             task=dag_str,
             service_name=service_name,
+            file_mounts_blob_id=file_mounts_blob_id,
         )
 
         response = server_common.make_authenticated_request(
@@ -92,13 +94,15 @@ def update(
                           abort=True,
                           show_default=True)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
+        dag, file_mounts_blob_id = (
+            client_common.upload_mounts_to_api_server(dag))
         dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
         body = payloads.ServeUpdateBody(
             task=dag_str,
             service_name=service_name,
             mode=mode,
+            file_mounts_blob_id=file_mounts_blob_id,
         )
 
         response = server_common.make_authenticated_request(
@@ -166,13 +170,15 @@ def apply(
                                   abort=True,
                                   show_default=True)
 
-            dag = client_common.upload_mounts_to_api_server(dag)
+            dag, file_mounts_blob_id = (
+                client_common.upload_mounts_to_api_server(dag))
             dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
             body = payloads.JobsPoolApplyBody(
                 task=dag_str,
                 pool_name=service_name,
                 mode=mode,
+                file_mounts_blob_id=file_mounts_blob_id,
             )
             response = server_common.make_authenticated_request(
                 'POST',

@@ -66,6 +66,7 @@ async def queue_v2(
         return await sdk_async.get(request_id)
 
 
+# TODO(lloyd): Remove before 0.13.
 @usage_lib.entrypoint
 async def queue(
     refresh: bool,
@@ -73,11 +74,13 @@ async def queue(
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     stream_logs: Optional[
-        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
-) -> List[responses.ManagedJobRecord]:
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+    version: int = 1,
+) -> Union[List[responses.ManagedJobRecord], Tuple[
+        List[responses.ManagedJobRecord], int, Dict[str, int], int]]:
     """Async version of queue() that gets statuses of managed jobs."""
     request_id = await asyncio.to_thread(sdk.queue, refresh, skip_finished,
-                                         all_users, job_ids)
+                                         all_users, job_ids, version)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -90,12 +93,35 @@ async def cancel(
     job_ids: Optional[List[int]] = None,
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
+    pool: Optional[str] = None,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> None:
     """Async version of cancel() that cancels managed jobs."""
     request_id = await asyncio.to_thread(sdk.cancel, name, job_ids, all,
-                                         all_users)
+                                         all_users, pool, graceful,
+                                         graceful_timeout)
+    if stream_logs is not None:
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
+    else:
+        return await sdk_async.get(request_id)
+
+
+@usage_lib.entrypoint
+async def wait(
+    name: Optional[str] = None,
+    job_id: Optional[int] = None,
+    timeout: Optional[int] = None,
+    poll_interval: int = 15,
+    task: Optional[Union[str, int]] = None,
+    stream_logs: Optional[
+        sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
+) -> int:
+    """Async version of wait() that waits for a managed job to finish."""
+    request_id = await asyncio.to_thread(sdk.wait, name, job_id, timeout,
+                                         poll_interval, task)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -109,8 +135,11 @@ async def tail_logs(cluster_name: str,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
+    # mypy cannot pick an overload of sdk.tail_logs when it is passed as a
+    # value to asyncio.to_thread; the runtime call is unambiguous because
+    # preload_content defaults to True.
     return await asyncio.to_thread(
-        sdk.tail_logs,
+        sdk.tail_logs,  # type: ignore[arg-type]
         cluster_name,
         job_id,
         follow,

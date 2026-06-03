@@ -1,0 +1,38 @@
+resources:
+  accelerators: {H100:1, H200:1}
+  image_id: docker:nvcr.io/nvidia/pytorch:24.07-py3
+
+workdir: .
+
+envs:
+  EXPERIMENT_ID: baseline
+  EXPERIMENT_DESC: "baseline run"
+
+setup: |
+  pip install uv
+  uv sync
+  uv run prepare.py
+
+run: |
+  # Run the experiment (5-min fixed budget)
+  uv run train.py 2>&1 | tee run.log
+  EXIT_CODE=${PIPESTATUS[0]}
+
+  if [ $EXIT_CODE -ne 0 ]; then
+    echo "EXPERIMENT_STATUS: crash"
+    echo "Experiment ${EXPERIMENT_ID} crashed. Check logs above for details."
+  else
+    VAL_BPB=$(grep "^val_bpb:" run.log | awk '{print $2}')
+    PEAK_VRAM=$(grep "^peak_vram_mb:" run.log | awk '{print $2}')
+
+    if [ -z "$VAL_BPB" ] || [ -z "$PEAK_VRAM" ]; then
+      echo "EXPERIMENT_STATUS: crash"
+      echo "Experiment ${EXPERIMENT_ID} finished but failed to parse metrics from run.log."
+    else
+      MEMORY_GB=$(echo "scale=1; ${PEAK_VRAM} / 1024" | bc)
+      echo "EXPERIMENT_STATUS: done"
+      echo "EXPERIMENT_RESULT: ${EXPERIMENT_ID} val_bpb=${VAL_BPB} memory_gb=${MEMORY_GB}"
+    fi
+  fi
+
+  echo "EXPERIMENT_DESC: ${EXPERIMENT_DESC}"

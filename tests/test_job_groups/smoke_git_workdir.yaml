@@ -1,0 +1,22 @@
+# JobGroup smoke test - git workdir
+---
+name: {{name}}
+execution: parallel
+---
+name: job-a
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job A Starting"
+  git status
+  echo "Job A Done"
+---
+name: job-b
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job B Starting"
+  git status
+  echo "Job B Done"

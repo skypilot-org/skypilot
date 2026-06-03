@@ -221,6 +221,10 @@ class TestQueue:
             }
             return {w: {} for w in workspaces}
 
+        def fake_get_accessible_workspace_names():
+            # Match fake_get_workspaces so queue_v2 sees the same workspace set
+            return set(fake_get_workspaces().keys())
+
         def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
                                workspace_match, name_match, pool_match, page,
                                limit, user_hashes, statuses, fields, sort_by,
@@ -309,6 +313,9 @@ class TestQueue:
                             fake_get_backend_from_handle)
         monkeypatch.setattr(jobs_core.workspaces_core, 'get_workspaces',
                             fake_get_workspaces)
+        monkeypatch.setattr(jobs_core.workspaces_core,
+                            'get_accessible_workspace_names',
+                            fake_get_accessible_workspace_names)
 
         # Patch codegen to return a payload and loader to compute results
         monkeypatch.setattr(jobs_core.managed_job_utils.ManagedJobCodeGen,
@@ -510,6 +517,8 @@ class TestQueue:
         self._patch_backend_and_utils(monkeypatch, jobs)
         monkeypatch.setattr(jobs_core.workspaces_core, 'get_workspaces',
                             fake_get_workspaces_only_w1)
+        monkeypatch.setattr(jobs_core.workspaces_core,
+                            'get_accessible_workspace_names', lambda: {'w1'})
         filtered, total, status_counts, total_no_filter = jobs_core.queue_v2(
             refresh=False,
             skip_finished=False,

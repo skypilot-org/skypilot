@@ -6,11 +6,20 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
 } from 'react';
+import { useRouter } from 'next/router';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
+import {
+  trackEvent,
+  trackPluginPageView,
+  registerAnalyticsProvider,
+} from '@/lib/analytics';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -19,7 +28,39 @@ const PluginContext = createContext({
   dataEnhancements: {},
   tableColumns: {},
   dataProviders: {},
+  recipeTypes: [],
 });
+
+const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
+
+function loadCachedNavLinks() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(NAV_LINKS_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        return parsed.map((link) => ({ ...link, _cached: true }));
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveCachedNavLinks(links) {
+  if (typeof window === 'undefined') return;
+  try {
+    // Strip _cached flag before persisting
+    const toCache = links
+      .filter((link) => !link._cached)
+      .map(({ _cached, ...rest }) => rest);
+    localStorage.setItem(NAV_LINKS_CACHE_KEY, JSON.stringify(toCache));
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 const initialState = {
   topNavLinks: [],
@@ -28,6 +69,7 @@ const initialState = {
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
+  recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
 };
 
 const actions = {
@@ -37,6 +79,8 @@ const actions = {
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
+  CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
+  REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
 };
 
 function pluginReducer(state, action) {
@@ -118,6 +162,16 @@ function pluginReducer(state, action) {
           ...state.dataProviders,
           [action.payload.id]: action.payload,
         },
+      };
+    case actions.CLEAR_CACHED_NAV_LINKS:
+      return {
+        ...state,
+        topNavLinks: state.topNavLinks.filter((link) => !link._cached),
+      };
+    case actions.REGISTER_RECIPE_TYPE:
+      return {
+        ...state,
+        recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
     default:
       return state;
@@ -467,7 +521,13 @@ function interceptHistoryApi() {
       normalizedUrl = normalizeUrlForHistory(url);
     }
     try {
-      return originalPushState.call(this, state, title, normalizedUrl);
+      const result = originalPushState.call(this, state, title, normalizedUrl);
+      window.dispatchEvent(
+        new CustomEvent('skydashboard:url-changed', {
+          detail: { url: normalizedUrl || url },
+        })
+      );
+      return result;
     } catch (error) {
       // If pushState still fails (e.g., due to origin mismatch), try with a relative URL
       if (
@@ -478,7 +538,18 @@ function interceptHistoryApi() {
         try {
           const urlObj = new URL(normalizedUrl, window.location.href);
           const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
-          return originalPushState.call(this, state, title, relativeUrl);
+          const result = originalPushState.call(
+            this,
+            state,
+            title,
+            relativeUrl
+          );
+          window.dispatchEvent(
+            new CustomEvent('skydashboard:url-changed', {
+              detail: { url: relativeUrl },
+            })
+          );
+          return result;
         } catch {
           // If that also fails, rethrow the original error
           throw error;
@@ -495,7 +566,18 @@ function interceptHistoryApi() {
       normalizedUrl = normalizeUrlForHistory(url);
     }
     try {
-      return originalReplaceState.call(this, state, title, normalizedUrl);
+      const result = originalReplaceState.call(
+        this,
+        state,
+        title,
+        normalizedUrl
+      );
+      window.dispatchEvent(
+        new CustomEvent('skydashboard:url-changed', {
+          detail: { url: normalizedUrl || url },
+        })
+      );
+      return result;
     } catch (error) {
       // If replaceState still fails (e.g., due to origin mismatch), try with a relative URL
       if (
@@ -506,7 +588,18 @@ function interceptHistoryApi() {
         try {
           const urlObj = new URL(normalizedUrl, window.location.href);
           const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
-          return originalReplaceState.call(this, state, title, relativeUrl);
+          const result = originalReplaceState.call(
+            this,
+            state,
+            title,
+            relativeUrl
+          );
+          window.dispatchEvent(
+            new CustomEvent('skydashboard:url-changed', {
+              detail: { url: relativeUrl },
+            })
+          );
+          return result;
         } catch {
           // If that also fails, rethrow the original error
           throw error;
@@ -603,12 +696,54 @@ function createPluginApi(dispatch) {
         basePath: BASE_PATH,
         apiEndpoint: ENDPOINT,
         dashboardCache: dashboardCache,
+        cachePreloader: cachePreloader,
         grafanaUtils: {
           checkGrafanaAvailability,
           getGrafanaUrl,
         },
+        gpuUtils: {
+          canonicalizeGpuName,
+          CANONICAL_GPU_NAMES,
+        },
         // Provide URL normalization utility for plugins
         normalizeUrl: normalizeUrlForHistory,
+        // Navigate using the Next.js router (SPA navigation)
+        navigate: (path) => {
+          const router = window.__pluginRouterRef?.current;
+          if (router) {
+            router.push(path);
+          } else {
+            window.location.href = path;
+          }
+        },
+        // Get current grouped nav links (from all registered plugins)
+        getNavLinks: () => {
+          const stateRef = window.__pluginStateRef;
+          if (!stateRef?.current) return { ungrouped: [], groups: {} };
+          const sorted = [...(stateRef.current.topNavLinks || [])].sort(
+            (a, b) => a.order - b.order
+          );
+          const ungrouped = sorted.filter((link) => !link.group);
+          const grouped = sorted.filter((link) => link.group);
+          const groups = grouped.reduce((acc, link) => {
+            const groupName = link.group;
+            if (!acc[groupName]) acc[groupName] = [];
+            acc[groupName].push(link);
+            return acc;
+          }, {});
+          return { ungrouped, groups };
+        },
+        // Get current plugin routes
+        getPluginRoutes: () => {
+          const stateRef = window.__pluginStateRef;
+          return stateRef?.current?.routes || [];
+        },
+        // Get registered components for a slot
+        getSlotComponents: (slot) => {
+          const stateRef = window.__pluginStateRef;
+          if (!stateRef?.current || !slot) return [];
+          return stateRef.current.components[slot] || [];
+        },
       };
     },
     getComponents() {
@@ -616,6 +751,39 @@ function createPluginApi(dispatch) {
       // This dynamically provides all components from the ui directory.
       // eslint-disable-next-line no-undef
       return require('@/components/ui');
+    },
+    trackEvent(eventName, properties = {}) {
+      trackEvent(eventName, properties);
+    },
+    trackPluginPageView(pluginName, pagePath) {
+      trackPluginPageView(pluginName, pagePath);
+    },
+    registerAnalyticsProvider(provider) {
+      registerAnalyticsProvider(provider);
+    },
+    registerRecipeType(config) {
+      if (!config || !config.id || !config.label) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid recipe type registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        label: String(config.label),
+        fullLabel: config.fullLabel
+          ? String(config.fullLabel)
+          : String(config.label),
+        icon: config.icon || null,
+        color: config.color ? String(config.color) : 'gray',
+        template: config.template ? String(config.template) : '',
+      };
+      dispatch({
+        type: actions.REGISTER_RECIPE_TYPE,
+        payload: normalized,
+      });
+      return normalized.id;
     },
     registerDataProvider(config) {
       if (!config?.id) {
@@ -629,6 +797,8 @@ function createPluginApi(dispatch) {
         id: String(config.id),
         name: config.name || config.id,
         useHook: config.useHook,
+        hooks: config.hooks || {},
+        components: config.components || {},
       };
       dispatch({
         type: actions.REGISTER_DATA_PROVIDER,
@@ -641,19 +811,58 @@ function createPluginApi(dispatch) {
 }
 
 export function PluginProvider({ children }) {
-  const [state, dispatch] = useReducer(pluginReducer, initialState);
+  const [state, dispatch] = useReducer(pluginReducer, null, () => ({
+    ...initialState,
+    topNavLinks: loadCachedNavLinks(),
+  }));
+  const router = useRouter();
+  const routerRef = useRef(router);
+  const pluginsLoadedRef = useRef(false);
 
-  // Expose state reference for getDataEnhancements to access outside React context
+  // Keep router ref up to date
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  // Expose router reference for plugin API navigate()
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.__pluginStateRef = { current: state };
+      window.__pluginRouterRef = routerRef;
       return () => {
-        if (window.__pluginStateRef) {
+        if (window.__pluginRouterRef === routerRef) {
+          delete window.__pluginRouterRef;
+        }
+      };
+    }
+  }, []);
+
+  // Expose state reference for plugins to access outside React context.
+  // Use a stable ref updated during render (not in useEffect) so that child
+  // components' effects always read the latest state — even on the same commit
+  // that first mounts them.  The previous approach (useEffect with [state] dep)
+  // deleted and recreated __pluginStateRef on every state change; because React
+  // runs all cleanups before all new effects (children-first), a child mounting
+  // on the same render would read undefined during its effect.
+  const pluginStateRef = useRef(state);
+  pluginStateRef.current = state;
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__pluginStateRef = pluginStateRef;
+      return () => {
+        if (window.__pluginStateRef === pluginStateRef) {
           delete window.__pluginStateRef;
         }
       };
     }
-  }, [state]);
+  }, []);
+
+  // Persist nav links to localStorage after plugins have fully loaded
+  useEffect(() => {
+    if (pluginsLoadedRef.current) {
+      saveCachedNavLinks(state.topNavLinks);
+    }
+  }, [state.topNavLinks]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -675,14 +884,37 @@ export function PluginProvider({ children }) {
       if (cancelled) {
         return;
       }
+      const loadPromises = [];
       manifest.forEach((pluginDescriptor) => {
         const jsPath = extractJsPath(pluginDescriptor);
         if (jsPath && !cancelled) {
           const requiresEarlyInit =
             pluginDescriptor.requires_early_init === true;
-          loadPluginScript(jsPath, requiresEarlyInit);
+          const promise = loadPluginScript(jsPath, requiresEarlyInit);
+          if (promise) {
+            loadPromises.push(promise);
+          }
         }
       });
+      // After all plugin scripts have loaded and registered,
+      // clear stale cached nav links and enable cache persistence
+      if (loadPromises.length > 0) {
+        await Promise.all(loadPromises);
+      }
+      if (!cancelled) {
+        pluginsLoadedRef.current = true;
+        dispatch({ type: actions.CLEAR_CACHED_NAV_LINKS });
+        // Signal that all plugin scripts have finished loading.
+        // layout.jsx listens for this to avoid showing the fallback top bar
+        // before the sidebar plugin has had a chance to register.
+        // Also set a synchronously-readable global flag so pages that
+        // mount AFTER this event has fired can detect that state without
+        // waiting on a 2-second safety-net timeout. Without this, every
+        // navigation to a plugin-aware page paid an unconditional 2s
+        // gate before rendering anything.
+        window.__skyDashboardPluginsLoaded = true;
+        window.dispatchEvent(new CustomEvent('skydashboard:plugins-loaded'));
+      }
     };
     void bootstrapPlugins();
 
@@ -745,13 +977,28 @@ export function usePluginRoutes() {
   return routes;
 }
 
+export function usePluginRecipeTypes() {
+  const { recipeTypes } = usePluginState();
+  return recipeTypes;
+}
+
 export function usePluginRoute(pathname) {
   const routes = usePluginRoutes();
   return useMemo(() => {
     if (!pathname) {
       return null;
     }
-    return routes.find((route) => route.path === pathname) || null;
+    // Use prefix matching so plugin sub-routes (e.g. /plugins/my-plugin/details)
+    // are handled by the plugin that registered the base path (/plugins/my-plugin).
+    // Sort by path length descending so the most specific match wins.
+    return (
+      [...routes]
+        .sort((a, b) => b.path.length - a.path.length)
+        .find(
+          (route) =>
+            pathname === route.path || pathname.startsWith(route.path + '/')
+        ) || null
+    );
   }, [pathname, routes]);
 }
 
@@ -820,6 +1067,20 @@ export function useTableColumns(tableName, context = {}) {
 export function useDataProvider(id) {
   const { dataProviders } = usePluginState();
   return dataProviders[id] || null;
+}
+
+/**
+ * Hook to access all registered data providers as an array.
+ *
+ * Used by host pages that want to discover plugins exposing a particular
+ * hook by name (e.g., looking for any provider with a `useExtraInfraRows`
+ * hook) without knowing any specific plugin id.
+ *
+ * @returns {Array} All registered data provider configs
+ */
+export function useAllDataProviders() {
+  const { dataProviders } = usePluginState();
+  return Object.values(dataProviders);
 }
 
 /**

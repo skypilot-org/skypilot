@@ -463,13 +463,9 @@ sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
-script = 'python train.py'
-if script is None:
-    script = ''
-rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi'
+script = 'python train.py\n__skypilot_user_exit_code=$?\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi\nexit $__skypilot_user_exit_code'
 
 if script or True:
-    script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
 
     # Signal files for setup/run synchronization:
@@ -487,7 +483,7 @@ if script or True:
     setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-    gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
+    gpu_arg = f'--gpus-per-node=1'
 
     def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                               task_name=None, is_setup=False,
@@ -498,7 +494,8 @@ if script or True:
         env_vars = shlex.quote(env_vars_json)
         cluster_ips = shlex.quote(",".join(['10.0.0.1']))
 
-        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips}'
+        cluster_home = shlex.quote(os.path.expanduser('~'))
+        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips} --cluster-home-dir={cluster_home}'
 
         if task_name is not None:
             runner_args += f' --task-name={shlex.quote(task_name)}'
@@ -533,10 +530,19 @@ if script or True:
         # SLURM_CPU_BIND, SLURM_NNODES, and SLURM_NODELIST constrain
         # the inner srun to the parent step's allocation. This causes
         # "CPU binding outside of job step allocation" errors.
-        # Unsetting all SLURM_* variables allows this srun to access the full job
-        # allocation. See:
+        # Unsetting SLURM_* variables allows this srun to access the
+        # full job allocation. See:
         # https://support.schedmd.com/show_bug.cgi?id=14298
         # https://github.com/huggingface/datatrove/issues/248
+        #
+        # Preserve SLURM_CONF* (SLURM_CONF, SLURM_CONF_SERVER): srun
+        # needs these to locate slurmctld when /etc/slurm/slurm.conf
+        # is not present and DNS SRV discovery is unavailable. On
+        # sites that distribute the config via SLURM_CONF, stripping
+        # it causes srun to fail with:
+        #   resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
+        #   fetch_config: DNS SRV lookup failed
+        #   fatal: Could not establish a configuration source
         cmd_parts = []
         # Only unset SKY_RUNTIME_DIR for container runs. For non-container
         # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
@@ -550,7 +556,7 @@ if script or True:
         ])
         bash_cmd = shlex.quote(' '.join(cmd_parts))
         srun_cmd = (
-            "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
+            "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
             f'/bin/bash -c {bash_cmd}'

@@ -38,8 +38,10 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`instance_type <yaml-spec-resources-instance-type>`: p3.8xlarge
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
+    :ref:`ephemeral_storage <yaml-spec-resources-ephemeral-storage>`: 50
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
+    :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
@@ -49,12 +51,6 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`autostop <yaml-spec-resources-autostop>`:
       idle_minutes: 10
       wait_for: none
-      :ref:`hook <auto-stop-hooks>`: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
-      hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -77,6 +73,8 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_HF_TOKEN: my-secret-value
     WANDB_API_KEY: my-secret-value-2
 
+  :ref:`api_server_access <yaml-spec-api-server-access>`: true
+
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
     /mnt/cache:
@@ -89,6 +87,11 @@ Below is the configuration syntax and some example values.  See details under ea
     /checkpoints:
       source: s3://existing-bucket
       mode: MOUNT
+    # Mount with VFS caching and a pre-tuned workload type
+    /data:
+      source: s3://my-model-data
+      mode: MOUNT_CACHED
+      type: DATASET_RO
     /datasets-s3: s3://my-awesome-dataset
 
   :ref:`setup <yaml-spec-setup>`: |
@@ -276,12 +279,10 @@ Format:
     - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
     - ``jobs``: Only wait for in‑progress jobs
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
-  - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
-    See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
-
-  - ``hook_timeout``: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
-    If the hook exceeds this timeout, it will be terminated and autostop continues.
+To run a script before autostop, see :ref:`Lifecycle hooks <lifecycle-hooks>`
+(under ``config.hooks`` with ``events: [stop]`` for autostop, or
+``events: [down]`` for autodown — ``autostop: {down: true}``).
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -328,20 +329,6 @@ OR
     autostop:
       idle_minutes: 10
       wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-    autostop:
-      idle_minutes: 10
-      hook: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
-      hook_timeout: 300
 
 
 .. _yaml-spec-resources-accelerators:
@@ -562,6 +549,50 @@ OR
 
 
 
+.. _yaml-spec-resources-ephemeral-storage:
+
+``resources.ephemeral_storage``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ephemeral storage to request for Kubernetes pods, specified as an integer in GB or as a string with units (e.g., ``50GB``).
+
+This sets the ``resources.requests.ephemeral-storage`` field in the Kubernetes pod spec.
+When :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>` is configured in the SkyPilot config, it also sets
+``resources.limits.ephemeral-storage`` using the multiplier defined there.
+
+This field is **only effective on Kubernetes**. It is ignored on other clouds.
+
+Increase this if your tasks download large datasets or produce significant temporary files that
+could exhaust the node's ephemeral storage and trigger pod evictions.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+.. warning::
+
+   The ephemeral storage size will be rounded down (floored) to the nearest gigabyte. For example, ``1500MB`` or ``2000MB`` will be rounded to ``1GB``.
+
+.. code-block:: yaml
+
+  resources:
+    infra: kubernetes
+    ephemeral_storage: 50
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    infra: kubernetes
+    ephemeral_storage: 50GB
+
+
+
 .. _yaml-spec-resources-disk-tier:
 
 ``resources.disk_tier``
@@ -604,16 +635,55 @@ Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
 
 If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
 
-- ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
-- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+**VM-based:**
+
+- ``infra: aws``: Enable Elastic Fabric Adapter (EFA) for high-performance inter-node communication on EFA-supported instance types (e.g., p4d, p5, p5e, p5en, p6-b200, p6-b300, etc.).
+- ``infra: gcp``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance node-to-node GPU communication on supported instance types (A3 High, A3 Edge, A3 Mega, A3 Ultra, A4).
+- ``infra: nebius``: Enable InfiniBand for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+
+**Kubernetes-based:**
+
+- ``infra: k8s/my-eks-or-hyperpod-cluster``: Enable EFA for high-performance inter-node communication across pods on AWS EKS/HyperPod clusters.
+- ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 - ``infra: k8s/my-coreweave-cluster``: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
 - ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
-- ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
+- ``infra: k8s/my-together-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Together AI Kubernetes clusters.
+- ``infra: k8s/my-oke-cluster``: Enable RoCEv2 for high-performance GPU communication across pods on Oracle OKE clusters with bare-metal GPU shapes (BM.GPU.*.8) provisioned via dedicated RDMA capacity pools.
+
+**Slurm-based:**
+
+- ``infra: slurm``: On AWS HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.), EFA is available by default. No `network_tier` setting is needed.
 
 .. code-block:: yaml
 
   resources:
     network_tier: best
+
+
+.. _yaml-spec-resources-max-hourly-cost:
+
+``resources.max_hourly_cost``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When ``use_spot`` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100
+    max_hourly_cost: 10.0
+
+.. code-block:: yaml
+
+  # Combined with spot instances: filters by spot price
+  resources:
+    use_spot: true
+    max_hourly_cost: 5.0
 
 
 .. _yaml-spec-resources-ports:
@@ -676,7 +746,7 @@ OR
 ~~~~~~~~~~~~~~~~~~~~~~
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI and IBM (for non-docker image).
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -801,6 +871,17 @@ OR
       us-east-1: ami-123
       us-west-2: ami-456
 
+**Nebius**
+
+The ``image_id`` parameter supports specifying an image by ID, or by image family.
+
+.. code-block:: yaml
+
+  resources:
+    # Specify an image by ID
+    image_id: computeimage-e00d6q343kqz6ayd63
+    # Or use the latest image from a family
+    image_id: ubuntu24.04-cuda13.0
 
 **RunPod**
 
@@ -1026,6 +1107,22 @@ Example:
     HF_TOKEN: my-huggingface-token
     WANDB_API_KEY: my-wandb-api-key
 
+.. _yaml-spec-api-server-access:
+
+``api_server_access``
+~~~~~~~~~~~~~~~~~~~~~
+
+Whether to inject API server credentials into the task's environment so that it can call ``sky`` CLI/SDK to launch nested SkyPilot operations. Defaults to ``true``. Set to ``false`` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+.. code-block:: yaml
+
+  # Opt out of API server access injection
+  api_server_access: false
+
+See :ref:`Nested SkyPilot from managed jobs <nested-skypilot-managed-jobs>` for details.
+
 .. _yaml-spec-new-volumes:
 
 ``volumes``
@@ -1076,9 +1173,23 @@ Example:
     /datasets-storage:
       name: sky-dataset  # Name of storage, optional when source is bucket URI
       source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
-      store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'oci', or 'ibm'; default: None. Optional.
+      store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'vastdata', 'oci', or 'ibm'; default: None. Optional.
       persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
       mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
+
+    # Mount with VFS caching and a pre-tuned workload type for model checkpoints.
+    /checkpoints:
+      source: s3://my-checkpoint-bucket
+      mode: MOUNT_CACHED
+      type: MODEL_CHECKPOINT_RW  # Pre-tuned workload type. Optional.
+
+    # Mount a bucket as read-only to prevent accidental writes.
+    /readonly-data:
+      source: s3://my-dataset-bucket
+      mode: MOUNT
+      config:
+        mount:
+          read_only: true
 
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
@@ -1094,13 +1205,25 @@ OR
 .. code-block:: yaml
 
   file_mounts:
-    /remote/data: ./local_data  # Local to remote
+    /remote/config: ./local_config  # Local to remote
     /remote/output: s3://my-bucket/outputs  # Cloud storage
     /remote/models:
       name: my-models-bucket
       source: ~/local_models
       store: gcs
       mode: MOUNT
+    /remote/data:
+      source: gs://my-data-bucket
+      mode: MOUNT_CACHED
+      type: DATASET_RO
+
+The ``type`` field specifies a pre-tuned workload type for ``MOUNT_CACHED`` mode.
+Available types: ``MODEL_CHECKPOINT_RO``, ``MODEL_CHECKPOINT_RW``, ``DATASET_RO``, ``DATASET_RW``.
+See :ref:`mount_cached_workload_types` for details on workload types and ``config.mount_cached`` parameters.
+
+The ``config.mount`` section supports parameters for ``MOUNT`` mode.
+Setting ``read_only: true`` mounts the bucket as read-only, preventing accidental writes.
+See :ref:`storage-yaml-reference` for all available parameters.
 
 .. _yaml-spec-setup:
 
@@ -1186,6 +1309,16 @@ Example:
       managed_instance_group: ...
     nvidia_gpus:
       disable_ecc: ...
+    hooks:
+      - run: |
+          cd my-code-base
+          git add . && git commit -m "Auto-commit" && git push
+        events: [stop, preemption, down]  # optional; defaults to all three
+        timeout: 300                      # optional; default 3600s
+
+The ``hooks`` field lists scripts to run on the cluster on lifecycle events
+(``stop``, ``preemption``, ``down``). See :ref:`Lifecycle hooks
+<lifecycle-hooks>` for the full reference.
 
 .. _service-yaml-spec:
 
@@ -1204,6 +1337,11 @@ Syntax
       :ref:`post_data <yaml-spec-service-readiness-probe-post-data>`: {'model_name': 'model'}
       :ref:`initial_delay_seconds <yaml-spec-service-readiness-probe-initial-delay-seconds>`: 1200
       :ref:`timeout_seconds <yaml-spec-service-readiness-probe-timeout-seconds>`: 15
+      :ref:`endpoint_probe_interval_seconds <yaml-spec-service-readiness-probe-endpoint-probe-interval-seconds>`: 10
+      :ref:`consecutive_failure_threshold_timeout <yaml-spec-service-readiness-probe-consecutive-failure-threshold-timeout>`: 180
+
+    :ref:`load_balancer <yaml-spec-service-load-balancer>`:
+      :ref:`stream_timeout_seconds <yaml-spec-service-load-balancer-stream-timeout-seconds>`: 120
 
     :ref:`readiness_probe <yaml-spec-service-readiness-probe>`: /v1/models
 
@@ -1251,6 +1389,11 @@ OR
       post_data: '{"model_name": "my_model"}'
       initial_delay_seconds: 600
       timeout_seconds: 10
+      endpoint_probe_interval_seconds: 10
+      consecutive_failure_threshold_timeout: 180
+
+    load_balancer:
+      stream_timeout_seconds: 120
 
 
 .. _yaml-spec-service-readiness-probe-path:
@@ -1323,6 +1466,74 @@ Note, having a too high timeout will delay the detection of a real failure of yo
     service:
       readiness_probe:
         timeout_seconds: 10
+
+
+.. _yaml-spec-service-readiness-probe-endpoint-probe-interval-seconds:
+
+``service.readiness_probe.endpoint_probe_interval_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Time between readiness probe attempts (default: 10).
+
+SkyServe probes each replica endpoint at this interval to update readiness and
+detect unhealthy replicas.
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        endpoint_probe_interval_seconds: 5
+
+
+.. _yaml-spec-service-readiness-probe-consecutive-failure-threshold-timeout:
+
+``service.readiness_probe.consecutive_failure_threshold_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum consecutive probe failure window before tearing down a ready replica.
+
+If omitted, SkyServe keeps the existing defaults: ``10`` seconds for pools and
+``180`` seconds for regular services.
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        consecutive_failure_threshold_timeout: 30
+
+
+.. _yaml-spec-service-load-balancer:
+
+``service.load_balancer``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Load balancer configuration (optional).
+
+Controls request proxy behavior for the SkyServe load balancer.
+
+.. code-block:: yaml
+
+    service:
+      load_balancer:
+        stream_timeout_seconds: 300
+
+
+.. _yaml-spec-service-load-balancer-stream-timeout-seconds:
+
+``service.load_balancer.stream_timeout_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum time the load balancer waits for a proxied response stream (default:
+120).
+
+This controls the timeout for requests forwarded by the SkyServe load balancer
+to a ready replica.
+
+.. code-block:: yaml
+
+    service:
+      load_balancer:
+        stream_timeout_seconds: 300
 
 
 .. _yaml-spec-service-replica-policy:
@@ -1452,3 +1663,125 @@ Port to run your service on each replica.
 
   resources:
     ports: 8080
+
+.. _pool-yaml-spec:
+
+Job Pools
+=========
+
+To define a YAML for use with :ref:`job pools <pool>`, use previously mentioned fields to describe each worker, then add a pool section to configure the pool's scaling behavior.
+
+Syntax
+
+.. parsed-literal::
+
+  pool:
+    :ref:`workers <yaml-spec-pool-workers>`: 3
+
+  pool:
+    :ref:`min_workers <yaml-spec-pool-min-workers>`: 1
+    :ref:`max_workers <yaml-spec-pool-max-workers>`: 10
+    :ref:`queue_length_threshold <yaml-spec-pool-queue-length-threshold>`: 5
+    :ref:`upscale_delay_seconds <yaml-spec-pool-upscale-delay-seconds>`: 300
+    :ref:`downscale_delay_seconds <yaml-spec-pool-downscale-delay-seconds>`: 1200
+
+
+Fields
+----------
+
+.. _yaml-spec-pool-workers:
+
+``pool.workers``
+~~~~~~~~~~~~~~~~
+
+Number of workers in the pool.
+
+If ``min_workers`` and ``max_workers`` are not specified, the pool maintains a fixed number of workers with no autoscaling. If autoscaling is enabled (``min_workers``/``max_workers`` are set), this serves as the initial number of workers.
+
+.. code-block:: yaml
+
+  pool:
+    workers: 3
+
+
+.. _yaml-spec-pool-min-workers:
+
+``pool.min_workers``
+~~~~~~~~~~~~~~~~~~~~
+
+Minimum number of workers when autoscaling is enabled (required with ``max_workers``).
+
+The pool never scales below this count. Setting to ``0`` enables **scale-to-zero**: the pool terminates all workers when idle, and provisions workers automatically when new jobs are submitted.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+
+
+.. _yaml-spec-pool-max-workers:
+
+``pool.max_workers``
+~~~~~~~~~~~~~~~~~~~~
+
+Maximum number of workers when autoscaling is enabled (required with ``min_workers``).
+
+The pool never scales above this count. Must be greater than or equal to ``min_workers``.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+
+
+.. _yaml-spec-pool-queue-length-threshold:
+
+``pool.queue_length_threshold``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Number of pending jobs that triggers upscaling (default: 1).
+
+When the number of pending jobs exceeds this threshold, the pool scales up. Requires ``max_workers`` to be set.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+    queue_length_threshold: 5
+
+
+.. _yaml-spec-pool-upscale-delay-seconds:
+
+``pool.upscale_delay_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Delay in seconds between upscaling decisions (default: 300).
+
+Controls how frequently the pool evaluates whether to add workers.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+    upscale_delay_seconds: 60
+
+
+.. _yaml-spec-pool-downscale-delay-seconds:
+
+``pool.downscale_delay_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Delay in seconds between downscaling decisions (default: 1200).
+
+Controls how frequently the pool evaluates whether to remove workers.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+    downscale_delay_seconds: 600

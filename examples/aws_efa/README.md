@@ -69,7 +69,7 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 
 ### Running NCCL test with EFA using SkyPilot
 
-Check the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot cluster yaml configurations.
+See [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot YAML configurations.
 
 The image [public.ecr.aws/hpc-cloud/nccl-tests:latest](https://github.com/aws-samples/awsome-distributed-training/blob/main/micro-benchmarks/nccl-tests/nccl-tests.Dockerfile) provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
@@ -135,6 +135,62 @@ The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`
 | ≥ 32 MB       | The fabric really kicks in: ≥ 8 x at 32 MB, climbing to ~18 x for 1–2 GB messages. Non-EFA tops out around 4 GB/s, while EFA pushes ≈ 77 GB/s. |
 
 EFA provides much higher throughput than the traditional TCP transport. Enabling EFA could enhance the performance of inter-instance communication significantly, which could speedup distributed AI training and inference.
+
+## Using EFA on HyperPod Slurm
+
+EFA is available by default on HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.). No `network_tier` setting is needed — the compute nodes have direct access to the EFA devices.
+
+### Running NCCL test with EFA on Slurm
+
+See [`efa_slurm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_slurm.yaml) for the complete SkyPilot YAML configuration.
+
+To run the NCCL test with EFA support:
+
+```bash
+sky launch -c efa --infra slurm efa_slurm.yaml
+```
+
+### Benchmark results
+
+We compare the performance with and without EFA using NCCL test reports on the same HyperPod Slurm cluster (2x p4d.24xlarge, i.e. 2xA100:8).
+
+The non-EFA baseline was measured by removing the `aws-ofi-nccl` plugin from `LD_LIBRARY_PATH`, forcing NCCL to use its built-in Socket transport over the standard ENA interface (`ens33`).
+
+The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`.
+
+| Message Size | busbw EFA (GB/s) | busbw Non-EFA (GB/s) | Speed-up |
+|--------------|-------------|-------------|---------------|
+| 8 B          | 0           | 0           | -             |
+| 16 B         | 0           | 0           | -             |
+| 32 B         | 0           | 0           | -             |
+| 64 B         | 0           | 0           | -             |
+| 128 B        | 0           | 0           | -             |
+| 256 B        | 0           | 0           | -             |
+| 512 B        | 0.00        | 0.01        | -             |
+| 1 KB         | 0.01        | 0.01        | 1 x           |
+| 2 KB         | 0.02        | 0.02        | 1 x           |
+| 4 KB         | 0.04        | 0.04        | 1 x           |
+| 8 KB         | 0.07        | 0.05        | 1.4 x         |
+| 16 KB        | 0.13        | 0.04        | 3.3 x         |
+| 32 KB        | 0.21        | 0.13        | 1.6 x         |
+| 64 KB        | 0.42        | 0.24        | 1.8 x         |
+| 128 KB       | 0.81        | 0.38        | 2.1 x         |
+| 256 KB       | 1.53        | 0.59        | 2.6 x         |
+| 512 KB       | 2.27        | 0.92        | 2.5 x         |
+| 1 MB         | 3.36        | 1.69        | 2.0 x         |
+| 2 MB         | 4.97        | 2.35        | 2.1 x         |
+| 4 MB         | 7.74        | 3.81        | 2.0 x         |
+| 8 MB         | 10.30       | 5.31        | 1.9 x         |
+| 16 MB        | 17.99       | 6.43        | 2.8 x         |
+| 32 MB        | 29.99       | 7.19        | 4.2 x         |
+| 64 MB        | 43.29       | 7.63        | 5.7 x         |
+| 128 MB       | 54.27       | 7.85        | 6.9 x         |
+| 256 MB       | 65.02       | 7.90        | 8.2 x         |
+| 512 MB       | 71.27       | 7.98        | 8.9 x         |
+| 1 GB         | 75.01       | 8.02        | 9.4 x         |
+| 2 GB         | 77.12       | 8.04        | 9.6 x         |
+
+EFA results match the HyperPod/EKS numbers above. Without EFA, NCCL Socket transport over ENA tops out at ~8 GB/s — making EFA **~9.6x faster** for large messages on p4d.24xlarge.
 
 ## Using EFA on AWS VM
 

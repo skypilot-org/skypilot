@@ -1,0 +1,1 @@
+../../generated-examples/autoresearch.md

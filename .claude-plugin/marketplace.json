@@ -1,0 +1,25 @@
+{
+  "name": "skypilot",
+  "owner": {
+    "name": "SkyPilot Team"
+  },
+  "metadata": {
+    "description": "Official SkyPilot skills for AI coding agents",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "skypilot",
+      "source": "./agent",
+      "description": "SkyPilot agent skill for launching cloud VMs, Kubernetes pods, and Slurm jobs across 25+ clouds",
+      "version": "1.0.0",
+      "author": {
+        "name": "SkyPilot Team"
+      },
+      "homepage": "https://docs.skypilot.co/",
+      "repository": "https://github.com/skypilot-org/skypilot",
+      "license": "Apache-2.0",
+      "keywords": ["AI Infrastructure", "Multi-Cloud", "GPU", "Kubernetes", "Slurm", "Training", "Serving", "Cost Optimization", "SkyPilot"]
+    }
+  ]
+}

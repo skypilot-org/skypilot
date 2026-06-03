@@ -39,6 +39,47 @@ _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/global/firewalls/.*\' was not found')
 
 
+def _is_reservation_bound(project_id: str, zone: str,
+                          reservation_name: str) -> bool:
+    """Check if a reservation requires the RESERVATION_BOUND provisioning model.
+
+    GCP DENSE reservations (used for large GPU blocks like A100/H100) require
+    instances to set provisioningModel=RESERVATION_BOUND. This function queries
+    the reservation metadata to determine if RESERVATION_BOUND is needed.
+
+    Uses reservations().list() with a name filter, which requires
+    compute.reservations.list (already in SkyPilot's required permissions).
+
+    Returns True if the reservation has deploymentType=DENSE, False otherwise
+    (including on API errors, to avoid blocking standard reservations).
+    """
+    # Parse reservation name — may be a full URI or just a name
+    parts = reservation_name.split('/')
+    short_name = parts[-1] if '/' in reservation_name else reservation_name
+    try:
+        compute = GCPComputeInstance.load_resource()
+        result = compute.reservations().list(
+            project=project_id,
+            zone=zone,
+            filter=f'name={short_name}',
+        ).execute(num_retries=GCP_MAX_RETRIES)
+        items = result.get('items', [])
+        if not items:
+            return False
+        deployment_type = items[0].get('deploymentType', '')
+        if deployment_type == 'DENSE':
+            logger.debug(f'Reservation {reservation_name} has '
+                         f'deploymentType={deployment_type!r}, '
+                         f'will set provisioningModel=RESERVATION_BOUND')
+            return True
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            f'Failed to query reservation {reservation_name} metadata: {e}. '
+            'Assuming standard reservation (no provisioningModel override).')
+        return False
+
+
 def _retry_on_gcp_http_exception(
     regex: Optional[str] = None,
     max_retries: int = GCP_MAX_RETRIES,
@@ -714,10 +755,19 @@ class GCPComputeInstance(GCPInstance):
                 reservation_count = min(reservation_count, count)
                 logger.debug(f'Creating {reservation_count} instances '
                              f'with reservation {reservation}')
-                config['reservationAffinity']['values'] = [reservation]
+                reservation_config = copy.deepcopy(config)
+                reservation_config['reservationAffinity']['values'] = [
+                    reservation
+                ]
+                if _is_reservation_bound(project_id, zone, reservation):
+                    reservation_config.setdefault('scheduling', {})
+                    reservation_config['scheduling'][
+                        'provisioningModel'] = 'RESERVATION_BOUND'
+                    reservation_config['scheduling'][
+                        'onHostMaintenance'] = 'TERMINATE'
                 created_names = names[:reservation_count]
                 errors = cls._create_instances(
-                    created_names, project_id, zone, config,
+                    created_names, project_id, zone, reservation_config,
                     head_tag_needed[:reservation_count])
                 all_names.extend(created_names)
                 if errors:
@@ -945,6 +995,8 @@ class GCPComputeInstance(GCPInstance):
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=result.get('labels', {}),
+                # GCP instance name is the instance_id
+                node_name=instance_id,
             )
         ]
 
@@ -1821,6 +1873,8 @@ class GCPTPUVMInstance(GCPInstance):
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=result.get('labels', {}),
+                # GCP TPU instance name is the instance_id
+                node_name=instance_id,
             ) for internal_ip, external_ip in zip(internal_ips, external_ips)
         ]
 

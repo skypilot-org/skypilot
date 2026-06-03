@@ -215,6 +215,28 @@ GenericProcess = Union[multiprocessing.Process, psutil.Process,
                        subprocess.Popen]
 
 
+def _wait_non_child_process(proc: 'psutil.Process', grace_period: int) -> None:
+    """Wait for a non-child process to exit by polling its status.
+
+    psutil.Process.wait() internally polls kill(pid, 0) for non-children,
+    which always succeeds for zombies, causing it to block for the full
+    timeout. This is a problem in containers without a proper init (e.g.
+    no tini) where PID 1 does not reap orphaned zombies.
+
+    Instead, we poll proc.status() which correctly distinguishes zombies
+    (process exited but not reaped) from running processes.
+    """
+    deadline = time.monotonic() + grace_period
+    while time.monotonic() < deadline:
+        try:
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                return
+        except psutil.NoSuchProcess:
+            return
+        time.sleep(0.1)
+    raise psutil.TimeoutExpired(grace_period, pid=proc.pid)
+
+
 def kill_process_with_grace_period(proc: GenericProcess,
                                    force: bool = False,
                                    grace_period: int = 10) -> None:
@@ -244,19 +266,26 @@ def kill_process_with_grace_period(proc: GenericProcess,
             proc.kill()
         else:
             proc.terminate()
-        wait(timeout=grace_period)
+        if isinstance(proc, psutil.Process) and proc.ppid() != os.getpid():
+            # Not our child — use status polling instead of psutil.wait()
+            # which hangs on zombies (see _wait_non_child_process).
+            _wait_non_child_process(proc, grace_period)
+        else:
+            wait(timeout=grace_period)
     except (psutil.NoSuchProcess, ValueError):
         # The child process may have already been terminated.
         return
-    except psutil.TimeoutExpired:
+    except (psutil.TimeoutExpired, subprocess.TimeoutExpired):
         logger.debug(f'Process {proc.pid} did not terminate after '
                      f'{grace_period} seconds')
-        # Continue to finally to force kill the process.
     finally:
-        # Attempt to force kill if the normal termination fails
-        if not force:
+        # Escalate to SIGKILL if we only tried SIGTERM and the process is
+        # still around. The finally block is needed because
+        # multiprocessing.Process.join() returns None on timeout and
+        # subprocess.Popen.wait() raises subprocess.TimeoutExpired
+        # (not psutil.TimeoutExpired).
+        if not force and alive():
             logger.debug(f'Force killing process {proc.pid}')
-            # Shorter timeout after force kill
             kill_process_with_grace_period(proc, force=True, grace_period=5)
 
 

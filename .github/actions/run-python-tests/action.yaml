@@ -19,7 +19,7 @@ runs:
   using: "composite"
   steps:
     - name: Install the latest version of uv
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
       with:
         version: "latest"
         python-version: ${{ inputs.python-version }}
@@ -28,7 +28,7 @@ runs:
       run: |
         uv venv --seed ~/test-env
         source ~/test-env/bin/activate
-        uv pip install --prerelease=allow "azure-cli>=2.65.0"
+        uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0"
         # Use -e to include examples and tests folder in the path for unit
         # tests to access them.
         uv pip install -e ".[all]"
@@ -36,24 +36,30 @@ runs:
     - name: Set branch name and commit message
       id: set_env
       shell: bash
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        MERGE_GROUP_HEAD_COMMIT_MESSAGE: ${{ github.event.merge_group.head_commit.message }}
+        HEAD_REF: ${{ github.head_ref }}
+        REF_NAME: ${{ github.ref_name }}
       run: |
         if [ "${{ github.event_name }}" == "pull_request" ]; then
-          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "branch=$HEAD_REF" >> $GITHUB_OUTPUT
           {
             echo "message<<EOF"
-            echo "${{ github.event.pull_request.title }}"
+            printf '%s\n' "$PR_TITLE"
             echo "EOF"
           } >> $GITHUB_OUTPUT
         else
-          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "branch=$REF_NAME" >> $GITHUB_OUTPUT
           # For push events after merge, head_commit.message contains the merge commit message
           # which includes the PR title. For merge_group events, use merge_group.head_commit.message
           {
             echo "message<<EOF"
             if [ "${{ github.event_name }}" == "merge_group" ]; then
-              echo "${{ github.event.merge_group.head_commit.message }}"
+              printf '%s\n' "$MERGE_GROUP_HEAD_COMMIT_MESSAGE"
             else
-              echo "${{ github.event.head_commit.message }}"
+              printf '%s\n' "$HEAD_COMMIT_MESSAGE"
             fi
             echo "EOF"
           } >> $GITHUB_OUTPUT

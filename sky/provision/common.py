@@ -39,11 +39,16 @@ class StopFailoverError(Exception):
 
 # These fields are sensitive and should be redacted from the config for logging
 # purposes.
-SENSITIVE_FIELDS = [
+SENSITIVE_FIELDS: List[Tuple[str, ...]] = [
     ('docker_config', 'docker_login_config', 'password'),
     ('provider_config', 'create_instance_kwargs', 'login'),
     ('provider_config', 'create_instance_kwargs', 'api_key'),
 ]
+
+
+def register_sensitive_fields(fields: List[Tuple[str, ...]]) -> None:
+    """Register additional sensitive fields for redaction."""
+    SENSITIVE_FIELDS.extend(fields)
 
 
 @dataclasses.dataclass
@@ -82,6 +87,41 @@ class ProvisionConfig:
 # -------------------- output data model -------------------- #
 
 
+@dataclasses.dataclass(frozen=True)
+class ProvisionRuntimeMetadata:
+    """Record of what the provisioner set up and which runtime
+    phases it handled. Set once at provision time.
+    """
+
+    # Whether ray is running on the cluster.
+    has_ray: bool = True
+    # Whether the skylet daemon is running on the cluster.
+    has_skylet: bool = True
+    # Whether the cluster runs a job queue (ray + skylet bookkeeping) that
+    # can accept multiple ``sky exec`` submissions over its lifetime. False
+    # for single-use clusters where the job is baked into the provisioned
+    # runtime itself.
+    has_job_queue: bool = True
+    # Whether the cluster is reachable via SSH using the credentials and
+    # endpoint recorded in its cluster YAML.
+    ssh_available: bool = True
+    # Whether the SkyPilot runtime (cloud credentials, wheel, ray, skylet)
+    # has already been materialized on the cluster by the provisioner.
+    runtime_setup_done: bool = False
+    # Whether the user's workdir has already been synced to the cluster by
+    # the provisioner.
+    workdir_synced: bool = False
+    # Whether the task's file_mounts have already been synced to the
+    # cluster by the provisioner.
+    file_mounts_synced: bool = False
+    # Whether the user's ``setup`` commands have already been run on the
+    # cluster by the provisioner.
+    setup_done: bool = False
+    # Whether the user's ``run`` command has already been started on the
+    # cluster by the provisioner.
+    run_started: bool = False
+
+
 @dataclasses.dataclass
 class ProvisionRecord:
     """Record for a provisioning process."""
@@ -101,6 +141,9 @@ class ProvisionRecord:
     resumed_instance_ids: List[InstanceId]
     # The IDs of all just created instances.
     created_instance_ids: List[InstanceId]
+    # Metadata about the runtime materialized by provisioning.
+    runtime_metadata: ProvisionRuntimeMetadata = dataclasses.field(
+        default_factory=ProvisionRuntimeMetadata)
 
     def is_instance_just_booted(self, instance_id: InstanceId) -> bool:
         """Whether or not the instance is just booted.
@@ -121,6 +164,10 @@ class InstanceInfo:
     ssh_port: int = 22
     # The internal service address of the instance on Kubernetes.
     internal_svc: Optional[str] = None
+    # The infrastructure node name for display in dashboard.
+    # For Kubernetes: the k8s node name the pod runs on.
+    # For clouds: the instance name (e.g., from AWS Name tag, GCP name).
+    node_name: Optional[str] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -250,6 +297,22 @@ class ClusterInfo:
             instance.ssh_port for instance in worker_instances
         ]
         return head_instance_port + worker_instance_ports
+
+    def get_node_names(self) -> Optional[List[str]]:
+        """Get current node names as a list, head first.
+
+        Returns:
+            List of node names ordered head-first, or None if unavailable.
+            For Kubernetes, this is the k8s node name the pod runs on.
+            For clouds, this is the instance name.
+        """
+        node_names: List[str] = []
+        head = self.get_head_instance()
+        if head is not None and head.node_name:
+            node_names.append(head.node_name)
+        for worker in self.get_worker_instances():
+            node_names.append(worker.node_name or '')
+        return node_names if node_names else None
 
 
 class Endpoint:

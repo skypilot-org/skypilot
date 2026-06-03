@@ -194,6 +194,70 @@ If your tasks use :ref:`Ingress <kubernetes-ingress>` for exposing ports, you wi
         verbs: ["list", "get"]
 
 
+.. _k8s-workload-sa-permissions:
+
+Minimum permissions for the workload service account
+----------------------------------------------------
+
+When SkyPilot launches a pod on Kubernetes, it creates a service account
+(``skypilot-service-account``) that is mounted inside the head pod. This
+**workload service account** is used by the skylet process running inside the
+pod for operations such as autodown (automatically tearing down idle clusters).
+
+By default, this service account is granted broad namespace permissions.
+If you want to restrict the workload service account to the minimum permissions
+needed for autodown, you can create a custom service account with the
+following role and configure SkyPilot to use it via
+:code:`remote_identity` in :ref:`~/.sky/config.yaml <config-yaml>`.
+
+.. note::
+
+    These permissions are separate from the `Minimum Permissions Required for SkyPilot`_
+    described above, which apply to the service account used to *launch* clusters
+    (e.g., the API server SA or the user's kubeconfig). The workload SA permissions
+    below apply to the service account *inside* the head pod.
+
+.. code-block:: yaml
+
+    # Namespace role for the workload service account
+    # Only namespace-scoped permissions are needed (no ClusterRole required).
+    kind: Role
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+      name: sky-workload-sa-role  # Can be changed if needed
+      namespace: default  # Change to your namespace if using a different one.
+    rules:
+      # Required for listing and deleting pods during autodown
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["get", "list", "delete"]
+      # Required for listing and deleting services during autodown.
+      # "deletecollection" is needed for bulk service cleanup.
+      - apiGroups: [""]
+        resources: ["services"]
+        verbs: ["get", "list", "delete", "deletecollection"]
+      # Required for checking if the cluster uses a HA deployment
+      - apiGroups: ["apps"]
+        resources: ["deployments"]
+        verbs: ["get", "list"]
+
+To use a custom workload service account, create the service account and role
+above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      remote_identity: sky-workload-sa  # Your custom service account name
+
+.. note::
+
+    If your workload pods need to perform additional operations beyond autodown
+    (e.g., launching new SkyPilot clusters from within a pod, or running
+    ``sky`` commands inside the pod), the workload service account will need
+    broader permissions similar to the `Minimum Permissions Required for SkyPilot`_.
+
+
 .. _k8s-sa-example:
 
 Example using custom service account

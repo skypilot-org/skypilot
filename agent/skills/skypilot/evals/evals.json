@@ -1,0 +1,82 @@
+{
+  "skill_name": "skypilot",
+  "description": "Evaluates the 'Before You Start (Agent Bootstrap)' section behavior",
+  "evals": [
+    {
+      "id": 1,
+      "name": "happy-path-server-running",
+      "prompt": "I want to launch an 8xH100 cluster for training a LLaMA model. My SkyPilot is already set up.",
+      "expected_output": "Agent runs `sky api status -l 1`, sees the server is running (table output with request data), skips rest of bootstrap (no `sky check`, no install, no `sky api start`), and proceeds directly to help write the task YAML or run `sky launch`.",
+      "assertions": [
+        {
+          "text": "Agent runs `sky api status` (or `sky api status -l 1`) as the first SkyPilot command",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT run `sky check` when the server is already running",
+          "type": "negative"
+        },
+        {
+          "text": "Agent does NOT run `sky api start` or `sky api login` when the server is already running",
+          "type": "negative"
+        },
+        {
+          "text": "Agent proceeds to help with the user's actual task (launching H100 cluster) without unnecessary bootstrap steps",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "server-not-running-local-setup",
+      "prompt": "I just installed SkyPilot and want to try launching a GPU instance on AWS. I don't have a remote API server.",
+      "expected_output": "Agent runs `sky api status -l 1`, detects 'SkyPilot API server is not running.', asks about local vs remote, user indicates local, agent runs `sky api start`, re-checks with `sky api status -l 1`, then runs `sky check` for credentials since this is a fresh setup.",
+      "assertions": [
+        {
+          "text": "Agent runs `sky api status` as the first SkyPilot command",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent asks the user whether they have a remote server or want to start locally",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent runs `sky api start` after user confirms local setup",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent re-runs `sky api status` after starting the server to confirm it's reachable",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent runs `sky check` since this is a fresh setup",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "server-not-running-remote-connect",
+      "prompt": "I need to connect to our team's SkyPilot API server at https://skypilot.internal.company.com and launch a fine-tuning job.",
+      "expected_output": "Agent runs `sky api status -l 1`, detects server not running, recognizes user already provided a remote URL, runs `sky api login -e https://skypilot.internal.company.com` without asking unnecessary questions, re-checks status, then proceeds to help with the fine-tuning job.",
+      "assertions": [
+        {
+          "text": "Agent runs `sky api status` as the first SkyPilot command",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent uses `sky api login -e https://skypilot.internal.company.com` (not `sky api start`) since the user provided a remote endpoint",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT ask the user for the server URL again since they already provided it",
+          "type": "negative"
+        },
+        {
+          "text": "Agent re-runs `sky api status` after connecting to confirm it's reachable",
+          "type": "required_action"
+        }
+      ]
+    }
+  ]
+}

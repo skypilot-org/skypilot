@@ -29,13 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: skypilot-artifacts-${{ inputs.package_name }}
           path: dist/
 
       - name: Publish distribution to repository
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
         with:
           password: ${{ inputs.repository_type == 'test-pypi' && secrets.TEST_PYPI_API_TOKEN || secrets.PYPI_API_TOKEN }}
           repository-url: ${{ inputs.repository_type == 'test-pypi' && 'https://test.pypi.org/legacy/' || '' }}

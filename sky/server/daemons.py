@@ -2,9 +2,11 @@
 import atexit
 import dataclasses
 import os
+import shutil
+import sys
 import time
 import typing
-from typing import Callable
+from typing import Callable, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -26,6 +28,52 @@ else:
     pathlib = adaptors_common.LazyImport('pathlib')
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _rotate_daemon_log(log_path: str) -> None:
+    """Rotate the daemon log if it exceeds the size threshold.
+
+    Uses the copytruncate pattern: copy current log to a backup file,
+    then truncate the original. This keeps one backup for external log
+    collectors and debugging.
+
+    The threshold is configurable via api_server.daemon_log_max_bytes in
+    ~/.sky/config.yaml, defaulting to DAEMON_LOG_MAX_BYTES.
+    """
+    try:
+        max_bytes = skypilot_config.get_nested(
+            ('api_server', 'daemon_log_max_bytes'),
+            server_constants.DEFAULT_DAEMON_LOG_MAX_BYTES)
+        if max_bytes <= 0:
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = sys.stdout.fileno()
+        if os.fstat(fd).st_size < max_bytes:
+            return
+        # Copy current log to backup before truncating.
+        backup_path = log_path + '.1'
+        shutil.copy2(log_path, backup_path)
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+    except Exception:  # pylint: disable=broad-except
+        # Never crash the daemon on rotation failure.
+        pass
+
+
+# Populated lazily on the first run_event() call per process.
+#
+# Why not snapshot at import time: importing this module can happen before
+# the process has finished its startup initialization, so an import-time
+# read of env_options.Options.DISABLE_LOGGING may not reflect the final
+# intended value.
+#
+# Why not read inside the event: run_event() overrides DISABLE_LOGGING to
+# silence per-daemon usage messages, so a read at gate time would always
+# see the override rather than the user's original setting.
+#
+# Initializing inside run_event, before the override, threads the needle.
+_user_disabled_usage_collection: Optional[bool] = None
 
 
 def _default_should_skip():
@@ -70,10 +118,20 @@ class InternalRequestDaemon:
 
     def run_event(self):
         """Run the event."""
+        global _user_disabled_usage_collection
+        # Capture the original DISABLE_LOGGING value once per process,
+        # before we override it below.
+        if _user_disabled_usage_collection is None:
+            _user_disabled_usage_collection = (
+                env_options.Options.DISABLE_LOGGING.get())
 
         # Disable logging for periodic refresh to avoid the usage message being
         # sent multiple times.
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
+
+        log_path = os.path.join(
+            os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX),
+            self.id + '.log')
 
         level = self.refresh_log_level()
         while True:
@@ -102,6 +160,7 @@ class InternalRequestDaemon:
                 # kill all children processes related to this request.
                 subprocess_utils.kill_children_processes()
                 common_utils.release_memory()
+                _rotate_daemon_log(log_path)
 
 
 def refresh_cluster_status_event():
@@ -138,6 +197,21 @@ def refresh_volume_status_event():
 
 
 _managed_job_consolidation_mode_lock = None
+_pool_consolidation_mode_lock = None
+_serve_consolidation_mode_lock = None
+
+# Module-scoped SkyletEvent instances. `SkyletEvent.run()` relies on the
+# internal `_n` counter accumulating across calls to throttle the heavy
+# `_run()` work to once per EVENT_INTERVAL_SECONDS. Recreating the event
+# inside each daemon iteration would reset `_n` to 0 every call, run()
+# would advance it only to 1, the `_n == 0` trigger would never fire,
+# and the throttled work (update_service_status / managed_job_utils
+# update) would NEVER execute. The outer `while True` in
+# InternalRequestDaemon.run_event re-invokes the event_fn, so these
+# instances must outlive a single iteration.
+_managed_job_event = None
+_pool_status_update_event = None
+_serve_status_update_event = None
 
 
 # Attempt to gracefully release the lock when the process exits.
@@ -149,7 +223,18 @@ def _release_managed_job_consolidation_mode_lock() -> None:
         _managed_job_consolidation_mode_lock = None
 
 
+def _release_serve_and_pool_consolidation_mode_locks() -> None:
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if _pool_consolidation_mode_lock is not None:
+        _pool_consolidation_mode_lock.release()
+        _pool_consolidation_mode_lock = None
+    if _serve_consolidation_mode_lock is not None:
+        _serve_consolidation_mode_lock.release()
+        _serve_consolidation_mode_lock = None
+
+
 atexit.register(_release_managed_job_consolidation_mode_lock)
+atexit.register(_release_serve_and_pool_consolidation_mode_locks)
 
 
 def managed_job_status_refresh_event():
@@ -201,11 +286,16 @@ def managed_job_status_refresh_event():
         # ready to update the job statuses.
         signal_file.unlink()
 
-    # After recovery, we start the event loop.
+    # After recovery, we start the event loop. The event instance is
+    # cached at module scope so its internal throttling counter
+    # accumulates across daemon iterations (see comment near
+    # _managed_job_event declaration).
     from sky.skylet import events
-    refresh_event = events.ManagedJobEvent()
+    global _managed_job_event
+    if _managed_job_event is None:
+        _managed_job_event = events.ManagedJobEvent()
     logger.info('=== Running managed job event ===')
-    refresh_event.run()
+    _managed_job_event.run()
     time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
 
 
@@ -219,15 +309,49 @@ def should_skip_managed_job_status_refresh():
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
+    from sky.serve import constants as serve_constants
     from sky.serve import serve_utils
+
+    # Acquire an advisory lock so that only one pod runs the recovery /
+    # controller-startup path at a time.
+    global _pool_consolidation_mode_lock, _serve_consolidation_mode_lock
+    if pool:
+        if _pool_consolidation_mode_lock is None:
+            _pool_consolidation_mode_lock = locks.get_lock(
+                serve_constants.POOL_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _pool_consolidation_mode_lock
+        lock_label = 'pool consolidation mode lock'
+    else:
+        if _serve_consolidation_mode_lock is None:
+            _serve_consolidation_mode_lock = locks.get_lock(
+                serve_constants.SERVE_CONSOLIDATION_MODE_LOCK_ID)
+        lock = _serve_consolidation_mode_lock
+        lock_label = 'serve consolidation mode lock'
+
+    if not lock.is_locked():
+        logger.info(f'Acquiring the {lock_label}: {lock}')
+        lock.acquire()
+        logger.info(f'{lock_label} acquired')
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
     serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
-    # After recovery, we start the event loop.
+    # After recovery, we start the event loop. The event instance is
+    # cached at module scope so its internal throttling counter
+    # accumulates across daemon iterations (see comment near
+    # _pool_status_update_event / _serve_status_update_event
+    # declarations).
     from sky.skylet import events
-    event = events.ServiceUpdateEvent(pool=pool)
+    global _pool_status_update_event, _serve_status_update_event
+    if pool:
+        if _pool_status_update_event is None:
+            _pool_status_update_event = events.ServiceUpdateEvent(pool=True)
+        event = _pool_status_update_event
+    else:
+        if _serve_status_update_event is None:
+            _serve_status_update_event = events.ServiceUpdateEvent(pool=False)
+        event = _serve_status_update_event
     noun = 'pool' if pool else 'serve'
     logger.info(f'=== Running {noun} status refresh event ===')
     event.run()
@@ -255,6 +379,59 @@ def pool_status_refresh_event():
 
 def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
+
+
+def should_skip_server_heartbeat():
+    """Skip server heartbeat when running as a controller."""
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # We are running as a controller.
+        return True
+    return False
+
+
+def expired_token_cleanup_event():
+    """Periodically remove expired managed-job API access tokens."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+
+    logger.info('=== Cleaning up expired managed-job API access tokens ===')
+    removed = managed_job_utils.cleanup_expired_api_access_tokens()
+    # Read the interval from config on every iteration so operators can
+    # lower it (e.g., for testing) without restarting the API server.
+    interval = skypilot_config.get_nested(
+        ('daemons', 'expired-token-cleanup-daemon', 'interval_seconds'),
+        server_constants.EXPIRED_TOKEN_CLEANUP_DAEMON_INTERVAL_SECONDS)
+    logger.info(f'Expired token cleanup removed {removed} token(s). '
+                f'Sleeping {interval} seconds for the next sweep...\n')
+    time.sleep(interval)
+
+
+def server_heartbeat_event():
+    """Periodically send server-side plugin metrics to Loki."""
+    # pylint: disable=import-outside-toplevel
+    from sky.usage import usage_lib
+
+    # Skip if no plugins registered providers (check inside event_fn, not
+    # should_skip, because providers register in executor processes via
+    # plugin install(), not in the main process where should_skip runs),
+    # or if the user explicitly disabled usage collection.
+    if (not usage_lib.ServerHeartbeatMessage.has_providers() or
+            _user_disabled_usage_collection):
+        time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
+        return
+
+    # _send_to_loki checks DISABLE_LOGGING, but run_event() sets it to '1'
+    # to prevent usage messages from daemons. We temporarily unset it here
+    # because the server heartbeat's purpose IS to send to Loki.
+    disable_key = env_options.Options.DISABLE_LOGGING.env_key
+    original_val = os.environ.pop(disable_key, None)
+    try:
+        usage_lib.send_server_heartbeat()
+        logger.info('Server heartbeat sent')
+    finally:
+        if original_val is not None:
+            os.environ[disable_key] = original_val
+    time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
 
 
 # Register the events to run in the background.
@@ -287,9 +464,24 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_POOL_STATUS_REFRESH,
         event_fn=pool_status_refresh_event,
         should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(
+        id='server-heartbeat-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
+        event_fn=server_heartbeat_event,
+        should_skip=should_skip_server_heartbeat),
+    InternalRequestDaemon(
+        id='expired-token-cleanup-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_EXPIRED_TOKEN_CLEANUP,
+        event_fn=expired_token_cleanup_event),
 ]
+
+HIDDEN_REQUEST_NAMES = [
+    request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
+]
+
+_DAEMON_IDS = set(d.id for d in INTERNAL_REQUEST_DAEMONS)
 
 
 def is_daemon_request_id(request_id: str) -> bool:
     """Returns whether a specific request_id is an internal daemon."""
-    return any([d.id == request_id for d in INTERNAL_REQUEST_DAEMONS])
+    return request_id in _DAEMON_IDS

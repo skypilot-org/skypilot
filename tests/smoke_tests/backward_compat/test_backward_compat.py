@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from typing import Sequence
 
 import jinja2
@@ -151,17 +152,57 @@ class TestBackwardCompatibility:
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
+            # Cap azure-cli<2.87.0 in the base (old, published) env, which
+            # can't be fixed retroactively: 2.87.0 pulls the broken
+            # azure-mgmt-storage 25.0.0 (see dependencies.py). Mirrors the
+            # kubernetes<36.0.0 base-env pin below.
+            # TODO: Remove once the base version tested against caps
+            # azure-cli<2.87.0.
+            'uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0" && '
             # Fix https://github.com/skypilot-org/skypilot/issues/7287
             # for legacy skypilot versions.
             'uv pip install uvicorn==0.35.0 && '
-            f'{pip_install_cmd}')
+            f'{pip_install_cmd} && '
+            # Old SkyPilot versions pin `kubernetes>=20.0.0,!=32.0.0` with
+            # no upper bound, so uv resolves kubernetes==36.0.0 (released
+            # 2026-05-20), which breaks in-cluster auth, bearer token
+            # handling, and renames attributes used by sky launch/serve
+            # against k8s. The current branch pins `<36.0.0`; downgrade
+            # the base env to match so quicktest-core --kubernetes works.
+            # TODO: Remove once the base version tested against also
+            # pins `kubernetes<36.0.0`.
+            'uv pip install "kubernetes<36.0.0"')
+
+        # Hot-patch old env with me-south-1 fix (PR #9240 + #9244).
+        # Old SkyPilot versions lack ConnectionError/ReadTimeoutError handling
+        # in _get_availability_zones(), causing ThreadPool crashes when
+        # me-south-1 is unreachable. Remove once the minimum compatible
+        # version includes commit 6e5d73633.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-03 (which includes commit 6e5d73633).
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_me_south_1.py"}')
+
+        # Hot-patch old env with click<8.3.0 pin (PR #9459).
+        # Old SkyPilot versions don't pin click<8.3.0 in RAY_INSTALLATION_COMMANDS
+        # or the cloud-deps install. typer 0.25.x transitively pulls click>=8.2.1
+        # with no upper bound, so uv resolves click to 8.3.x on the controller.
+        # ray 2.9.3 then crashes on import via copy.deepcopy on Click Sentinels,
+        # surfacing as 'Failed to start ray on the head node'.
+        # TODO: Remove hotpatch once the base version tested against is
+        # newer than 2026-04-28 (which includes commit a1a1f0bef).
+        self._run_cmd(
+            f'{self.ACTIVATE_BASE} && python '
+            f'{pathlib.Path(__file__).parent / "hotpatch_click_pin.py"}')
 
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
+            # Cap azure-cli<2.87.0 to match dependencies.py; see the base-env
+            # note above.
+            'uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0" && '
             'uv pip install -e .[all]',)
 
         base_sky_api_version = subprocess.run(
@@ -490,8 +531,18 @@ class TestBackwardCompatibility:
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
             ]
 
+        # Test sync-down with a job that succeeded in the old version.
+        # managed_job_name-old-1 ran 'echo hi' and SUCCEEDED before the
+        # version switch, so sync-down should work with new server + new client.
+        sync_down_commands = [
+            f's=$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down '
+            f'-n {managed_job_name}-old-1 2>&1) && echo "$s" && '
+            f'echo "$s" | grep -E "Job .* logs: "',
+        ]
+
         # Combine all commands
-        current_commands = common_initial_commands + version_specific_commands
+        current_commands = (common_initial_commands + sync_down_commands +
+                            version_specific_commands)
 
         # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
         # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
@@ -569,13 +620,13 @@ class TestBackwardCompatibility:
         where the API server is running an older version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
-            if self.BASE_API_VERSION < 11:
+            if self.BASE_API_VERSION < 24:
                 pytest.skip(
-                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
-            if self.CURRENT_API_VERSION < 11:
+            if self.CURRENT_API_VERSION < 24:
                 pytest.skip(
-                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
@@ -608,6 +659,13 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # sync-down: new client, old server. Verifies the server still
+            # writes downloaded logs under the path the client expects to
+            # rewrite (api_server_user_logs_dir_prefix); regression check
+            # for https://github.com/skypilot-org/skypilot/issues/9315.
+            f'{self.ACTIVATE_CURRENT} && '
+            f's="$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down -n {job_name} 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
             # cluster launch/exec test
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to current, cli in current, server in base
@@ -615,6 +673,14 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            # sync-down: new client, old server, against the cluster CLI.
+            # Goes straight to /download_logs (no streaming wrapper), so
+            # the server's download_tmp_dir() path-generation contract is
+            # exercised directly — this is the path #9294 broke and #9310
+            # fixed; tracks #9315.
+            f'{self.ACTIVATE_CURRENT} && '
+            f's="$(SKYPILOT_DEBUG=0 sky logs {cluster_name} 1 --sync-down 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job 1 logs: "',
             f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
@@ -653,13 +719,13 @@ class TestBackwardCompatibility:
         where the API server is running a newer version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
-            if self.BASE_API_VERSION < 11:
+            if self.BASE_API_VERSION < 24:
                 pytest.skip(
-                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
-            if self.CURRENT_API_VERSION < 11:
+            if self.CURRENT_API_VERSION < 24:
                 pytest.skip(
-                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
@@ -692,6 +758,13 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # sync-down: old client, new server. Verifies the new server
+            # still writes downloaded logs under the path the legacy
+            # client rewrites (api_server_user_logs_dir_prefix); regression
+            # check for https://github.com/skypilot-org/skypilot/issues/9315.
+            f'{self.ACTIVATE_BASE} && '
+            f's="$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down -n {job_name} 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job .* logs: "',
             # cluster launch/exec test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to base, cli in base, server in current
@@ -699,10 +772,47 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            # sync-down: old client, new server, against the cluster CLI.
+            # Goes straight to /download_logs (no streaming wrapper), so
+            # the server's download_tmp_dir() path-generation contract is
+            # exercised directly — this is the path #9294 broke and #9310
+            # fixed; tracks #9315.
+            f'{self.ACTIVATE_BASE} && '
+            f's="$(SKYPILOT_DEBUG=0 sky logs {cluster_name} 1 --sync-down 2>&1)" && '
+            f'echo "$s" && echo "$s" | grep -E "Job 1 logs: "',
             f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
-            f'{self.ACTIVATE_CURRENT} && sky autostop -i 1 -y {cluster_name}',
+        ]
+
+        # Test AUTOSTOPPING backward compat: set autostop with a
+        # long-running hook so the cluster stays in AUTOSTOPPING long
+        # enough to observe. Old clients (< 29) should see UP; newer
+        # clients should see AUTOSTOPPING.
+        # Skipped on Kubernetes as autostop is not supported.
+        if generic_cloud != 'kubernetes':
+            commands.extend([
+                # Set autostop with hook via SDK (CLI doesn't expose --hook).
+                f'{self.ACTIVATE_CURRENT} && python -c "'
+                'import sky; '
+                f'rid = sky.autostop(\\\"{cluster_name}\\\", '
+                'idle_minutes=1, hook=\\\"sleep 120\\\"); '
+                'sky.get(rid)"',
+                # Wait for AUTOSTOPPING (new server understands this)
+                f'{self.ACTIVATE_CURRENT} && ' +
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=cluster_name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=300),
+                # Old client: sky status should show INIT (mapped from
+                # AUTOSTOPPING) for clients < 29, or AUTOSTOPPING for >= 29.
+                f'{self.ACTIVATE_BASE} && result="$(sky status '
+                f'{cluster_name})"; echo "$result"; '
+                f'echo "$result" | grep {cluster_name} | grep '
+                f'{"INIT" if self.BASE_API_VERSION < 29 else "AUTOSTOPPING"}',
+            ])
+
+        commands.extend([
             # serve test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
@@ -712,7 +822,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky serve logs --controller {cluster_name}-0 --no-follow',
             f'{self.ACTIVATE_BASE} && sky serve logs --load-balancer {cluster_name}-0 --no-follow',
             f'{self.ACTIVATE_BASE} && sky serve down {cluster_name}-0 -y',
-        ]
+        ])
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
 
@@ -842,3 +952,135 @@ class TestBackwardCompatibility:
             teardown = f'{self.ACTIVATE_CURRENT} && (sky down {cluster_name} -y || true) && (sky volumes delete {volume_name} -y || true)'
             self.run_compatibility_test(f'{volume_name}-compat', commands,
                                         teardown)
+
+    @pytest.mark.no_kubernetes
+    def test_autostop_hook_compatibility(self, generic_cloud: str):
+        """Master's `autostop.hook` YAML works end-to-end across versions.
+
+        Exercises the lifecycle-hooks back-compat contract: master-era
+        callers using ``resources.autostop.hook`` / ``hook_timeout``
+        keep working against this PR's generalized hooks framework,
+        and the resulting hook log is readable via the new
+        ``sky logs --hook stop`` CLI. Removal of the legacy surfaces
+        is pinned at v0.15.0 (see ``sky/utils/hooks_deprecation.py``).
+
+        BASE side (pre-PR1 SkyPilot)
+          - Launch with master's ``resources.autostop.hook`` YAML.
+          - The pre-v7 skylet stores the single hook in its
+            ``AutostopConfig`` and fires it via the legacy
+            ``execute_autostop_hook`` path at idle-timer teardown.
+          - The hook writes to ``~/.sky/autostop_hook.log`` (the
+            legacy path, before PR1 added the per-event log layout
+            under ``~/.sky/hooks/<event>.log``).
+
+        CURRENT side (this PR)
+          - Restart the now-stopped cluster.
+          - Read the hook log via ``sky logs --hook stop`` — exercises
+            the legacy-log-path fallback in
+            ``cloud_vm_ray_backend.tail_hook_logs`` (when
+            ``~/.sky/hooks/stop.log`` is absent, fall back to
+            ``~/.sky/autostop_hook.log``).
+
+        If any link in this chain regresses — pre-v7 skylet stops
+        respecting ``autostop.hook``; the legacy log path moves;
+        ``sky logs --hook stop`` drops its fallback branch — the test
+        catches it before users see "my hook stopped firing after the
+        upgrade".
+        """
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        marker = f'hook-bc-{int(time.time())}'
+        task_yaml = textwrap.dedent(f"""\
+            resources:
+              autostop:
+                idle_minutes: 1
+                hook: |
+                  echo {marker}
+                hook_timeout: 60
+            """)
+        with tempfile.NamedTemporaryFile(prefix='autostop_hook_bc_',
+                                         suffix='.yaml',
+                                         delete=False,
+                                         mode='w') as f:
+            f.write(task_yaml)
+            yaml_path = f.name
+        commands = [
+            # BASE: launch with master's autostop.hook YAML.
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --cloud {generic_cloud} -y '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} '
+            f'{yaml_path}',
+            # BASE: idle-timer fires (1 min), pre-v7 skylet runs the hook,
+            # writes ~/.sky/autostop_hook.log, cluster reaches STOPPED.
+            # ~250s budget covers the 60s idle + hook + cloud stop latency.
+            f'{self.ACTIVATE_BASE} && '
+            f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(cluster_name=cluster_name, cluster_status=[sky.ClusterStatus.STOPPED], timeout=250)}',
+            # CURRENT: restart the cluster (pre-v7 skylet still resident
+            # on disk; this exercises CURRENT-client + pre-v7-skylet).
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky start -y {cluster_name}',
+            # CURRENT: `sky logs --hook stop` falls back to the legacy log
+            # because ~/.sky/hooks/stop.log was never created on the pre-v7
+            # skylet — only ~/.sky/autostop_hook.log exists.
+            f'{self.ACTIVATE_CURRENT} && '
+            f'out=$(sky logs --hook stop {cluster_name} --no-follow) && '
+            f'echo "$out" | grep "{marker}"',
+        ]
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
+    @pytest.mark.no_kubernetes
+    def test_autostop_hook_sdk_legacy_param(self, generic_cloud: str):
+        """Pin: SDK-side ``sky.autostop(cluster, idle_minutes=N, hook=...)``
+        routes the legacy ``hook=`` arg into the new hooks-list framework
+        and the cluster enters AUTOSTOPPING (hook actively running)
+        before reaching STOPPED.
+
+        The ``hook=`` parameter on ``sky.autostop()`` is a master-era SDK
+        signature kept for back-compat (the canonical new way is
+        ``config.hooks:`` in YAML). This test pins the regression fixed
+        in ``AutostopCodeGen.set_autostop`` v7+ ``else:`` branch — see
+        ``sky/skylet/autostop_lib.py`` — where the codegen had been
+        dropping the legacy ``hook`` arg and unconditionally emitting
+        ``set_hooks([])``, wiping the routed entry. Result pre-fix: the
+        cluster went ``UP → STOPPED`` directly, skipping the
+        AUTOSTOPPING window entirely.
+
+        The bigger ``test_client_server_compatibility_new_server`` above
+        also exercises this path as part of a full mixed-version dance,
+        but that test takes ~15+ minutes and combines many concerns.
+        This focused smoke takes ~3 minutes (one launch + one autostop
+        poll), so a future regression of the v7+ codegen branch fires
+        this test specifically and identifies the bug directly. K8s is
+        excluded because ``autostop.down=False`` (autostop, not
+        autodown) is not supported on Kubernetes.
+        """
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        commands = [
+            # Launch a plain cluster (no hooks at launch). The skylet
+            # has no hook entry stored at this point.
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} '
+            f'--fast {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml',
+            # The legacy SDK signature: hook= passed without an
+            # explicit hooks= list. This is the exact call shape that
+            # broke quicktest-core 5 builds in a row before the codegen
+            # fix landed.
+            f'{self.ACTIVATE_CURRENT} && '
+            f'python -c "import sky; '
+            f'sky.get(sky.autostop('
+            f"'{cluster_name}', idle_minutes=1, hook='sleep 90'))"
+            f'"',
+            # AUTOSTOPPING must be observed before STOPPED. Pre-fix
+            # this poll would never see the state (the cluster skipped
+            # AUTOSTOPPING because the hook list was wiped) and the
+            # 300s timeout would fire — exactly the symptom seen in
+            # quicktest-core #3242, #3244, #3257, #3258, #3261.
+            f'{self.ACTIVATE_CURRENT} && ' +
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=cluster_name,
+                cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                timeout=300),
+        ]
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down -y {cluster_name}'
+        self.run_compatibility_test(cluster_name, commands, teardown)

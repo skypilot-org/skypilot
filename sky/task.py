@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import collections
+import dataclasses
 import json
 import os
 import re
@@ -28,6 +29,19 @@ from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_task_validators: List[Callable[['Task'], None]] = []
+
+
+def register_task_validator(fn: Callable[['Task'], None]) -> None:
+    """Register a plugin-provided task validator.
+
+    Registered functions are called during ``Task.validate()``.
+    Each receives the task and should raise ``ValueError`` on
+    invalid configurations.
+    """
+    _task_validators.append(fn)
+
 
 _VALID_NAME_REGEX = '[a-zA-Z0-9]+(?:[._-]{1,2}[a-zA-Z0-9]+)*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
@@ -192,7 +206,11 @@ def _with_docker_login_config(
                            'in `image_id`. The login configs will be '
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
-        # Already checked in extract_docker_image
+        # If docker image comes from the 'docker' key in image_id dict,
+        # don't overwrite image_id, just attach login config.
+        if resources._docker_image is not None:  # pylint: disable=protected-access
+            return resources.copy(_docker_login_config=docker_login_config)
+        # Legacy path: image_id contains docker: prefix
         assert resources.image_id is not None and len(
             resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
@@ -238,6 +256,61 @@ def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
     return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
+def _parse_secret_name(raw_name: str):
+    """Parse '[secrets:]scope.NAME' into (name, scope_override).
+
+    Supports prefixes: personal., workspace., global.
+    Returns (name, None) if no scope prefix found.
+
+    Strips a leading ``secrets:`` if present so the parse is symmetric with
+    the YAML emission in ``_to_yaml_config``: refs with no inline mount
+    path are written as ``secrets:NAME`` (or ``secrets:scope.NAME``) into
+    either the ``secrets:`` array or the ``managed_secrets:`` field. The
+    ``secrets:`` array form strips the prefix at its call site; the
+    ``managed_secrets:`` form (used when the task also carries inline
+    secrets, e.g. an injected service-account token) routes through this
+    function, so we strip here to avoid the prefix accumulating across
+    YAML round-trips.
+    """
+    raw_name = common_utils.removeprefix(raw_name, 'secrets:')
+    for prefix in ('personal.', 'workspace.', 'global.'):
+        if raw_name.startswith(prefix):
+            return raw_name[len(prefix):], prefix[:-1]
+    return raw_name, None
+
+
+@dataclasses.dataclass
+class ManagedSecretRef:
+    """A reference to a secret in task YAML."""
+    name: str
+    mount_path: Optional[str] = None
+    scope_override: Optional[str] = None  # 'personal', 'workspace', or 'global'
+
+
+def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
+    """Redact secrets and credentials from a parsed task YAML config dict.
+
+    Modifies task_yaml in-place. Secret refs (secrets: prefix) in array
+    form are kept as-is; in dict form they are set to null so the YAML
+    remains launchable.
+    """
+    raw_secrets = task_yaml.get('secrets')
+    if raw_secrets is not None:
+        if isinstance(raw_secrets, list):
+            # Array form: all items are secret refs, keep as-is
+            pass
+        else:
+            task_yaml['secrets'] = {
+                k: (None if k.startswith('secrets:') else '<redacted>')
+                for k in raw_secrets
+            }
+    docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
+                                                       {})
+    if isinstance(docker_config,
+                  dict) and docker_config.get('password') is not None:
+        docker_config['password'] = '<redacted>'
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -262,6 +335,7 @@ class Task:
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
+        api_server_access: bool = True,
         _file_mounts_mapping: Optional[Dict[str, str]] = None,
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         _metadata: Optional[Dict[str, Any]] = None,
@@ -345,6 +419,10 @@ class Task:
           event_callback: A bash script that will be executed when the task
             changes state.
           blocked_resources: A set of resources that this task cannot run on.
+          api_server_access: If True, auto-inject API server credentials
+            (endpoint and service account token) into the job's environment
+            so that the job can call ``sky`` SDK / CLI to launch nested jobs.
+            Defaults to True.
           _file_mounts_mapping: (Internal use only) A dictionary of file mounts
             mapping.
           _volume_mounts: (Internal use only) A list of volume mounts.
@@ -362,6 +440,8 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        self._managed_secret_refs: List[ManagedSecretRef] = []
+        self._api_server_access = api_server_access
 
         # concatenate commands if given as list
         def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
@@ -452,6 +532,8 @@ class Task:
             self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()
+        for validator_fn in _task_validators:
+            validator_fn(self)
 
     def validate_name(self):
         """Validates if the task name is valid."""
@@ -514,6 +596,19 @@ class Task:
                 raise ValueError('Mount paths cannot end with a slash '
                                  f'Found: {path} in {location}')
 
+    def _validate_mount_dest_is_absolute(self, path: str, location: str):
+        if data_utils.is_cloud_store_url(path):
+            return
+        # Explicitly use POSIX semantics — `os.path.isabs` treats e.g.
+        # 'C:/foo' as absolute on Windows, but the remote side is always
+        # POSIX. Tilde is allowed as a common shorthand for the remote
+        # home directory (see Task docstring examples).
+        if not (path.startswith('/') or path.startswith('~')):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'File mount destination must be an absolute path '
+                    f'(start with "/" or "~"). Got: {path!r} in {location}.')
+
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
 
@@ -538,7 +633,13 @@ class Task:
                     'Workdir must be a valid directory (or '
                     f'a symlink to a directory). {user_workdir} not found.')
 
-        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+        git_commit = common_utils.get_git_commit(self.workdir)
+        # Always prefer the workdir's commit over any previously set value
+        # (e.g. from the YAML file's repo). But don't overwrite a valid
+        # value with None, which happens on the server where the uploaded
+        # blob directory is not a git repo.
+        if git_commit is not None:
+            self._metadata['git_commit'] = git_commit
 
     @staticmethod
     def from_yaml_config(
@@ -573,6 +674,8 @@ class Task:
                 else:
                     new_secrets[str(k)] = None
             config['secrets'] = new_secrets
+        elif secrets is not None and isinstance(secrets, list):
+            config['secrets'] = [str(item) for item in secrets]
 
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
@@ -589,9 +692,18 @@ class Task:
 
         if secrets_overrides is not None:
             # Override secrets vars from CLI.
-            new_secrets = config.get('secrets', {})
-            new_secrets.update(secrets_overrides)
-            config['secrets'] = new_secrets
+            existing = config.get('secrets')
+            if isinstance(existing, list):
+                # Convert list form to dict to merge CLI overrides
+                merged: Dict[str, Optional[str]] = {}
+                for item in existing:
+                    merged[str(item)] = None
+                merged.update(secrets_overrides)
+                config['secrets'] = merged
+            else:
+                new_secrets = existing or {}
+                new_secrets.update(secrets_overrides)
+                config['secrets'] = new_secrets
 
         for k, v in config.get('envs', {}).items():
             if v is None:
@@ -602,21 +714,26 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
 
-        for k, v in config.get('secrets', {}).items():
-            if v is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Secret variable {k!r} is None. Please set a '
-                        'value for it in task YAML or with --secret flag. '
-                        f'To set it to be empty, use an empty string ({k}: "" '
-                        f'in task YAML or --secret {k}="" in CLI).')
+        raw_secrets_check = config.get('secrets')
+        if isinstance(raw_secrets_check, dict):
+            for k, v in raw_secrets_check.items():
+                if v is None and not k.startswith('secrets:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Secret variable {k!r} is None. Please set a '
+                            'value for it in task YAML or with --secret flag.'
+                            f' To set it to be empty, use an empty string '
+                            f'({k}: "" in task YAML or '
+                            f'--secret {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_vars = config.get('envs', {})
-        secrets = config.get('secrets', {})
+        secrets_for_subst = config.get('secrets', {})
+        if isinstance(secrets_for_subst, list):
+            secrets_for_subst = {}  # Array form has no inline values
         env_and_secrets = env_vars.copy()
-        env_and_secrets.update(secrets)
+        env_and_secrets.update(secrets_for_subst)
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       env_and_secrets)
@@ -635,6 +752,44 @@ class Task:
             config['volumes'] = _fill_in_env_vars(config['volumes'],
                                                   env_and_secrets)
 
+        # Split secrets: inline values vs managed references
+        raw_secrets = config.pop('secrets', None)
+        inline_secrets = {}
+        managed_from_secrets = []
+        if isinstance(raw_secrets, list):
+            # Array form: all items are managed secret references
+            for item in raw_secrets:
+                if not isinstance(item, str) or not item.startswith('secrets:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid secret in array form: {item!r}. '
+                            'Array items must use the secrets: prefix '
+                            '(e.g., secrets:HF_TOKEN). For inline secrets '
+                            'with values, use dict form: '
+                            'secrets: {MY_SECRET: "value"}')
+                ref_name = item[len('secrets:'):]
+                name, scope = _parse_secret_name(ref_name)
+                managed_from_secrets.append(
+                    ManagedSecretRef(name=name, scope_override=scope))
+        elif isinstance(raw_secrets, dict):
+            # Dict form: split inline values vs secrets: prefix refs
+            for key, value in raw_secrets.items():
+                if key.startswith('secrets:'):
+                    if value is not None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid secret {key!r}: secret '
+                                'references (secrets: prefix) must have '
+                                'a null value in dict form. To provide '
+                                'an inline secret value, remove the '
+                                '\'secrets:\' prefix.')
+                    ref_name = key[len('secrets:'):]
+                    name, scope = _parse_secret_name(ref_name)
+                    managed_from_secrets.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                else:
+                    inline_secrets[key] = value
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -642,13 +797,38 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
-            secrets=config.pop('secrets', None),
+            secrets=inline_secrets or None,
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
+            api_server_access=config.pop('api_server_access', True),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
+
+        # Append managed refs from secrets: field (secrets:NAME entries)
+        # pylint: disable=protected-access
+        for ref in managed_from_secrets:
+            task._managed_secret_refs.append(ref)
+
+        # Parse managed_secrets references
+        managed_secrets_raw = config.pop('managed_secrets', None)
+        if managed_secrets_raw:
+            # pylint: disable=protected-access
+            for entry in managed_secrets_raw:
+                if isinstance(entry, str):
+                    name, scope = _parse_secret_name(entry)
+                    task._managed_secret_refs.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                elif isinstance(entry, dict):
+                    for raw_name, opts in entry.items():
+                        name, scope = _parse_secret_name(raw_name)
+                        task._managed_secret_refs.append(
+                            ManagedSecretRef(
+                                name=name,
+                                mount_path=opts.get('mount_path'),
+                                scope_override=scope,
+                            ))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
@@ -725,13 +905,36 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         # Handle the top-level config field
-        config_override = config.pop('config', None)
+        config_override = config.pop('config', None) or {}
+        # Lifecycle hooks live under `config.hooks:` but they are not a
+        # SkyPilot-config override — they are task lifecycle metadata.
+        # Pull them out of the override block and forward to Resources
+        # via the same path master's `resources.hooks:` used (kept for
+        # backward compat — see below).
+        config_hooks = config_override.pop('hooks', None)
 
-        # Store the final config override for use in resource setup
-        cluster_config_override = config_override
+        # Store the final config override for use in resource setup.
+        # Restore None semantics if the override block was hooks-only.
+        cluster_config_override = config_override or None
 
-        # Parse resources field.
-        resources_config = config.pop('resources', {})
+        # Parse resources field. Coerce `resources: null` / `resources:`
+        # (empty value) to {} so the assignment below doesn't fail.
+        resources_config = config.pop('resources', None) or {}
+        # `resources.hooks:` was an in-flight rename during PR1 review;
+        # it never landed in master. Reject the form explicitly so users
+        # write `config.hooks:` (the canonical placement) instead of
+        # discovering the rename via Resources-internal silent acceptance.
+        if 'hooks' in resources_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Lifecycle hooks live under top-level `config.hooks:`, '
+                    'not `resources.hooks:`. Move the list to '
+                    '`config.hooks` at the top level of the task YAML.')
+        # Forward task.config.hooks into the resources block so the
+        # Resources constructor can pick it up via the same key the
+        # internal API uses.
+        if config_hooks is not None:
+            resources_config['hooks'] = config_hooks
         if cluster_config_override is not None:
             assert resources_config.get('_cluster_config_overrides') is None, (
                 'Cannot set _cluster_config_overrides in both resources and '
@@ -798,9 +1001,6 @@ class Task:
             if there are any other parsing errors.
         """
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
             return Task.from_yaml_str(user_specified_yaml)
 
@@ -813,6 +1013,8 @@ class Task:
 
                 task = sky.Task.from_yaml_str('yaml_str')
         """
+        with ux_utils.print_exception_no_traceback():
+            yaml_utils.check_no_duplicate_keys(yaml_str)
         config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
@@ -843,6 +1045,7 @@ class Task:
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             self._validate_mount_path(dst_path, location='volumes')
+            self._validate_mount_dest_is_absolute(dst_path, location='volumes')
             # Shortcut for `dst_path: volume_name` (external persistent volume)
             if isinstance(vol, str):
                 volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
@@ -857,7 +1060,7 @@ class Task:
                 elif 'name' in vol:
                     # External volume with 'name' field
                     volume_mount = volume_lib.VolumeMount.resolve(
-                        dst_path, vol['name'])
+                        dst_path, vol['name'], sub_path=vol.get('sub_path'))
                 else:
                     raise ValueError(
                         f'Invalid volume config: {dst_path}: {vol}. '
@@ -964,6 +1167,14 @@ class Task:
     @property
     def secrets(self) -> Dict[str, SecretStr]:
         return self._secrets
+
+    @property
+    def managed_secret_refs(self) -> List['ManagedSecretRef']:
+        return self._managed_secret_refs
+
+    @property
+    def api_server_access(self) -> bool:
+        return self._api_server_access
 
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
@@ -1586,6 +1797,45 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.VASTDATA:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('vastdata://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'vastdata://' + storage.name
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.HF:
+                    # Build the base URL without any embedded sub-path; the
+                    # canonical sub-path lives in ``_bucket_sub_path`` and is
+                    # appended via ``get_bucket_sub_path_prefix`` below
+                    # (mirroring the other store types). Stripping first
+                    # avoids doubling the sub-path when the source URL
+                    # already embeds it.
+                    if storage.source is not None and not isinstance(
+                            storage.source, list) and data_utils.is_hf_path(
+                                storage.source):
+                        if data_utils.is_hf_bucket_path(storage.source):
+                            bucket_id, _ = data_utils.split_hf_path(
+                                storage.source)
+                            blob_path = f'hf://buckets/{bucket_id}'
+                        else:
+                            repo_type, repo_id, revision, _ = (
+                                data_utils.split_hf_repo_path(storage.source))
+                            hf_id = (storage_lib.HuggingFaceStore.
+                                     hf_id_from_repo_parts(repo_type, repo_id))
+                            blob_path = f'hf://{hf_id}'
+                            if revision:
+                                blob_path = f'{blob_path}@{revision}'
+                    else:
+                        blob_path = f'hf://buckets/{storage.name}'
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
@@ -1708,8 +1958,7 @@ class Task:
             if self._user_specified_yaml is None:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml_utils.safe_load(self._user_specified_yaml)
-            if config.get('secrets') is not None:
-                config['secrets'] = {k: '<redacted>' for k in config['secrets']}
+            redact_task_yaml_dict(config)
             return config
         return self._to_yaml_config()
 
@@ -1724,9 +1973,25 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config = _resources_to_config(self.resources)
+        tmp_resource_config = _resources_to_config(
+            self.resources, redact_secrets=redact_secrets)
 
         add_if_not_none('resources', tmp_resource_config)
+
+        # Lifecycle hooks are stored on each Resources instance (the
+        # internal API replicates them across all resources), but their
+        # canonical YAML placement is the task-level ``config.hooks:``.
+        # Lift the list off any Resources that carries one and emit
+        # under ``config.hooks`` so round-trips through to_yaml/from_yaml
+        # don't trip the rejection that catches a misplaced
+        # ``resources.hooks`` in user YAML.
+        task_hooks: Optional[List[Dict[str, Any]]] = None
+        for r in self.resources:
+            if r.hooks:
+                task_hooks = [dict(h) for h in r.hooks]
+                break
+        if task_hooks:
+            config.setdefault('config', {})['hooks'] = task_hooks
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
@@ -1750,11 +2015,65 @@ class Task:
         add_if_not_none('envs', self.envs, no_empty=True)
 
         secrets = self.secrets
-        if secrets and not redact_secrets:
-            secrets = {k: v.get_secret_value() for k, v in secrets.items()}
-        elif secrets and redact_secrets:
-            secrets = {k: '<redacted>' for k, v in secrets.items()}
-        add_if_not_none('secrets', secrets, no_empty=True)
+        # Separate inline secrets from resolved secret refs
+        has_refs = any(k.startswith('secrets:') for k in (secrets or {}))
+        has_refs = has_refs or bool(self._managed_secret_refs)
+
+        if secrets and not has_refs:
+            # Pure inline secrets — use dict form
+            if not redact_secrets:
+                secrets = {k: v.get_secret_value() for k, v in secrets.items()}
+            else:
+                secrets = {k: '<redacted>' for k in secrets}
+            add_if_not_none('secrets', secrets, no_empty=True)
+        elif secrets or has_refs:
+            # Has secret refs — use array form for refs, dict for inline.
+            # Inline secrets go in dict form.
+            inline = {
+                k: v
+                for k, v in (secrets or {}).items()
+                if not k.startswith('secrets:')
+            }
+            if inline:
+                if not redact_secrets:
+                    inline = {
+                        k: v.get_secret_value() for k, v in inline.items()
+                    }
+                else:
+                    inline = {k: '<redacted>' for k in inline}
+                config['secrets'] = inline
+
+            # Secret refs go in array form (valid YAML, re-launchable)
+            ref_list = sorted(
+                k for k in (secrets or {}) if k.startswith('secrets:'))
+
+            # Add unresolved refs from _secret_refs
+            managed_secrets_field: list = []
+            if self._managed_secret_refs:
+                for ref in self._managed_secret_refs:
+                    prefix = (f'{ref.scope_override}.'
+                              if ref.scope_override else '')
+                    if ref.mount_path is not None:
+                        managed_secrets_field.append({
+                            f'{prefix}{ref.name}': {
+                                'mount_path': ref.mount_path
+                            }
+                        })
+                    else:
+                        ref_list.append(f'secrets:{prefix}{ref.name}')
+
+            if ref_list:
+                # Append refs to secrets array or set it
+                existing = config.get('secrets')
+                if isinstance(existing, dict):
+                    # Mixed: inline dict already set. Put refs in
+                    # managed_secrets field to keep YAML valid.
+                    managed_secrets_field.extend(ref_list)
+                else:
+                    config['secrets'] = ref_list
+
+            if managed_secrets_field:
+                config['managed_secrets'] = managed_secrets_field
 
         add_if_not_none('file_mounts', {})
 
@@ -1774,6 +2093,8 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
+        if not self._api_server_access:
+            config['api_server_access'] = False
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
         add_if_not_none('_user_specified_yaml', self._user_specified_yaml)
@@ -1846,20 +2167,21 @@ class Task:
         return s
 
 
-def _resources_to_config(
-        resources: Union[List['resources_lib.Resources'],
-                         Set['resources_lib.Resources']],
-        factor_out_common_fields: bool = False) -> Dict[str, Any]:
+def _resources_to_config(resources: Union[List['resources_lib.Resources'],
+                                          Set['resources_lib.Resources']],
+                         factor_out_common_fields: bool = False,
+                         redact_secrets: bool = False) -> Dict[str, Any]:
     if len(resources) > 1:
         resource_list: List[Dict[str, Union[str, int]]] = []
         for r in resources:
-            resource_list.append(r.to_yaml_config())
+            resource_list.append(
+                r.to_yaml_config(redact_secrets=redact_secrets))
         group_key = 'ordered' if isinstance(resources, list) else 'any_of'
         if factor_out_common_fields:
             return _factor_out_common_resource_fields(resource_list, group_key)
         return {group_key: resource_list}
     else:
-        return list(resources)[0].to_yaml_config()
+        return list(resources)[0].to_yaml_config(redact_secrets=redact_secrets)
 
 
 def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,

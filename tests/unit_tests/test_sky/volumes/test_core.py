@@ -9,6 +9,7 @@ from sky import global_user_state
 from sky import models
 from sky import provision
 from sky.schemas.api import responses
+from sky.server import plugin_hooks
 from sky.utils import status_lib
 from sky.volumes.server import core
 
@@ -683,6 +684,143 @@ class TestVolumeCore:
         assert mock_get_volume_by_name.call_count == 2
         assert mock_provision_delete.call_count == 2
         assert mock_delete_volume.call_count == 2
+
+    @pytest.fixture(autouse=True)
+    def _clear_volume_deleted_hooks(self):
+        """Reset the global hook list around each test in this class."""
+        plugin_hooks._VOLUME_DELETED_HOOKS.clear()
+        yield
+        plugin_hooks._VOLUME_DELETED_HOOKS.clear()
+
+    def _setup_volume_delete_mocks(self,
+                                   monkeypatch,
+                                   provision_delete_side_effect=None):
+        """Set up the standard set of mocks for volume_delete hook tests."""
+        handle = mock.MagicMock(spec=models.VolumeConfig)
+        handle.cloud = 'kubernetes'
+        handle.region = 'my-context'
+        mock_volume = {
+            'name': 'test-volume',
+            'status': status_lib.VolumeStatus.READY,
+            'handle': handle,
+        }
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(return_value=mock_volume))
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock.MagicMock())
+        provision_delete = mock.MagicMock(
+            side_effect=provision_delete_side_effect)
+        monkeypatch.setattr(provision, 'delete_volume', provision_delete)
+        monkeypatch.setattr(provision, 'get_volume_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+        return handle
+
+    def test_volume_delete_fires_hook(self, monkeypatch):
+        """volume_delete invokes registered hooks with name and config."""
+        handle = self._setup_volume_delete_mocks(monkeypatch)
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.fires_hook', lambda name, config: captured.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'])
+
+        assert captured == [('test-volume', handle)]
+
+    def test_volume_delete_purge_fires_hook(self, monkeypatch):
+        """Hook fires even when purge=True and provision.delete_volume fails."""
+        handle = self._setup_volume_delete_mocks(
+            monkeypatch,
+            provision_delete_side_effect=Exception('cloud delete failed'))
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.purge_fires_hook', lambda name, config: captured.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'], purge=True)
+
+        assert captured == [('test-volume', handle)]
+
+    def test_volume_delete_does_not_fire_hook_when_provision_fails_no_purge(
+            self, monkeypatch):
+        """Hook must not fire if delete aborts before db deletion."""
+        self._setup_volume_delete_mocks(
+            monkeypatch,
+            provision_delete_side_effect=Exception('cloud delete failed'))
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.no_fire_on_failure', lambda name, config: captured.append(
+                (name, config)))
+
+        with pytest.raises(Exception, match='cloud delete failed'):
+            core.volume_delete(['test-volume'])
+
+        assert captured == []
+
+    def test_volume_delete_hook_failure_does_not_block_delete(
+            self, monkeypatch):
+        """An exception inside a hook must not propagate out of volume_delete."""
+        self._setup_volume_delete_mocks(monkeypatch)
+
+        def bad_hook(name, config):
+            raise RuntimeError('hook boom')
+
+        plugin_hooks.register_volume_deleted_hook('test.bad_hook', bad_hook)
+
+        # Should not raise.
+        core.volume_delete(['test-volume'])
+
+    def test_register_replaces_hook_with_same_id(self, monkeypatch):
+        """Re-registering with the same ID replaces the previous callback."""
+        handle = self._setup_volume_delete_mocks(monkeypatch)
+        first_calls = []
+        second_calls = []
+
+        plugin_hooks.register_volume_deleted_hook(
+            'test.dup', lambda name, config: first_calls.append((name, config)))
+        plugin_hooks.register_volume_deleted_hook(
+            'test.dup', lambda name, config: second_calls.append(
+                (name, config)))
+
+        core.volume_delete(['test-volume'])
+
+        assert first_calls == []
+        assert second_calls == [('test-volume', handle)]
+
+    def test_volume_delete_multiple_fires_hook_per_volume(self, monkeypatch):
+        """Hook fires once per volume in a multi-volume delete call."""
+        handles = []
+        mock_volumes = []
+        for vname, cloud in [('v1', 'aws'), ('v2', 'gcp')]:
+            handle = mock.MagicMock(spec=models.VolumeConfig)
+            handle.cloud = cloud
+            handle.region = None
+            handles.append(handle)
+            mock_volumes.append({
+                'name': vname,
+                'status': status_lib.VolumeStatus.READY,
+                'handle': handle,
+            })
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock.MagicMock(side_effect=mock_volumes))
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock.MagicMock())
+        monkeypatch.setattr(provision, 'delete_volume', mock.MagicMock())
+        monkeypatch.setattr(provision, 'get_volume_usedby',
+                            mock.MagicMock(return_value=([], [])))
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock.MagicMock())
+
+        captured = []
+        plugin_hooks.register_volume_deleted_hook(
+            'test.multi_volume', lambda name, config: captured.append(
+                (name, config)))
+
+        core.volume_delete(['v1', 'v2'])
+
+        assert captured == [('v1', handles[0]), ('v2', handles[1])]
 
     def test_volume_apply_success_new_volume(self, monkeypatch):
         """Test volume_apply with successful creation of new volume."""
@@ -1510,6 +1648,196 @@ class TestVolumeCore:
         assert len(result) == 1
         assert result[0]['status'] == 'NOT_READY'
         assert result[0]['error_message'] == error_msg
+
+
+def _make_volume_config(**kwargs) -> models.VolumeConfig:
+    """Helper to create a VolumeConfig with sensible defaults."""
+    defaults = {
+        'name': 'test-vol',
+        'type': 'k8s-pvc',
+        'cloud': 'Kubernetes',
+        'region': 'kind-kind',
+        'zone': None,
+        'name_on_cloud': 'my-pvc',
+        'size': '10Gi',
+        'config': {},
+    }
+    defaults.update(kwargs)
+    return models.VolumeConfig(**defaults)
+
+
+class TestSameBackendResource:
+    """Tests for _same_backend_resource."""
+
+    def test_same_k8s_pvc_same_context_namespace(self):
+        a = _make_volume_config(config={'namespace': 'default'})
+        b = _make_volume_config(name='other', config={'namespace': 'default'})
+        assert core._same_backend_resource(a, b) is True
+
+    def test_same_k8s_pvc_different_namespace(self):
+        a = _make_volume_config(config={'namespace': 'default'})
+        b = _make_volume_config(config={'namespace': 'prod'})
+        assert core._same_backend_resource(a, b) is False
+
+    def test_same_k8s_pvc_different_context(self):
+        a = _make_volume_config(region='ctx-a', config={'namespace': 'default'})
+        b = _make_volume_config(region='ctx-b', config={'namespace': 'default'})
+        assert core._same_backend_resource(a, b) is False
+
+    def test_different_cloud_same_name(self):
+        a = _make_volume_config(cloud='Kubernetes')
+        b = _make_volume_config(cloud='RunPod')
+        assert core._same_backend_resource(a, b) is False
+
+    def test_same_runpod_by_id(self):
+        a = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                zone='US-TX-3',
+                                id_on_cloud='vol-123')
+        b = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                zone='US-TX-3',
+                                name_on_cloud='other',
+                                id_on_cloud='vol-123')
+        assert core._same_backend_resource(a, b) is True
+
+    def test_different_runpod_by_id(self):
+        a = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                zone='US-TX-3',
+                                id_on_cloud='vol-123')
+        b = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                zone='US-TX-3',
+                                id_on_cloud='vol-456')
+        assert core._same_backend_resource(a, b) is False
+
+    def test_same_runpod_by_name_zone(self):
+        a = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                name_on_cloud='my-vol',
+                                zone='US-TX-3')
+        b = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                name_on_cloud='my-vol',
+                                zone='US-TX-3')
+        assert core._same_backend_resource(a, b) is True
+
+    def test_different_runpod_by_zone(self):
+        a = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                name_on_cloud='my-vol',
+                                zone='US-TX-3')
+        b = _make_volume_config(cloud='RunPod',
+                                type='runpod_network_volume',
+                                name_on_cloud='my-vol',
+                                zone='EU-RO-1')
+        assert core._same_backend_resource(a, b) is False
+
+    def test_same_k8s_pvc_no_namespace(self):
+        """Both configs with no namespace key should still match."""
+        a = _make_volume_config(config={})
+        b = _make_volume_config(config={})
+        assert core._same_backend_resource(a, b) is True
+
+    def test_different_name_on_cloud(self):
+        a = _make_volume_config(name_on_cloud='pvc-a')
+        b = _make_volume_config(name_on_cloud='pvc-b')
+        assert core._same_backend_resource(a, b) is False
+
+    def test_generic_cloud_fallback(self):
+        """Unknown cloud uses generic (name_on_cloud, region, zone) match."""
+        a = _make_volume_config(cloud='GCP',
+                                name_on_cloud='disk-1',
+                                region='us-central1',
+                                zone='us-central1-a')
+        b = _make_volume_config(cloud='GCP',
+                                name_on_cloud='disk-1',
+                                region='us-central1',
+                                zone='us-central1-a')
+        assert core._same_backend_resource(a, b) is True
+
+    def test_generic_cloud_different_zone(self):
+        a = _make_volume_config(cloud='GCP',
+                                name_on_cloud='disk-1',
+                                region='us-central1',
+                                zone='us-central1-a')
+        b = _make_volume_config(cloud='GCP',
+                                name_on_cloud='disk-1',
+                                region='us-central1',
+                                zone='us-central1-b')
+        assert core._same_backend_resource(a, b) is False
+
+    def test_none_region_vs_non_none_region(self):
+        """region=None should not match a concrete region."""
+        a = _make_volume_config(region=None)
+        b = _make_volume_config(region='kind-kind')
+        assert core._same_backend_resource(a, b) is False
+
+    def test_none_zone_vs_non_none_zone(self):
+        """zone=None should not match a concrete zone."""
+        a = _make_volume_config(cloud='GCP',
+                                name_on_cloud='disk-1',
+                                region='us-central1',
+                                zone=None)
+        b = _make_volume_config(cloud='GCP',
+                                name_on_cloud='disk-1',
+                                region='us-central1',
+                                zone='us-central1-a')
+        assert core._same_backend_resource(a, b) is False
+
+
+class TestCheckDuplicateBackendResource:
+    """Tests for _check_duplicate_backend_resource."""
+
+    def test_raises_on_duplicate(self, monkeypatch):
+        existing_config = _make_volume_config(name='vol-a',
+                                              name_on_cloud='my-pvc',
+                                              config={'namespace': 'default'})
+        monkeypatch.setattr(
+            global_user_state, 'get_volumes', lambda: [{
+                'name': 'vol-a',
+                'handle': existing_config,
+            }])
+        new_config = _make_volume_config(name='vol-b',
+                                         name_on_cloud='my-pvc',
+                                         config={'namespace': 'default'})
+        with pytest.raises(ValueError, match='same backend resource'):
+            core._check_duplicate_backend_resource('vol-b', new_config)
+
+    def test_no_error_different_resource(self, monkeypatch):
+        existing_config = _make_volume_config(name='vol-a',
+                                              name_on_cloud='pvc-a',
+                                              config={'namespace': 'default'})
+        monkeypatch.setattr(
+            global_user_state, 'get_volumes', lambda: [{
+                'name': 'vol-a',
+                'handle': existing_config,
+            }])
+        new_config = _make_volume_config(name='vol-b',
+                                         name_on_cloud='pvc-b',
+                                         config={'namespace': 'default'})
+        # Should not raise
+        core._check_duplicate_backend_resource('vol-b', new_config)
+
+    def test_skips_same_name(self, monkeypatch):
+        """A volume should not conflict with itself."""
+        config = _make_volume_config(name='vol-a', name_on_cloud='my-pvc')
+        monkeypatch.setattr(global_user_state, 'get_volumes', lambda: [{
+            'name': 'vol-a',
+            'handle': config,
+        }])
+        # Should not raise
+        core._check_duplicate_backend_resource('vol-a', config)
+
+    def test_skips_none_handle(self, monkeypatch):
+        monkeypatch.setattr(global_user_state, 'get_volumes', lambda: [{
+            'name': 'vol-a',
+            'handle': None,
+        }])
+        config = _make_volume_config(name='vol-b', name_on_cloud='my-pvc')
+        # Should not raise
+        core._check_duplicate_backend_resource('vol-b', config)
 
 
 class TestVolumeStatus:

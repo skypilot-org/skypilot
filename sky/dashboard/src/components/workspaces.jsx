@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import {
   getWorkspaces,
-  getEnabledClouds,
+  getEnabledCloudsBatch,
   deleteWorkspace,
 } from '@/data/connectors/workspaces';
 import {
@@ -49,6 +49,7 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
+import { trackWorkspaceAction } from '@/lib/analytics';
 import {
   CLOUD_CANONICALIZATIONS,
   CLUSTER_NOT_UP_ERROR,
@@ -477,29 +478,15 @@ export function Workspaces() {
         setRawWorkspacesData(fetchedWorkspacesConfig);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-        // Fetch enabledClouds for all workspaces in parallel
-        const enabledCloudsPromises = configuredWorkspaceNames.map(
-          async (wsName) => {
-            try {
-              const enabledClouds = await dashboardCache.get(getEnabledClouds, [
-                wsName,
-              ]);
-              return { wsName, enabledClouds };
-            } catch (error) {
-              console.error(
-                `Error fetching enabled clouds for ${wsName}:`,
-                error
-              );
-              return { wsName, enabledClouds: [] };
-            }
-          }
-        );
-
-        const enabledCloudsResults = await Promise.all(enabledCloudsPromises);
-        const enabledCloudsMap = {};
-        enabledCloudsResults.forEach(({ wsName, enabledClouds }) => {
-          enabledCloudsMap[wsName] = enabledClouds;
-        });
+        // Fetch enabledClouds for all workspaces in a single batch request
+        let enabledCloudsMap = {};
+        try {
+          enabledCloudsMap = await dashboardCache.get(getEnabledCloudsBatch, [
+            configuredWorkspaceNames,
+          ]);
+        } catch (error) {
+          console.error('Error fetching enabled clouds batch:', error);
+        }
 
         // Initialize workspace details with zeros - UI will show spinners for counts
         const initialWorkspaceDetails = configuredWorkspaceNames
@@ -576,13 +563,14 @@ export function Workspaces() {
   }, [fetchData]);
 
   const handleRefresh = useCallback(async () => {
+    trackWorkspaceAction('refresh');
     // Set loading states immediately for responsive UI
     setClustersLoading(true);
     setJobsLoading(true);
 
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+    dashboardCache.invalidateFunction(getEnabledCloudsBatch);
 
     // Invalidate cluster and job caches
     dashboardCache.invalidate(getClusters);
@@ -672,6 +660,7 @@ export function Workspaces() {
   }, [workspaceDetails, sortConfig, searchQuery, rawWorkspacesData]);
 
   const handleDeleteWorkspace = (workspaceName) => {
+    trackWorkspaceAction('delete');
     checkPermissionAndAct('cannot delete workspace', () => {
       setDeleteState({
         confirmOpen: true,
@@ -730,12 +719,14 @@ export function Workspaces() {
   };
 
   const handleCreateWorkspace = () => {
+    trackWorkspaceAction('create');
     checkPermissionAndAct('cannot create workspace', () => {
       router.push('/workspace/new');
     });
   };
 
   const handleEditWorkspace = (workspaceName) => {
+    trackWorkspaceAction('edit');
     checkPermissionAndAct('cannot edit workspace', () => {
       router.push(`/workspaces/${workspaceName}`);
     });
@@ -848,13 +839,13 @@ export function Workspaces() {
 
       {/* Search and Create Workspace Row */}
       <div className="flex items-center justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 sm:flex-none">
           <input
             type="text"
             placeholder="Filter workspaces"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            className="h-8 w-full sm:w-96 px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-0 focus:outline-none"
           />
           {searchQuery && (
             <button

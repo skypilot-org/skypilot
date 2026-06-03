@@ -4,6 +4,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -19,6 +20,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
@@ -32,6 +34,7 @@ from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -47,6 +50,145 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
+# Cluster-autoscaler caps graceful pod termination at this many
+# seconds by default (--max-graceful-termination-sec=600). Rendering a
+# higher `terminationGracePeriodSeconds` doesn't extend the autoscaler's
+# willingness to wait — it just SIGKILLs at 600 anyway. Keep our render
+# inside that envelope so a "hooks took longer than expected" failure
+# mode falls inside the kubelet's deterministic SIGKILL rather than
+# the autoscaler's.
+_PREEMPTION_GRACE_CAP_SECONDS = 600
+
+
+def _compute_preemption_hook_timeout(
+        hooks: Optional[List[Dict[str, Any]]]) -> Optional[int]:
+    """Sum of timeouts for all preemption-event hooks, capped.
+
+    Returns ``None`` when no hook declares the ``preemption`` event,
+    so the caller can omit ``terminationGracePeriodSeconds`` from the
+    pod spec entirely (K8s falls back to its 30 s default).
+
+    Why sum rather than max: ``hook_executor.run`` executes matching
+    hooks sequentially, so the wall-clock cost is the sum of per-hook
+    timeouts. Using max would let kubelet SIGKILL the daemon
+    mid-execution after the first hook's timeout expires.
+
+    Why we cap at 600s: cluster-autoscaler's
+    ``--max-graceful-termination-sec`` defaults to 600. A render larger
+    than that is silently truncated by the autoscaler on scale-down,
+    so the daemon would be SIGKILLed mid-hook anyway. We log a stderr
+    warning when the raw sum exceeds the cap so users can shrink their
+    timeouts (or the operator can raise ``--max-graceful-termination-sec``
+    on their cluster). See:
+    https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#does-ca-respect-gracefultermination-in-scale-down
+    """
+    timeouts = [
+        entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        for entry in (hooks or [])
+        if 'preemption' in (entry.get('events') or [])
+    ]
+    if not timeouts:
+        return None
+    raw = sum(timeouts)
+    if raw > _PREEMPTION_GRACE_CAP_SECONDS:
+        cap = _PREEMPTION_GRACE_CAP_SECONDS
+        sys.stderr.write(
+            f'WARNING: preemption-hook timeouts sum to {raw}s, but '
+            f'cluster-autoscaler caps graceful pod termination at '
+            f'{cap}s by default. Capping '
+            f'terminationGracePeriodSeconds at {cap}s. '
+            f'Reduce per-hook timeouts or raise '
+            f'--max-graceful-termination-sec on your cluster if longer '
+            f'hooks are required.\n')
+        return _PREEMPTION_GRACE_CAP_SECONDS
+    return raw
+
+
+def warn_if_preemption_grace_change_requires_relaunch(
+    cloud: Optional['clouds.Cloud'],
+    prior_hooks: Optional[List[Dict[str, Any]]],
+    new_hooks: Optional[List[Dict[str, Any]]],
+) -> Optional[str]:
+    """Return a warning string if a re-launch would need more K8s grace.
+
+    Pod ``terminationGracePeriodSeconds`` is set at pod-creation time
+    and is immutable for the lifetime of the pod. Re-launching an
+    existing Kubernetes cluster with a *larger* preemption-hook timeout
+    than before means the new timeout would be silently truncated by
+    kubelet at SIGTERM — the preemption hook would be SIGKILLed
+    mid-run.
+
+    Returns ``None`` when no warning is needed (non-K8s cloud, no new
+    preemption hooks, or new timeout ≤ prior timeout).
+
+    Lives here (rather than in the re-launch caller in
+    ``cloud_vm_ray_backend``) so the ``_compute_preemption_hook_timeout``
+    helper stays a same-module private — see review thread on PR #9064.
+    """
+    if not isinstance(cloud, Kubernetes):
+        return None
+    prior_t = _compute_preemption_hook_timeout(prior_hooks)
+    new_t = _compute_preemption_hook_timeout(new_hooks)
+    if new_t is None:
+        return None
+    if prior_t is not None and new_t <= prior_t:
+        return None
+    prior_label = f'{prior_t}s' if prior_t is not None else '~30s (k8s default)'
+    return (f'Re-launch increased the preemption-hook grace requirement '
+            f'from {prior_label} to {new_t}s, but Kubernetes pod\'s '
+            '`terminationGracePeriodSeconds` is fixed at pod creation and '
+            'cannot be updated in place. The new preemption hooks will be '
+            'SIGKILLed by kubelet once the existing grace expires. To apply '
+            'the new grace, run `sky down <cluster>` then `sky launch` to '
+            'recreate the pod.')
+
+
+def cap_preemption_hook_timeouts(
+    hooks: Optional[List[Dict[str, Any]]],) -> Optional[List[Dict[str, Any]]]:
+    """Cap each preemption-event hook's ``timeout`` to the K8s grace cap.
+
+    On Kubernetes the pod's ``terminationGracePeriodSeconds`` is
+    bounded by cluster-autoscaler's ``--max-graceful-termination-sec``
+    (default 600). A user-set or default hook ``timeout`` larger than
+    that is meaningless — kubelet SIGKILLs at the grace, leaving the
+    skylet's stored timeout misleading. Cap the individual timeout on
+    send so the stored value matches what kubelet will actually honor,
+    and warn the user once per offending hook.
+
+    Only ``preemption``-event entries are affected; ``autostop``/``down``
+    hooks don't interact with the pod grace.
+    """
+    if not hooks:
+        return hooks
+    out: List[Dict[str, Any]] = []
+    for entry in hooks:
+        events = list(entry.get('events') or [])
+        timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        if ('preemption' in events and timeout > _PREEMPTION_GRACE_CAP_SECONDS):
+            sys.stderr.write(
+                f'WARNING: preemption-hook timeout {timeout}s on '
+                f'Kubernetes capped to {_PREEMPTION_GRACE_CAP_SECONDS}s '
+                f'(pod terminationGracePeriodSeconds limit; '
+                f'cluster-autoscaler --max-graceful-termination-sec). '
+                f'Raise the autoscaler flag if longer hooks are needed.\n')
+            other_events = [e for e in events if e != 'preemption']
+            # Split a multi-event entry so the K8s grace cap only
+            # applies to the preemption dispatch. The non-preemption
+            # events (stop/down) keep the user's original timeout —
+            # kubelet's SIGKILL boundary doesn't apply to idle-timer
+            # stops or `sky down` teardowns.
+            capped = dict(entry)
+            capped['events'] = ['preemption']
+            capped['timeout'] = _PREEMPTION_GRACE_CAP_SECONDS
+            out.append(capped)
+            if other_events:
+                uncapped = dict(entry)
+                uncapped['events'] = other_events
+                out.append(uncapped)
+        else:
+            out.append(entry)
+    return out
+
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
@@ -59,7 +201,9 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+    # Limit the length of the volume name to match the label value
+    # limit (63 characters)
+    _MAX_VOLUME_NAME_LEN_LIMIT = 63
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -91,8 +235,8 @@ class Kubernetes(clouds.Cloud):
             (f'Local disk is not supported on {_REPR}'),
     }
 
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -204,7 +348,19 @@ class Kubernetes(clouds.Cloud):
             allowed_contexts is None and
             env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
         if allow_all_contexts:
-            allowed_contexts = all_contexts
+            # `SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false`
+            # excludes the API server's own in-cluster context from the
+            # `'all'` expansion, so the cluster running the API server is
+            # not surfaced as a user-facing compute target. Default is to
+            # include in-cluster (backward compatible).
+            if (env_options.Options.ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.
+                    get()):
+                allowed_contexts = all_contexts
+            else:
+                in_cluster_name = kubernetes.in_cluster_context_name()
+                allowed_contexts = [
+                    c for c in all_contexts if c != in_cluster_name
+                ]
 
         if allowed_contexts is None:
             # Try kubeconfig if present
@@ -319,7 +475,7 @@ class Kubernetes(clouds.Cloud):
                          f'{context}. Reason: {reason}')
 
             autoscaler_type = skypilot_config.get_effective_region_config(
-                cloud='kubernetes',
+                cloud=cls._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -360,10 +516,10 @@ class Kubernetes(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        # TODO(romilb): Investigate how users can provide their own cost catalog
-        #  for Kubernetes clusters.
-        # For now, assume zero cost for Kubernetes clusters
-        return 0.0
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import kubernetes_catalog
+        return kubernetes_catalog.get_hourly_cost(instance_type, use_spot,
+                                                  region, zone)
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -381,16 +537,20 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional['resources_utils.DiskTier'] = None,
-            local_disk: Optional[str] = None,
-            region: Optional[str] = None,
-            zone: Optional[str] = None) -> str:
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier, region, zone, local_disk  # Unused.
+        del disk_tier, region, zone, local_disk, use_spot  # Unused.
+        del max_hourly_cost  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -424,8 +584,17 @@ class Kubernetes(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
-            instance_type)
+        try:
+            k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+                instance_type)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid Kubernetes instance type: {instance_type!r}. '
+                    'Kubernetes instance types use the format '
+                    '"<cpus>CPU--<mem>GB" or '
+                    '"<cpus>CPU--<mem>GB--<accelerator>:<count>" '
+                    '(e.g. "4CPU--16GB", "4CPU--16GB--H100:1").') from None
         return k.cpus, k.memory
 
     @classmethod
@@ -458,7 +627,7 @@ class Kubernetes(clouds.Cloud):
         num_nodes: int,
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
         enable_flex_start: bool,
-        is_using_kueue: bool,
+        is_using_queueing: bool,
     ) -> int:
         """Calculate provision timeout based on number of nodes.
 
@@ -473,8 +642,9 @@ class Kubernetes(clouds.Cloud):
         Returns:
             Timeout in seconds
         """
-        if is_using_kueue:
-            # Return a large timeout to let kueue handle the provisioning
+        if is_using_queueing:
+            # Return a large timeout to let the
+            # queue system handle the provisioning
             return 24 * 60 * 60  # 24 hours
 
         base_timeout = 10  # Base timeout for single node
@@ -512,7 +682,7 @@ class Kubernetes(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones, dryrun  # Unused.
+        del zones  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
@@ -531,6 +701,11 @@ class Kubernetes(clouds.Cloud):
             resources.instance_type)
         cpus = k.cpus
         mem = k.memory
+        # Clamp resource requests to node allocatable capacity so that
+        # pods can schedule even when the request matches a node's total
+        # capacity (which exceeds allocatable due to system overhead).
+        cpus, mem = kubernetes_utils.adjust_resources_to_allocatable(
+            cpus, mem, context, dryrun=dryrun)
         # Optionally populate accelerator information.
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count
@@ -693,26 +868,11 @@ class Kubernetes(clouds.Cloud):
                 keys=('high_availability', 'storage_class_name'),
                 default_value=None))
 
-        # Get the config for setting pod CPU/memory limits relative to requests.
-        # This is useful for clusters that require limits to be set (e.g., for
-        # LimitRange enforcement or resource quotas).
-        # Can be: False (default, no limits), True (limits = requests),
-        # or a number (limits = requests * multiplier).
-        set_pod_resource_limits_config = (
-            skypilot_config.get_effective_workspace_region_config(
-                cloud='kubernetes',
-                region=context,
-                keys=('set_pod_resource_limits',),
-                default_value=False,
-                override_configs=resources.cluster_config_overrides))
-
         k8s_kueue_local_queue_name = (
-            skypilot_config.get_effective_workspace_region_config(
+            skypilot_config.get_effective_queue_name(
                 # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
-                keys=('kueue', 'local_queue_name'),
-                default_value=None,
                 override_configs=resources.cluster_config_overrides))
 
         # Check DWS configuration for GKE.
@@ -724,7 +884,7 @@ class Kubernetes(clouds.Cloud):
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
-                cloud='kubernetes',
+                cloud=self._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -757,6 +917,39 @@ class Kubernetes(clouds.Cloud):
             keys=('provision_timeout',),
             default_value=timeout,
             override_configs=resources.cluster_config_overrides)
+
+        namespace = kubernetes_utils.get_namespace(
+            context=context,
+            override_configs=resources.cluster_config_overrides,
+            cloud=cloud_config_str,
+        )
+
+        # Detect hostNetwork before the template is rendered so the probe
+        # env vars can be wired into deploy_vars. Two independent paths put
+        # a pod on the host network namespace, and both need the probe:
+        #   1. The user sets spec.hostNetwork in pod_config. Resolved through
+        #      the same helper combine_pod_config_fields() uses, so this
+        #      agrees with the pod_config folded into the rendered YAML.
+        #   2. OCI OKE RoCE: the template forces `hostNetwork: true` from
+        #      k8s_enable_oci_roce (the user never sets it in pod_config, so
+        #      path 1 wouldn't catch it). Without the probe, the OCI RoCE
+        #      pod's sshd can't bind host:22 (the K8s node's own sshd owns
+        #      it) and inter-node Ray ports collide — so OCI RoCE is treated
+        #      as host-networked here too. Keep this in sync with the
+        #      `hostNetwork: true` gate in kubernetes-ray.yml.j2.
+        oci_roce_enabled = (
+            network_type == KubernetesHighPerformanceNetworkType.OCI_ROCE)
+        merged_pod_config = kubernetes_utils.resolve_effective_pod_config(
+            resources.cluster_config_overrides, self, context)
+        k8s_host_network = oci_roce_enabled or bool(
+            merged_pod_config.get('spec', {}).get('hostNetwork', False))
+        if k8s_host_network:
+            cluster_name_on_cloud = cluster_name.name_on_cloud
+            k8s_env_vars['SKYPILOT_HOST_NETWORK'] = '1'
+            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAME'] = (
+                host_network_probe.ray_ports_configmap_name(
+                    cluster_name_on_cloud))
+            k8s_env_vars['SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE'] = namespace
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -814,26 +1007,52 @@ class Kubernetes(clouds.Cloud):
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
+            'k8s_context': context,
+            'k8s_namespace': namespace,
+            'k8s_host_network': k8s_host_network,
         }
+
+        # Pod-level terminationGracePeriodSeconds rendered from any
+        # preemption hooks the resources declare (see
+        # `_compute_preemption_hook_timeout`).  Autostop and `sky down`
+        # paths control their own timing so they don't need a
+        # grace-period override — hook-free pods stay on the K8s
+        # default (30s).
+        preemption_timeout = _compute_preemption_hook_timeout(resources.hooks)
+        if preemption_timeout is not None:
+            deploy_vars['preemption_hook_timeout'] = preemption_timeout
+
+        # Add ephemeral storage to deploy vars if specified.
+        ephemeral_storage = resources.ephemeral_storage
+        if ephemeral_storage is not None:
+            deploy_vars['k8s_ephemeral_storage'] = str(ephemeral_storage)
 
         # Calculate CPU/memory limits if set_pod_resource_limits is configured.
         # Convert config: False -> no limits, True -> multiplier 1.0,
-        # number -> that multiplier
+        # number -> that multiplier. Limits are calculated with unclamped
+        # values for maximum burst as intended.
+        set_pod_resource_limits_config = (
+            skypilot_config.get_effective_workspace_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('set_pod_resource_limits',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides))
         if set_pod_resource_limits_config is not False:
             if set_pod_resource_limits_config is True:
-                multiplier = 1.0
+                mul = 1.0
             else:
-                multiplier = float(set_pod_resource_limits_config)
-            deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
-            deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
-
-        # Add kubecontext if it is set. It may be None if SkyPilot is running
-        # inside a pod with in-cluster auth.
-        if context is not None:
-            deploy_vars['k8s_context'] = context
-
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
-        deploy_vars['k8s_namespace'] = namespace
+                mul = float(set_pod_resource_limits_config)
+            if mul == 1.0:
+                # For QoS purposes, we set the limit to match the request.
+                deploy_vars['k8s_cpu_limit'] = round(cpus, 3)
+                deploy_vars['k8s_memory_limit'] = round(mem, 3)
+            else:
+                deploy_vars['k8s_cpu_limit'] = round(k.cpus * mul, 3)
+                deploy_vars['k8s_memory_limit'] = round(k.memory * mul, 3)
+            if ephemeral_storage is not None:
+                deploy_vars['k8s_ephemeral_storage_limit'] = round(
+                    ephemeral_storage * mul, 3)
 
         # Add backward compatibility template variables for GPUDirect variants
         deploy_vars['k8s_enable_gpudirect_tcpx'] = (
@@ -851,6 +1070,50 @@ class Kubernetes(clouds.Cloud):
 
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
+
+        # OCI OKE RoCE: requires hostNetwork, privileged containers, and a
+        # hostPath mount of /dev/infiniband (no device plugin on OCI). The
+        # hostNetwork part also feeds k8s_host_network above (see comment
+        # there), which is what activates the Ray-port probe machinery.
+        deploy_vars['k8s_enable_oci_roce'] = oci_roce_enabled
+
+        # User-specified APT mirror candidates for pod package installs.
+        # None means unset (template uses built-in defaults); an empty list
+        # explicitly disables fallback mirrors.
+        deploy_vars['k8s_apt_mirrors'] = (
+            skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('apt_mirrors',),
+                default_value=None,
+                override_configs=resources.cluster_config_overrides))
+
+        # Docker sidecar (DinD / BuildKit) support.
+        raw_docker_cfg = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('enable_docker',),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides)
+        docker_cfg = kubernetes_utils.normalize_enable_docker_config(
+            raw_docker_cfg)
+        if docker_cfg is not None:
+            docker_mode = docker_cfg.mode
+            dind_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.ALL]
+            build_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.BUILD]
+            deploy_vars['k8s_enable_docker_all'] = (
+                docker_mode == kubernetes_utils.DockerMode.ALL)
+            deploy_vars['k8s_enable_docker_build'] = (
+                docker_mode == kubernetes_utils.DockerMode.BUILD)
+            deploy_vars['k8s_docker_dind_image'] = dind_defaults.image
+            deploy_vars['k8s_docker_buildkit_image'] = build_defaults.image
+            deploy_vars['k8s_docker_config_dict'] = docker_cfg.to_dict()
+        else:
+            deploy_vars['k8s_enable_docker_all'] = False
+            deploy_vars['k8s_enable_docker_build'] = False
+            deploy_vars['k8s_docker_config_dict'] = None
 
         return deploy_vars
 
@@ -909,7 +1172,9 @@ class Kubernetes(clouds.Cloud):
             disk_tier=resources.disk_tier,
             local_disk=resources.local_disk,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            use_spot=resources.use_spot,
+            max_hourly_cost=resources.max_hourly_cost)
 
         if accelerators is None:
             # For CPU only clusters, need no special handling
@@ -975,7 +1240,7 @@ class Kubernetes(clouds.Cloud):
 
         try:
             check_result = kubernetes_utils.check_credentials(
-                context, run_optional_checks=True)
+                context, run_optional_checks=True, cloud=cls._REPR.lower())
             if check_result[0]:
                 if check_result[1] is not None:
                     return True, (_bright_green_color('enabled.') +
@@ -1107,6 +1372,14 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def get_identity_from_context(context):
+        # TODO (kyuds): remove `namespace` from the identity formation. The
+        # issue with namespace is that it represents the default namespace of
+        # the cluster, not necessarily the actual namespace the cluster was
+        # launched on. We store the namespace in the provider config too
+        # anyways. Therefore, if users launch a SkyPilot cluster on one
+        # namespace and switches, then the a CloudUserIdentityError will
+        # be raised. Currently, this is difficult as there is no good
+        # forward compatibility mechanism (upgrade -> downgrade).
         if 'namespace' in context['context']:
             namespace = context['context']['namespace']
         else:
@@ -1117,6 +1390,37 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
+    def get_identity_from_context_name(cls,
+                                       context: str) -> Optional[List[str]]:
+        """Returns the user identity for a specific Kubernetes context.
+
+        Args:
+            context: The name of the Kubernetes context to get the
+                identity for.
+
+        Returns:
+            None if the kubeconfig is not available, otherwise
+            the identity for the given context.
+
+        Raises:
+            CloudUserIdentityError: If the context is not found in kubeconfig.
+        """
+        k8s = kubernetes.kubernetes
+        err = f'Kubernetes context {context!r} not found in kubeconfig.'
+        if context == kubernetes.in_cluster_context_name():
+            if kubernetes_utils.is_incluster_config_available():
+                return kubernetes.in_cluster_identity()
+            raise exceptions.CloudUserIdentityError(err)
+        try:
+            all_contexts, _ = kubernetes.list_kube_config_contexts()
+        except k8s.config.config_exception.ConfigException:
+            raise exceptions.CloudUserIdentityError(err) from None
+        context_map = {ctx['name']: ctx for ctx in all_contexts}
+        if context not in context_map:
+            raise exceptions.CloudUserIdentityError(err)
+        return [cls.get_identity_from_context(context_map[context])]
+
+    @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         identities = []
         k8s = kubernetes.kubernetes
@@ -1124,14 +1428,18 @@ class Kubernetes(clouds.Cloud):
             all_contexts, current_context = (
                 kubernetes.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
-            return None
-        # Add current context at the head of the list
-        current_identity = [cls.get_identity_from_context(current_context)]
-        identities.append(current_identity)
+            all_contexts = []
+            current_context = None
+        if current_context:
+            # Add current context at the head of the list
+            current_identity = [cls.get_identity_from_context(current_context)]
+            identities.append(current_identity)
         for context in all_contexts:
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
-        return identities
+        if kubernetes_utils.is_incluster_config_available():
+            identities.append(kubernetes.in_cluster_identity())
+        return identities if identities else None
 
     @classmethod
     def is_volume_name_valid(cls,
@@ -1242,6 +1550,15 @@ class Kubernetes(clouds.Cloud):
                             return (
                                 KubernetesHighPerformanceNetworkType.TOGETHER,
                                 None)
+                        # OCI OKE bare-metal GPU nodes provisioned in a
+                        # dedicated RDMA capacity pool. The `rdma.*` label
+                        # family is only set on RoCE-capable nodes; matching
+                        # broader `oci.oraclecloud.com/` would false-positive
+                        # on non-RDMA OCI nodes.
+                        if label_key.startswith('oci.oraclecloud.com/rdma.'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.OCI_ROCE,
+                                None)
                         if label_key.startswith(
                             ('k8s.io/cloud-provider-aws', 'topology.k8s.aws',
                              'topology.ebs.csi.aws.com')):
@@ -1348,7 +1665,7 @@ class Kubernetes(clouds.Cloud):
         # Check if the cluster has any node pools with autoscaling enabled
         # with machine types that support high perf networking for GKE.
         autoscaler_type = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cls._REPR.lower(),
             region=context,
             keys=('autoscaler',),
             default_value=None)

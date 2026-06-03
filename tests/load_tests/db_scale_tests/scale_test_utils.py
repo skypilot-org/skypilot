@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import psycopg2
 from psycopg2.extras import execute_batch
+from psycopg2.extras import Json
 from sample_based_generator import SampleBasedGenerator
 
 from sky import global_user_state
@@ -117,6 +118,23 @@ class TestScale:
             execute_batch(cursor, sql, batch_data, page_size=page_size)
         else:
             cursor.executemany(sql, batch_data)
+
+    def _adapt_row_for_insert(self, row, columns):
+        """Convert a row dict to a tuple in column order, wrapping dict/list
+        values with psycopg2's Json() for the postgres path.
+
+        psycopg2's RealDictCursor auto-deserializes JSON columns (e.g.
+        spot.full_resources, spot.links) into Python dicts/lists when read,
+        but the default adapter raises ``can't adapt type 'dict'`` when those
+        values are passed back to ``cursor.execute``. SQLite stores JSON as
+        text and the round-trip needs no wrapping.
+        """
+        if self.use_postgres:
+            return tuple(
+                Json(row[col]) if isinstance(row[col], (dict,
+                                                        list)) else row[col]
+                for col in columns)
+        return tuple(row[col] for col in columns)
 
     def _get_integrity_error_class(self):
         """Get the IntegrityError exception class for current database."""
@@ -375,12 +393,12 @@ class TestScale:
                 job_info_batch_data = []
 
                 for spot_job in spot_batch:
-                    row_data = tuple(spot_job[col] for col in spot_columns)
-                    spot_batch_data.append(row_data)
+                    spot_batch_data.append(
+                        self._adapt_row_for_insert(spot_job, spot_columns))
 
                 for job_info in job_info_batch:
-                    row_data = tuple(job_info[col] for col in job_info_columns)
-                    job_info_batch_data.append(row_data)
+                    job_info_batch_data.append(
+                        self._adapt_row_for_insert(job_info, job_info_columns))
 
                 self._execute_batch(cursor, spot_insert_sql, spot_batch_data,
                                     batch_size)
@@ -398,5 +416,8 @@ class TestScale:
             return total_inserted
 
         except Exception as e:
+            # Re-raise so main() reports the failure and exits non-zero;
+            # callers (including the bash test harness) previously masked
+            # injection failures by treating returning 0 as success.
             print(f"Failed to inject managed jobs: {e}")
-            return 0
+            raise

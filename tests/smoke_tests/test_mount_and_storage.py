@@ -26,6 +26,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import time
 from typing import Dict, Optional, TextIO
 import urllib.parse
@@ -42,8 +43,10 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import vastdata
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -139,6 +142,116 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
         (f'sky down -y {name} {name}-2',
          f'sky storage delete -y {storage_name} {storage_name}-2'),
         timeout=20 * 60,  # 20 mins
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_seeweb
+def test_concurrent_file_mounts_launch(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'Skipping because file mount uploads will be skipped for local server.'
+        )
+    name = smoke_tests_utils.get_cluster_name()
+    test_commands = [
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        # Write random content so the blob hash is unique per test run,
+        # avoiding false "already exists" from a previous run's cache.
+        f'echo {name} > ~/tmpfile',
+        f'echo {name} > ~/tmp-workdir/foo',
+        # Launch two clusters concurrently with the same file mounts.
+        (f'sky launch -y -c {name}-1 --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-1.log 2>&1 & PID1=$!; '
+         f'sky launch -y -c {name}-2 --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-2.log 2>&1 & PID2=$!; '
+         f'RC1=0; wait $PID1 || RC1=$?; '
+         f'RC2=0; wait $PID2 || RC2=$?; '
+         f'cat /tmp/{name}-1.log; cat /tmp/{name}-2.log; '
+         f'echo "Exit codes: $RC1 $RC2"; '
+         f'[ $RC1 -eq 0 ] && [ $RC2 -eq 0 ]'),
+        f'sky logs {name}-1 1 --status',
+        f'sky logs {name}-2 1 --status',
+        # Verify that only one actual upload occurred (the other should be
+        # deduplicated). Upload logs are in ~/sky_logs/file_uploads/*.log.
+        ('UPLOADED=$(grep -rl "Uploaded files:" ~/sky_logs/file_uploads/ | wc -l); '
+         'SKIPPED=$(grep -rl "Blob already exists, skipping" ~/sky_logs/file_uploads/ | wc -l); '
+         'echo "Uploaded: $UPLOADED, Skipped: $SKIPPED"; '
+         '[ "$UPLOADED" -ge 1 ] && [ "$SKIPPED" -ge 1 ]'),
+    ]
+    test = smoke_tests_utils.Test(
+        'concurrent_file_mounts_launch',
+        test_commands,
+        f'sky down -y {name}-1 {name}-2; '
+        f'rm -f /tmp/{name}-1.log /tmp/{name}-2.log',
+        smoke_tests_utils.get_timeout(generic_cloud, 30 * 60),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.no_fluidstack
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_seeweb
+def test_concurrent_file_mounts_jobs_launch(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'Skipping because file mount uploads will be skipped for local server.'
+        )
+    name = smoke_tests_utils.get_cluster_name()
+    job1_name = f'{name}-job1'
+    job2_name = f'{name}-job2'
+    test_commands = [
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        # Write random content so the blob hash is unique per test run,
+        # avoiding false "already exists" from a previous run's cache.
+        f'echo {name} > ~/tmpfile',
+        f'echo {name} > ~/tmp-workdir/foo',
+        # Launch two managed jobs concurrently with the same file mounts.
+        (f'sky jobs launch -y -d -n {job1_name} --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-job1.log 2>&1 & PID1=$!; '
+         f'sky jobs launch -y -d -n {job2_name} --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-job2.log 2>&1 & PID2=$!; '
+         f'RC1=0; wait $PID1 || RC1=$?; '
+         f'RC2=0; wait $PID2 || RC2=$?; '
+         f'cat /tmp/{name}-job1.log; cat /tmp/{name}-job2.log; '
+         f'echo "Exit codes: $RC1 $RC2"; '
+         f'[ $RC1 -eq 0 ] && [ $RC2 -eq 0 ]'),
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=job1_name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=600),
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=job2_name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=600),
+        # Verify that only one actual upload occurred (the other should be
+        # deduplicated). Upload logs are in ~/sky_logs/file_uploads/*.log.
+        ('UPLOADED=$(grep -rl "Uploaded files:" ~/sky_logs/file_uploads/ | wc -l); '
+         'SKIPPED=$(grep -rl "Blob already exists, skipping" ~/sky_logs/file_uploads/ | wc -l); '
+         'echo "Uploaded: $UPLOADED, Skipped: $SKIPPED"; '
+         '[ "$UPLOADED" -ge 1 ] && [ "$SKIPPED" -ge 1 ]'),
+    ]
+    test = smoke_tests_utils.Test(
+        'concurrent_file_mounts_jobs_launch',
+        test_commands,
+        f'sky jobs cancel -y -n {job1_name}; sky jobs cancel -y -n {job2_name}; '
+        f'rm -f /tmp/{name}-job1.log /tmp/{name}-job2.log',
+        smoke_tests_utils.get_timeout(generic_cloud, 30 * 60),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -557,6 +670,104 @@ def test_slurm_storage_mounts_cached(image_id: Optional[str]):
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_ensure_no_fd_leak_fusermount_server():
+    """Verify fusermount-server closes /dev/fuse fds after MOUNT_CACHED mounts.
+
+    Each MOUNT_CACHED mount passes a /dev/fuse fd to the client via SCM_RIGHTS.
+    A prior bug (fixed in #9463) left the server's copy open, leaking one fd
+    per mount. This test launches two clusters, checks the fd count after each,
+    and asserts no /dev/fuse fds are leaked.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    cloud = 'kubernetes'
+    yaml_content = textwrap.dedent(f"""\
+        resources:
+          cloud: kubernetes
+          cpus: 2+
+
+        file_mounts:
+          /data:
+            name: {storage_name}
+            source: ~/tmp-workdir
+            mode: MOUNT_CACHED
+
+        run: |
+          ls /data
+          echo "MOUNT_READY"
+          sleep infinity
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+        name1 = f'{name}-1'
+        name2 = f'{name}-2'
+
+        # Count /dev/fuse fds in the fusermount-server pod on the same node
+        # as a given workload pod. Uses per-fd readlink with timeout to avoid
+        # blocking on stuck fds.
+        # Look up the workload pod via the skypilot-cluster-name
+        # annotation (raw cluster name, no hash suffix).
+        get_node = ('NODE=$(kubectl get pods -o'
+                    ' custom-columns=NAME:.metadata.name,'
+                    'NODE:.spec.nodeName,'
+                    'ANN:.metadata.annotations.skypilot-cluster-name'
+                    ' --no-headers |'
+                    """ awk -v n="{cluster}" '$NF==n{{print $2}}' |"""
+                    ' head -1) && echo "node=$NODE"')
+        get_fuse_pod = ('FUSE_POD=$(kubectl get pods -n skypilot-system'
+                        ' -l app=fusermount-server'
+                        ' --field-selector spec.nodeName=$NODE'
+                        ' -o jsonpath=\'{{.items[0].metadata.name}}\') &&'
+                        ' echo "fuse_pod=$FUSE_POD"')
+        count_fuse_fds = (
+            'COUNT=$(kubectl exec -n skypilot-system $FUSE_POD --'
+            ' sh -c \''
+            'c=0; for i in $(seq 0 50); do'
+            ' [ -e /proc/1/fd/$i ] &&'
+            ' t=$(timeout 1 readlink /proc/1/fd/$i 2>/dev/null) &&'
+            ' case "$t" in *fuse*) c=$((c+1));; esac;'
+            ' done; echo $c\') &&'
+            ' echo "fuse_fd_count=$COUNT" &&'
+            ' [ "$COUNT" -eq 0 ]')
+        fuse_fd_check = (f'{get_node} && {get_fuse_pod} && {count_fuse_fds}')
+
+        wait_mount = ('for i in $(seq 1 60); do'
+                      ' sky logs {cluster} 1 --no-follow 2>&1'
+                      ' | grep -q MOUNT_READY'
+                      ' && break || sleep 5;'
+                      ' done')
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, name),
+            # Launch first cluster with MOUNT_CACHED
+            f'sky launch -y -c {name1} -d {yaml_path}',
+            wait_mount.format(cluster=name1),
+            # After first mount: assert 0 leaked fuse fds
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, fuse_fd_check.format(cluster=name1)),
+            # Launch second cluster with MOUNT_CACHED
+            f'sky launch -y -c {name2} -d {yaml_path}',
+            wait_mount.format(cluster=name2),
+            # After second mount: still 0 leaked fuse fds
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, fuse_fd_check.format(cluster=name2)),
+        ]
+        clean_command = (
+            f'sky down -y {name1} {name2}; '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+            f'sky storage delete -y {storage_name}')
+        test = smoke_tests_utils.Test(
+            'kubernetes_ensure_no_fd_leak_fusermount_server',
+            test_commands,
+            clean_command,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_context_switch():
     name = smoke_tests_utils.get_cluster_name()
     new_context = f'sky-test-context-{int(time.time())}'
@@ -701,6 +912,90 @@ def test_nebius_storage_mounts(generic_cloud: str):
 #             timeout=30 * 60,  # 20 mins
 #         )
 #         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.vastdata
+def test_vastdata_storage_mounts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_vastdata_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',
+            (f'AWS_SHARED_CREDENTIALS_FILE='
+             f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
+             f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
+             f'aws s3 ls s3://{storage_name}/hello.txt '
+             f'--profile={vastdata.VASTDATA_PROFILE_NAME}'),
+        ]
+
+        test = smoke_tests_utils.Test(
+            'vastdata_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.huggingface
+def test_huggingface_storage_mounts(generic_cloud: str):
+    """End-to-end smoke test for HF Buckets + HF repo mounts.
+
+    The YAML exercises:
+      - COPY-mode upload (dir and list-of-files) to a new HF bucket.
+      - MOUNT / MOUNT_CACHED modes to the same bucket (read-write).
+      - MOUNT mode for a public model repo (read-only, auth optional).
+      - MOUNT mode for a public dataset repo at ``@main``.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # HF bucket names must be ``<namespace>/<bucket>``. Use the logged-in
+    # namespace so this works across test environments.
+    user = huggingface.api().whoami(token=huggingface.get_token())
+    namespace = user['name']
+    bucket_name = f'sky-test-{int(time.time())}'
+    storage_name = f'{namespace}/{bucket_name}'
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_huggingface_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        # Post-launch verification: uploaded files should be listable via
+        # ``huggingface_hub`` against the HF Bucket.
+        verify_py = (
+            'python3 -c "from huggingface_hub import HfApi; import os;'
+            ' token=os.environ.get(\\"HF_TOKEN\\") or'
+            ' open(os.path.expanduser(\\"~/.cache/huggingface/token\\"))'
+            '.read().strip();'
+            f' entries=list(HfApi().list_bucket_tree({storage_name!r},'
+            ' recursive=True, token=token));'
+            ' names=[e.path for e in entries];'
+            ' assert any(\\"hello.txt\\" in n for n in names), names"')
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            verify_py,
+        ]
+        test = smoke_tests_utils.Test(
+            'huggingface_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
@@ -1549,6 +1844,12 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    # Test fixture creates Storage objects via the SDK directly, which writes
+    # to the local SQLite. `sky storage ls` then queries the remote server's
+    # Postgres -- the two state stores never agree, so the assertion that the
+    # bucket name appears in `sky storage ls` output cannot hold against a
+    # remote API server.
+    @pytest.mark.no_remote_server
     @pytest.mark.no_shadeform  # Requires other clouds to be enabled
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1582,6 +1883,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_remote_server
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
@@ -1650,6 +1952,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_remote_server
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1701,6 +2004,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_remote_server
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1736,6 +2040,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_remote_server
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1775,6 +2080,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_remote_server
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -2014,6 +2320,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_postgres
+    @pytest.mark.no_remote_server
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     def test_copy_mount_existing_storage(self,

@@ -115,6 +115,10 @@ Private registries
 
     These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
+.. note::
+
+    For **Slurm** clusters, private registry authentication is configured at the cluster level by the administrator. See :ref:`Private registries on Slurm <slurm-container-images>` for details.
+
 When using this mode, to access Docker images hosted on private registries,
 you can use :ref:`task environment variables <env-vars>`:
 
