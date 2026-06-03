@@ -3272,10 +3272,9 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
                     await proc.wait()
             except ProcessLookupError:
                 stdout_data = await stdout.read()
-                logger.error(
-                    'VM SSH proxy process was terminated before the '
-                    'websocket connection was closed. Remaining '
-                    f'output: {str(stdout_data)}')
+                logger.error('VM SSH proxy process was terminated before the '
+                             'websocket connection was closed. Remaining '
+                             f'output: {str(stdout_data)}')
                 reason = 'SSHProcessExit'
             else:
                 if ssh_failed:

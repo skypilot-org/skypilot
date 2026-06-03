@@ -656,16 +656,18 @@ class TestLoadVmSshProxyMode:
         config.load_vm_ssh_proxy_mode.cache_clear()
 
     def test_default_is_only_internal(self):
-        assert (_load_vm_ssh_proxy_mode({}) ==
-                config.VmSshProxyMode.ONLY_INTERNAL)
+        assert (_load_vm_ssh_proxy_mode(
+            {}) == config.VmSshProxyMode.ONLY_INTERNAL)
 
     def test_load_none_mode(self):
-        assert (_load_vm_ssh_proxy_mode({'ssh': {'vm_proxy_mode': 'none'}}) ==
-                config.VmSshProxyMode.NONE)
+        assert (_load_vm_ssh_proxy_mode({'ssh': {
+            'vm_proxy_mode': 'none'
+        }}) == config.VmSshProxyMode.NONE)
 
     def test_load_all_mode(self):
-        assert (_load_vm_ssh_proxy_mode({'ssh': {'vm_proxy_mode': 'all'}}) ==
-                config.VmSshProxyMode.ALL)
+        assert (_load_vm_ssh_proxy_mode({'ssh': {
+            'vm_proxy_mode': 'all'
+        }}) == config.VmSshProxyMode.ALL)
 
     def test_load_only_internal_mode(self):
         assert (_load_vm_ssh_proxy_mode(
