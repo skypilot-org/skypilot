@@ -687,6 +687,7 @@ def _parse_override_params(
     network_tier: Optional[str] = None,
     local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
+    priority: Optional[str] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
@@ -759,6 +760,16 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if priority is not None:
+        # `--priority` accepts either an integer (priority) or a string
+        # (priority class). Clear both first so that a resource never carries
+        # both at once, then set whichever one applies ('none' clears both).
+        override_params.update({'priority': None, 'priority_class': None})
+        if priority.lower() != 'none':
+            try:
+                override_params['priority'] = int(priority)
+            except ValueError:
+                override_params['priority_class'] = priority
     if config_override:
         override_params['_cluster_config_overrides'] = config_override
     return override_params
@@ -957,6 +968,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     network_tier: Optional[str] = None,
     local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
+    priority: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     secret: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
@@ -1011,6 +1023,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              network_tier=network_tier,
                                              local_disk=local_disk,
                                              ports=ports,
+                                             priority=priority,
                                              config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
@@ -1218,7 +1231,8 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                     'To run locally, create a local Kubernetes cluster with '
                     '``sky local up``.'))
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
-                    flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+                    flags.EXTRA_RESOURCES_OPTIONS + flags.PRIORITY_OPTION +
+                    flags.COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1326,6 +1340,7 @@ def launch(
     network_tier: Optional[str],
     local_disk: Optional[str],
     ports: Tuple[str, ...],
+    priority: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
@@ -1389,6 +1404,7 @@ def launch(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
+        priority=priority,
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
@@ -5697,7 +5713,8 @@ def jobs():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
-                    flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+                    flags.EXTRA_RESOURCES_OPTIONS + flags.PRIORITY_OPTION +
+                    flags.COMMON_OPTIONS)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -5767,6 +5784,7 @@ def jobs_launch(
     network_tier: Optional[str],
     local_disk: Optional[str],
     ports: Tuple[str],
+    priority: Optional[str],
     detach_run: bool,
     yes: bool,
     pool: Optional[str],  # pylint: disable=redefined-outer-name
@@ -5826,6 +5844,7 @@ def jobs_launch(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
+        priority=priority,
         job_recovery=job_recovery,
         config_override=config_override,
         git_url=git_url,

@@ -8,6 +8,7 @@ import dotenv
 
 from sky import skypilot_config
 from sky.skylet import autostop_lib
+from sky.skylet import constants
 from sky.utils import resources_utils
 
 
@@ -306,6 +307,23 @@ EXTRA_RESOURCES_OPTIONS = [
               'the flag to specify multiple values (``--ports 8080 '
               '--ports 9090-9100``). If specified, overrides the '
               '"ports" config in the YAML.'),
+    ),
+]
+
+PRIORITY_OPTION = [
+    click.option(
+        '--priority',
+        required=False,
+        default=None,
+        type=str,
+        help=(
+            'Priority for this task. Accepts either an integer priority (from '
+            f'{constants.MIN_PRIORITY} to {constants.MAX_PRIORITY}, where '
+            'higher values indicate higher priority) which sets the '
+            '"resources.priority" config, or a string priority class name '
+            '(e.g. for Kueue) which sets the "resources.priority_class" '
+            'config. Setting one clears the other. Passing "none" resets '
+            'both.'),
     ),
 ]
 
