@@ -70,7 +70,7 @@ CLI and the bundled Sandbox SDK are installed, that is the whole loop:
 
    import sky.sandbox
 
-   # Create a sandbox from the built-in `default` template.
+   # Create a sandbox from the built-in `default` pool.
    sb = sky.sandbox.create(name='dev')
 
    # Run a command (argv tokens, no implicit shell); get
@@ -160,17 +160,16 @@ fan-out, and secret / volume injection:
                 volumes={'/data': 'shared-data'},
             )
 
-The SDK exposes ``create``, ``exec``, ``terminate``, ``ls``, ``create_template``,
-``set_pool_size``, and ``delete_template``. Every per-call entrypoint has an async
+The SDK exposes ``create``, ``exec``, ``terminate``, ``ls``, ``create_pool``,
+``set_pool_size``, and ``delete_pool``. Every per-call entrypoint has an async
 sibling on a ``.aio`` attribute (``sky.sandbox.create.aio(...)``,
 ``sb.exec.aio(...)``), so the same names work in event-loop code. See the
-dashboard's **Sandboxes** page to manage templates, warm pools, and running
-sandboxes in the UI.
+dashboard's **Sandboxes** page to manage pools and running sandboxes in the UI.
 
 Running AI coding agents
 ------------------------
 
-The built-in ``claude`` template ships with `Claude Code
+The built-in ``claude`` pool ships with `Claude Code
 <https://www.anthropic.com/claude-code>`_ installed. Give an agent its own
 isolated sandbox, inject its token from the secrets manager, and drive it
 non-interactively:
@@ -181,7 +180,7 @@ non-interactively:
 
    with sky.sandbox.create(
        name='claude',
-       template='claude',
+       pool='claude',
        secrets=['CLAUDE_CODE_OAUTH_TOKEN'],
    ) as sb:
        # Shell features like pipes need an explicit shell.
@@ -194,43 +193,73 @@ non-interactively:
 Each agent runs in its own pod, so many agents can work in parallel without
 sharing a filesystem or stepping on each other.
 
-Templates and warm pools
--------------------------
+Pools
+-----
 
-A **template** defines the shape of a sandbox: its container image, CPU, memory,
-and any baked-in volumes. Each template is backed by a **warm pool** of idle
-pods, so launching against it is instant: a launch *claims* a ready pod from the
-pool, which becomes your running sandbox. SkyPilot ships a built-in ``default``
-template (a ``python`` image), so the quickstart above needs no template setup;
-create your own when you need a different image or size.
+A **pool** defines the shape of a sandbox (its container image, CPU, and memory)
+and keeps a set of warm, pre-provisioned pods ready. Launching is instant:
+``create`` *claims* a ready pod from the pool, which becomes your running
+sandbox. SkyPilot ships a built-in ``default`` pool (a ``python`` image), so the
+quickstart above needs no setup; create your own when you need a different image
+or size.
 
 .. raw:: html
 
-   <iframe src="_static/sandboxes-diagram.html"
-           title="How sandbox templates and warm pools work"
+   <iframe id="sandbox-pools-diagram"
+           src="_static/sandboxes-diagram.html"
+           title="How sandbox pools work"
            loading="lazy"
-           style="width: 100%; max-width: 1000px; height: 470px; border: 1px solid #e5e5e5; border-radius: 8px; display: block; margin: 0 auto 24px auto;"></iframe>
+           scrolling="no"
+           style="width: 100%; max-width: 1000px; height: 470px; border: none; background: transparent; display: block; margin: 0 auto 24px auto;"></iframe>
+   <script>
+   // The standalone diagram draws its own white card frame and a gray
+   // dotted-grid stage. Embedded in the docs those read as a floating
+   // gray/white box, so strip just those two layers (keeping the inner
+   // cards) to sit the diagram directly on the page. Selector-based
+   // !important rules beat the diagram's runtime inline styles and survive
+   // its re-renders; keeping this here (not in the exported asset) means it
+   // persists across diagram re-exports.
+   (function () {
+     var iframe = document.getElementById('sandbox-pools-diagram');
+     if (!iframe) return;
+     function strip() {
+       try {
+         var doc = iframe.contentDocument;
+         if (!doc || !doc.head || doc.getElementById('sky-embed-transparent')) return;
+         var s = doc.createElement('style');
+         s.id = 'sky-embed-transparent';
+         s.textContent =
+           'div[style*="margin: 0px auto"][style*="border-radius: 16px"]{background:transparent !important;border:none !important;box-shadow:none !important;}' +
+           'div[style*="margin: 0px auto"][style*="border-radius: 16px"] > div{background:transparent !important;}' +
+           'div[style*="radial-gradient"]{background:transparent !important;background-image:none !important;}';
+         doc.head.appendChild(s);
+       } catch (e) { /* cross-document access can fail harmlessly; ignore */ }
+     }
+     iframe.addEventListener('load', strip);
+     strip();
+   })();
+   </script>
 
-Create a template with a warm pool, and resize the pool at any time:
+Create a pool, and resize it at any time:
 
 .. code-block:: python
 
    import sky.sandbox
 
-   # Create a template with 10 warm pods kept idle and ready.
-   sky.sandbox.create_template(
+   # Create a pool with 10 warm pods kept idle and ready.
+   sky.sandbox.create_pool(
        name='ml-gpu',
        image='nvcr.io/nvidia/pytorch:24.05-py3',
        cpus=8,
        memory_gb=64,
-       pool_replicas=10,
+       replicas=10,
    )
 
-   # Scale the warm pool up or down at any time.
+   # Scale the pool up or down at any time.
    sky.sandbox.set_pool_size('ml-gpu', replicas=50)
 
-   # Launch against the template.
-   sb = sky.sandbox.create(name='train', template='ml-gpu')
+   # Launch a sandbox from the pool.
+   sb = sky.sandbox.create(name='train', pool='ml-gpu')
 
 .. seealso::
 
