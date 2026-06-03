@@ -3134,6 +3134,15 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for VM cluster: {cluster_name}')
 
+    # Fail-fast before acquiring a semaphore slot or querying the DB.
+    proxy_mode = server_config.load_vm_ssh_proxy_mode()
+    if proxy_mode == server_config.VmSshProxyMode.NONE:
+        await websocket.close(
+            code=1008,
+            reason='VM SSH proxy is disabled on this server '
+            '(vm_proxy_mode: none).')
+        return
+
     try:
         await asyncio.wait_for(_vm_ssh_proxy_semaphore.acquire(), timeout=10)
     except asyncio.TimeoutError:
@@ -3164,21 +3173,18 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
                 'Use the appropriate endpoint instead.')
             return
 
-        # Enforce the server's vm_ssh_proxy_mode policy.
-        proxy_mode = server_config.load_vm_ssh_proxy_mode()
-        if proxy_mode == server_config.VmSshProxyMode.NONE:
+        if proxy_mode == server_config.VmSshProxyMode.ONLY_INTERNAL:
+            if not handle.use_internal_ips():
+                await websocket.close(
+                    code=1008,
+                    reason=f'Cluster {cluster_name} does not use internal IPs '
+                    'and vm_proxy_mode is only-internal. '
+                    'Connect directly instead.')
+                return
+        elif proxy_mode != server_config.VmSshProxyMode.ALL:
             await websocket.close(
                 code=1008,
-                reason='VM SSH proxy is disabled on this server '
-                '(vm_proxy_mode: none).')
-            return
-        if (proxy_mode == server_config.VmSshProxyMode.ONLY_INTERNAL and
-                not handle.use_internal_ips()):
-            await websocket.close(
-                code=1008,
-                reason=f'Cluster {cluster_name} does not use internal IPs '
-                'and vm_proxy_mode is only-internal. '
-                'Connect directly instead.')
+                reason=f'Unknown vm_proxy_mode: {proxy_mode.value}.')
             return
 
         runners = handle.get_command_runners()
