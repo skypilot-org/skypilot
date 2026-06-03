@@ -1,13 +1,19 @@
-# Fine-tune NVIDIA Cosmos3-Nano (16B omnimodal world model) with SkyPilot.
+# Fine-tune NVIDIA Cosmos3-Nano (16B omnimodal world model) as a SkyPilot managed job.
 #
 # Runs NVIDIA's official `vision_sft_nano` SFT recipe from
 # github.com/NVIDIA/cosmos-framework: an 8-GPU FSDP fine-tune of the Cosmos3-Nano
 # generation pathway on the public nvidia/bridge-v2-subset-synthetic-captions
 # robot-video dataset, then exports to Hugging Face safetensors. See README.md.
 #
-#   sky launch -c cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml
+# Checkpoints are written to a mounted cloud bucket, so the managed job auto-resumes
+# from the latest checkpoint after a recovery, and the outputs survive job teardown.
+#
+# Usage (CHECKPOINT_BUCKET_NAME must be a globally-unique bucket name):
+#   sky jobs launch -n cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml \
+#       --env CHECKPOINT_BUCKET_NAME=my-cosmos3-checkpoints
 #   # Quick smoke test (a few steps, still checkpoints + exports):
-#   sky launch -c cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml --env MAX_ITER=10 --env SAVE_ITER=5
+#   sky jobs launch -n cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml \
+#       --env CHECKPOINT_BUCKET_NAME=my-cosmos3-checkpoints --env MAX_ITER=10 --env SAVE_ITER=5
 
 name: cosmos3-nano-finetune
 
@@ -23,14 +29,30 @@ num_nodes: 1
 envs:
   COSMOS_FRAMEWORK_REF: 411d25b2e35bc441126f48c44a4b93e1c0564274  # pinned for reproducibility
   BASE_CHECKPOINT_NAME: Cosmos3-Nano  # cosmos-framework catalog name -> nvidia/Cosmos3-Nano on HF
+  # Dataset dir the launcher trains on. Defaults to the bridge subset downloaded in
+  # `setup`; override to fine-tune on your own data (see README).
+  DATASET_PATH: examples/data/bridge-v2-subset-synthetic-captions/sft_dataset_bridge
   MAX_ITER: "500"          # optimizer steps (recipe default 500; set small for a smoke test)
   SAVE_ITER: "100"         # save a DCP checkpoint every N steps
   EXPORT_SAFETENSORS: "1"  # export the trained checkpoint to HF safetensors (1=yes, 0=no)
+  # Globally-unique cloud bucket for durable checkpoints + exports. SkyPilot creates it
+  # and mounts it at /checkpoints, which `run` sets as the recipe's OUTPUT_ROOT, so the
+  # job auto-resumes from the latest checkpoint after a recovery. Change to your own name.
+  CHECKPOINT_BUCKET_NAME: my-cosmos3-checkpoints
 
 secrets:
   # Base model + dataset are public, so this defaults to empty (no token needed).
   # To authenticate, `export HF_TOKEN=...` and pass `--secret HF_TOKEN`.
   HF_TOKEN: ""
+
+file_mounts:
+  # Durable checkpoint store. `run` points the recipe's OUTPUT_ROOT here, so DCP
+  # checkpoints, the resolved config, and the exported safetensors all land in the
+  # bucket, surviving managed-job recovery (auto-resume) and post-job teardown.
+  # mode: MOUNT is write-through, so each checkpoint is flushed straight to the bucket.
+  /checkpoints:
+    name: ${CHECKPOINT_BUCKET_NAME}
+    mode: MOUNT
 
 setup: |
   set -e
@@ -40,7 +62,7 @@ setup: |
   export DEBIAN_FRONTEND=noninteractive
   SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
   $SUDO apt-get update -y
-  $SUDO apt-get install -y --no-install-recommends curl ffmpeg git git-lfs libx11-dev tree wget
+  $SUDO apt-get install -y --no-install-recommends curl ffmpeg git git-lfs libx11-dev wget
 
   if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -86,6 +108,11 @@ run: |
   [ -n "${HF_TOKEN:-}" ] && export HF_TOKEN
   export NPROC_PER_NODE="${SKYPILOT_NUM_GPUS_PER_NODE}"  # FSDP shards across every GPU
 
+  # Write all training outputs to the mounted checkpoint bucket so the recipe
+  # auto-resumes from the latest checkpoint after a managed-job recovery.
+  export OUTPUT_ROOT=/checkpoints
+  RUN_DIR="$OUTPUT_ROOT/cosmos3/sft/vision_sft_nano"
+
   # Set step count + checkpoint frequency in the recipe TOML.
   TOML=examples/toml/sft_config/vision_sft_nano.toml
   sed -i "s/^max_iter[[:space:]]*=.*/max_iter = ${MAX_ITER}/" "$TOML"
@@ -95,12 +122,11 @@ run: |
   bash examples/launch_sft_vision_nano.sh
 
   # Export the fine-tuned DCP checkpoint to Hugging Face safetensors.
-  RUN_DIR=outputs/train/cosmos3/sft/vision_sft_nano
   if [ "${EXPORT_SAFETENSORS}" = "1" ] && [ -f "$RUN_DIR/checkpoints/latest_checkpoint.txt" ]; then
     CKPT_ITER="$(cat "$RUN_DIR/checkpoints/latest_checkpoint.txt")"
     python -m cosmos_framework.scripts.export_model \
       --checkpoint-path "$RUN_DIR/checkpoints/$CKPT_ITER" \
       --config-file "$RUN_DIR/config.yaml" \
       -o "$RUN_DIR/model"
-    echo ">>> Fine-tuned safetensors written to $HOME/cosmos-framework/$RUN_DIR/model"
+    echo ">>> Fine-tuned safetensors written to the $CHECKPOINT_BUCKET_NAME bucket: $RUN_DIR/model"
   fi

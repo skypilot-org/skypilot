@@ -14,7 +14,7 @@ Machine learning examples:
 
 - [**`huggingface_glue_imdb_app.yaml`**](./huggingface_glue_imdb_app.yaml): Use [Huggingface Transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
 
-- [**`cosmos3-finetuning/`**](./cosmos3-finetuning/README.md): Fine-tune [NVIDIA Cosmos 3](https://github.com/NVIDIA/cosmos-framework) (`Cosmos3-Nano`, a 16B omnimodal world foundation model for Physical AI) on a robot-manipulation video dataset, using NVIDIA's official `vision_sft_nano` SFT recipe with FSDP across 8 GPUs.
+- [**`cosmos3-finetuning/`**](./cosmos3-finetuning/README.md): Fine-tune [NVIDIA Cosmos 3](https://github.com/NVIDIA/cosmos-framework) (`Cosmos3-Nano`, a 16B world foundation model for Physical AI) on robot-manipulation video as a managed job, using NVIDIA's `vision_sft_nano` SFT recipe with checkpoint-to-bucket auto-recovery.
 
 - [**`resnet_distributed_torch.yaml`**](./resnet_distributed_torch.yaml): Run Distributed PyTorch (DDP) training of ResNet50 on 2 nodes.
 
