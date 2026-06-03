@@ -1942,7 +1942,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def get_cluster_name_on_cloud(self):
         return self.cluster_name_on_cloud
 
-    def _use_internal_ips(self):
+    def use_internal_ips(self):
         """Returns whether to use internal IPs for SSH connections."""
         # Directly load the `use_internal_ips` flag from the cluster yaml
         # instead of `skypilot_config` as the latter can be changed after the
@@ -2056,7 +2056,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         == self.num_ips_per_node * self.launched_nodes and
                         all(ip is not None for ip in ips))
 
-            use_internal_ips = self._use_internal_ips()
+            use_internal_ips = self.use_internal_ips()
 
             # cluster_feasible_ips is the list of IPs of the nodes in the
             # cluster which can be used to connect to the cluster. It is a list

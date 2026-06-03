@@ -437,21 +437,14 @@ def load_external_proxy_config() -> ExternalProxyConfig:
 def load_vm_ssh_proxy_mode() -> VmSshProxyMode:
     """Load the VM SSH proxy mode from server configuration.
 
-    Returns:
-        VmSshProxyMode: The configured proxy mode. Defaults to ONLY_INTERNAL
-            if not specified, which means SSH is proxied through the API server
-            only when the cluster uses internal IPs (use_internal_ips: true).
+    Defaults to ONLY_INTERNAL if not specified.
     """
     server_config = load_server_config()
     mode_str = server_config.get_nested(('ssh', 'vm_proxy_mode'), None)
-
-    if mode_str is None:
-        # Default to ONLY_INTERNAL - proxy only when cluster uses internal IPs
-        return VmSshProxyMode.ONLY_INTERNAL
-
     try:
         return VmSshProxyMode(mode_str)
     except ValueError:
-        logger.warning(f'Invalid vm_proxy_mode value: {mode_str}. '
-                       f'Using default: only-internal')
+        if mode_str is not None:
+            logger.warning(f'Invalid vm_proxy_mode value: {mode_str}. '
+                           f'Using default: only-internal')
         return VmSshProxyMode.ONLY_INTERNAL

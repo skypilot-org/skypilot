@@ -2622,15 +2622,12 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for VM cluster: {cluster_name}')
 
-    if not _vm_ssh_proxy_semaphore.locked():
-        pass  # Fast path: semaphore available
-    else:
-        logger.warning(
-            f'VM SSH proxy at capacity ({_VM_SSH_PROXY_MAX_SESSIONS} '
-            f'sessions). Waiting for a slot...')
     try:
         await asyncio.wait_for(_vm_ssh_proxy_semaphore.acquire(), timeout=10)
     except asyncio.TimeoutError:
+        logger.warning(
+            f'VM SSH proxy at capacity ({_VM_SSH_PROXY_MAX_SESSIONS} '
+            f'sessions). Rejecting connection for cluster: {cluster_name}')
         await websocket.close(
             code=1013,  # Try Again Later
             reason=f'Too many concurrent VM SSH proxy sessions '
@@ -2644,11 +2641,8 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
             f'Websocket timestamps supported: {timestamps_supported}, '
             f'client_version = {client_version}')
 
-        # Get the cluster handle - accept any cloud type (VM-based clouds)
         handle = await _get_cluster_and_validate(cluster_name)
 
-        # Ensure this is not a Kubernetes or Slurm cluster (they have their
-        # own endpoints)
         if isinstance(handle.launched_resources.cloud,
                       (clouds.Kubernetes, clouds.Slurm)):
             await websocket.close(
@@ -2658,7 +2652,6 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
                 'Use the appropriate endpoint instead.')
             return
 
-        # Get the command runner for the target node
         runners = handle.get_command_runners()
         if worker >= len(runners):
             await websocket.close(
@@ -2669,18 +2662,12 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
 
         runner = runners[worker]
 
-        # For VM clusters, we need to establish an SSH connection to the
-        # target VM and proxy the data over the websocket.
-        # We use the SSH command runner's ssh_base_command to get the SSH
-        # command with all the necessary options (proxy commands, keys, etc.)
         ssh_cmd = runner.ssh_base_command(
             ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
             port_forward=None,
             connect_timeout=30,
         )
-        # Add netcat-style forwarding to stdin/stdout for SSH port
-        # -W host:port - Requests that standard input and output on the
-        # client be forwarded to host on port over the secure channel.
+        # -W: forward stdin/stdout to remote host:port over the SSH channel
         ssh_cmd += ['-W', 'localhost:22']
 
         logger.info(
@@ -2755,8 +2742,6 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
                     'websocket connection was closed. Remaining '
                     f'output: {str(stdout_data)}')
                 reason = 'SSHProcessExit'
-                metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                    pid=os.getpid(), reason=reason).inc()
             else:
                 if ssh_failed:
                     reason = 'SSHToVMDisconnected'
