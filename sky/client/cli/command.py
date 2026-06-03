@@ -8079,29 +8079,11 @@ def workspace_use(name: Optional[str], clear: bool):
               'machine-readable shape.')
 @usage_lib.entrypoint
 def workspace_info(output_format: str):
-    """Shows the workspace the next ``sky launch`` would land in.
+    """Shows the workspace your next request lands in by default, plus
+    your saved preferred and the workspaces you can access.
 
-    Combines the four answers users actually want about workspaces:
-
-    * which workspace the resolver will pick for the next request
-      (``workspace``) and why (``source``),
-    * the persisted preferred (``preferred``) — distinct from the
-      resolved value when preferred is unset, inaccessible, or
-      overridden by an explicit per-request setting,
-    * the full list of workspaces this user can launch into
-      (``accessible``).
-
-    JSON shape:
-
-    .. code-block:: json
-
-        {
-          "workspace": "team-a",
-          "source": "preferred",
-          "note": null,
-          "preferred": "team-a",
-          "accessible": ["default", "team-a", "team-b"]
-        }
+    A one-off ``--workspace <name>`` flag on the next command still wins;
+    this view reflects what happens when no such override is passed.
     """
     info = sdk.get_user_workspace()
     if output_format == flags.OUTPUT_FORMAT_JSON:
