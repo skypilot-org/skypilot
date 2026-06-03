@@ -71,7 +71,8 @@ setup: |
 
   # Clone cosmos-framework at the pinned commit (skip large LFS assets).
   cd "$HOME"
-  if [ ! -d cosmos-framework ]; then
+  if [ ! -d cosmos-framework/.git ]; then
+    rm -rf cosmos-framework
     GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/NVIDIA/cosmos-framework.git
   fi
   cd cosmos-framework
@@ -115,8 +116,8 @@ run: |
 
   # Set step count + checkpoint frequency in the recipe TOML.
   TOML=examples/toml/sft_config/vision_sft_nano.toml
-  sed -i "s/^max_iter[[:space:]]*=.*/max_iter = ${MAX_ITER}/" "$TOML"
-  sed -i "s/^save_iter[[:space:]]*=.*/save_iter = ${SAVE_ITER}/" "$TOML"
+  sed -i "s/^[[:space:]]*max_iter[[:space:]]*=.*/max_iter = ${MAX_ITER}/" "$TOML"
+  sed -i "s/^[[:space:]]*save_iter[[:space:]]*=.*/save_iter = ${SAVE_ITER}/" "$TOML"
 
   # Launch multi-GPU FSDP supervised fine-tuning.
   bash examples/launch_sft_vision_nano.sh
