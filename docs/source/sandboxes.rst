@@ -18,7 +18,7 @@ second**, with volumes and secrets injected automatically. A built-in image for
 .. tip::
 
    Sandboxes are part of **SkyPilot Platform**, in limited early access.
-   `Sign up here <https://forms.gle/HGGMjzvRz8Mqn9pn7>`_; takes 20 seconds.
+   `Sign up here <https://forms.gle/o4keAryXsVazNjyGA>`_; takes 20 seconds.
 
 .. raw:: html
 
@@ -242,4 +242,4 @@ Create a template with a warm pool, and resize the pool at any time:
 .. tip::
 
    Sandboxes are part of **SkyPilot Platform**, in limited early access.
-   `Sign up here <https://forms.gle/HGGMjzvRz8Mqn9pn7>`_; takes 20 seconds.
+   `Sign up here <https://forms.gle/o4keAryXsVazNjyGA>`_; takes 20 seconds.
