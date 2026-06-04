@@ -8130,6 +8130,17 @@ def workspace_info(output_format: str):
     ])
     click.echo('\n'.join(lines))
 
+    # AMBIGUOUS is the only state whose recovery message is multi-line
+    # (5+ lines) — inlining it into `Note:` would break the tree
+    # alignment, so render it as a separate paragraph below. The text
+    # comes from `WorkspaceAmbiguousError.recovery_hint()` so the CLI
+    # and launch-path error message share a single source.
+    # pylint: disable=import-outside-toplevel
+    from sky.workspaces import constants as workspace_constants
+    if info.get('source') == workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS:
+        click.echo()
+        click.echo(exceptions.WorkspaceAmbiguousError.recovery_hint())
+
 
 @cli.group(cls=_NaturalOrderGroup)
 def ssh():

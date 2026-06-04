@@ -16,6 +16,7 @@ from sky import models
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.users import server as users_server
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 
@@ -31,7 +32,7 @@ def _fake_request(auth_user):
 class TestSetUsersMeWorkspace(unittest.TestCase):
 
     def setUp(self):
-        self.user = models.User(id='hailong', name='hailong')
+        self.user = models.User(id='alice', name='alice')
 
     def _body(self, preferred):
         b = mock.MagicMock(spec=payloads.UserPreferredWorkspaceBody)
@@ -108,7 +109,7 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         # Matches how AuthProxyMiddleware constructs `auth_user` from a
         # header — which the handler must NOT blindly trust for fields
         # that live in the DB.
-        self.auth_user = models.User(id='hailong', name='hailong')
+        self.auth_user = models.User(id='alice', name='alice')
 
     def _patch(self, fresh_user, resolution, accessible):
         return [
@@ -134,12 +135,12 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
     def test_happy_path_preferred(self):
         """Preferred set + accessible -> resolver returns preferred, the
         handler echoes both alongside the accessible set."""
-        fresh = models.User(id='hailong',
-                            name='hailong',
+        fresh = models.User(id='alice',
+                            name='alice',
                             preferred_workspace='team-a')
         resolution = workspaces_core.WorkspaceResolution(
             workspace='team-a',
-            source=workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+            source=workspace_constants.WORKSPACE_SOURCE_PREFERRED)
         patches = self._patch(fresh, resolution, {'team-a', 'team-b'})
         for p in patches:
             p.start()
@@ -151,7 +152,7 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                 p.stop()
         self.assertEqual(resp['workspace'], 'team-a')
         self.assertEqual(resp['source'],
-                         workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+                         workspace_constants.WORKSPACE_SOURCE_PREFERRED)
         self.assertIsNone(resp['note'])
         self.assertEqual(resp['preferred'], 'team-a')
         # `accessible` is sorted to make the wire format deterministic
@@ -162,12 +163,12 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         """Preferred='team-x' but the user lost access (RBAC drift).
         Resolver falls back to default; handler exposes the drift note
         AND echoes the stale preferred so the UI can surface it."""
-        fresh = models.User(id='hailong',
-                            name='hailong',
+        fresh = models.User(id='alice',
+                            name='alice',
                             preferred_workspace='team-x')
         resolution = workspaces_core.WorkspaceResolution(
             workspace='default',
-            source=workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
+            source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
             note="preferred 'team-x' not accessible")
         patches = self._patch(fresh, resolution, {'default', 'team-a'})
         for p in patches:
@@ -180,7 +181,7 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                 p.stop()
         self.assertEqual(resp['workspace'], 'default')
         self.assertEqual(resp['source'],
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
         self.assertEqual(resp['note'], "preferred 'team-x' not accessible")
         # The persisted preferred is reported even though it's not
         # accessible — the dashboard surfaces this to explain the drift.
@@ -190,10 +191,10 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         """User has not set preferred but has access to default.
         Returned `preferred` is None (not the resolved fallback), so a
         client can tell "I haven't set anything" from "I set default"."""
-        fresh = models.User(id='hailong', name='hailong')
+        fresh = models.User(id='alice', name='alice')
         resolution = workspaces_core.WorkspaceResolution(
             workspace='default',
-            source=workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+            source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
         patches = self._patch(fresh, resolution, {'default', 'team-a'})
         for p in patches:
             p.start()
@@ -219,12 +220,12 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         precedence branch. Without this, `sky workspace info` would
         contradict `sky launch` for users with an active workspace set
         locally — same machinery, different answer."""
-        fresh = models.User(id='hailong',
-                            name='hailong',
+        fresh = models.User(id='alice',
+                            name='alice',
                             preferred_workspace='team-a')
         resolution = workspaces_core.WorkspaceResolution(
             workspace='team-b',
-            source=workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+            source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
         with mock.patch.object(users_server.global_user_state,
                                'get_user',
                                return_value=fresh), \
@@ -244,7 +245,7 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         resolve_mock.assert_called_once_with(fresh, requested='team-b')
         self.assertEqual(resp['workspace'], 'team-b')
         self.assertEqual(resp['source'],
-                         workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+                         workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
         # Preferred is reported alongside even though the explicit
         # override won — the caller may want to surface "you're
         # overriding your saved preference for this one launch".
@@ -256,10 +257,10 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         usually unset, but admins may pin it). Matches launch-path
         precedence: the server's loaded config flows into the
         resolver's `requested` slot."""
-        fresh = models.User(id='hailong', name='hailong')
+        fresh = models.User(id='alice', name='alice')
         resolution = workspaces_core.WorkspaceResolution(
             workspace='server-pinned',
-            source=workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+            source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
         with mock.patch.object(users_server.global_user_state,
                                'get_user',
                                return_value=fresh), \
@@ -280,14 +281,19 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         resolve_mock.assert_called_once_with(fresh, requested='server-pinned')
         self.assertEqual(resp['workspace'], 'server-pinned')
 
-    def test_ambiguous_resolver_surfaces_as_note_with_null_workspace(self):
-        """When the resolver raises WorkspaceAmbiguousError (multi-ws
-        user, no preferred, no 'default' access), the GET handler
-        returns 200 with `workspace=None` + the guidance message in
-        `note`. The CLI uses `note` to print "run `sky workspace use
-        <name>`" — a 4xx body would force every caller to parse error
-        envelopes."""
-        fresh = models.User(id='hailong', name='hailong')
+    def test_ambiguous_resolver_surfaces_as_state_coded_source(self):
+        """Resolver raises WorkspaceAmbiguousError (multi-ws user, no
+        preferred, no 'default' access). The GET handler must NOT dump
+        the exception's multi-line recovery text into `note` — that
+        breaks the CLI tree renderer and clutters the wire shape.
+        Instead, `source` is the state code `ambiguous` and `note` is
+        a short one-liner; the CLI / dashboard look up the recovery
+        hint separately via `WorkspaceAmbiguousError.recovery_hint()`.
+
+        If you revert the handler change, `source` would be `None` and
+        `note` would be the 5-line English block — this test would fail
+        on both assertions."""
+        fresh = models.User(id='alice', name='alice')
         with mock.patch.object(users_server.global_user_state,
                                'get_user',
                                return_value=fresh), \
@@ -305,15 +311,102 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
             resp = users_server.get_user_workspace(_fake_request(
                 self.auth_user))
         self.assertIsNone(resp['workspace'])
-        self.assertIsNone(resp['source'])
-        # The exception's formatted message lists candidates + guidance —
-        # we surface it verbatim in `note` so the CLI doesn't need to
-        # re-format.
-        self.assertIn('multiple workspaces', resp['note'])
-        self.assertIn('team-a', resp['note'])
-        self.assertIn('sky workspace use', resp['note'])
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS)
+        # Short, single-line note — no embedded recovery paragraph.
+        self.assertNotIn('\n', resp['note'])
+        self.assertNotIn('sky workspace use', resp['note'])
         # Accessible is still populated so the CLI can list candidates.
         self.assertEqual(resp['accessible'], ['team-a', 'team-b'])
+
+    def test_ambiguous_with_drift_note_surfaces_drift_in_note(self):
+        """Drift case: user had a preferred that lost access AND ended
+        up ambiguous. The exception carries a short `note` (the drift
+        explanation); the handler must prefer that over the generic
+        one-liner so the CLI surfaces the actual cause."""
+        fresh = models.User(id='alice',
+                            name='alice',
+                            preferred_workspace='team-x')
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(
+                 users_server.workspaces_core,
+                 'resolve_workspace_for_user',
+                 side_effect=exceptions.WorkspaceAmbiguousError(
+                     accessible=['team-a', 'team-b'],
+                     note="preferred 'team-x' not accessible")), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               return_value={'team-a', 'team-b'}), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS)
+        self.assertEqual(resp['note'], "preferred 'team-x' not accessible")
+
+    def test_no_workspace_access_surfaces_message_verbatim(self):
+        """User has zero accessible workspaces. The raise-site message
+        already names the user ("User <name> (<id>) has no accessible
+        workspaces.") — short enough to fit in the tree row AND more
+        informative than a generic stand-in, so the handler surfaces it
+        verbatim (same pattern as PERMISSION_DENIED)."""
+        fresh = models.User(id='alice', name='alice')
+        raise_msg = 'User alice (alice) has no accessible workspaces.'
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(
+                 users_server.workspaces_core,
+                 'resolve_workspace_for_user',
+                 side_effect=exceptions.NoWorkspaceAccessError(raise_msg)), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               return_value=set()), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertIsNone(resp['workspace'])
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_NO_ACCESS)
+        self.assertEqual(resp['note'], raise_msg)
+        self.assertEqual(resp['accessible'], [])
+
+    def test_permission_denied_surfaces_permission_denied_source(self):
+        """Explicit `requested` workspace the user can't access. The
+        handler keeps `str(e)` here (unlike the ambiguous path) because
+        the exception names the specific workspace + RBAC reason —
+        information the structured payload alone does not carry."""
+        fresh = models.User(id='alice', name='alice')
+        denied_msg = ("User 'alice' does not have permission to "
+                      "access workspace 'team-locked'")
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(
+                 users_server.workspaces_core,
+                 'resolve_workspace_for_user',
+                 side_effect=exceptions.PermissionDeniedError(denied_msg)), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               return_value={'team-a', 'team-b'}), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user),
+                                                   requested='team-locked')
+        self.assertIsNone(resp['workspace'])
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_PERMISSION_DENIED)
+        # The note retains the exception message — it names the
+        # specific workspace, which the payload doesn't.
+        self.assertEqual(resp['note'], denied_msg)
 
 
 # Version gate constant -----------------------------------------------

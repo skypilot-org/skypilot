@@ -26,6 +26,7 @@ from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
@@ -229,13 +230,35 @@ def get_user_workspace(
     try:
         resolution = workspaces_core.resolve_workspace_for_user(
             user_for_resolve, requested=requested)
-    except (exceptions.WorkspaceAmbiguousError,
-            exceptions.NoWorkspaceAccessError,
-            exceptions.PermissionDeniedError) as e:
-        # All three are "tell me my state" answers from the user's
-        # perspective, not server faults. Surface the message in
-        # `note` and return 200 so callers can render guidance
-        # uniformly without parsing 4xx bodies.
+    except exceptions.WorkspaceAmbiguousError as e:
+        # Per-user state, not a server fault — return 200 with a state-
+        # coded `source` and a SHORT `note`. The CLI / dashboard show
+        # the long recovery guidance separately (see
+        # `WorkspaceAmbiguousError.recovery_hint`) so the structured
+        # payload (`workspace` / `source` / `note` / `preferred` /
+        # `accessible`) stays clean and grep-able.
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS
+        # `e.note` only carries drift context ("preferred 'X' not
+        # accessible"); fall back to a generic one-liner otherwise.
+        response['note'] = (e.note
+                            if e.note else 'multiple workspaces accessible; '
+                            'no preferred or active workspace set')
+        return response
+    except exceptions.NoWorkspaceAccessError as e:
+        # One-line message from the raise site ("User <name> (<id>) has
+        # no accessible workspaces.") — short enough to fit in the tree
+        # row and more informative than a generic stand-in.
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
+        response['note'] = str(e)
+        return response
+    except exceptions.PermissionDeniedError as e:
+        # Per-workspace deny — raised when an explicit `requested`
+        # workspace exists but the user can't access it. We keep the
+        # exception message here because it names the specific
+        # workspace and the reason (RBAC / not-in-allowed-users),
+        # which the payload alone wouldn't convey.
+        response['source'] = (
+            workspace_constants.WORKSPACE_SOURCE_PERMISSION_DENIED)
         response['note'] = str(e)
         return response
     response['workspace'] = resolution.workspace

@@ -64,6 +64,7 @@ from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -355,6 +356,37 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
     return RequestQueue(factory.create_queue(schedule_type.value))
 
 
+# Request names where a non-explicit workspace pick is worth surfacing
+# at INFO level (i.e. visible in the streamed CLI output, not just debug
+# logs). Resource-creating commands record the resolved workspace into
+# durable state (cluster.workspace / job_info.workspace) — users care
+# which workspace that ended up being. Read-only commands resolve the
+# same way under the hood but the log line would just be noise.
+#
+# To extend coverage to other resource-creating verbs (e.g. SERVE_UP),
+# add the request_name here.
+_RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG = {
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.CLUSTER_LAUNCH.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LAUNCH.value,
+}
+
+# Sources we DON'T announce, even on a resource-creating request:
+#   EXPLICIT          — the user already named the workspace; repeating
+#                       it in the log is noise.
+#   DEFAULT_FALLBACK  — landing on 'default' is the pre-existing implicit
+#                       behavior; surfacing it on every launch for every
+#                       single-default user would clutter output for the
+#                       common case while telling them nothing new.
+# PREFERRED / SINGLE_MEMBERSHIP are the cases worth surfacing — the user
+# may not realize where the resource landed.
+_SILENT_WORKSPACE_RESOLUTION_SOURCES = {
+    workspace_constants.WORKSPACE_SOURCE_EXPLICIT,
+    workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
+}
+
+
 def _should_apply_workspace_resolver(is_daemon: bool,
                                      client_api_version: Optional[int]) -> bool:
     """Returns True iff the per-user workspace resolver should run for
@@ -488,6 +520,22 @@ def override_request_env_and_config(
                     logger.debug(f'{request_id} resolved workspace '
                                  f'{resolution.workspace!r} from '
                                  f'{resolution.source} for user {user.name}')
+                    # For resource-creating commands, surface the
+                    # resolver's pick at INFO level so the user sees
+                    # which workspace their cluster / job actually
+                    # landed in. Two filters compose:
+                    #   - request_name whitelist (resource-creating verbs)
+                    #   - source NOT in the silent set (EXPLICIT /
+                    #     DEFAULT_FALLBACK) — EXPLICIT repeats what the
+                    #     user just said; DEFAULT_FALLBACK is the silent
+                    #     pre-existing behavior. Only PREFERRED /
+                    #     SINGLE_MEMBERSHIP are worth surfacing.
+                    if (request_name in
+                            _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
+                            and resolution.source
+                            not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
+                        logger.info(f'Using workspace {resolution.workspace!r} '
+                                    f'(source: {resolution.source}).')
                 with workspace_ctx:
                     try:
                         # Reject requests that the user does not have
