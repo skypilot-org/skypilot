@@ -3202,10 +3202,8 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
             port_forward=None,
             connect_timeout=30,
         )
-        # -W: forward stdin/stdout to remote host:port over the SSH channel.
-        # Disable ControlMaster so the process exits cleanly on terminate
-        # instead of persisting as a shared connection.
-        ssh_cmd += ['-o', 'ControlMaster=no', '-W', 'localhost:22']
+        # -W: forward stdin/stdout to remote host:port over the SSH channel
+        ssh_cmd += ['-W', 'localhost:22']
 
         logger.info(
             f'Starting SSH proxy with command: {" ".join(ssh_cmd)}')
@@ -3225,19 +3223,16 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
         stderr = proc.stderr
 
         async def log_stderr():
-            line_count = 0
             while True:
                 line = await stderr.readline()
                 if not line:
                     break
-                decoded = line.decode().rstrip()
-                line_count += 1
-                if line_count <= 5:
-                    logger.warning(f'VM SSH proxy stderr: {decoded}')
-                else:
-                    logger.debug(f'VM SSH proxy stderr: {decoded}')
+                logger.debug(
+                    f'VM SSH proxy stderr: {line.decode().rstrip()}')
 
-        stderr_task = asyncio.create_task(log_stderr())
+        stderr_task = None
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            stderr_task = asyncio.create_task(log_stderr())
 
         conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
             pid=os.getpid())
@@ -3254,7 +3249,7 @@ async def vm_ssh_proxy(websocket: fastapi.WebSocket,
 
             ssh_failed = await websocket_utils.run_websocket_proxy(
                 websocket,
-                read_from_backend=lambda: stdout.read(16384),
+                read_from_backend=lambda: stdout.read(4096),
                 write_to_backend=write_and_drain,
                 close_backend=close_stdin,
                 timestamps_supported=timestamps_supported,
