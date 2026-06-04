@@ -583,11 +583,22 @@ def _common_execution_tags(config) -> Dict[str, str]:
 def _item_cloud(config, item, cloud_to_run: List[str],
                 generic_cloud: str) -> str:
     """Resolve which cloud a collected test item runs on."""
-    for cloud in all_clouds_in_smoke_tests:
-        if cloud_to_pytest_keyword[cloud] in item.keywords and (
-                cloud in cloud_to_run or config.getoption(f'--{cloud}')):
+    marked_clouds = [
+        cloud for cloud in all_clouds_in_smoke_tests
+        if cloud_to_pytest_keyword[cloud] in item.keywords
+    ]
+    if not marked_clouds:
+        # Generic test: runs on the generic cloud.
+        return generic_cloud
+    # A test may be marked for multiple clouds; prefer the one that is
+    # active in this run.
+    for cloud in marked_clouds:
+        if cloud in cloud_to_run or config.getoption(f'--{cloud}'):
             return cloud
-    return generic_cloud
+    # None of the marked clouds is active in this run, so the item is
+    # collected but skipped. Tag it with its first marked cloud rather
+    # than the generic cloud of the run.
+    return marked_clouds[0]
 
 
 @annotations.lru_cache(scope='session')
