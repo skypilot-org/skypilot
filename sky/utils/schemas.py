@@ -1615,6 +1615,11 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'queue': {
                 'type': 'string',
             },
+            # Queue used for launches that request no accelerators; when set,
+            # CPU-only launches route here instead of `queue`.
+            'cpu_queue': {
+                'type': 'string',
+            },
         },
     },
     'dws': {
@@ -2478,6 +2483,9 @@ def get_config_schema():
                                 'queue': {
                                     'type': 'string',
                                 },
+                                'cpu_queue': {
+                                    'type': 'string',
+                                },
                             },
                         },
                         'context_configs': {
@@ -2519,6 +2527,9 @@ def get_config_schema():
                                         'additionalProperties': True,
                                         'properties': {
                                             'queue': {
+                                                'type': 'string',
+                                            },
+                                            'cpu_queue': {
                                                 'type': 'string',
                                             },
                                         },

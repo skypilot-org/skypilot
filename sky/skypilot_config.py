@@ -904,6 +904,15 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+# Queue used for launches that request no accelerators. When set, it takes
+# precedence over `_QUEUE_NAME_KEYS` at the same scope for CPU-only launches;
+# accelerator launches ignore it. The accelerator determination is made by the
+# caller from the finalized resource of the launch attempt (a single task may
+# define multiple resources that resolve to different queues).
+_CPU_QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
+    ('quota', 'cpu_queue'),
+]
+
 _NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
 
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
@@ -989,16 +998,33 @@ def get_effective_queue_name(
         cloud: str,
         region: Optional[str] = None,
         workspace: Optional[str] = None,
-        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        override_configs: Optional[Dict[str, Any]] = None,
+        has_accelerators: Optional[bool] = None) -> Optional[str]:
     """Returns the effective Kueue local queue name from config.
 
     Supports two equivalent spellings, ``kueue.local_queue_name`` and
     ``quota.queue``. Scope precedence (workspace > global; context > cloud)
     takes priority over spelling; within the same scope, ``quota.queue``
     wins over ``kueue.local_queue_name`` when both are set.
+
+    ``has_accelerators`` lets a launch attempt route CPU-only workloads to a
+    separate ``quota.cpu_queue``:
+
+    - ``None`` (default) / ``True``: only the regular queue spellings are
+      considered; ``quota.cpu_queue`` is ignored.
+    - ``False``: the launch requests no accelerators, so ``quota.cpu_queue``
+      takes precedence over the regular spellings at the same scope, falling
+      back to them when it is unset.
+
+    The caller must derive ``has_accelerators`` from the *finalized* resource
+    of the launch attempt, since a single task may define multiple resources
+    that resolve to different queues.
     """
+    property_keys = _QUEUE_NAME_KEYS
+    if has_accelerators is False:
+        property_keys = _CPU_QUEUE_NAME_KEYS + _QUEUE_NAME_KEYS
     return _get_effective_k8s_config_value(cloud=cloud,
-                                           property_keys=_QUEUE_NAME_KEYS,
+                                           property_keys=property_keys,
                                            region=region,
                                            workspace=workspace,
                                            override_configs=override_configs)
@@ -1042,7 +1068,7 @@ def remove_queue_name_from_config() -> Iterator[None]:
     config = to_dict()
 
     def update_to_none_if_set(keys: Tuple[str, ...]) -> None:
-        for queue_key in _QUEUE_NAME_KEYS:
+        for queue_key in _QUEUE_NAME_KEYS + _CPU_QUEUE_NAME_KEYS:
             if config.get_nested(keys + queue_key, None) is not None:
                 logger.debug(f'removing local queue name: setting '
                              f'{keys + queue_key} to None')

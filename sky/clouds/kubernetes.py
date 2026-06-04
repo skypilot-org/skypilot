@@ -873,7 +873,11 @@ class Kubernetes(clouds.Cloud):
                 # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
-                override_configs=resources.cluster_config_overrides))
+                override_configs=resources.cluster_config_overrides,
+                # `resources` is the finalized resource for this launch
+                # attempt, so route CPU-only launches to `quota.cpu_queue`
+                # when configured.
+                has_accelerators=bool(resources.accelerators)))
 
         # Check DWS configuration for GKE.
         (enable_flex_start, enable_flex_start_queued_provisioning,

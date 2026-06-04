@@ -1332,6 +1332,49 @@ def test_get_effective_queue_name(monkeypatch, tmp_path) -> None:
         workspace='workspaceA') == 'workspaceA-queue-via-quota'
 
 
+def test_get_effective_queue_name_cpu_queue(monkeypatch, tmp_path) -> None:
+    """`quota.cpu_queue` routes CPU-only launches to a separate queue."""
+    with open(tmp_path / 'cpu_queue.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            quota:
+                queue: gpu-queue
+                cpu_queue: cpu-queue
+            context_configs:
+                # Only a regular queue here; CPU launches fall back to it.
+                contextA:
+                    quota:
+                        queue: contextA-gpu-queue
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'cpu_queue.yaml')
+    skypilot_config.reload_config()
+
+    # Default (`has_accelerators=None`) ignores `cpu_queue`.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='default') == 'gpu-queue'
+    # Accelerator launch uses the regular queue.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='default',
+        has_accelerators=True) == 'gpu-queue'
+    # CPU-only launch uses `cpu_queue` when set at the same scope.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes', workspace='default',
+        has_accelerators=False) == 'cpu-queue'
+    # CPU-only launch falls back to the regular queue when `cpu_queue` is
+    # unset at the resolved scope.
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        region='contextA',
+        workspace='default',
+        has_accelerators=False) == 'contextA-gpu-queue'
+    assert skypilot_config.get_effective_queue_name(
+        cloud='kubernetes',
+        region='contextA',
+        workspace='default',
+        has_accelerators=True) == 'contextA-gpu-queue'
+
+
 def test_get_effective_queue_name_workspace_override(monkeypatch,
                                                      tmp_path) -> None:
     """Cloud-level `override_configs` must apply inside workspace scope.
@@ -1735,7 +1778,8 @@ class TestRemoveQueueNameFromConfig:
                     'local_queue_name': 'root-q'
                 },
                 'quota': {
-                    'queue': 'root-quota-q'
+                    'queue': 'root-quota-q',
+                    'cpu_queue': 'root-cpu-q'
                 },
                 'context_configs': {
                     'ctx1': {
@@ -1743,7 +1787,8 @@ class TestRemoveQueueNameFromConfig:
                             'local_queue_name': 'ctx1-q'
                         },
                         'quota': {
-                            'queue': 'ctx1-quota-q'
+                            'queue': 'ctx1-quota-q',
+                            'cpu_queue': 'ctx1-cpu-q'
                         }
                     }
                 }
@@ -1777,9 +1822,12 @@ class TestRemoveQueueNameFromConfig:
                 for keys in [
                     ('kubernetes', 'kueue', 'local_queue_name'),
                     ('kubernetes', 'quota', 'queue'),
+                    ('kubernetes', 'quota', 'cpu_queue'),
                     ('kubernetes', 'context_configs', 'ctx1', 'kueue',
                      'local_queue_name'),
                     ('kubernetes', 'context_configs', 'ctx1', 'quota', 'queue'),
+                    ('kubernetes', 'context_configs', 'ctx1', 'quota',
+                     'cpu_queue'),
                     ('workspaces', 'ws1', 'kubernetes', 'kueue',
                      'local_queue_name'),
                     ('workspaces', 'ws1', 'kubernetes', 'quota', 'queue'),
