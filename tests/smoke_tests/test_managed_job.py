@@ -1150,6 +1150,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     region_validation_base_cmd = 'true'
     use_spot = ' --use-spot'
     output_check_cmd = None
+    output_storage_names = [output_storage_name]
 
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
@@ -1225,26 +1226,53 @@ def test_managed_jobs_storage(generic_cloud: str):
             'done')
         timeout *= 2
     elif generic_cloud in ('kubernetes', 'slurm'):
-        # With Kubernetes, we don't know which object storage provider is used.
-        # Check S3, GCS and Azure if bucket exists in any of them.
-        s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.S3, output_storage_name, 'output.txt')
-        s3_output_check_cmd = f'{s3_check_file_count} | grep 1'
-        gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
-        gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
-        # For Azure, we need to get the storage account name for the region
-        storage_account_name = test_mount_and_storage.TestStorageWithCredentials.get_az_storage_account_name(
-        )
-        az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.AZURE,
-            output_storage_name,
-            'output.txt',
-            storage_account_name=storage_account_name)
-        az_output_check_cmd = f'{az_check_file_count} | grep 1'
-        nebius_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.NEBIUS, output_storage_name, 'output.txt')
-        nebius_output_check_cmd = f'{nebius_check_file_count} | grep 1'
+        # The task's cloud does not determine the object store. Pin one output
+        # bucket to each object store so every store is exercised
+        # deterministically on each run, instead of depending on which enabled
+        # storage cloud the server picks as the default store.
+        pinned_stores = {
+            's3': storage_lib.StoreType.S3,
+            'gcs': storage_lib.StoreType.GCS,
+            'azure': storage_lib.StoreType.AZURE,
+            'nebius': storage_lib.StoreType.NEBIUS,
+        }
+        # For Azure, the bucket lands in the configured storage account when
+        # the API server shares the client config, or in the default per-user
+        # account (AzureBlobStore's default region) when a remote API server
+        # does not receive the client config. Check both.
+        az_account_names = [
+            test_mount_and_storage.TestStorageWithCredentials.
+            get_az_storage_account_name()
+        ]
+        try:
+            default_az_account = (storage_lib.AzureBlobStore.
+                                  get_default_storage_account_name('eastus'))
+            if default_az_account not in az_account_names:
+                az_account_names.append(default_az_account)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        output_check_cmds = []
+        for store_str, store_type in pinned_stores.items():
+            bucket_name = f'{output_storage_name}-{store_str}'
+            if store_type == storage_lib.StoreType.AZURE:
+                az_checks = []
+                for account_name in az_account_names:
+                    try:
+                        check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+                            store_type,
+                            bucket_name,
+                            'output.txt',
+                            storage_account_name=account_name)
+                    except Exception:  # pylint: disable=broad-except
+                        # The account (and its key) may not exist yet.
+                        continue
+                    az_checks.append(f'{check_file_count} | grep 1')
+                assert az_checks, 'No Azure storage account available to check'
+                output_check_cmds.append(f'({" || ".join(az_checks)})')
+            else:
+                check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+                    store_type, bucket_name, 'output.txt')
+                output_check_cmds.append(f'{check_file_count} | grep 1')
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
@@ -1253,11 +1281,34 @@ def test_managed_jobs_storage(generic_cloud: str):
             'gcloud auth activate-service-account '
             '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
             '2> /dev/null || true')
+        all_output_checks = ' && '.join(output_check_cmds)
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
             f'{try_activating_gcp_service_account}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd} || {nebius_output_check_cmd}; }}'
-        )
+            f'{all_output_checks}')
+        # Replace the single output bucket in the YAML with one per store, and
+        # write output.txt to each. 'sky-output-bucket' is replaced with the
+        # unique output_storage_name below, same as for other clouds.
+        task_config = yaml_utils.safe_load(yaml_str)
+        task_config['file_mounts'].pop('/output_path')
+        write_output_cmd = 'echo "hello world!" > /output_path/output.txt'
+        assert write_output_cmd in task_config['run'], task_config['run']
+        write_output_cmds = []
+        for store_str in pinned_stores:
+            mount_path = f'/output_path_{store_str}'
+            task_config['file_mounts'][mount_path] = {
+                'name': f'sky-output-bucket-{store_str}',
+                'store': store_str,
+                'mode': 'MOUNT',
+            }
+            write_output_cmds.append(
+                f'echo "hello world!" > {mount_path}/output.txt')
+        task_config['run'] = task_config['run'].replace(
+            write_output_cmd, '\n'.join(write_output_cmds))
+        yaml_str = yaml_utils.dump_yaml_str(task_config)
+        output_storage_names = [
+            f'{output_storage_name}-{store_str}' for store_str in pinned_stores
+        ]
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.S3, storage_name)
@@ -1327,7 +1378,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 non_persistent_bucket_removed_check_cmd,
             ],
             (f'sky jobs cancel -y -n {name}; '
-             f'sky storage delete {output_storage_name} -y; '
+             f'sky storage delete {" ".join(output_storage_names)} -y; '
              f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} || true'),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
