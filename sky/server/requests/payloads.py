@@ -1026,7 +1026,10 @@ class ClusterEventsBody(RequestBody):
     """The request body for the cluster events endpoint."""
     cluster_name: Optional[str] = None
     cluster_hash: Optional[str] = None
-    event_type: str  # 'STATUS_CHANGE' or 'DEBUG'
+    # Event type to retrieve (e.g. 'STATUS_CHANGE' or 'DEBUG'). Multiple types
+    # may be requested as a comma-separated string (e.g.
+    # 'STATUS_CHANGE,LAUNCH_PROGRESS'); results are merged by timestamp.
+    event_type: str
     include_timestamps: bool = False
     limit: Optional[
         int] = None  # If specified, returns at most this many events
@@ -1037,6 +1040,11 @@ class GetJobEventsBody(RequestBody):
     job_id: int
     task_id: Optional[int] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
+    # When True, merge in launch-progress events from the job's underlying
+    # cluster (e.g. image pulling) so the timeline shows provisioning
+    # milestones between STARTING and RUNNING. Defaults to False to keep the
+    # response backward compatible for callers that only want status events.
+    include_cluster_events: bool = False
 
 
 # =============================================================================
