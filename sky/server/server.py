@@ -743,26 +743,15 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
 
-    # Startup: Run background tasks
+    # Startup: Run background tasks. Delete any persisted daemon rows whose
+    # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
+    # removed in code), then submit each current daemon.
+    await requests_lib.delete_orphan_internal_daemons_async(
+        daemons.INTERNAL_REQUEST_DAEMONS)
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
             continue
-        try:
-            await executor.schedule_request_async(
-                request_id=event.id,
-                request_name=event.name,
-                request_body=payloads.RequestBody(),
-                func=event.run_event,
-                schedule_type=requests_lib.ScheduleType.SHORT,
-                is_skypilot_system=True,
-                # Request deamon should be retried if the process pool is
-                # broken.
-                retryable=True,
-            )
-        except exceptions.RequestAlreadyExistsError:
-            # Lifespan will be executed in each uvicorn worker process, we
-            # can safely ignore the error if the task is already scheduled.
-            logger.debug(f'Request {event.id} already exists.')
+        await executor.schedule_internal_daemon_async(event)
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)

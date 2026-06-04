@@ -902,6 +902,37 @@ def test_network_tier_copy():
     assert r_override.cpus == '4'  # Other properties preserved
 
 
+@pytest.mark.parametrize('value', [True, 2.0])
+def test_set_pod_resource_limits_task_config_override(value):
+    """set_pod_resource_limits in a task-level config block must survive.
+
+    Regression test for https://github.com/skypilot-org/skypilot/issues/9785:
+    the field was silently dropped by Resources.copy() (invoked during the
+    launch/optimize flow) because it was missing from
+    OVERRIDEABLE_CONFIG_KEYS_IN_TASK.
+    """
+    overrides = {'kubernetes': {'set_pod_resource_limits': value}}
+    r = Resources(infra='kubernetes',
+                  cpus=2,
+                  memory=8,
+                  _cluster_config_overrides=overrides)
+    assert r.cluster_config_overrides == overrides
+
+    # copy() is called during the launch/optimize flow; the override must be
+    # preserved rather than silently stripped.
+    r_copy = r.copy()
+    assert r_copy.cluster_config_overrides == overrides
+
+    # The read path used by make_deploy_resources_variables must see it.
+    read = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region=None,
+        keys=('set_pod_resource_limits',),
+        default_value=False,
+        override_configs=r_copy.cluster_config_overrides)
+    assert read == value
+
+
 def test_network_tier_repr():
     """Test that network tier appears in the string representation."""
     r = Resources(network_tier='best')

@@ -63,6 +63,13 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'GET'
     },
     {
+        # Read counterpart of `POST /users/me/workspace`. Returns the
+        # calling user's resolved workspace + preferred + accessible —
+        # all per-user state the viewer is entitled to see.
+        'path': '/users/me/workspace',
+        'method': 'GET'
+    },
+    {
         'path': '/token',
         'method': 'GET'
     },

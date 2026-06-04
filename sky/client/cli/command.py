@@ -102,6 +102,7 @@ from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes.client import sdk as volumes_sdk
+from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
 
@@ -687,6 +688,7 @@ def _parse_override_params(
     network_tier: Optional[str] = None,
     local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
+    priority: Optional[str] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
@@ -759,6 +761,17 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if priority is not None:
+        priority = priority.strip()
+        # `--priority` accepts either an integer (priority) or a string
+        # (priority class). Clear both first so that a resource never carries
+        # both at once, then set whichever one applies ('none' clears both).
+        override_params.update({'priority': None, 'priority_class': None})
+        if priority.lower() != 'none' and priority != '':
+            try:
+                override_params['priority'] = int(priority)
+            except ValueError:
+                override_params['priority_class'] = priority
     if config_override:
         override_params['_cluster_config_overrides'] = config_override
     return override_params
@@ -957,6 +970,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     network_tier: Optional[str] = None,
     local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
+    priority: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     secret: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
@@ -1011,6 +1025,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              network_tier=network_tier,
                                              local_disk=local_disk,
                                              ports=ports,
+                                             priority=priority,
                                              config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
@@ -1218,7 +1233,8 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                     'To run locally, create a local Kubernetes cluster with '
                     '``sky local up``.'))
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
-                    flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+                    flags.EXTRA_RESOURCES_OPTIONS + flags.PRIORITY_OPTION +
+                    flags.COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1289,6 +1305,14 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace to launch into. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1318,6 +1342,7 @@ def launch(
     network_tier: Optional[str],
     local_disk: Optional[str],
     ports: Tuple[str, ...],
+    priority: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
     down: bool,  # pylint: disable=redefined-outer-name
@@ -1381,6 +1406,7 @@ def launch(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
+        priority=priority,
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
@@ -1964,11 +1990,17 @@ def _show_endpoint(query_clusters: Optional[List[str]],
 
 
 def _show_enabled_infra(
-        active_workspace: str, show_workspace: bool,
+        active_workspace: Optional[str], show_workspace: bool,
         enabled_clouds_request_id: server_common.RequestId[List[str]]):
-    """Show the enabled infrastructure."""
+    """Show the enabled infrastructure.
+
+    ``active_workspace`` is the workspace label to annotate the title
+    with. Callers that didn't set a workspace client-side should
+    pre-resolve via ``sdk.get_user_workspace()`` and pass that value
+    here, so this function stays a pure renderer.
+    """
     workspace_str = ''
-    if show_workspace:
+    if show_workspace and active_workspace is not None:
         workspace_str = f' (workspace: {active_workspace!r})'
     title = (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Enabled Infra'
              f'{workspace_str}:'
@@ -2182,16 +2214,38 @@ def status(verbose: bool,
     def submit_workspace() -> Optional[server_common.RequestId[Dict[str, Any]]]:
         return sdk.workspaces()
 
-    active_workspace = skypilot_config.get_active_workspace()
+    if skypilot_config.is_active_workspace_set():
+        active_workspace = skypilot_config.get_active_workspace()
+    else:
+        active_workspace = None
 
     def submit_enabled_clouds():
         return sdk.enabled_clouds(workspace=active_workspace, expand=True)
+
+    def fetch_resolved_workspace() -> Optional[str]:
+        # Only needed when the client did not set active_workspace —
+        # otherwise the resolver picks whatever the user chose and the
+        # display path uses `active_workspace` directly. Failure here is
+        # non-fatal: we just skip the `(workspace: ...)` annotation
+        # rather than break the whole status output.
+        try:
+            return sdk.get_user_workspace().get('workspace')
+        except Exception:  # pylint: disable=broad-except
+            return None
 
     managed_jobs_queue_request_id = None
     queue_result_version = cli_utils.QueueResultVersion.V1
     service_status_request_id = None
     workspace_request_id = None
     pool_status_request_id = None
+    resolved_workspace: Optional[str] = None
+
+    # `--ip` and `--endpoints` short-circuit to `_show_endpoint` and skip
+    # the main status table. Any request whose only consumer is that
+    # table (workspace for the Enabled-Infra title)
+    # is wasted work in those modes — gate on this
+    # single flag instead of repeating `not (ip or show_endpoints)`.
+    needs_status_table = not (ip or show_endpoints)
 
     # Submit all requests in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -2201,9 +2255,14 @@ def status(verbose: bool,
             services_request_future = executor.submit(submit_services)
         if show_pools:
             pools_request_future = executor.submit(submit_pools)
-        if not (ip or show_endpoints):
+        if needs_status_table:
             workspace_request_future = executor.submit(submit_workspace)
         enabled_clouds_request_future = executor.submit(submit_enabled_clouds)
+        if needs_status_table and active_workspace is None:
+            resolved_workspace_future = executor.submit(
+                fetch_resolved_workspace)
+        else:
+            resolved_workspace_future = None
 
         # Get the request IDs
         if show_managed_jobs:
@@ -2213,9 +2272,11 @@ def status(verbose: bool,
             service_status_request_id = services_request_future.result()
         if show_pools:
             pool_status_request_id = pools_request_future.result()
-        if not (ip or show_endpoints):
+        if needs_status_table:
             workspace_request_id = workspace_request_future.result()
         enabled_clouds_request_id = enabled_clouds_request_future.result()
+        if resolved_workspace_future is not None:
+            resolved_workspace = resolved_workspace_future.result()
 
     managed_jobs_queue_request_id = (server_common.RequestId()
                                      if not managed_jobs_queue_request_id else
@@ -2261,7 +2322,12 @@ def status(verbose: bool,
     else:
         all_workspaces = {constants.SKYPILOT_DEFAULT_WORKSPACE: {}}
     show_workspace = len(all_workspaces) > 1
-    _show_enabled_infra(active_workspace, show_workspace,
+    # Annotate with the client-set workspace if any; otherwise fall back
+    # to whatever the server resolver said the next request would land
+    # on. `_show_enabled_infra` is a pure renderer and only takes the
+    # final label.
+    display_workspace = active_workspace or resolved_workspace
+    _show_enabled_infra(display_workspace, show_workspace,
                         enabled_clouds_request_id)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                f'{colorama.Style.RESET_ALL}')
@@ -5649,7 +5715,8 @@ def jobs():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(flags.TASK_OPTIONS_WITH_NAME +
-                    flags.EXTRA_RESOURCES_OPTIONS + flags.COMMON_OPTIONS)
+                    flags.EXTRA_RESOURCES_OPTIONS + flags.PRIORITY_OPTION +
+                    flags.COMMON_OPTIONS)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -5682,6 +5749,14 @@ def jobs():
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
+@click.option('--workspace',
+              '-w',
+              type=str,
+              default=None,
+              expose_value=False,
+              callback=flags.apply_workspace_option_callback,
+              help=('Workspace to submit the managed job into. Shorthand for '
+                    '`--config active_workspace=<name>`.'))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -5711,6 +5786,7 @@ def jobs_launch(
     network_tier: Optional[str],
     local_disk: Optional[str],
     ports: Tuple[str],
+    priority: Optional[str],
     detach_run: bool,
     yes: bool,
     pool: Optional[str],  # pylint: disable=redefined-outer-name
@@ -5770,6 +5846,7 @@ def jobs_launch(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
+        priority=priority,
         job_recovery=job_recovery,
         config_override=config_override,
         git_url=git_url,
@@ -7960,6 +8037,108 @@ def api_info(output_format: str):
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
     # Show upgrade hint if available
     server_common.check_and_print_upgrade_hint(api_server_info, url)
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def workspace():
+    """Per-user workspace commands."""
+    pass
+
+
+@workspace.command('use', cls=_DocumentedCodeCommand)
+@click.argument('name', required=False, type=str)
+@click.option('--clear',
+              is_flag=True,
+              default=False,
+              help='Clear the saved preferred workspace.')
+@flags.config_option(expose_value=False)
+@usage_lib.entrypoint
+def workspace_use(name: Optional[str], clear: bool):
+    """Sets (or clears with --clear) your default workspace on the server.
+
+    This default is picked up by ``sky launch`` / ``sky jobs launch`` when
+    no explicit ``active_workspace`` is in effect. Anything that DOES set
+    ``active_workspace`` still wins — including a per-command
+    ``--workspace`` / ``-w`` flag, ``--config active_workspace=X``,
+    project ``./.sky.yaml``, user ``~/.sky/config.yaml``, or a server-
+    side ``active_workspace`` pinned by an admin.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Set team-a as your default.
+      sky workspace use team-a
+      \b
+      # Clear the default.
+      sky workspace use --clear
+    """
+    if clear and name:
+        raise click.UsageError('Cannot pass both --clear and a workspace name.')
+    if not clear and not name:
+        raise click.UsageError(
+            'Specify a workspace name, or pass --clear to remove your '
+            'current default.')
+    target = None if clear else name
+    sdk.set_preferred_workspace(target)
+    if clear:
+        click.secho('Cleared preferred workspace.', fg='green')
+    else:
+        click.secho(f'Set preferred workspace to {target!r}.', fg='green')
+
+
+@workspace.command('info', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('-o',
+              '--output',
+              'output_format',
+              type=click.Choice(flags.OUTPUT_FORMAT_CHOICES,
+                                case_sensitive=False),
+              default=flags.OUTPUT_FORMAT_TABLE,
+              help='Output format (default: table). Use "json" for a '
+              'machine-readable shape.')
+@usage_lib.entrypoint
+def workspace_info(output_format: str):
+    """Shows the workspace your next request lands in by default, plus
+    your saved preferred and the workspaces you can access.
+
+    A one-off ``--workspace <name>`` flag on the next command still wins;
+    this view reflects what happens when no such override is passed.
+    """
+    info = sdk.get_user_workspace()
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(json.dumps(info, indent=2))
+        return
+
+    workspace_str = (f'{info["workspace"]!r}'
+                     if info.get('workspace') is not None else '(none)')
+    source_str = info.get('source') or '-'
+    preferred = info.get('preferred')
+    preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
+    accessible = info.get('accessible') or []
+    accessible_str = (', '.join(
+        repr(w) for w in accessible) if accessible else '(none)')
+    note = info.get('note')
+    lines = [
+        f'Workspace: {workspace_str}',
+        f'{ux_utils.INDENT_SYMBOL}Source: {source_str}',
+    ]
+    if note:
+        lines.append(f'{ux_utils.INDENT_SYMBOL}Note: {note}')
+    lines.extend([
+        f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}',
+        f'{ux_utils.INDENT_LAST_SYMBOL}Accessible: {accessible_str}',
+    ])
+    click.echo('\n'.join(lines))
+
+    # AMBIGUOUS is the only state whose recovery message is multi-line
+    # (5+ lines) — inlining it into `Note:` would break the tree
+    # alignment, so render it as a separate paragraph below. The text
+    # comes from `WorkspaceAmbiguousError.recovery_hint()` so the CLI
+    # and launch-path error message share a single source.
+    if info.get('source') == workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS:
+        click.echo()
+        click.echo(exceptions.WorkspaceAmbiguousError.recovery_hint())
 
 
 @cli.group(cls=_NaturalOrderGroup)

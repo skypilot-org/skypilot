@@ -25,6 +25,7 @@ from sky.adaptors import aws
 from sky.adaptors import common
 from sky.catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
+from sky.clouds.utils import gpu_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -51,8 +52,14 @@ _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
 _DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-arm64'
 # For GPU-related package version,
 # see sky/catalog/images/provisioners/cuda.sh
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
-_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
+# Default GPU image: NVIDIA 580 open kernel module + CUDA 13. Supports Turing
+# and later only.
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-cuda13'
+_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64-cuda13'
+# Legacy GPU image: NVIDIA 535 proprietary driver + CUDA 12. Used for pre-Turing
+# GPUs (V100, M60) that the open kernel module does not support.
+_DEFAULT_GPU_CUDA12_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_CUDA12_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
@@ -443,6 +450,16 @@ class AWS(clouds.Cloud):
             if acc_name == 'K80':
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
+            elif gpu_utils.is_legacy_driver_gpu(acc_name):
+                # Pre-Turing GPUs (V100, M60) are not supported by the open
+                # kernel module in the default image, so fall back to the
+                # legacy proprietary-driver (CUDA 12) image.
+                legacy_tag = (_DEFAULT_GPU_CUDA12_ARM64_IMAGE_ID
+                              if arch == constants.ARM64_ARCH else
+                              _DEFAULT_GPU_CUDA12_IMAGE_ID)
+                image_id = catalog.get_image_id_from_tag(legacy_tag,
+                                                         region_name,
+                                                         clouds='aws')
             if acc_name.startswith('Trainium') or acc_name.startswith(
                     'Inferentia'):
                 image_id = catalog.get_image_id_from_tag(

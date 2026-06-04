@@ -7,6 +7,7 @@ import filelock
 
 from sky import check as sky_check
 from sky import exceptions
+from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -21,6 +22,7 @@ from sky.utils import config_utils
 from sky.utils import locks
 from sky.utils import resource_checker
 from sky.utils import schemas
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -1007,3 +1009,138 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     accessible_names = _accessible_workspace_names_for_user(
         user_id, set(workspaces.keys()))
     return {name: workspaces[name] for name in accessible_names}
+
+
+# ===========================
+# = Per-user default workspace
+# ===========================
+
+
+@dataclass
+class WorkspaceResolution:
+    """Outcome of resolve_workspace_for_user().
+
+    workspace: the resolved workspace name to use.
+    source: where it came from — one of WORKSPACE_SOURCE_*. Surfaced by
+        server logs, and the dashboard so users see why the
+        chosen workspace landed where it did.
+    note: optional human-readable explanation (e.g. "preferred 'team-a' not
+        accessible") used when there is drift between what the user set and
+        what we resolved.
+    """
+    workspace: str
+    source: str
+    note: Optional[str] = None
+
+
+def set_user_preferred_workspace(user: models.User,
+                                 workspace: Optional[str]) -> None:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    Validates that the target workspace exists AND that the user has access
+    to it before writing. A future admin-assignment endpoint can share this
+    setter by passing the target user (not the caller) as the user arg.
+
+    Raises:
+        ValueError: target workspace does not exist.
+        exceptions.PermissionDeniedError: user lacks access to the workspace.
+    """
+    if workspace is None:
+        global_user_state.set_user_preferred_workspace(user.id, None)
+        return
+
+    workspaces = _load_workspaces()
+    if workspace not in workspaces:
+        raise ValueError(f'Workspace {workspace!r} does not exist.')
+    # Reuse the same permission check the launch path uses, so the error
+    # message and the policy are consistent.
+    check_workspace_permission(user, workspace)
+    global_user_state.set_user_preferred_workspace(user.id, workspace)
+
+
+def resolve_workspace_for_user(
+        user: models.User,
+        requested: Optional[str] = None) -> WorkspaceResolution:
+    """Resolves the effective workspace for a user when none was set.
+
+    Precedence (a future admin-assignment tier can splice in between
+    `preferred_workspace` and the default-fallback step without changing
+    this function's callers):
+
+      1. requested explicitly (by caller, e.g. --workspace flag or the
+         active_workspace value from override_skypilot_config)
+         -> use it; access is validated.
+      2. user.preferred_workspace, if still accessible
+      3. 'default' if accessible
+         -> use it. Preserves today's behavior for users (and admins) who
+         can access the 'default' workspace and have not set a preference.
+         Without this step, every legacy multi-workspace user — and every
+         admin (who can access all workspaces) — would hit AMBIGUOUS on
+         upgrade. The auto-select behavior is meant for users for whom
+         the implicit default is NOT valid; this step makes sure we don't
+         over-reach to users for whom it IS valid.
+      4. exactly one accessible workspace -> auto-select
+      5. zero accessible -> NoWorkspaceAccessError
+      6. multiple, none chosen, no 'default' access -> WorkspaceAmbiguousError
+
+    Args:
+        user: the user the resolution is for.
+        requested: workspace explicitly named by the caller, or None.
+
+    Returns:
+        WorkspaceResolution carrying the workspace name + source + optional
+        drift note.
+
+    Raises:
+        exceptions.NoWorkspaceAccessError: zero accessible workspaces, or
+            requested workspace not accessible (PermissionDeniedError
+            subclass).
+        exceptions.WorkspaceAmbiguousError: multiple accessible and none
+            chosen, and the user has no access to 'default'.
+    """
+    if requested is not None:
+        check_workspace_permission(user, requested)
+        return WorkspaceResolution(
+            workspace=requested,
+            source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
+
+    accessible = sorted(
+        _accessible_workspace_names_for_user(user.id,
+                                             set(_load_workspaces().keys())))
+
+    # Read preferred from the User dataclass: it is populated by
+    # global_user_state.add_or_update_user(return_user=True), which the
+    # executor already calls upstream for every request. Re-querying the
+    # users table per request would be redundant on the hot path.
+    preferred = user.preferred_workspace
+    if preferred is not None and preferred in accessible:
+        return WorkspaceResolution(
+            workspace=preferred,
+            source=workspace_constants.WORKSPACE_SOURCE_PREFERRED)
+
+    drift_note: Optional[str] = None
+    if preferred is not None and preferred not in accessible:
+        # The preference was set in the past but the user no longer has
+        # access (RBAC drift). Surface this in the source note so users
+        # understand why their preference wasn't honored.
+        drift_note = f'preferred {preferred!r} not accessible'
+
+    if constants.SKYPILOT_DEFAULT_WORKSPACE in accessible:
+        # Default-fallback: don't break legacy multi-workspace users and
+        # admins who used to land on 'default' implicitly.
+        return WorkspaceResolution(
+            workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
+            source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
+            note=drift_note)
+
+    if len(accessible) == 1:
+        return WorkspaceResolution(
+            workspace=accessible[0],
+            source=workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP,
+            note=drift_note)
+
+    if not accessible:
+        raise exceptions.NoWorkspaceAccessError(
+            f'User {user.name} ({user.id}) has no accessible workspaces.')
+
+    raise exceptions.WorkspaceAmbiguousError(accessible, note=drift_note)

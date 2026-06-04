@@ -461,14 +461,20 @@ async def get_job_status(
         status = list(statuses.values())[0]
         _log_job_status(status)
         return status, None
-    except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
-            ValueError, TypeError, asyncio.TimeoutError) as e:
+    except (exceptions.CommandError, exceptions.CommandFailureException,
+            grpc.RpcError, grpc.FutureTimeoutError, ValueError, TypeError,
+            asyncio.TimeoutError) as e:
         # Note: Each of these exceptions has some additional conditions to
         # limit how we handle it and whether or not we catch it.
         potential_transient_error_reason = None
         if isinstance(e, exceptions.CommandError):
             returncode = e.returncode
             potential_transient_error_reason = (f'Returncode: {returncode}. '
+                                                f'{e.detailed_reason}')
+        elif isinstance(e, exceptions.CommandFailureException):
+            # Note: this should come after the CommandError handler, as this is
+            # the supertype of CommandError
+            potential_transient_error_reason = (f'Command {e.failure}. '
                                                 f'{e.detailed_reason}')
         elif isinstance(e, grpc.RpcError):
             potential_transient_error_reason = e.details()
