@@ -498,7 +498,7 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
 
     # Step 1: Login with service account token. This writes the sa token
     # into config and sets local user hash to the sa user.
-    sa_user = {'id': sa_user_hash, 'name': 'hailong'}
+    sa_user = {'id': sa_user_hash, 'name': 'alice'}
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
         mock_check.return_value = (
             server_common.ApiServerStatus.HEALTHY,

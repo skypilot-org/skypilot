@@ -17,6 +17,7 @@ from sky import exceptions
 from sky import models
 from sky import skypilot_config
 from sky.skylet import constants
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 # Helper -----------------------------------------------------------------
@@ -49,9 +50,7 @@ def _patch_resolver(accessible, workspaces=None):
 
 def _user_with_preferred(preferred):
     """Build the standard test User with `preferred_workspace` set."""
-    return models.User(id='hailong',
-                       name='hailong',
-                       preferred_workspace=preferred)
+    return models.User(id='alice', name='alice', preferred_workspace=preferred)
 
 
 class _Patcher:
@@ -77,7 +76,7 @@ class TestResolverPrecedence(unittest.TestCase):
     """Exercises every branch of resolve_workspace_for_user."""
 
     def setUp(self):
-        self.user = models.User(id='hailong', name='hailong')
+        self.user = models.User(id='alice', name='alice')
 
     def test_explicit_requested_wins(self):
         """`requested` is honored over preferred and accessibility heuristics."""
@@ -87,7 +86,8 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(user,
                                                            requested='team-a')
         self.assertEqual(r.workspace, 'team-a')
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
 
     def test_explicit_requested_validates_access(self):
         """A requested workspace the user can't access raises."""
@@ -108,7 +108,8 @@ class TestResolverPrecedence(unittest.TestCase):
                     [constants.SKYPILOT_DEFAULT_WORKSPACE, 'team-a'])):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, 'team-a')
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_PREFERRED)
         self.assertIsNone(r.note)
 
     def test_preferred_revoked_falls_through_with_note(self):
@@ -121,7 +122,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
         self.assertIsNotNone(r.note)
         self.assertIn('team-a', r.note)
 
@@ -135,7 +136,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(self.user)
         self.assertEqual(r.workspace, 'team-only')
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+                         workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
 
     def test_zero_accessible_raises_no_workspace_access(self):
         with _Patcher(_patch_resolver([])):
@@ -176,7 +177,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(self.user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
         self.assertIsNone(r.note)
 
     def test_admin_lands_on_default_no_ambiguous(self):
@@ -192,7 +193,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(self.user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
 
     # ---- Gap-fill cases from the function-test matrix --------
 
@@ -205,7 +206,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(self.user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
 
     def test_preferred_default_single_accessible_default(self):
         """preferred='default' explicit overrides the default-fallback
@@ -217,7 +218,8 @@ class TestResolverPrecedence(unittest.TestCase):
         with _Patcher(_patch_resolver([constants.SKYPILOT_DEFAULT_WORKSPACE])):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_PREFERRED)
 
     def test_preferred_inaccessible_single_accessible_default(self):
         """Preferred revoked, only 'default' left → default-fallback with a
@@ -228,7 +230,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
         self.assertIsNotNone(r.note)
         self.assertIn('team-revoked', r.note)
 
@@ -240,7 +242,8 @@ class TestResolverPrecedence(unittest.TestCase):
         with _Patcher(_patch_resolver(['team-only'])):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, 'team-only')
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_PREFERRED)
 
     def test_preferred_mismatch_single_non_default_with_drift(self):
         """Preferred set but inaccessible, the only accessible is a
@@ -252,7 +255,7 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, 'team-only')
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+                         workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
         self.assertIsNotNone(r.note)
         self.assertIn('team-revoked', r.note)
 
@@ -266,7 +269,8 @@ class TestResolverPrecedence(unittest.TestCase):
         with _Patcher(_patch_resolver(['team-a', 'team-b', 'team-c'])):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, 'team-b')
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_PREFERRED)
 
     def test_preferred_set_zero_accessible(self):
         """Edge: preferred set but the user has zero accessible workspaces
@@ -291,7 +295,8 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(user,
                                                            requested='team-a')
         self.assertEqual(r.workspace, 'team-a')
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_EXPLICIT)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
         # No drift note when explicit — drift only arises from the
         # automatic resolution path.
         self.assertIsNone(r.note)
@@ -307,13 +312,13 @@ class TestResolverPrecedence(unittest.TestCase):
             r = workspaces_core.resolve_workspace_for_user(self.user)
         self.assertEqual(r.workspace, constants.SKYPILOT_DEFAULT_WORKSPACE)
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+                         workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
         # Sub-case 2: single ws non-default (admin happens to see only one)
         with _Patcher(_patch_resolver(['team-only-admin'])):
             r = workspaces_core.resolve_workspace_for_user(self.user)
         self.assertEqual(r.workspace, 'team-only-admin')
         self.assertEqual(r.source,
-                         workspaces_core.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+                         workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
 
     def test_admin_with_preferred_uses_preferred(self):
         """Admin who has set a preferred → preferred wins over
@@ -327,7 +332,8 @@ class TestResolverPrecedence(unittest.TestCase):
         with _Patcher(_patch_resolver(all_workspaces)):
             r = workspaces_core.resolve_workspace_for_user(user)
         self.assertEqual(r.workspace, 'team-b')
-        self.assertEqual(r.source, workspaces_core.WORKSPACE_SOURCE_PREFERRED)
+        self.assertEqual(r.source,
+                         workspace_constants.WORKSPACE_SOURCE_PREFERRED)
 
 
 # Preferred-workspace setter RBAC ----------------------------------------
@@ -336,7 +342,7 @@ class TestResolverPrecedence(unittest.TestCase):
 class TestPreferredSetterRBAC(unittest.TestCase):
 
     def setUp(self):
-        self.user = models.User(id='hailong', name='hailong')
+        self.user = models.User(id='alice', name='alice')
 
     def test_setter_rejects_inaccessible_ws(self):
         with mock.patch.object(workspaces_core, '_load_workspaces',

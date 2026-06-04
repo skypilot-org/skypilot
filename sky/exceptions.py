@@ -476,24 +476,38 @@ class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
 
     Carries the list of accessible workspace names so callers (CLI / API
     handlers) can format consistent guidance pointing the user at
-    `sky workspace use <name>`, `--workspace`, or `~/.sky/config.yaml`.
+    `sky workspace use <name>` or `~/.sky/config.yaml`. The `--workspace`
+    flag is listed as a footnote because it only exists on the launch
+    commands (`sky launch` / `sky jobs launch`); listing it as a main
+    fix would mislead users running `sky status` / `sky queue` / etc.
 
     `note` is an optional drift explanation populated when the user has a
     saved preference that is no longer accessible — so the user understands
     why their previous default stopped working.
     """
 
+    # Recovery guidance shared between the exception message and the
+    # `sky workspace info` hint paragraph. Kept as a classmethod so the
+    # two surfaces don't drift; not parameterized on `accessible` because
+    # both call sites already show the list separately (the exception
+    # message via the preamble, the CLI via the `Accessible:` tree row).
+    @classmethod
+    def recovery_hint(cls) -> str:
+        return ('SkyPilot can\'t pick one automatically for this command. '
+                'To proceed:\n'
+                '  - run `sky workspace use <name>` to set your default, or\n'
+                '  - set `active_workspace: <name>` in `~/.sky/config.yaml`.\n'
+                '\n'
+                'Or, for a one-shot override on `sky launch` / '
+                '`sky jobs launch`, pass `--workspace <name>`.')
+
     def __init__(self, accessible: List[str], note: Optional[str] = None):
         self.accessible = sorted(accessible)
         self.note = note
         names = ', '.join(self.accessible)
         note_line = f'\nNote: {note}.' if note else ''
-        super().__init__(
-            f'You belong to multiple workspaces: {names}.{note_line}\n'
-            f'To proceed:\n'
-            f'  - run `sky workspace use <name>` to set your default, or\n'
-            f'  - pass `--workspace <name>` on this command, or\n'
-            f'  - set `active_workspace:` in `~/.sky/config.yaml`.')
+        super().__init__(f'You belong to multiple workspaces: {names}.'
+                         f'{note_line}\n{self.recovery_hint()}')
 
     def __reduce__(self):
         # SkyPilot's request executor pickles exceptions raised by a

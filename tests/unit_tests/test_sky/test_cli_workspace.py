@@ -120,6 +120,32 @@ class TestLaunchAmbiguousSurfaced(unittest.TestCase):
             self.assertIn(needle, msg,
                           f'AMBIGUOUS message missing {needle!r}: {msg}')
 
+    def test_ambiguous_message_scopes_workspace_flag_to_launch(self):
+        """`--workspace <name>` only exists on `sky launch` / `sky jobs
+        launch`. The message must NOT advertise it as a universal fix —
+        users running `sky status` / `sky queue` / etc. would try a flag
+        that doesn't exist on their command. The wording was changed
+        deliberately to push `--workspace` into a footnote that names
+        the two commands where it applies."""
+        e = exceptions.WorkspaceAmbiguousError(['team-a', 'team-b'])
+        msg = str(e)
+        # The launch-specific footnote must mention BOTH launch commands.
+        self.assertIn('sky launch', msg)
+        self.assertIn('sky jobs launch', msg)
+        # The universal fix list (`sky workspace use` + `~/.sky/config.yaml`)
+        # must not include `--workspace` — that would be misleading.
+        # Grab the substring before the launch-specific footnote and
+        # assert `--workspace` isn't in it.
+        footnote_marker = 'for a one-shot override'
+        self.assertIn(
+            footnote_marker, msg,
+            f'Expected launch footnote marker {footnote_marker!r}: {msg}')
+        universal_section = msg.split(footnote_marker)[0]
+        self.assertNotIn(
+            '--workspace', universal_section,
+            f'`--workspace` leaked into the universal fix list: '
+            f'{universal_section!r}')
+
     def test_ambiguous_message_with_drift_note(self):
         """When the user had a preferred that lost access, the drift note
         explains why they're now in AMBIGUOUS — keeps the user oriented."""
@@ -245,6 +271,89 @@ class TestSkyWorkspaceInfoCommand(unittest.TestCase):
             result = self.runner.invoke(command.cli, ['workspace', 'info'])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn('Preferred: (not set)', result.output)
+
+    def test_ambiguous_source_appends_recovery_hint_below_tree(self):
+        """When the resolver couldn't pick a workspace, the handler
+        returns `source='ambiguous'` with a SHORT `note`. The CLI must
+        render the tree uniformly (so `Preferred` / `Accessible` aren't
+        pushed sideways by a multi-line `Note:`), then append the long
+        recovery guidance as a separate block below. The hint text
+        comes from `WorkspaceAmbiguousError.recovery_hint()` so the
+        CLI and the launch-path exception message stay in sync.
+
+        Revert check: drop the appended `recovery_hint()` echo in
+        `workspace_info` and the `sky workspace use` substring assertion
+        below fails (the hint lives only in the appended paragraph,
+        never in `note`)."""
+        payload = {
+            'workspace': None,
+            'source': 'ambiguous',
+            'note': 'multiple workspaces accessible; '
+                    'no preferred or active workspace set',
+            'preferred': None,
+            'accessible': ['team-a', 'team-b'],
+        }
+        with mock.patch.object(sdk, 'get_user_workspace', return_value=payload):
+            result = self.runner.invoke(command.cli, ['workspace', 'info'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        # Tree row carries only the SHORT note — no multi-line spill.
+        self.assertIn('Source: ambiguous', result.output)
+        self.assertIn('Note: multiple workspaces accessible', result.output)
+        # The recovery hint appears as a separate paragraph below.
+        self.assertIn(exceptions.WorkspaceAmbiguousError.recovery_hint(),
+                      result.output)
+        # The hint must follow the tree, not be embedded in it.
+        accessible_idx = result.output.index('Accessible:')
+        hint_idx = result.output.index('sky workspace use')
+        self.assertLess(
+            accessible_idx, hint_idx,
+            'Recovery hint must come AFTER the tree (`Accessible:` row),'
+            ' otherwise the tree alignment breaks visually.')
+
+    def test_no_access_source_renders_note_without_extra_hint(self):
+        """User has no accessible workspaces. The raise-site note
+        ("User <name> (<id>) has no accessible workspaces.") fits in
+        the tree row — no separate recovery paragraph is appended.
+        The AMBIGUOUS state is special because its hint is multi-line;
+        NO_ACCESS doesn't share that problem."""
+        payload = {
+            'workspace': None,
+            'source': 'no-access',
+            'note': 'User alice (alice) has no accessible workspaces.',
+            'preferred': None,
+            'accessible': [],
+        }
+        with mock.patch.object(sdk, 'get_user_workspace', return_value=payload):
+            result = self.runner.invoke(command.cli, ['workspace', 'info'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('Source: no-access', result.output)
+        self.assertIn('Accessible: (none)', result.output)
+        self.assertIn('User alice (alice) has no accessible workspaces.',
+                      result.output)
+        # No appended recovery paragraph — the note already says it all.
+        self.assertNotIn('sky workspace use', result.output)
+
+    def test_permission_denied_source_does_not_append_generic_hint(self):
+        """For permission-denied the `note` already names the specific
+        workspace + reason. A generic recovery paragraph here would be
+        noise on top of the specific message — verify the CLI suppresses
+        the append for this state."""
+        payload = {
+            'workspace': None,
+            'source': 'permission-denied',
+            'note': "User does not have permission to access workspace "
+                    "'team-locked'",
+            'preferred': None,
+            'accessible': ['team-a'],
+        }
+        with mock.patch.object(sdk, 'get_user_workspace', return_value=payload):
+            result = self.runner.invoke(command.cli, ['workspace', 'info'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('Source: permission-denied', result.output)
+        self.assertIn('team-locked', result.output)
+        # No generic recovery paragraph for this state.
+        self.assertNotIn('sky workspace use', result.output)
+        self.assertNotIn('Ask an admin', result.output)
 
 
 if __name__ == '__main__':

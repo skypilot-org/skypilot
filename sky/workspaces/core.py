@@ -22,17 +22,8 @@ from sky.utils import config_utils
 from sky.utils import locks
 from sky.utils import resource_checker
 from sky.utils import schemas
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
-
-# Sources reported by resolve_workspace_for_user() so callers (launch path,
-# logs) can format consistent provenance strings.
-WORKSPACE_SOURCE_EXPLICIT = 'explicit'
-WORKSPACE_SOURCE_PREFERRED = 'preferred'
-# Preserves today's behavior for users (and admins) who can access the
-# 'default' workspace and have not set a preference — they continue landing
-# on 'default' instead of being surprised by an AMBIGUOUS error after upgrade.
-WORKSPACE_SOURCE_DEFAULT_FALLBACK = 'default-fallback'
-WORKSPACE_SOURCE_SINGLE_MEMBERSHIP = 'single-membership'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1109,8 +1100,9 @@ def resolve_workspace_for_user(
     """
     if requested is not None:
         check_workspace_permission(user, requested)
-        return WorkspaceResolution(workspace=requested,
-                                   source=WORKSPACE_SOURCE_EXPLICIT)
+        return WorkspaceResolution(
+            workspace=requested,
+            source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
 
     accessible = sorted(
         _accessible_workspace_names_for_user(user.id,
@@ -1122,8 +1114,9 @@ def resolve_workspace_for_user(
     # users table per request would be redundant on the hot path.
     preferred = user.preferred_workspace
     if preferred is not None and preferred in accessible:
-        return WorkspaceResolution(workspace=preferred,
-                                   source=WORKSPACE_SOURCE_PREFERRED)
+        return WorkspaceResolution(
+            workspace=preferred,
+            source=workspace_constants.WORKSPACE_SOURCE_PREFERRED)
 
     drift_note: Optional[str] = None
     if preferred is not None and preferred not in accessible:
@@ -1137,13 +1130,14 @@ def resolve_workspace_for_user(
         # admins who used to land on 'default' implicitly.
         return WorkspaceResolution(
             workspace=constants.SKYPILOT_DEFAULT_WORKSPACE,
-            source=WORKSPACE_SOURCE_DEFAULT_FALLBACK,
+            source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
             note=drift_note)
 
     if len(accessible) == 1:
-        return WorkspaceResolution(workspace=accessible[0],
-                                   source=WORKSPACE_SOURCE_SINGLE_MEMBERSHIP,
-                                   note=drift_note)
+        return WorkspaceResolution(
+            workspace=accessible[0],
+            source=workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP,
+            note=drift_note)
 
     if not accessible:
         raise exceptions.NoWorkspaceAccessError(

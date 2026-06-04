@@ -102,6 +102,7 @@ from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 from sky.volumes.client import sdk as volumes_sdk
+from sky.workspaces import constants as workspace_constants
 
 if typing.TYPE_CHECKING:
 
@@ -8129,6 +8130,15 @@ def workspace_info(output_format: str):
         f'{ux_utils.INDENT_LAST_SYMBOL}Accessible: {accessible_str}',
     ])
     click.echo('\n'.join(lines))
+
+    # AMBIGUOUS is the only state whose recovery message is multi-line
+    # (5+ lines) — inlining it into `Note:` would break the tree
+    # alignment, so render it as a separate paragraph below. The text
+    # comes from `WorkspaceAmbiguousError.recovery_hint()` so the CLI
+    # and launch-path error message share a single source.
+    if info.get('source') == workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS:
+        click.echo()
+        click.echo(exceptions.WorkspaceAmbiguousError.recovery_hint())
 
 
 @cli.group(cls=_NaturalOrderGroup)
