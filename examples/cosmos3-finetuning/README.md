@@ -22,9 +22,11 @@ post-trains the Cosmos3-Nano generation pathway (text/image/video → video) wit
 FSDP across 8 GPUs in bfloat16. It trains on
 [`nvidia/bridge-v2-subset-synthetic-captions`](https://huggingface.co/datasets/nvidia/bridge-v2-subset-synthetic-captions),
 a ~650 MB subset of [BridgeData V2](https://rail-berkeley.github.io/bridgedata/)
-robot-manipulation videos. To fine-tune on your own data, make it available on the
-instance (e.g. via another `file_mounts` bucket) laid out like
-`train/video_dataset_file.jsonl` and pass `--env DATASET_PATH=/path/to/it` (see
+robot-manipulation videos. To fine-tune on your own data, mount it on the instance with a
+`file_mounts` bucket (e.g. `source: s3://your-bucket/`, see
+[Cloud Buckets](https://docs.skypilot.co/en/latest/reference/storage.html)) or a
+[volume](https://docs.skypilot.co/en/stable/reference/volumes.html), laid out like
+`train/video_dataset_file.jsonl`, and pass `--env DATASET_PATH=/path/to/it` (see
 [`docs/dataset_jsonl.md`](https://github.com/NVIDIA/cosmos-framework/blob/main/docs/dataset_jsonl.md)).
 
 ## Run it

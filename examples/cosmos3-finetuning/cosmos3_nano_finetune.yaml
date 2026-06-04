@@ -30,7 +30,8 @@ envs:
   COSMOS_FRAMEWORK_REF: 411d25b2e35bc441126f48c44a4b93e1c0564274  # pinned for reproducibility
   BASE_CHECKPOINT_NAME: Cosmos3-Nano  # cosmos-framework catalog name -> nvidia/Cosmos3-Nano on HF
   # Dataset dir the launcher trains on. Defaults to the bridge subset downloaded in
-  # `setup`; override to fine-tune on your own data (see README).
+  # `setup`; override to fine-tune on your own data (see the bring-your-own-dataset
+  # note under file_mounts below).
   DATASET_PATH: examples/data/bridge-v2-subset-synthetic-captions/sft_dataset_bridge
   MAX_ITER: "500"          # optimizer steps (recipe default 500; set small for a smoke test)
   SAVE_ITER: "100"         # save a DCP checkpoint every N steps
@@ -53,6 +54,17 @@ file_mounts:
   /checkpoints:
     name: ${CHECKPOINT_BUCKET_NAME}
     mode: MOUNT
+
+  # Bring your own dataset: mount an existing cloud bucket, then point the recipe at it
+  # with `--env DATASET_PATH=/my-dataset` (that dir must contain
+  # `train/video_dataset_file.jsonl`; see README), so it trains on your data instead of
+  # the bridge subset `setup` downloads by default. Uncomment and set your bucket:
+  # /my-dataset:
+  #   source: s3://my-dataset-bucket/  # or gs://..., r2://..., etc.; read-only is fine
+  #   mode: MOUNT
+  # To use a SkyPilot volume instead, attach one with a top-level `volumes:` field
+  # (`volumes: {/my-dataset: my-vol}`); see
+  # https://docs.skypilot.co/en/stable/reference/volumes.html
 
 setup: |
   set -e
