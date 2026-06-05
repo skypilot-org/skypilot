@@ -543,10 +543,18 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Fetch the specific job by ID with all fields for complete data
-        const allJobsData = await dashboardCache.get(getManagedJobs, [
+        // Fetch the specific job by ID with all fields for complete data.
+        const cacheArgs = [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
-        ]);
+        ];
+        // On a manual refresh (refreshTrigger > 0), drop the cached entry
+        // first so the click fetches fresh data. Without this, a cache hit
+        // within the TTL returns the previously cached value and the refresh
+        // appears to do nothing until a second click.
+        if (refreshTrigger > 0) {
+          dashboardCache.invalidate(getManagedJobs, cacheArgs);
+        }
+        const allJobsData = await dashboardCache.get(getManagedJobs, cacheArgs);
 
         // Filter for ALL tasks matching this job_id (supports multi-task jobs)
         const matchingJobs =
