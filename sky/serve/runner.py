@@ -14,11 +14,14 @@ of import ordering. Plugins override the default by calling
 ``register(MyRunner())`` in their ``install()`` phase.
 
 Thread-safety: ``register()`` is only expected to be called during
-server/plugin startup, before request handling begins. The module-level
-reference is written and read atomically under the GIL, and only the
-default + plugin-provided runner are registered (sequentially), so no
-lock is needed.
+server/plugin startup, before request handling begins. ``current()``'s
+default-runner lazy init is double-checked-locked because uvicorn runs
+sync request handlers in a thread pool — concurrent first calls would
+otherwise construct ``_DefaultServiceStatusRunner`` twice. The lock is
+not held on the hot path (post-init reads short-circuit before the
+``with`` block).
 """
+import threading
 import typing
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -51,6 +54,7 @@ class ServiceStatusRunner(Protocol):
 
 
 _current: Optional[ServiceStatusRunner] = None
+_lock = threading.Lock()
 
 
 def register(runner: ServiceStatusRunner) -> None:
@@ -70,13 +74,22 @@ def current() -> ServiceStatusRunner:
     If nothing has been registered, constructs and installs
     ``_DefaultServiceStatusRunner`` so there's always a usable runner
     regardless of import ordering.
+
+    Uvicorn dispatches sync handlers to a thread pool, so concurrent
+    first calls can race here. Double-checked locking avoids
+    constructing the default runner twice — benign today (the class
+    has no ``__init__`` side effects) but cheap insurance against
+    future side effects.
     """
     # pylint: disable=global-statement
     global _current
     if _current is None:
-        # pylint: disable=import-outside-toplevel
-        from sky.serve.server.impl import _DefaultServiceStatusRunner
-        _current = _DefaultServiceStatusRunner()
+        with _lock:
+            if _current is None:
+                # In-function import: a top-level import would deadlock
+                # pylint: disable=import-outside-toplevel
+                from sky.serve.server.impl import _DefaultServiceStatusRunner
+                _current = _DefaultServiceStatusRunner()
     return _current
 
 

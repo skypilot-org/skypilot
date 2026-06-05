@@ -5,6 +5,7 @@ default codegen+subprocess status fetcher for an in-process one when
 the controller is consolidated into the API server.
 """
 # pylint: disable=invalid-name,protected-access
+import contextlib
 from unittest import mock
 
 import pytest
@@ -200,14 +201,10 @@ class TestStatusDelegatesToRunner:
 
         serve_runner.register(mock.Mock(get_service_status=fake_get))
 
-        patches = self._common_patches()
-        try:
-            for p in patches:
-                p.start()
+        with contextlib.ExitStack() as stack:
+            for p in self._common_patches():
+                stack.enter_context(p)
             impl.status(service_names='single', pool=True)
-        finally:
-            for p in patches:
-                p.stop()
 
         # service_names should be normalized from str -> [str].
         assert captured['service_names'] == ['single']
@@ -228,27 +225,26 @@ class TestStatusDelegatesToRunner:
             'load_balancer_port': None,
             'tls_encrypted': False,
         }]
-        patches = self._common_patches(handle=handle,
-                                       get_backend_return=backend)
-        with mock.patch(
-                'sky.serve.server.impl.serve_rpc_utils.RpcRunner.'
-                'get_service_status',
-                side_effect=exceptions.SkyletMethodNotImplementedError(
-                    'old skylet')) as rpc, \
-             mock.patch(
-                'sky.serve.server.impl.serve_utils.ServeCodeGen.'
-                'get_service_status',
-                return_value='CODE') as codegen, \
-             mock.patch(
-                'sky.serve.server.impl.serve_utils.load_service_status',
-                return_value=legacy_records):
-            try:
-                for p in patches:
-                    p.start()
-                result = impl.status(pool=False)
-            finally:
-                for p in patches:
-                    p.stop()
+        with contextlib.ExitStack() as stack:
+            for p in self._common_patches(handle=handle,
+                                          get_backend_return=backend):
+                stack.enter_context(p)
+            rpc = stack.enter_context(
+                mock.patch(
+                    'sky.serve.server.impl.serve_rpc_utils.RpcRunner.'
+                    'get_service_status',
+                    side_effect=exceptions.SkyletMethodNotImplementedError(
+                        'old skylet')))
+            codegen = stack.enter_context(
+                mock.patch(
+                    'sky.serve.server.impl.serve_utils.ServeCodeGen.'
+                    'get_service_status',
+                    return_value='CODE'))
+            stack.enter_context(
+                mock.patch(
+                    'sky.serve.server.impl.serve_utils.load_service_status',
+                    return_value=legacy_records))
+            result = impl.status(pool=False)
 
         rpc.assert_called_once()
         codegen.assert_called_once()
@@ -271,14 +267,10 @@ class TestStatusDelegatesToRunner:
         runner.get_service_status.return_value = records
         serve_runner.register(runner)
 
-        patches = self._common_patches()
-        try:
-            for p in patches:
-                p.start()
+        with contextlib.ExitStack() as stack:
+            for p in self._common_patches():
+                stack.enter_context(p)
             result = impl.status(pool=False)
-        finally:
-            for p in patches:
-                p.stop()
 
         # serve path with no load_balancer_port → endpoint stays None
         assert result == [{
