@@ -1,7 +1,10 @@
 """Unit tests for subprocess_utils.py."""
 import logging
 import multiprocessing
+import os
 import signal
+import subprocess
+import sys
 import time
 import unittest
 from unittest import mock
@@ -289,3 +292,52 @@ class TestKillProcessWithGrace(unittest.TestCase):
         # Process should be terminated by SIGKILL after grace period
         time.sleep(0.1)  # Give some time for the process to be fully terminated
         self.assertFalse(process.is_alive())
+
+
+def _count_zombie_children():
+    """Count zombie children of the current process."""
+    my_pid = os.getpid()
+    zombies = []
+    for proc in psutil.process_iter(['pid', 'ppid', 'status']):
+        try:
+            if (proc.info['ppid'] == my_pid and
+                    proc.info['status'] == psutil.STATUS_ZOMBIE):
+                zombies.append(proc.info['pid'])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return zombies
+
+
+class TestKillProcessDaemonNoZombie(unittest.TestCase):
+    """Test that kill_process_daemon does not leave zombie processes."""
+
+    def test_no_zombie_from_daemon_fork(self):
+        """kill_process_daemon should not create zombie processes.
+
+        The daemon does a double-fork (daemonize). The intermediate process
+        (the Popen's direct child) exits immediately. If we don't call
+        .wait() on the Popen, the intermediate process becomes a zombie.
+        This test verifies that .wait() is called and no zombies accumulate.
+        """
+        initial_zombies = _count_zombie_children()
+
+        # Create 10 short-lived processes, each with a daemon
+        for _ in range(10):
+            proc = subprocess.Popen(
+                ['sleep', '0.01'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess_utils.kill_process_daemon(proc.pid)
+            proc.wait()
+            time.sleep(0.1)
+
+        # Let daemon forks settle
+        time.sleep(2)
+
+        current_zombies = _count_zombie_children()
+        new_zombies = set(current_zombies) - set(initial_zombies)
+        self.assertEqual(
+            len(new_zombies), 0,
+            f'kill_process_daemon created {len(new_zombies)} zombie '
+            f'processes. PIDs: {list(new_zombies)}')

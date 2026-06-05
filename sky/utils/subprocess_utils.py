@@ -382,7 +382,7 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     # daemon script will detach itself from the parent process with
     # fork to avoid being killed by parent process. See the reason we
     # daemonize the process in `sky/skylet/subprocess_daemon.py`.
-    subprocess.Popen(
+    daemon_proc = subprocess.Popen(
         daemon_cmd,
         # Suppress output
         stdout=subprocess.DEVNULL,
@@ -391,6 +391,13 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
         stdin=subprocess.DEVNULL,
         env=env,
     )
+    # Wait for the daemon's intermediate process to exit. The daemon
+    # does a double-fork (daemonize): the direct child exits immediately
+    # after forking the grandchild. If we don't call wait(), the direct
+    # child becomes a zombie process. With many SSH/kubectl commands
+    # (e.g., 293 managed jobs checking status every 15s), these zombies
+    # accumulate and consume process table entries.
+    daemon_proc.wait()
 
 
 def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
