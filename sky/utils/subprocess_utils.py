@@ -107,7 +107,9 @@ def _fallback_children(parent_pid: int) -> List['psutil.Process']:
             ppid_map[pid] = int(data[rpar + 2:].split()[1])
         except (ValueError, IndexError):
             continue
-    # BFS exactly like psutil.Process.children(recursive=True).
+    # Traversal pattern (DFS via stack.pop) matches the upstream
+    # psutil.Process.children(recursive=True) implementation; order does
+    # not matter for our callers, which kill the whole subtree anyway.
     children_of: Dict[int, List[int]] = {}
     for pid, ppid in ppid_map.items():
         children_of.setdefault(ppid, []).append(pid)
@@ -122,7 +124,10 @@ def _fallback_children(parent_pid: int) -> List['psutil.Process']:
         for child_pid in children_of.get(cur, []):
             try:
                 descendants.append(psutil.Process(child_pid))
-            except psutil.NoSuchProcess:
+            except psutil.Error:
+                # NoSuchProcess / ZombieProcess / AccessDenied — in this
+                # degraded LSM fallback we drop the PID and keep walking
+                # so kill_children_processes can still clean up the rest.
                 pass
             stack.append(child_pid)
     return descendants
