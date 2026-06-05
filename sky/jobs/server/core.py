@@ -1838,10 +1838,14 @@ def _get_job_cluster_names(job_id: int,
                            task_id: Optional[int] = None) -> List[str]:
     """Reconstruct the underlying cluster name(s) for a managed job.
 
-    Mirrors the derivation used elsewhere (e.g. cluster cleanup): a non-pool
-    task's cluster is named deterministically from the task's job name and the
-    job id. Pool tasks are skipped, since their cluster is shared across jobs
-    and its events are not attributable to a single job.
+    Mirrors the derivation used by the controller (see ``jobs/controller.py``):
+    a non-pool task's cluster is named deterministically from the *task* name
+    (``task.name``) and the job id. The task name is the right key here: for a
+    multi-task pipeline the job-level (DAG) name is shared across tasks, but
+    each task launches its own cluster named from ``task.name``
+    (``dag_utils`` sets ``task.name = f'{dag.name}-{task_id}'``). Pool tasks are
+    skipped, since their cluster is shared across jobs and its events are not
+    attributable to a single job.
 
     Returns a de-duplicated list of cluster names (a multi-task pipeline uses
     one cluster per task).
@@ -1852,12 +1856,15 @@ def _get_job_cluster_names(job_id: int,
             continue
         if task.get('pool') is not None:
             continue
-        job_name = task.get('job_name')
-        if not job_name:
+        # 'task_name' is the per-task name (spot.task_name); 'job_name' is the
+        # job-level/DAG name, which is shared across a pipeline's tasks and so
+        # would reconstruct the wrong cluster name for multi-task jobs.
+        task_name = task.get('task_name')
+        if not task_name:
             continue
         cluster_names.append(
             managed_job_utils.generate_managed_job_cluster_name(
-                job_name, job_id))
+                task_name, job_id))
     # De-duplicate while preserving order.
     return list(dict.fromkeys(cluster_names))
 

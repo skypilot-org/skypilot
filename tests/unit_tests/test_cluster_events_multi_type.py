@@ -44,3 +44,18 @@ def test_parses_and_forwards_event_types(monkeypatch, event_type,
     assert captured['event_type'] == expected_types
     assert captured['include_timestamps'] is True
     assert captured['limit'] == 7
+
+
+@pytest.mark.parametrize('event_type', ['', '   ', ',', ' , '])
+def test_blank_event_type_raises(monkeypatch, event_type):
+    # A blank/empty event_type would parse to an empty list and silently match
+    # no events (type IN ()); reject it instead, mirroring the ValueError an
+    # unknown type raises.
+    def _should_not_be_called(**_kwargs):
+        raise AssertionError('reader must not be called for blank event_type')
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_events',
+                        _should_not_be_called)
+
+    with pytest.raises(ValueError):
+        core.get_cluster_events(cluster_hash='h', event_type=event_type)

@@ -359,6 +359,10 @@ def get_cluster_events(
         for event_type_str in event_type.split(',')
         if event_type_str.strip()
     ]
+    if not event_type_enums:
+        # Reject blank/empty input rather than silently matching nothing
+        # (an empty type list translates to `type IN ()`, i.e. no events).
+        raise ValueError(f'No valid cluster event type in {event_type!r}.')
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,

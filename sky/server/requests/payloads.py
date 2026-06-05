@@ -1029,6 +1029,9 @@ class ClusterEventsBody(RequestBody):
     # Event type to retrieve (e.g. 'STATUS_CHANGE' or 'DEBUG'). Multiple types
     # may be requested as a comma-separated string (e.g.
     # 'STATUS_CHANGE,LAUNCH_PROGRESS'); results are merged by timestamp.
+    # TODO: consider replacing this with a typed `event_types: List[str]`
+    # field (mapping a single `event_type` to `[event_type]` for back-compat)
+    # so callers don't have to encode the list as a comma-separated string.
     event_type: str
     include_timestamps: bool = False
     limit: Optional[

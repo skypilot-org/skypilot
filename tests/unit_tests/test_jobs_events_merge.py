@@ -24,8 +24,17 @@ def _job_event(reason, status, ts):
     }
 
 
-def _task(job_name='my-task', pool=None, task_id=0):
-    return {'job_name': job_name, 'pool': pool, 'task_id': task_id}
+def _task(task_name='my-task', pool=None, task_id=0, job_name='my-pipeline'):
+    # 'task_name' is the per-task name the controller uses to build the
+    # cluster name; 'job_name' is the job-level/DAG name (shared across a
+    # pipeline's tasks). They are deliberately different so a test fails if
+    # the wrong field is used to reconstruct the cluster name.
+    return {
+        'task_name': task_name,
+        'job_name': job_name,
+        'pool': pool,
+        'task_id': task_id,
+    }
 
 
 def test_no_merge_when_flag_disabled(monkeypatch):
@@ -60,7 +69,7 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
     monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
                         lambda job_id: [_task()])
     monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
-                        lambda job_name, job_id: f'{job_name}-{job_id}')
+                        lambda name, job_id: f'{name}-{job_id}')
     cluster_events = [
         {
             'reason': 'Launching (1 pod(s) pending due to Pulling)',
@@ -84,7 +93,8 @@ def test_merge_orders_newest_first_and_truncates(monkeypatch):
 
     result = core.get_job_events(job_id=1, limit=3, include_cluster_events=True)
 
-    # Cluster name reconstructed from the task's job name + job id.
+    # Cluster name reconstructed from the per-task name + job id (not the
+    # job-level/DAG name 'my-pipeline').
     assert captured['name'] == 'my-task-1'
     # Both the milestone sequence and the finer-grained launch progress are
     # requested.
@@ -136,7 +146,7 @@ def test_merge_is_best_effort_on_error(monkeypatch):
     monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
                         lambda job_id: [_task()])
     monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
-                        lambda job_name, job_id: f'{job_name}-{job_id}')
+                        lambda name, job_id: f'{name}-{job_id}')
 
     def _raise(*args, **kwargs):
         raise RuntimeError('db unavailable')
@@ -184,7 +194,7 @@ def test_merged_events_match_job_event_timezone(monkeypatch):
     monkeypatch.setattr(managed_job_state, 'get_managed_job_tasks',
                         lambda job_id: [_task()])
     monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
-                        lambda job_name, job_id: f'{job_name}-{job_id}')
+                        lambda name, job_id: f'{name}-{job_id}')
     monkeypatch.setattr(
         global_user_state, 'get_cluster_events_by_name', lambda *a, **k: [{
             'reason': 'Provisioning',
@@ -196,3 +206,37 @@ def test_merged_events_match_job_event_timezone(monkeypatch):
     # Timezone-aware (matching the job event) and the correct instant.
     assert merged['timestamp'].tzinfo is not None
     assert merged['timestamp'].timestamp() == 200
+
+
+def test_pipeline_uses_per_task_cluster_name(monkeypatch):
+    # A multi-task pipeline launches one cluster per task, each named from the
+    # per-task name (task.name), while the job-level/DAG name is shared. The
+    # merge must look up events by per-task cluster name, not the shared name.
+    job_events = [
+        _job_event('Job has started',
+                   managed_job_state.ManagedJobStatus.RUNNING, 300)
+    ]
+    monkeypatch.setattr(managed_job_state, 'get_job_events',
+                        lambda **kwargs: list(job_events))
+    # Two tasks of the same pipeline: distinct per-task names, shared DAG name.
+    monkeypatch.setattr(
+        managed_job_state, 'get_managed_job_tasks', lambda job_id: [
+            _task(task_name='pipe-0', task_id=0, job_name='pipe'),
+            _task(task_name='pipe-1', task_id=1, job_name='pipe'),
+        ])
+    monkeypatch.setattr(managed_job_utils, 'generate_managed_job_cluster_name',
+                        lambda name, job_id: f'{name}-{job_id}')
+
+    queried_names = []
+
+    def _fake_cluster_events(name, event_types, limit=None):
+        queried_names.append(name)
+        return [{'reason': f'Provisioning {name}', 'transitioned_at': 100}]
+
+    monkeypatch.setattr(global_user_state, 'get_cluster_events_by_name',
+                        _fake_cluster_events)
+
+    core.get_job_events(job_id=1, include_cluster_events=True)
+
+    # Per-task cluster names, not the shared DAG name 'pipe-1'.
+    assert queried_names == ['pipe-0-1', 'pipe-1-1']
