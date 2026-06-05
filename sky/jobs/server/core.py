@@ -435,11 +435,14 @@ def _maybe_submit_job_locally(
         is_batch = any(
             t.metadata.get('batch_coordinator', False) for t in dag.tasks)
         assert dag.name is not None, 'dag must have a name'
+        # Read the resolver-set thread-local directly. `force_user_workspace`
+        # would drop back to the literal 'default' for users who never set
+        # `active_workspace` server-side, which breaks users without
+        # access to the 'default' workspace.
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
-                workspace=skypilot_config.get_active_workspace(
-                    force_user_workspace=True),
+                workspace=skypilot_config.get_active_workspace(),
                 entrypoint=common_utils.get_current_command(),
                 pool=pool,
                 pool_hash=pool_hash,
@@ -557,7 +560,12 @@ def _submit_remotely(controller: controller_utils.Controllers,
     backend = backend_utils.get_backend_from_handle(local_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
+    # `_ensure_controller_up` has already entered AND exited its own
+    # `local_active_workspace_ctx`, so the thread-local here is the
+    # outer (resolver-set) workspace. See the consolidation-mode
+    # counterpart in `_maybe_submit_job_locally` for why
+    # `force_user_workspace` is not used.
+    workspace = skypilot_config.get_active_workspace()
     entrypoint = common_utils.get_current_command()
     pool_hash = serve_state.get_service_hash(pool) if pool else None
     user_hash = common_utils.get_user_hash()

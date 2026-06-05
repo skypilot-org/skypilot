@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 52  # lifecycle hooks: /hook_logs route + tail_hook_logs SDK
+API_VERSION = 53  # per-user preferred_workspace + /users/me/workspace endpoints
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -59,6 +59,13 @@ MIN_LAZY_REPLICA_HANDLE_API_VERSION = 51
 
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3
+
+# Minimum server API version that exposes /users/me/workspace and runs the
+# server-side launch-path resolver when the client does not specify an
+# active workspace. Older servers don't have the endpoint and fall back to
+# the literal 'default' workspace, so the client must skip features that
+# depend on per-user preferred workspace when talking to such servers.
+MIN_PREFERRED_WORKSPACE_API_VERSION = 53
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

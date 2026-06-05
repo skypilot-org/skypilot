@@ -304,6 +304,64 @@ jobs:
       package_name: skypilot-nightly
     secrets: inherit
 
+  # After a nightly is published, dispatch the downstream repo's workflow so it
+  # can react without polling PyPI. Fail-loud: a missing secret, bad App creds,
+  # or a non-204 turns the run red rather than silently skipping.
+  notify-downstream:
+    runs-on: ubuntu-latest
+    needs: [check-date, nightly-build-pypi, publish-and-validate-both]
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
+    steps:
+      - name: Parse downstream repo
+        id: parse
+        env:
+          DOWNSTREAM_REPO: ${{ secrets.NIGHTLY_DOWNSTREAM_REPO }}
+          DOWNSTREAM_WORKFLOW: ${{ secrets.NIGHTLY_DOWNSTREAM_WORKFLOW }}
+        run: |
+          if [[ -z "${DOWNSTREAM_REPO}" ]]; then
+            echo "::error::NIGHTLY_DOWNSTREAM_REPO secret is not set; cannot dispatch the downstream nightly."
+            exit 1
+          fi
+          if [[ -z "${DOWNSTREAM_WORKFLOW}" ]]; then
+            echo "::error::NIGHTLY_DOWNSTREAM_WORKFLOW secret is not set; cannot dispatch the downstream nightly."
+            exit 1
+          fi
+          echo "owner=${DOWNSTREAM_REPO%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${DOWNSTREAM_REPO#*/}"  >> "$GITHUB_OUTPUT"
+
+      - name: Mint downstream dispatch token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.NIGHTLY_DOWNSTREAM_CI_APP_ID }}
+          private-key: ${{ secrets.NIGHTLY_DOWNSTREAM_CI_APP_PRIVATE_KEY }}
+          owner: ${{ steps.parse.outputs.owner }}
+          repositories: ${{ steps.parse.outputs.name }}
+
+      - name: Trigger downstream workflow
+        env:
+          DISPATCH_REPO: ${{ secrets.NIGHTLY_DOWNSTREAM_REPO }}
+          DISPATCH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DISPATCH_WORKFLOW: ${{ secrets.NIGHTLY_DOWNSTREAM_WORKFLOW }}
+          DISPATCH_REF: ${{ secrets.NIGHTLY_DOWNSTREAM_REF || 'main' }}
+          NIGHTLY_VERSION: ${{ needs.nightly-build-pypi.outputs.version }}
+        run: |
+          echo "Dispatching ${DISPATCH_WORKFLOW} on ${DISPATCH_REPO}@${DISPATCH_REF} (version=${NIGHTLY_VERSION})"
+          http_code=$(curl -sS -o /tmp/dispatch-resp -w '%{http_code}' \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${DISPATCH_REPO}/actions/workflows/${DISPATCH_WORKFLOW}/dispatches" \
+            -d "{\"ref\":\"${DISPATCH_REF}\",\"inputs\":{\"version\":\"${NIGHTLY_VERSION}\"}}")
+          if [[ "${http_code}" != "204" ]]; then
+            echo "::error::Downstream dispatch to ${DISPATCH_REPO} (${DISPATCH_WORKFLOW}) failed with HTTP ${http_code}."
+            echo "Response body:"
+            cat /tmp/dispatch-resp || true
+            exit 1
+          fi
+          echo "Dispatch accepted."
+
   summary:
     runs-on: ubuntu-latest
     needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]

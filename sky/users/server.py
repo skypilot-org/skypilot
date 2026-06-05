@@ -6,23 +6,28 @@ import os
 import re
 import secrets
 import time
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Generator, List, Optional, Set
 
 import fastapi
 import filelock
 
+from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.users import permission
 from sky.users import rbac
+from sky.users import resolver as user_resolver
 from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import resource_checker
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import core as workspaces_core
 
 logger = sky_logging.init_logger(__name__)
 
@@ -109,6 +114,159 @@ def get_current_user_role(request: fastapi.Request):
     }
 
 
+@router.post('/me/workspace')
+def set_user_preferred_workspace(
+    request: fastapi.Request,
+    body: payloads.UserPreferredWorkspaceBody,
+) -> Dict[str, Any]:
+    """Sets (or clears with `preferred: null`) the user's preferred workspace.
+
+    Echoes the new preferred value on success. Callers that need the
+    resolved workspace + accessible list should follow up with
+    ``GET /users/me/workspace``.
+
+    RBAC: rejects setting a workspace the user does not have access to.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Not authenticated.')
+    try:
+        workspaces_core.set_user_preferred_workspace(auth_user, body.preferred)
+    except exceptions.PermissionDeniedError as e:
+        raise fastapi.HTTPException(status_code=403, detail=str(e)) from e
+    except ValueError as e:
+        # Workspace does not exist.
+        raise fastapi.HTTPException(status_code=404, detail=str(e)) from e
+    return {'preferred': body.preferred}
+
+
+@router.get('/me/workspace')
+def get_user_workspace(
+    request: fastapi.Request,
+    requested: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Returns workspace state for the calling user.
+
+    One stop for everything ``sky workspace info`` / dashboard pages /
+    ``_show_enabled_infra`` need:
+
+    * ``workspace``: the workspace the launch path would pick for this
+      user RIGHT NOW. Mirrors the launch-path precedence — an explicit
+      ``active_workspace`` (set client-side in ``.sky.yaml`` and passed
+      here via ``?requested=``, or set in the server's own loaded
+      config) wins; otherwise the resolver runs preferred /
+      default-fallback / single-membership.
+    * ``source``: one of ``WORKSPACE_SOURCE_*``. Tells the UI / CLI why
+      the resolver landed where it did (``explicit`` when the active
+      override won, otherwise ``preferred`` / ``default-fallback`` /
+      ``single-membership``). Drives the optional ``note``.
+    * ``note``: free-form message — drift on success
+      (``preferred 'team-x' not accessible``), or the error message
+      when the resolver couldn't pick a workspace
+      (``WorkspaceAmbiguousError``, ``NoWorkspaceAccessError``, or a
+      ``PermissionDeniedError`` against an explicit ``requested``). In
+      those error cases ``workspace`` is ``None`` and ``source`` is
+      ``None``; the caller should render ``note`` as guidance instead
+      of treating the request as a server fault.
+    * ``preferred``: the persisted preferred workspace (``None`` if the
+      user has not set one).
+    * ``accessible``: sorted list of every workspace the user can launch
+      into. Same set ``/workspaces`` returns the config for, but just
+      the names.
+
+    Args:
+        request: FastAPI request — the auth middleware must have
+            populated ``request.state.auth_user``.
+        requested: explicit active workspace from the caller. Mirrors
+            the resolver's precedence-1 slot. The client SDK reads its
+            local ``active_workspace`` (if any) and stamps it here, so
+            the answer reflects what would actually land at launch.
+
+    The handler is synchronous (no executor.schedule_request_async) —
+    no request body, the resolver is pure-Python, and dashboard pages
+    poll this frequently enough that latency matters.
+    """
+    auth_user = request.state.auth_user
+    if auth_user is None:
+        raise fastapi.HTTPException(status_code=401,
+                                    detail='Not authenticated.')
+    # Sync FastAPI handler — see comment in user_update for why we have
+    # to set the per-request user context here ourselves. Without this,
+    # `workspaces_core.get_accessible_workspace_names()` (which calls
+    # `common_utils.get_current_user()`) would fall back to the API-
+    # server process's own identity and return the wrong user's
+    # accessible set.
+    common_utils.set_current_user(auth_user)
+    # Same reason: refresh process-cached workspace config +
+    # request-scoped lru cache so admin `workspace create/update`
+    # ops that ran on a worker process are visible here.
+    server_common.refresh_workspace_state_for_sync_handler()
+    # The auth middleware does not populate `preferred_workspace` on
+    # `auth_user` (only id/name/type travel via the request context); the
+    # resolver reads it off the User dataclass directly. Re-fetch the user
+    # row so this handler matches what worker-side `add_or_update_user(
+    # return_user=True)` would supply.
+    fresh_user = global_user_state.get_user(auth_user.id)
+    user_for_resolve = fresh_user if fresh_user is not None else auth_user
+    # Mirror launch-path precedence: an explicit `active_workspace` — set
+    # by the client and shipped here as `?requested=`, or
+    # set in the server's own loaded config — beats the resolver's 2-6
+    # path. For queued requests the executor reads the merged thread-
+    # local (client-overlay + server base), but this synchronous GET has
+    # no request body, so the SDK stamps `?requested=` explicitly. We
+    # still check the server-side config as a fallback so an admin who
+    # set `active_workspace` globally gets honored.
+    if requested is None and skypilot_config.is_active_workspace_set():
+        requested = skypilot_config.get_active_workspace()
+    accessible = sorted(workspaces_core.get_accessible_workspace_names())
+    response: Dict[str, Any] = {
+        'workspace': None,
+        'source': None,
+        'note': None,
+        'preferred': user_for_resolve.preferred_workspace,
+        'accessible': accessible,
+    }
+    try:
+        resolution = workspaces_core.resolve_workspace_for_user(
+            user_for_resolve, requested=requested)
+    except exceptions.WorkspaceAmbiguousError as e:
+        # Per-user state, not a server fault — return 200 with a state-
+        # coded `source` and a SHORT `note`. The CLI / dashboard show
+        # the long recovery guidance separately (see
+        # `WorkspaceAmbiguousError.recovery_hint`) so the structured
+        # payload (`workspace` / `source` / `note` / `preferred` /
+        # `accessible`) stays clean and grep-able.
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS
+        # `e.note` only carries drift context ("preferred 'X' not
+        # accessible"); fall back to a generic one-liner otherwise.
+        response['note'] = (e.note
+                            if e.note else 'multiple workspaces accessible; '
+                            'no preferred or active workspace set')
+        return response
+    except exceptions.NoWorkspaceAccessError as e:
+        # One-line message from the raise site ("User <name> (<id>) has
+        # no accessible workspaces.") — short enough to fit in the tree
+        # row and more informative than a generic stand-in.
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
+        response['note'] = str(e)
+        return response
+    except exceptions.PermissionDeniedError as e:
+        # Per-workspace deny — raised when an explicit `requested`
+        # workspace exists but the user can't access it. We keep the
+        # exception message here because it names the specific
+        # workspace and the reason (RBAC / not-in-allowed-users),
+        # which the payload alone wouldn't convey.
+        response['source'] = (
+            workspace_constants.WORKSPACE_SOURCE_PERMISSION_DENIED)
+        response['note'] = str(e)
+        return response
+    response['workspace'] = resolution.workspace
+    response['source'] = resolution.source
+    response['note'] = resolution.note
+    return response
+
+
 @router.post('/create')
 def user_create(user_create_body: payloads.UserCreateBody) -> None:
     username = user_create_body.username
@@ -158,6 +316,14 @@ def user_update(request: fastapi.Request,
                                  (role != target_user_roles[0]))
     current_user = request.state.auth_user
     if current_user is not None:
+        # This is a sync FastAPI handler, so it doesn't go through the
+        # executor's reload_for_new_request pipeline that normally
+        # populates the per-request user context. Without this, downstream
+        # calls (e.g. resource_checker -> queue_v2 ->
+        # get_accessible_workspace_names) would fall back to the local
+        # machine user and silently filter out anything in private
+        # workspaces the local user can't see.
+        common_utils.set_current_user(current_user)
         current_user_roles = permission.permission_service.get_user_roles(
             current_user.id)
         if not current_user_roles:
@@ -185,6 +351,17 @@ def user_update(request: fastapi.Request,
             detail=f'Cannot update password for internal '
             f'API server user {user_info.name}')
 
+    # When demoting from admin to a non-admin role, ensure the user has no
+    # active resources in private workspaces they will lose access to.
+    is_demotion = (need_update_role and target_user_roles and
+                   target_user_roles[0] == rbac.RoleName.ADMIN.value and
+                   role != rbac.RoleName.ADMIN.value)
+    if is_demotion:
+        try:
+            resource_checker.check_user_role_demotion(user_info)
+        except ValueError as e:
+            raise fastapi.HTTPException(status_code=400, detail=str(e))
+
     with _user_lock(user_info.id):
         if password:
             password_hash = server_common.crypt_ctx.hash(password)
@@ -195,6 +372,126 @@ def user_update(request: fastapi.Request,
         if role and need_update_role:
             # Update user role in casbin policy
             permission.permission_service.update_role(user_info.id, role)
+
+
+@router.post('/batch_update')
+def user_batch_update(request: fastapi.Request,
+                      body: payloads.UserBatchUpdateBody) -> Dict[str, Any]:
+    """Updates the role for a batch of users.
+
+    Returns a per-user result with ``succeeded`` and ``failed`` lists so the
+    caller can show partial failures (e.g. one user is blocked
+    while others are not).
+    """
+    role = body.role
+    user_ids = body.user_ids
+    supported_roles = rbac.get_supported_roles()
+    if not role or role not in supported_roles:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid role: {role}')
+    if not user_ids:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='user_ids must not be empty')
+
+    # Only admin can run a batch role update.
+    current_user = request.state.auth_user
+    if current_user is not None:
+        # Sync FastAPI handler -- see comment in user_update for why we
+        # have to set the per-request user context here ourselves.
+        common_utils.set_current_user(current_user)
+        current_user_roles = permission.permission_service.get_user_roles(
+            current_user.id)
+        if not current_user_roles:
+            raise fastapi.HTTPException(status_code=403, detail='Invalid user')
+        if current_user_roles[0] != rbac.RoleName.ADMIN.value:
+            raise fastapi.HTTPException(
+                status_code=403, detail='Only admin can update user roles')
+
+    # Pre-fetch the per-user role state ONCE for the whole batch so the
+    # per-user loop is O(1) dict lookups instead of N * casbin
+    # get_user_roles.
+    users_to_role: Dict[str, str] = {}
+    for supported_role in supported_roles:
+        for uid in permission.permission_service.get_users_for_role(
+                supported_role):
+            users_to_role[uid] = supported_role
+
+    batch_workspaces_allowed_users: Optional[Dict[str, Set[str]]] = None
+    if role == rbac.RoleName.ADMIN.value:
+        # Promotion -> nobody needs the demotion check, so we only need
+        # user info for the batch's user_ids (one targeted IN query,
+        # avoiding a full-table scan that gets wasted on this path).
+        all_users_map = global_user_state.get_users(set(user_ids))
+        batch_workspaces = None
+        batch_resources = None
+    else:
+        # Demotion -> we need the full user list anyway to detect
+        # username-uniqueness across the whole system when resolving each
+        # private workspace's ``allowed_users``. Build one shared
+        # UserResolver and derive the per-user map from the same fetch
+        # so we still do exactly one DB round-trip.
+        resolver = user_resolver.UserResolver()
+        all_users_map = resolver.id_to_user
+        batch_workspaces = resource_checker.load_fresh_workspaces()
+        batch_resources = resource_checker.ResourceSnapshot.fetch_all()
+        # Pre-resolve each private workspace's allowed_users -> user_id
+        # set ONCE for the batch. Without this, check_user_role_demotion
+        # iterates private workspaces and calls get_workspace_users for
+        # each (every call re-fetches get_all_users() from the DB),
+        # giving N * P * get_all_users() round-trips in a batch.
+        batch_workspaces_allowed_users = (
+            resolver.resolve_workspaces_allowed_users(batch_workspaces))
+
+    succeeded: List[str] = []
+    failed: List[Dict[str, str]] = []
+
+    for user_id in user_ids:
+        try:
+            user_info = all_users_map.get(user_id)
+            if user_info is None:
+                failed.append({
+                    'user_id': user_id,
+                    'error': f'User {user_id} does not exist'
+                })
+                continue
+            if user_info.id in _INTERNAL_USER_IDS:
+                failed.append({
+                    'user_id': user_id,
+                    'error': (f'Cannot update role for internal API server '
+                              f'user {user_info.name}')
+                })
+                continue
+            current_role = users_to_role.get(user_id)
+            target_user_roles = [current_role] if current_role else []
+            need_update_role = (not target_user_roles or
+                                role != target_user_roles[0])
+            if not need_update_role:
+                # Already in the desired role; record as success no-op.
+                succeeded.append(user_id)
+                continue
+            # When demoting from admin to a non-admin role (user / viewer),
+            # ensure the user has no active resources in private workspaces
+            # they will lose implicit access to. Reuse the per-batch
+            # pre-fetched workspaces + active resources to keep this O(C+J)
+            # for the whole batch instead of O(N * (C+J)).
+            if (target_user_roles and
+                    target_user_roles[0] == rbac.RoleName.ADMIN.value and
+                    role != rbac.RoleName.ADMIN.value):
+                resource_checker.check_user_role_demotion(
+                    user_info,
+                    workspaces=batch_workspaces,
+                    resources=batch_resources,
+                    workspaces_allowed_users=batch_workspaces_allowed_users)
+            with _user_lock(user_info.id):
+                permission.permission_service.update_role(user_info.id, role)
+            succeeded.append(user_id)
+        except ValueError as e:
+            failed.append({'user_id': user_id, 'error': str(e)})
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Failed to update role for user {user_id}')
+            failed.append({'user_id': user_id, 'error': str(e)})
+
+    return {'succeeded': succeeded, 'failed': failed}
 
 
 def _delete_user(user_id: str) -> None:
@@ -222,7 +519,13 @@ def _delete_user(user_id: str) -> None:
 
 
 @router.post('/delete')
-def user_delete(user_delete_body: payloads.UserDeleteBody) -> None:
+def user_delete(request: fastapi.Request,
+                user_delete_body: payloads.UserDeleteBody) -> None:
+    current_user = request.state.auth_user
+    if current_user is not None:
+        # Sync FastAPI handler -- see comment in user_update for why we
+        # have to set the per-request user context here ourselves.
+        common_utils.set_current_user(current_user)
     user_id = user_delete_body.user_id
     _delete_user(user_id)
 

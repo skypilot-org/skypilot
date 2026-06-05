@@ -38,6 +38,7 @@ from sky.utils import status_lib
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import retries as db_retries
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -79,6 +80,12 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('password', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('type', sqlalchemy.Text, server_default=None),
+    # User-set default workspace; null when unset. Resolution and RBAC
+    # validation are handled in sky/workspaces/; this column is the
+    # persisted value only.
+    sqlalchemy.Column('preferred_workspace',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -418,6 +425,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                 )
             result = session.execute(insert_stmnt)
 
@@ -447,6 +455,7 @@ def add_or_update_user(
                         user_table.c.password,
                         user_table.c.created_at,
                         user_table.c.type,
+                        user_table.c.preferred_workspace,
                     )
 
                 result = session.execute(update_stmnt)
@@ -467,6 +476,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -503,6 +513,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -520,6 +531,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -541,6 +553,7 @@ def get_user(user_id: str) -> Optional[models.User]:
         password=row.password,
         created_at=row.created_at,
         user_type=row.type,
+        preferred_workspace=row.preferred_workspace,
     )
 
 
@@ -557,6 +570,7 @@ def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     }
 
@@ -575,6 +589,7 @@ def get_user_by_name(username: str) -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -591,6 +606,7 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
             name=row.name,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -615,8 +631,30 @@ def get_all_users() -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
+
+
+@db_retries.retry
+@metrics_lib.time_me
+def set_user_preferred_workspace(user_id: str,
+                                 workspace: Optional[str]) -> bool:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    This is the raw DB write; RBAC validation that the user has access to the
+    target workspace MUST be done by the caller in sky/workspaces/ before
+    invoking this. Returns True if a row was updated, False if the user_id
+    does not exist.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(user_table).where(
+                user_table.c.id == user_id).values(
+                    preferred_workspace=workspace))
+        session.commit()
+        return result.rowcount > 0
 
 
 @metrics_lib.time_me
@@ -920,6 +958,7 @@ def add_or_update_cluster(cluster_name: str,
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
@@ -1202,6 +1241,7 @@ def get_cluster_events(
     ...
 
 
+@db_retries.retry
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
@@ -1309,6 +1349,7 @@ def update_last_use(cluster_name: str):
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
@@ -1357,6 +1398,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
@@ -1467,6 +1509,7 @@ def get_glob_cluster_names(
     return [row.name for row in rows]
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
@@ -1829,6 +1872,7 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
+@db_retries.retry
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def get_cluster_from_name(
@@ -3017,6 +3061,7 @@ def update_service_account_token_last_used(token_id: str) -> None:
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def delete_service_account_token(token_id: str) -> bool:
     """Delete a service account token.
@@ -3062,6 +3107,7 @@ def rotate_service_account_token(token_id: str,
         raise ValueError(f'Service account token {token_id} not found.')
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.

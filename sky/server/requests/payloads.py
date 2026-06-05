@@ -157,6 +157,19 @@ class RequestBody(BasePayload):
     override_skypilot_config_path: Optional[str] = None
     # Blob ID for uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # The client's API_VERSION as captured server-side from the
+    # `X-SkyPilot-API-Version` request header in `prepare_request_async`
+    # (the FastAPI dispatch context, where the `_remote_api_version`
+    # ContextVar set by APIVersionMiddleware is visible). The field
+    # exists because the worker process that later runs the request
+    # cannot see that ContextVar — it crosses a process boundary via
+    # the persisted request body. Clients themselves do NOT populate
+    # this field; the server fills it in from the wire header so any
+    # client that already sets the header (Python SDK already does; the
+    # dashboard apiClient also sets it) gets the right value without
+    # client-specific code. `None` means the request arrived without
+    # the header — i.e. an old client.
+    client_api_version: Optional[int] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -190,6 +203,7 @@ class RequestBody(BasePayload):
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
         kwargs.pop('file_mounts_blob_id')
+        kwargs.pop('client_api_version', None)
         return kwargs
 
     @property
@@ -476,6 +490,12 @@ class UserUpdateBody(RequestBody):
 class UserImportBody(RequestBody):
     """The request body for the user import endpoint."""
     csv_content: str
+
+
+class UserBatchUpdateBody(RequestBody):
+    """The request body for the user batch update endpoint."""
+    user_ids: List[str]
+    role: str
 
 
 class ServiceAccountTokenCreateBody(RequestBody):
@@ -914,6 +934,18 @@ class DeleteWorkspaceBody(RequestBody):
     workspace_name: str
 
 
+class WorkspaceBatchAddUsersBody(RequestBody):
+    """The request body for adding users to multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
+class WorkspaceBatchRemoveUsersBody(RequestBody):
+    """The request body for removing users from multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
 class UpdateConfigBody(RequestBody):
     """The request body for updating the entire SkyPilot configuration."""
     config: Dict[str, Any]
@@ -922,6 +954,16 @@ class UpdateConfigBody(RequestBody):
 class GetConfigBody(RequestBody):
     """The request body for getting the entire SkyPilot configuration."""
     pass
+
+
+class UserPreferredWorkspaceBody(RequestBody):
+    """Request body for POST /users/me/workspace.
+
+    `preferred` is the workspace name to set as the user's default, or None
+    to clear the preference. RBAC is validated server-side in
+    sky/workspaces/core.set_user_preferred_workspace().
+    """
+    preferred: Optional[str] = None
 
 
 class CostReportBody(RequestBody):

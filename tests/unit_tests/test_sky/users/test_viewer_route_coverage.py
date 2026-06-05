@@ -72,6 +72,9 @@ _KNOWN_VIEWER_DENIED: set = {
     # --- Auth writes ---
     ('/api/v1/auth/authorize', 'POST'),
     ('/api/cancel', 'POST'),
+    # Viewers are read-only; they cannot mutate their own preferred
+    # workspace. (The matching GET is in rbac._DEFAULT_VIEWER_ALLOWLIST.)
+    ('/users/me/workspace', 'POST'),
     # --- Managed jobs writes ---
     ('/jobs/launch', 'POST'),
     ('/jobs/cancel', 'POST'),
@@ -88,6 +91,7 @@ _KNOWN_VIEWER_DENIED: set = {
     # --- Users writes (incl. SA token mgmt) ---
     ('/users/create', 'POST'),
     ('/users/update', 'POST'),
+    ('/users/batch_update', 'POST'),
     ('/users/delete', 'POST'),
     ('/users/import', 'POST'),
     ('/users/export', 'GET'),  # password hashes
@@ -100,6 +104,8 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/workspaces/create', 'POST'),
     ('/workspaces/update', 'POST'),
     ('/workspaces/delete', 'POST'),
+    ('/workspaces/batch_add_users', 'POST'),
+    ('/workspaces/batch_remove_users', 'POST'),
     ('/workspaces/config', 'GET'),  # full admin config -> tokens, etc.
     ('/workspaces/config', 'POST'),
     # --- Recipes writes ---

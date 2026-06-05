@@ -1672,11 +1672,28 @@ def test_volume_env_mount_kubernetes():
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
             ' && '.join([
-                'sky jobs cancel -a -y || true', 'sleep 5',
+                'sky jobs cancel -a -y || true',
+                # The managed job's worker cluster is torn down in the
+                # controller's `finally` block, and the controller only sets
+                # schedule_state=DONE after that cleanup completes — so DONE
+                # is a stronger guarantee than the per-task terminal status
+                # (SUCCEEDED/CANCELLED/FAILED) and implies the PVC is no
+                # longer in use. Wait for our job to reach DONE before
+                # deleting the volume.
+                f'for i in $(seq 1 60); do '
+                f'sky jobs queue -v -a --format json 2>/dev/null | '
+                f'python3 -c "'
+                f'import json, sys; '
+                f'jobs = json.load(sys.stdin); '
+                f"m = [j for j in jobs if j.get('job_name') == '{name}-job']; "
+                f"sys.exit(0 if (m and all(j.get('schedule_state') == 'DONE' for j in m)) else 1)"
+                f'" && break; '
+                f'sleep 5; '
+                f'done',
                 f'sky volumes delete {full_pvc_name} -y',
                 f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
                 f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
-                '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
+                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
             ]),
         )
         smoke_tests_utils.run_one_test(test)

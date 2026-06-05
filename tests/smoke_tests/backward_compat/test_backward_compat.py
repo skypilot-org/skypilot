@@ -152,7 +152,13 @@ class TestBackwardCompatibility:
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
+            # Cap azure-cli<2.87.0 in the base (old, published) env, which
+            # can't be fixed retroactively: 2.87.0 pulls the broken
+            # azure-mgmt-storage 25.0.0 (see dependencies.py). Mirrors the
+            # kubernetes<36.0.0 base-env pin below.
+            # TODO: Remove once the base version tested against caps
+            # azure-cli<2.87.0.
+            'uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0" && '
             # Fix https://github.com/skypilot-org/skypilot/issues/7287
             # for legacy skypilot versions.
             'uv pip install uvicorn==0.35.0 && '
@@ -194,7 +200,9 @@ class TestBackwardCompatibility:
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
+            # Cap azure-cli<2.87.0 to match dependencies.py; see the base-env
+            # note above.
+            'uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0" && '
             'uv pip install -e .[all]',)
 
         base_sky_api_version = subprocess.run(

@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
         { selector: '.toctree-l1 > a', text: 'For Frontier AI' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
+        { selector: '.toctree-l2 > a', text: 'Sandboxes' },
         { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
     ];
     newItems.forEach(({ selector, text }) => {
@@ -48,6 +49,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.classList.add('new-item');
             }
         });
+    });
+});
+
+// Auto-expand the "For Frontier AI" section so its nested items (and their
+// "New" badges) are visible in the sidebar without a manual click.
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.toctree-l1').forEach((li) => {
+        const link = li.querySelector(':scope > a');
+        if (link && link.textContent.includes('For Frontier AI')) {
+            const checkbox = li.querySelector(':scope > input.toctree-checkbox');
+            if (checkbox) checkbox.checked = true;
+        }
     });
 });
 

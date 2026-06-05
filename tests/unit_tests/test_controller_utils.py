@@ -352,9 +352,10 @@ def test_get_cloud_dependencies_installation_commands_azure_only(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
 
-    # Mock dependencies
+    # Mock dependencies. Must match the AZURE_CLI value in
+    # extras_require['azure'], since the code removes it from that list.
     monkeypatch.setattr('sky.utils.controller_utils.dependencies.AZURE_CLI',
-                        'azure-cli>=2.65.0')
+                        'azure-cli>=2.65.0,<2.87.0')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(

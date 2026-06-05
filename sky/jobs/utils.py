@@ -43,6 +43,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -91,12 +92,31 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+# While a managed job is provisioning, we poll the jobs controller log this
+# often to relay the cluster-launch spinner messages (e.g. "Preparing SkyPilot
+# runtime (1/3)") to the user. This is faster than JOB_STATUS_CHECK_GAP_SECONDS
+# so the spinner feels responsive without polling the job-status DB as often.
+_PROVISION_LOG_POLL_GAP_SECONDS = 1
+
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
+# Pattern matching the "From controller <UUID>" line that the controller
+# emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
+# the debug-dump manifest to scope controller_system/*.log files to the
+# controllers that actually ran the requested jobs. HA recovery causes
+# the per-job log (opened in append mode at sky/utils/context.py:146) to
+# receive a fresh "From controller …" line each time a new controller
+# picks up the job — and that line can land arbitrarily far into the
+# file after hours of intervening status-check output, so we scan the
+# whole file rather than just the head.
+_CONTROLLER_UUID_LOG_RE = re.compile(
+    r'From controller ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
+    r'[0-9a-f]{4}-[0-9a-f]{12})')
+
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
-    '{status_str}. It may take a few minutes.\n'
+    '{status_str}. It may take a few minutes.{provision_str}\n'
     '  [dim]View controller logs: sky jobs logs --controller {job_id}')
 _JOB_CANCELLED_MESSAGE = (
     ux_utils.spinner_message('Waiting for task status to be updated.') +
@@ -441,14 +461,20 @@ async def get_job_status(
         status = list(statuses.values())[0]
         _log_job_status(status)
         return status, None
-    except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
-            ValueError, TypeError, asyncio.TimeoutError) as e:
+    except (exceptions.CommandError, exceptions.CommandFailureException,
+            grpc.RpcError, grpc.FutureTimeoutError, ValueError, TypeError,
+            asyncio.TimeoutError) as e:
         # Note: Each of these exceptions has some additional conditions to
         # limit how we handle it and whether or not we catch it.
         potential_transient_error_reason = None
         if isinstance(e, exceptions.CommandError):
             returncode = e.returncode
             potential_transient_error_reason = (f'Returncode: {returncode}. '
+                                                f'{e.detailed_reason}')
+        elif isinstance(e, exceptions.CommandFailureException):
+            # Note: this should come after the CommandError handler, as this is
+            # the supertype of CommandError
+            potential_transient_error_reason = (f'Command {e.failure}. '
                                                 f'{e.detailed_reason}')
         elif isinstance(e, grpc.RpcError):
             potential_transient_error_reason = e.details()
@@ -908,19 +934,25 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 
     # Merge results and collect cluster info for unique clusters
     seen_cluster_names: Set[str] = set()
-    for job_id, (job_inline, job_files, job_errors,
-                 cluster_name) in zip(job_ids, results):
+    seen_controller_uuids: Set[str] = set()
+    for job_id, (job_inline, job_files, job_errors, cluster_name,
+                 controller_uuids) in zip(job_ids, results):
         inline_data.extend(job_inline)
         file_paths.extend(job_files)
         errors.extend(job_errors)
+        seen_controller_uuids.update(controller_uuids)
         if cluster_name and cluster_name not in seen_cluster_names:
             seen_cluster_names.add(cluster_name)
             job_prefix = f'managed_jobs/{job_id}'
             _collect_cluster_debug_manifest(cluster_name, job_prefix,
                                             inline_data, errors)
 
-    # Collect controller system log paths (shared, not per-job)
-    _collect_controller_system_log_paths(file_paths, errors)
+    # Collect controller system log paths (shared, not per-job). Scope to
+    # the controllers that actually ran the requested jobs — globbing the
+    # whole directory would drag in thousands of unrelated controller
+    # processes' logs.
+    _collect_controller_system_log_paths(file_paths, errors,
+                                         seen_controller_uuids)
 
     return {
         'inline_data': inline_data,
@@ -932,18 +964,25 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 def _collect_job_debug_manifest(
     job_id: int,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
-           Optional[str]]:
+           Optional[str], Set[str]]:
     """Collect debug manifest entries for a single managed job.
 
     Returns:
-        (inline_data, file_paths, errors, cluster_name) for this job.
+        (inline_data, file_paths, errors, cluster_name, controller_uuids)
+        for this job. ``controller_uuids`` is the set of parent controller
+        UUIDs that ran this job (empty if no <jobid>.log exists yet or the
+        log doesn't contain the marker — e.g., the job never started).
     """
     inline_data: List[Dict[str, str]] = []
     file_paths: List[Dict[str, str]] = []
     errors: List[Dict[str, str]] = []
+    controller_uuids: Set[str] = set()
     job_prefix = f'managed_jobs/{job_id}'
 
-    # 1. Controller log for this job (FILE — needs rsync)
+    # 1. Controller log for this job (FILE — needs rsync). Also parse its
+    # head for "From controller <UUID>" so the caller can scope the
+    # shared controller_system/*.log set to only the controllers that
+    # actually ran this job.
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
@@ -953,6 +992,21 @@ def _collect_job_debug_manifest(
                 'remote_path': str(log_file),
                 'relative_path': f'{job_prefix}/{job_id}.log',
             })
+            try:
+                # Stream the file line by line: HA recovery appends a
+                # fresh "From controller <UUID>" line after the prior
+                # controller's entire output, which can be many MB into
+                # the file. Bounded memory regardless of file size.
+                with open(log_file, 'r', encoding='utf-8',
+                          errors='replace') as f:
+                    for line in f:
+                        match = _CONTROLLER_UUID_LOG_RE.search(line)
+                        if match is not None:
+                            controller_uuids.add(match.group(1))
+            except OSError:
+                # File disappeared / unreadable between is_file() and open;
+                # leave controller_uuids unchanged.
+                pass
 
     # 2. Job info from DB (inline — small data)
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/job_info'):
@@ -1014,7 +1068,7 @@ def _collect_job_debug_manifest(
                 cluster_name = generate_managed_job_cluster_name(
                     task_name, job_id)
 
-    return inline_data, file_paths, errors, cluster_name
+    return inline_data, file_paths, errors, cluster_name, controller_uuids
 
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
@@ -1050,14 +1104,26 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
-                                         errors: List[Dict[str, str]]) -> None:
-    """Collect controller system log file paths (controller_*.log files)."""
+                                         errors: List[Dict[str, str]],
+                                         relevant_uuids: Set[str]) -> None:
+    """Collect controller system log file paths (controller_*.log files).
+
+    Only the controllers whose UUIDs appear in ``relevant_uuids`` are
+    included. UUIDs are sourced from "From controller <UUID>" lines in
+    each requested job's <jobid>.log (see _collect_job_debug_manifest).
+    If ``relevant_uuids`` is empty (no requested job has a log yet, or
+    none of them recorded a controller marker), no controller_system
+    files are included — we do not fall back to globbing.
+    """
+    if not relevant_uuids:
+        return
     with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
         if not controller_logs_dir.exists():
             return
-        for log_file in controller_logs_dir.glob('controller_*.log'):
+        for uuid_str in relevant_uuids:
+            log_file = controller_logs_dir / f'controller_{uuid_str}.log'
             if log_file.is_file():
                 file_paths.append({
                     'remote_path': str(log_file),
@@ -1268,6 +1334,121 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
+def read_provision_status_from_log(
+        log_path: str, pos: int,
+        current_msg: Optional[str]) -> Tuple[int, Optional[str]]:
+    """Reads rich-status spinner messages relayed into a controller log.
+
+    The jobs controller relays the inner cluster-launch rich-status payloads
+    into its per-job log (see ``recovery_strategy._launch``'s
+    ``relay_rich_status=True``). This decodes any payloads appended since
+    ``pos`` and returns the new read position together with the latest
+    provisioning spinner message, so ``sky jobs launch`` / ``sky jobs logs``
+    can show the same provisioning progress (e.g. "Preparing SkyPilot runtime
+    (1/3)") that ``sky launch`` displays.
+
+    Args:
+        log_path: Path to the jobs controller log for the job.
+        pos: Byte/character offset to resume reading from (0 on first call).
+        current_msg: The previously returned spinner message.
+
+    Returns:
+        A tuple ``(new_pos, latest_msg)``. ``latest_msg`` is ``None`` if
+        provisioning has not emitted a spinner yet, or if it has finished
+        (an EXIT control clears the message).
+    """
+    msg = current_msg
+    try:
+        # If the log was truncated or recreated (e.g. controller recovery or a
+        # job retry), the saved offset can be past the new EOF; restart from the
+        # beginning so following doesn't get stuck reading nothing.
+        if os.path.exists(log_path) and pos > os.path.getsize(log_path):
+            pos = 0
+            msg = None
+        with open(log_path, 'r', encoding='utf-8') as f:
+            f.seek(pos)
+            while True:
+                line_start = f.tell()
+                line = f.readline()
+                if line == '':
+                    # EOF.
+                    break
+                if not line.endswith('\n'):
+                    # Partial line still being written; re-read it next time.
+                    f.seek(line_start)
+                    break
+                pos = f.tell()
+                is_payload, decoded = message_utils.decode_payload(
+                    line, raise_for_mismatch=False)
+                if not is_payload:
+                    continue
+                control, encoded_status = rich_utils.Control.decode(decoded)
+                if control in (rich_utils.Control.INIT,
+                               rich_utils.Control.UPDATE):
+                    # INIT/UPDATE carry the live spinner text.
+                    msg = encoded_status
+                elif control == rich_utils.Control.EXIT:
+                    # The spinner is done.
+                    msg = None
+                # START/STOP only toggle the spinner's visibility and carry the
+                # original (possibly stale) init message rather than the live
+                # one: entering a nested status emits UPDATE(nested) then
+                # START(original), so updating `msg` on START would revert the
+                # headline to the stale text. Leave `msg` unchanged for both.
+    except (OSError, ValueError):
+        # Best-effort: the log may not exist yet (FileNotFoundError) or be
+        # mid-write; never let log following break job-log streaming.
+        pass
+    return pos, msg
+
+
+def _is_relayed_status_payload_line(line: str) -> bool:
+    """Whether a controller-log line is a relayed rich-status payload.
+
+    With ``relay_rich_status=True``, the jobs controller writes the inner
+    cluster launch's encoded rich-status payloads into its per-job log to drive
+    the provisioning spinner (see ``read_provision_status_from_log``). These
+    encoded ``<sky-payload>`` lines are control-plane only and must be hidden
+    from the human-readable ``sky jobs logs --controller`` output.
+    """
+    is_payload, _ = message_utils.decode_payload(line, raise_for_mismatch=False)
+    return is_payload
+
+
+def _provision_status_headline(provision_msg: str) -> Optional[str]:
+    """Returns the blue headline of a provisioning spinner message.
+
+    Provisioning messages from the cluster launch are built by
+    ``ux_utils.spinner_message`` and look like
+    ``[bold cyan]Preparing SkyPilot runtime (1/3)[/]  <dim log hint>``, where
+    the trailing hint is colored with raw ANSI (colorama) codes rather than
+    rich markup -- so the message does *not* end at the headline's ``[/]``. We
+    keep only the ``[bold cyan]...[/]`` headline and drop the trailing hint, so
+    the caller can show it as a secondary detail under the "Waiting for task to
+    start" line. Returns ``None`` when the message has no ``[bold cyan]``
+    headline, so the caller can show nothing rather than a raw/unstyled message.
+    """
+    open_tag = '[bold cyan]'
+    start = provision_msg.find(open_tag)
+    if start == -1:
+        return None
+    start += len(open_tag)
+    # Walk the rich-markup tags after the opening tag, tracking nesting depth,
+    # and stop at the ``[/]`` that closes this ``[bold cyan]``. This keeps any
+    # nested markup (e.g. ``[bold]X[/]``) inside the headline intact -- instead
+    # of truncating at the first ``[/]`` -- and ignores the trailing log hint
+    # (which is ANSI-colored and contains no rich tags).
+    depth = 1
+    for match in re.finditer(r'\[[^\]]*\]', provision_msg[start:]):
+        if match.group(0).startswith('[/'):
+            depth -= 1
+            if depth == 0:
+                return provision_msg[start:start + match.start()]
+        else:
+            depth += 1
+    return None
+
+
 def stream_logs_by_id(
         job_id: int,
         follow: bool = True,
@@ -1385,7 +1566,9 @@ def stream_logs_by_id(
         # task_filter is a str, match by task name
         return task_name == task_filter
 
-    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
+    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='',
+                                             provision_str='',
+                                             job_id=job_id)
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
@@ -1408,6 +1591,21 @@ def stream_logs_by_id(
             return (f'No task found matching {task!r} in job {job_id}. '
                     f'Valid task IDs are {valid_range}.',
                     exceptions.JobExitCode.NOT_FOUND)
+
+    # Follow the jobs controller log during provisioning so the user sees the
+    # same spinner messages that `sky launch` shows. The controller relays the
+    # inner cluster-launch rich-status payloads into its per-job log (see
+    # recovery_strategy._launch's relay_rich_status=True); here we decode them
+    # to drive the single status spinner.
+    controller_log_path = controller_log_file_for_job(job_id)
+    provision_pos = 0
+    provision_msg: Optional[str] = None
+
+    def _latest_provision_status_msg() -> Optional[str]:
+        nonlocal provision_pos, provision_msg
+        provision_pos, provision_msg = read_provision_status_from_log(
+            controller_log_path, provision_pos, provision_msg)
+        return provision_msg
 
     with status_display:
         prev_msg = msg
@@ -1577,12 +1775,33 @@ def stream_logs_by_id(
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
-                                                         job_id=job_id)
-                if msg != prev_msg:
-                    status_display.update(msg)
-                    prev_msg = msg
-                time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                # Poll the controller log frequently for provisioning spinner
+                # updates, but only re-check the (more expensive) managed job
+                # status every JOB_STATUS_CHECK_GAP_SECONDS.
+                waited = 0.0
+                while True:
+                    # Keep the "Waiting for task to start" context and append
+                    # the live cluster-launch status, so it's clear the job is
+                    # waiting on its cluster to be provisioned.
+                    provision_msg = _latest_provision_status_msg()
+                    # Show only the blue headline of the cluster-launch status
+                    # as a secondary detail under the waiting line; show nothing
+                    # when there is no headline to display.
+                    headline = (None if provision_msg is None else
+                                _provision_status_headline(provision_msg))
+                    provision_str = (''
+                                     if headline is None else f'\n  {headline}')
+                    msg = _JOB_WAITING_STATUS_MESSAGE.format(
+                        status_str=status_str,
+                        provision_str=provision_str,
+                        job_id=job_id)
+                    if msg != prev_msg:
+                        status_display.update(msg)
+                        prev_msg = msg
+                    if waited >= JOB_STATUS_CHECK_GAP_SECONDS:
+                        break
+                    time.sleep(_PROVISION_LOG_POLL_GAP_SECONDS)
+                    waited += _PROVISION_LOG_POLL_GAP_SECONDS
                 latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
@@ -1868,12 +2087,16 @@ def stream_logs(job_id: Optional[int],
             tail_lines, end_pos = log_lib.tail_lines_from_end(
                 controller_log_path, tail, offset_arg)
             for line in tail_lines:
+                if _is_relayed_status_payload_line(line):
+                    continue
                 print(line, end='')
             print(end='', flush=True)
         else:
             with open(controller_log_path, 'r', newline='',
                       encoding='utf-8') as f:
                 for line in f:
+                    if _is_relayed_status_payload_line(line):
+                        continue
                     print(line, end='')
                 end_pos = f.tell()
                 print(end='', flush=True)
@@ -1889,7 +2112,8 @@ def stream_logs(job_id: Optional[int],
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':
-                        print(line, end='')
+                        if not _is_relayed_status_payload_line(line):
+                            print(line, end='')
                         line = f.readline()
 
                     # Flush.
@@ -1911,7 +2135,13 @@ def stream_logs(job_id: Optional[int],
                 time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
                 # Print any remaining logs including incomplete line.
-                print(f.read(), end='', flush=True)
+                remaining = f.read()
+                if remaining:
+                    print(''.join(
+                        line for line in remaining.splitlines(keepends=True)
+                        if not _is_relayed_status_payload_line(line)),
+                          end='',
+                          flush=True)
 
         if follow:
             return ux_utils.finishing_message(
@@ -2035,9 +2265,11 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
-def _format_job_details(*, job: Dict[str, Any],
-                        highest_blocking_priority: int) -> None:
-    """Add details about schedule state / backoff."""
+def _format_job_details(*,
+                        job: Dict[str, Any],
+                        highest_blocking_priority: int,
+                        recovery_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery."""
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2055,6 +2287,25 @@ def _format_job_details(*, job: Dict[str, Any],
         job['details'] = state_details
     elif job['failure_reason']:
         job['details'] = f'Failure: {job["failure_reason"]}'
+    elif recovery_reason:
+        # Surface why a job is recovering (e.g. an OOMKilled pod) so the
+        # transient recovery cause is visible in the CLI and dashboard, not
+        # just the controller logs. The reason (e.g. from
+        # _get_pod_termination_reason) may be multi-line; collapse whitespace
+        # so it renders as a single line in the details column.
+        flattened = ' '.join(recovery_reason.split())
+        detail = f'Recovering: {flattened}'
+        # Append an actionable remediation hint when the cause is a known
+        # Kubernetes pod failure (e.g. OOMKilled -> raise resources.memory).
+        # Guarded on the job's cloud (job['cloud'] is str(cloud), exactly
+        # 'Kubernetes') so a non-k8s reason that happens to contain a matched
+        # word (e.g. 'Insufficient') is not mis-hinted.
+        if str(job.get('cloud', '')).lower() == 'kubernetes':
+            hint = kubernetes_utils.match_kubernetes_failure_hint_text(
+                flattened)
+            if hint is not None:
+                detail += f' ({hint})'
+        job['details'] = detail
     else:
         job['details'] = None
 
@@ -2243,10 +2494,25 @@ def get_managed_job_queue(
 
     _populate_job_records_from_handles(jobs_with_handle)
 
+    # Batch-fetch the reason a recovering job is recovering (e.g. an OOMKilled
+    # pod), so it can be surfaced in `details`. Scoped to RECOVERING jobs (a
+    # small, transient subset) and done in one query to stay off the per-job
+    # path. `job['status']` is already stringified above.
+    recovery_reasons: Dict[int, str] = {}
+    if not fields or 'details' in fields:
+        recovering_job_ids = [
+            job['job_id'] for job in jobs if job['status'] ==
+            managed_job_state.ManagedJobStatus.RECOVERING.value
+        ]
+        recovery_reasons = managed_job_state.get_latest_recovery_reasons(
+            recovering_job_ids)
+
     for job in jobs:
         if not fields or 'details' in fields:
             _format_job_details(
-                job=job, highest_blocking_priority=highest_blocking_priority)
+                job=job,
+                highest_blocking_priority=highest_blocking_priority,
+                recovery_reason=recovery_reasons.get(job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (

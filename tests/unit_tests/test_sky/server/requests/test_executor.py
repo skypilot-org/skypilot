@@ -801,3 +801,167 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
     from sky.server import common as server_common
     with pytest.raises(FileNotFoundError, match='Blob not found'):
         server_common.resolve_blob_dir(blob_id, 'testuser')
+
+
+# ---- Workspace resolution info log -------------------------------------
+#
+# `override_request_env_and_config` writes an INFO-level log when the
+# resolver picks a workspace implicitly (preferred / default-fallback /
+# single-membership) for a resource-creating request. The launch flow
+# streams that log back to the CLI, so the user sees which workspace
+# their cluster / job ended up in.
+#
+# The tests below are unit-level: they stub the resolver + permission
+# check and verify the log gating logic, not the resolver itself
+# (covered in test_resolve_workspace_for_user.py).
+
+
+def _resolution(workspace, source):
+    """Build a fake WorkspaceResolution for tests below."""
+    from sky.workspaces import core as workspaces_core
+    return workspaces_core.WorkspaceResolution(workspace=workspace,
+                                               source=source)
+
+
+@pytest.fixture()
+def resolver_log_deps(monkeypatch, stub_override_request_env_deps):
+    """Pin the resolver gate to ON and stub the resolver itself."""
+    monkeypatch.setattr(
+        'sky.server.requests.executor._should_apply_workspace_resolver',
+        lambda is_daemon, client_api_version: True)
+    return monkeypatch
+
+
+def _run_override(request_name: str, resolution):
+    """Drive override_request_env_and_config with a mocked resolution.
+
+    Returns the list of `logger.info` calls (so tests can assert on the
+    "Using workspace ..." line without depending on log capture).
+    """
+    from sky.workspaces import core as workspaces_core
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    info_calls: List[str] = []
+    with mock.patch.object(workspaces_core,
+                           'resolve_workspace_for_user',
+                           return_value=resolution), \
+         mock.patch.object(executor.logger, 'info',
+                           side_effect=lambda msg, *a, **k: info_calls.append(
+                               msg)):
+        with executor.override_request_env_and_config(
+                body, request_id='not-a-daemon-uuid',
+                request_name=request_name):
+            pass
+    return info_calls
+
+
+def test_resolution_log_fires_for_launch_with_implicit_source(
+        resolver_log_deps):
+    """`sky launch` with no explicit workspace → resolver picks via
+    preferred / default-fallback / single-membership. The user sees
+    "Using workspace 'X' (source: …)" so they know which workspace
+    SkyPilot stamped onto the cluster row.
+
+    The request_name passed to override_request_env_and_config is the
+    name as stored on the task row — `REQUEST_NAME_PREFIX + <enum>`.
+    `prepare_request_async` does the prefixing once at enqueue time."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    matching = [m for m in info_calls if 'Using workspace' in m]
+    assert len(matching) == 1, (
+        f'Expected one resolution-log line, got: {info_calls}')
+    msg = matching[0]
+    assert "'team-a'" in msg
+    assert workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP in msg
+
+
+def test_resolution_log_fires_for_jobs_launch_with_preferred(resolver_log_deps):
+    """Same log path for managed jobs — `sky jobs launch` is also a
+    resource-creating verb (writes job_info.workspace), users need to
+    see which workspace it landed in."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'jobs.launch'),
+        resolution=_resolution('team-b',
+                               workspace_constants.WORKSPACE_SOURCE_PREFERRED))
+    matching = [m for m in info_calls if 'Using workspace' in m]
+    assert len(matching) == 1
+    assert "'team-b'" in matching[0]
+
+
+def test_resolution_log_silent_when_source_default_fallback(resolver_log_deps):
+    """Landing on 'default' via default-fallback is the pre-existing
+    silent behavior — every user without a preferred who has access to
+    'default' lands there. Surfacing that in the log on every launch
+    would clutter the common case while telling the user nothing new
+    (they're already used to landing on 'default').
+
+    Revert check: drop DEFAULT_FALLBACK from
+    `_SILENT_WORKSPACE_RESOLUTION_SOURCES` and this test flips to a
+    log-firing assertion failure."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution(
+            'default', workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK))
+    assert not [m for m in info_calls if 'Using workspace' in m
+               ], (f'DEFAULT_FALLBACK must not log; got: {info_calls}')
+
+
+def test_resolution_log_silent_when_source_explicit(resolver_log_deps):
+    """When `active_workspace` was explicitly set (--workspace flag or
+    a config file), the user already named the workspace — repeating
+    it in the log is noise. EXPLICIT must not trigger the line."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution('team-c',
+                               workspace_constants.WORKSPACE_SOURCE_EXPLICIT))
+    assert not [m for m in info_calls if 'Using workspace' in m
+               ], (f'EXPLICIT source must not log; got: {info_calls}')
+
+
+def test_resolution_log_silent_for_non_resource_creating_request(
+        resolver_log_deps):
+    """`sky status` / `sky queue` etc. resolve the same way but don't
+    persist the workspace onto durable state. Logging there would be
+    noise on commands the user runs frequently. The whitelist
+    (_RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG) is what
+    keeps this scoped — extend it when adding a new resource-creating
+    verb (SERVE_UP, etc.)."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'status'),
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    assert not [m for m in info_calls if 'Using workspace' in m], (
+        f'`status` must not surface the resolution log; got: {info_calls}')
+
+
+def test_resolution_log_silent_for_bare_launch_without_prefix(
+        resolver_log_deps):
+    """Protocol lock: the runtime `request_name` (read off
+    `request_task.name`) is always the prefixed form
+    (`'sky.launch'`); the raw enum value `'launch'` never reaches
+    `override_request_env_and_config`. If a future refactor drops the
+    prefix in the whitelist, this test would START passing the log
+    line and then break BOTH this case AND production — keep this case
+    locking the prefix in.
+
+    Revert check: drop `REQUEST_NAME_PREFIX +` from the whitelist and
+    this test still passes (no log) but the prefixed tests above flip
+    to failing — the two sides together pin the contract."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name='launch',
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    assert not [m for m in info_calls if 'Using workspace' in m], (
+        f'bare `launch` (without prefix) must not match the whitelist; '
+        f'got: {info_calls}')
