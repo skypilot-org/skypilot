@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   API_VERSION_HEADER,
@@ -533,6 +533,9 @@ export async function getPoolStatus() {
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
+  // Track the last seen refresh trigger so we only invalidate the cache when
+  // it actually increments (a manual refresh), not on every effect run.
+  const prevRefreshTriggerRef = useRef(refreshTrigger);
 
   const loading = loadingJobData;
 
@@ -547,13 +550,16 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
         const cacheArgs = [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
         ];
-        // On a manual refresh (refreshTrigger > 0), drop the cached entry
-        // first so the click fetches fresh data. Without this, a cache hit
-        // within the TTL returns the previously cached value and the refresh
-        // appears to do nothing until a second click.
-        if (refreshTrigger > 0) {
+        // Drop the cached entry only when the refresh trigger actually
+        // increments (a manual refresh), so the click fetches fresh data.
+        // Guarding on `> 0` instead would also invalidate the new job's
+        // cache when navigating between jobs while the trigger stays elevated
+        // (the parent keeps refreshTrigger state across jobId changes),
+        // defeating the cache on initial load.
+        if (refreshTrigger > prevRefreshTriggerRef.current) {
           dashboardCache.invalidate(getManagedJobs, cacheArgs);
         }
+        prevRefreshTriggerRef.current = refreshTrigger;
         const allJobsData = await dashboardCache.get(getManagedJobs, cacheArgs);
 
         // Filter for ALL tasks matching this job_id (supports multi-task jobs)

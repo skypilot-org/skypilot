@@ -63,4 +63,27 @@ describe('useSingleManagedJob manual-refresh cache invalidation', () => {
       expectedArgs
     );
   });
+
+  it('does not invalidate when navigating to a new job while refreshTrigger stays elevated', async () => {
+    // The parent keeps refreshTrigger state across jobId changes, so after a
+    // refresh the trigger remains > 0. Navigating to a different job must NOT
+    // invalidate the new job's cache on its initial load.
+    const { rerender } = renderHook(
+      ({ id, trigger }) => useSingleManagedJob(id, trigger),
+      { initialProps: { id: jobId, trigger: 1 } }
+    );
+
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
+    jest.clearAllMocks();
+    dashboardCache.get.mockResolvedValue({
+      jobs: [],
+      controllerStopped: false,
+    });
+
+    // Navigate to a different job; trigger is unchanged (no manual refresh).
+    rerender({ id: '56165', trigger: 1 });
+
+    await waitFor(() => expect(dashboardCache.get).toHaveBeenCalledTimes(1));
+    expect(dashboardCache.invalidate).not.toHaveBeenCalled();
+  });
 });
