@@ -2,6 +2,8 @@
 import logging
 import multiprocessing
 import signal
+import subprocess
+import sys
 import time
 import unittest
 from unittest import mock
@@ -289,3 +291,151 @@ class TestKillProcessWithGrace(unittest.TestCase):
         # Process should be terminated by SIGKILL after grace period
         time.sleep(0.1)  # Give some time for the process to be fully terminated
         self.assertFalse(process.is_alive())
+
+
+class TestSafeChildren(unittest.TestCase):
+    """Tests for _safe_children: the tolerant wrapper around
+    psutil.Process.children(recursive=True).
+
+    Three cases matter:
+      1. Happy path — pass through psutil unchanged.
+      2. psutil raises AccessDenied — log the offending PID and fall
+         back to the /proc walk.
+      3. Fallback /proc walk silently ignores unreadable PIDs (the
+         simplified version of the previous "denied diagnostics" path).
+    """
+
+    def test_happy_path_delegates_to_psutil(self):
+        # If psutil succeeds, _safe_children must return exactly what
+        # psutil returned (no extra work).
+        proc = mock.MagicMock(spec=psutil.Process)
+        sentinel = [mock.MagicMock(), mock.MagicMock()]
+        proc.children.return_value = sentinel
+        result = subprocess_utils._safe_children(proc)
+        proc.children.assert_called_once_with(recursive=True)
+        self.assertIs(result, sentinel)
+
+    def test_access_denied_triggers_fallback_with_log(self):
+        proc = mock.MagicMock(spec=psutil.Process)
+        proc.pid = 100
+        proc.children.side_effect = psutil.AccessDenied(pid=200,
+                                                        name='foo',
+                                                        msg='denied')
+        fallback_sentinel = [mock.MagicMock()]
+        with mock.patch.object(subprocess_utils,
+                               '_fallback_children',
+                               return_value=fallback_sentinel) as mock_fb:
+            with mock.patch.object(subprocess_utils,
+                                   '_pid_diag',
+                                   return_value={
+                                       'uid': '1337',
+                                       'exe': '/usr/sbin/agent'
+                                   }):
+                with self.assertLogs(subprocess_utils.logger.name,
+                                     level='WARNING') as cm:
+                    result = subprocess_utils._safe_children(proc)
+        mock_fb.assert_called_once_with(100)
+        self.assertIs(result, fallback_sentinel)
+        # The warning must include the offending PID + the signals we
+        # could still extract via dir-getattr / lnk_file-read so future
+        # debugging has a starting point.
+        joined = '\n'.join(cm.output)
+        self.assertIn('pid=200', joined)
+        self.assertIn('uid=1337', joined)
+        self.assertIn('/usr/sbin/agent', joined)
+
+    def test_no_such_process_returns_empty_silently(self):
+        proc = mock.MagicMock(spec=psutil.Process)
+        proc.children.side_effect = psutil.NoSuchProcess(pid=1)
+        self.assertEqual(subprocess_utils._safe_children(proc), [])
+
+
+class TestFallbackChildren(unittest.TestCase):
+    """Tests for _fallback_children, the simplified /proc walk used when
+    psutil's ppid_map raises AccessDenied. PIDs we can't read are
+    silently skipped (no diag collection) — the initial offending PID
+    was already logged by _safe_children."""
+
+    def setUp(self):
+        # Force Linux branch on any host.
+        self._platform_patch = mock.patch.object(subprocess_utils.sys,
+                                                 'platform', 'linux')
+        self._platform_patch.start()
+        self.addCleanup(self._platform_patch.stop)
+
+    @staticmethod
+    def _stat_bytes(pid: int, ppid: int, comm: str = 'cmd') -> bytes:
+        return (f'{pid} ({comm}) S {ppid} 0 0 0 -1 4194304 0 0 0 0 0 0 0 0 '
+                f'20 0 1 0 0 0 0 0 0').encode()
+
+    def test_returns_descendants_skipping_unreadable(self):
+        # Tree: 100 → {200 → {300}, 201}. 200 is unreadable (EACCES);
+        # the fallback should still return 201 (sibling of 200) but
+        # cannot reach 300 (whose only path is through 200).
+        tree = {100: 1, 200: 100, 201: 100, 300: 200, 999: 1}
+
+        def fake_open(path, *args, **kwargs):
+            if path == '/proc/200/stat':
+                raise PermissionError(13, 'denied')
+            for pid, ppid in tree.items():
+                if path == f'/proc/{pid}/stat':
+                    return mock.mock_open(
+                        read_data=self._stat_bytes(pid, ppid))(*args, **kwargs)
+            raise FileNotFoundError(path)
+
+        with mock.patch.object(subprocess_utils.os,
+                               'listdir',
+                               return_value=[str(p) for p in tree] + ['self']):
+            with mock.patch.object(subprocess_utils, 'open', fake_open):
+                # Avoid psutil.Process() touching the real /proc for fake PIDs.
+                with mock.patch.object(subprocess_utils.psutil,
+                                       'Process',
+                                       side_effect=lambda p: mock.MagicMock(
+                                           spec=psutil.Process, pid=p)):
+                    result = subprocess_utils._fallback_children(100)
+
+        result_pids = sorted(p.pid for p in result)
+        self.assertEqual(result_pids, [201])
+
+    def test_non_linux_returns_empty(self):
+        # If psutil already failed and we're not on Linux, there is no
+        # better source — return [] rather than guessing.
+        with mock.patch.object(subprocess_utils.sys, 'platform', 'darwin'):
+            self.assertEqual(subprocess_utils._fallback_children(1), [])
+
+
+class TestKillProcessDaemonTolerates(unittest.TestCase):
+    """Verify EACCES surfaced by _safe_children doesn't break
+    kill_process_daemon (the path that broke managed jobs)."""
+
+    def test_access_denied_does_not_raise(self):
+        proc = subprocess.Popen(['sleep', '30'])
+        try:
+            with mock.patch.object(subprocess_utils,
+                                   '_safe_children',
+                                   return_value=[]):
+                with mock.patch.object(subprocess_utils.subprocess, 'Popen'):
+                    subprocess_utils.kill_process_daemon(proc.pid,
+                                                         use_kill_pg=True)
+        finally:
+            proc.kill()
+            proc.wait()
+
+
+class TestKillChildrenProcessesTolerates(unittest.TestCase):
+    """Verify the explicitly given parent is killed even when child
+    enumeration returns empty (the contract callers rely on for cleanup
+    correctness)."""
+
+    def test_parent_still_killed_on_walk_failure(self):
+        proc = subprocess.Popen(['sleep', '30'])
+        try:
+            with mock.patch.object(subprocess_utils,
+                                   '_safe_children',
+                                   return_value=[]):
+                subprocess_utils.kill_children_processes([proc.pid], force=True)
+            self.assertIsNotNone(proc.wait(timeout=5))
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
