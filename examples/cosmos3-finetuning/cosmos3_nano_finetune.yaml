@@ -5,19 +5,23 @@
 # generation pathway on the public nvidia/bridge-v2-subset-synthetic-captions
 # robot-video dataset, then exports to Hugging Face safetensors. See README.md.
 #
-# Checkpoints are written to a mounted cloud bucket, so the managed job auto-resumes
-# from the latest checkpoint after a recovery, and the outputs survive job teardown.
+# Checkpoints are written to a mounted SkyPilot volume (a Kubernetes PVC), so the
+# managed job auto-resumes from the latest checkpoint after a recovery, and the
+# outputs survive job teardown.
 #
-# Usage (CHECKPOINT_BUCKET_NAME must be a globally-unique bucket name):
-#   sky jobs launch -n cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml \
-#       --env CHECKPOINT_BUCKET_NAME=my-cosmos3-checkpoints
+# Usage (create the checkpoint volume once, then launch):
+#   sky volumes apply examples/cosmos3-finetuning/cosmos3_checkpoints_volume.yaml
+#   sky jobs launch -n cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml
 #   # Quick smoke test (a few steps, still checkpoints + exports):
 #   sky jobs launch -n cosmos3 examples/cosmos3-finetuning/cosmos3_nano_finetune.yaml \
-#       --env CHECKPOINT_BUCKET_NAME=my-cosmos3-checkpoints --env MAX_ITER=10 --env SAVE_ITER=5
+#       --env MAX_ITER=10 --env SAVE_ITER=5
 
 name: cosmos3-nano-finetune
 
 resources:
+  # Run on Kubernetes. Drop this line to let SkyPilot pick any infra (e.g. a cloud),
+  # or set `infra: k8s/<context>` to pin a specific cluster.
+  infra: kubernetes
   # Cosmos3 needs Ampere or newer; NVIDIA's recipe is tested on 8x H100 80GB.
   accelerators: {H100:8, H200:8}
   # NVIDIA's recommended CUDA 13 base image; the training env layers on with `uv sync`.
@@ -26,45 +30,43 @@ resources:
 
 num_nodes: 1
 
+volumes:
+  # Durable checkpoint store, mounted at /checkpoints (the recipe's OUTPUT_ROOT).
+  # DCP checkpoints, the resolved config, and the exported safetensors all land on
+  # this volume, so they survive managed-job recovery (auto-resume) and post-job
+  # teardown. Create it first with:
+  #   sky volumes apply examples/cosmos3-finetuning/cosmos3_checkpoints_volume.yaml
+  /checkpoints: cosmos3-checkpoints
+
+  # Bring your own dataset: mount a second volume holding your data, then point the
+  # recipe at it with `--env DATASET_PATH=/my-dataset` (that dir must contain
+  # `train/video_dataset_file.jsonl`; see README), so it trains on your data instead
+  # of the bridge subset `setup` downloads by default. Uncomment and set your volume:
+  # /my-dataset: my-dataset-volume
+
 envs:
   COSMOS_FRAMEWORK_REF: 411d25b2e35bc441126f48c44a4b93e1c0564274  # pinned for reproducibility
   BASE_CHECKPOINT_NAME: Cosmos3-Nano  # cosmos-framework catalog name -> nvidia/Cosmos3-Nano on HF
   # Dataset dir the launcher trains on. Defaults to the bridge subset downloaded in
   # `setup`; override to fine-tune on your own data (see the bring-your-own-dataset
-  # note under file_mounts below).
+  # note under volumes above).
   DATASET_PATH: examples/data/bridge-v2-subset-synthetic-captions/sft_dataset_bridge
   MAX_ITER: "500"          # optimizer steps (recipe default 500; set small for a smoke test)
   SAVE_ITER: "100"         # save a DCP checkpoint every N steps
   EXPORT_SAFETENSORS: "1"  # export the trained checkpoint to HF safetensors (1=yes, 0=no)
-  # Globally-unique cloud bucket for durable checkpoints + exports. SkyPilot creates it
-  # and mounts it at /checkpoints, which `run` sets as the recipe's OUTPUT_ROOT, so the
-  # job auto-resumes from the latest checkpoint after a recovery. Change to your own name.
-  CHECKPOINT_BUCKET_NAME: my-cosmos3-checkpoints
 
 secrets:
   # Base model + dataset are public, so this defaults to empty (no token needed).
   # To authenticate, `export HF_TOKEN=...` and pass `--secret HF_TOKEN`.
   HF_TOKEN: ""
 
-file_mounts:
-  # Durable checkpoint store. `run` points the recipe's OUTPUT_ROOT here, so DCP
-  # checkpoints, the resolved config, and the exported safetensors all land in the
-  # bucket, surviving managed-job recovery (auto-resume) and post-job teardown.
-  # mode: MOUNT is write-through, so each checkpoint is flushed straight to the bucket.
-  /checkpoints:
-    name: ${CHECKPOINT_BUCKET_NAME}
-    mode: MOUNT
-
-  # Bring your own dataset: mount an existing cloud bucket, then point the recipe at it
-  # with `--env DATASET_PATH=/my-dataset` (that dir must contain
-  # `train/video_dataset_file.jsonl`; see README), so it trains on your data instead of
-  # the bridge subset `setup` downloads by default. Uncomment and set your bucket:
-  # /my-dataset:
-  #   source: s3://my-dataset-bucket/  # or gs://..., r2://..., etc.; read-only is fine
-  #   mode: MOUNT
-  # To use a SkyPilot volume instead, attach one with a top-level `volumes:` field
-  # (`volumes: {/my-dataset: my-vol}`); see
-  # https://docs.skypilot.co/en/stable/reference/volumes.html
+# Prefer a cloud bucket over a volume (e.g. for cross-region access)? Drop the
+# `volumes:` block above and mount a bucket at /checkpoints instead:
+#   file_mounts:
+#     /checkpoints:
+#       name: my-cosmos3-checkpoints  # globally-unique bucket name; SkyPilot creates it
+#       mode: MOUNT
+# See https://docs.skypilot.co/en/latest/reference/storage.html
 
 setup: |
   set -e
@@ -121,7 +123,7 @@ run: |
   [ -n "${HF_TOKEN:-}" ] && export HF_TOKEN
   export NPROC_PER_NODE="${SKYPILOT_NUM_GPUS_PER_NODE}"  # FSDP shards across every GPU
 
-  # Write all training outputs to the mounted checkpoint bucket so the recipe
+  # Write all training outputs to the mounted checkpoint volume so the recipe
   # auto-resumes from the latest checkpoint after a managed-job recovery.
   export OUTPUT_ROOT=/checkpoints
   RUN_DIR="$OUTPUT_ROOT/cosmos3/sft/vision_sft_nano"
@@ -141,5 +143,5 @@ run: |
       --checkpoint-path "$RUN_DIR/checkpoints/$CKPT_ITER" \
       --config-file "$RUN_DIR/config.yaml" \
       -o "$RUN_DIR/model"
-    echo ">>> Fine-tuned safetensors written to the $CHECKPOINT_BUCKET_NAME bucket: $RUN_DIR/model"
+    echo ">>> Fine-tuned safetensors written to the cosmos3-checkpoints volume: $RUN_DIR/model"
   fi
