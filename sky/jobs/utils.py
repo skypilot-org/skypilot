@@ -190,17 +190,12 @@ def terminate_cluster(
     # workspace and the owner-identity check at
     # `backend_utils._check_owner_identity_with_record` fails for any
     # cluster whose recorded workspace is not 'default'.
+    # DB lookup once outside the loop — cluster workspace is immutable.
+    # `None` when the cluster row is already gone: `core.down` will then
+    # raise `ClusterDoesNotExist` immediately and we return — no
+    # workspace to pin in that case.
     record = global_user_state.get_cluster_from_name(cluster_name)
     cluster_workspace = record.get('workspace') if record else None
-    workspace_ctx: contextlib.AbstractContextManager
-    if cluster_workspace:
-        workspace_ctx = skypilot_config.local_active_workspace_ctx(
-            cluster_workspace)
-    else:
-        # Cluster row already gone: `core.down` will raise
-        # `ClusterDoesNotExist` immediately and we return — no
-        # workspace to pin.
-        workspace_ctx = contextlib.nullcontext()
 
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
@@ -218,6 +213,14 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
+            # Construct the ctx inside the loop: `local_active_workspace_ctx`
+            # is a `@contextlib.contextmanager` generator and cannot be
+            # re-entered — reusing one instance across retries raises
+            # `RuntimeError` from the spent generator and masks the real
+            # failure.
+            workspace_ctx: contextlib.AbstractContextManager = (
+                skypilot_config.local_active_workspace_ctx(cluster_workspace)
+                if cluster_workspace else contextlib.nullcontext())
             with workspace_ctx:
                 core.down(cluster_name,
                           graceful=graceful,

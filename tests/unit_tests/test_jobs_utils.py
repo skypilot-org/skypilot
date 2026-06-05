@@ -281,6 +281,60 @@ def test_terminate_cluster_no_record_skips_workspace_pin(
     mock_sky_down.assert_called_once()
 
 
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.jobs.utils.time.sleep'
+           )  # Don't actually sleep between retries.
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_retry_reenters_workspace_ctx(
+        mock_set_internal, mock_sky_down, mock_sleep, mock_get_cluster) -> None:
+    """`skypilot_config.local_active_workspace_ctx` is implemented with
+    `@contextlib.contextmanager` (a generator), which can only be
+    entered ONCE per instance. If the retry loop reuses a single
+    `workspace_ctx` instance across attempts, the second `with` raises
+    `RuntimeError` ("generator didn't yield" / "already executed") and
+    masks the real underlying failure.
+
+    The fix is to construct a fresh ctx per retry attempt inside the
+    loop. This test exercises that: cluster row carries a non-default
+    workspace (so the live ctx path, not `nullcontext()`, is taken),
+    and `core.down` is set to fail twice then succeed. Without the
+    fix, the second iteration raises `RuntimeError` from the spent
+    generator and the function crashes. With the fix, all three
+    iterations construct a fresh ctx and the function completes.
+
+    Revert check: lift `workspace_ctx = ...` back outside the
+    `while True:` loop → the second retry raises `RuntimeError` →
+    test fails."""
+    from sky import skypilot_config
+    mock_get_cluster.return_value = {
+        'name': 'test-cluster',
+        'workspace': 'team-a',
+    }
+
+    observed = []
+
+    def _fail_twice_then_succeed(*args, **kwargs):
+        observed.append(skypilot_config.get_active_workspace())
+        if len(observed) < 3:
+            raise ValueError(f'transient error {len(observed)}')
+
+    mock_sky_down.side_effect = _fail_twice_then_succeed
+
+    # Must complete without RuntimeError (which would arise from
+    # re-entering a spent @contextlib.contextmanager generator).
+    utils.terminate_cluster('test-cluster')
+
+    assert mock_sky_down.call_count == 3
+    # Every attempt must see the pinned workspace, not just the first.
+    # If the ctx were a no-op on retries (e.g. wrong restore order),
+    # this would record 'default' on attempts 2 and 3.
+    assert observed == ['team-a', 'team-a', 'team-a'], observed
+    # Single DB lookup outside the loop is sufficient — cluster
+    # workspace is immutable.
+    mock_get_cluster.assert_called_once_with('test-cluster')
+
+
 def test_cancel_signal_file_no_graceful():
     """Test that cancel_jobs_by_id writes an empty signal file (touch)
     for non-graceful cancels on the new controller."""
