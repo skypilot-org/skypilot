@@ -3109,6 +3109,40 @@ def _update_cluster_status(
 
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
+
+    # For Kubernetes, recover an autodown that completed between two refreshes.
+    # On k8s, autostop is implemented as autodown (pod termination); if skylet
+    # deleted the pods before a refresh caught the cluster in AUTOSTOPPING, we
+    # would otherwise record only the generic cleanup event below. Skylet leaves
+    # a durable Event breadcrumb
+    # (kubernetes/instance.py::emit_autostop_event_best_effort) that outlives the
+    # deleted pods, so read it back and attribute the termination to autostop.
+    # nop_if_duplicate keeps the timeline clean in the non-race case where
+    # 'Cluster is autostopping.' was already recorded. Only attempt this when the
+    # cluster was configured with autostop/autodown -- otherwise the breadcrumb
+    # cannot exist and the lookup is pointless.
+    if (record['autostop'] >= 0 and to_terminate and
+            isinstance(launched_resources.cloud, clouds.Kubernetes)):
+        try:
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            if ray_config and 'provider' in ray_config:
+                autostop_event = k8s_instance.get_cluster_autostop_event(
+                    ray_config['provider'],
+                    handle.cluster_name_on_cloud,
+                    since=record['launched_at'])
+                if autostop_event is not None:
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        None,
+                        'Cluster was autodowned (idle timeout).',
+                        global_user_state.ClusterEventType.STATUS_CHANGE,
+                        nop_if_duplicate=True,
+                        transitioned_at=autostop_event.get('transitioned_at'))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug('Failed to record autodown event for '
+                         f'{cluster_name!r}: {e}')
+
     global_user_state.add_cluster_event(
         cluster_name,
         None,
