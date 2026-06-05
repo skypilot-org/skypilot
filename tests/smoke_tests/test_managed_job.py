@@ -1236,21 +1236,40 @@ def test_managed_jobs_storage(generic_cloud: str):
             'azure': storage_lib.StoreType.AZURE,
             'nebius': storage_lib.StoreType.NEBIUS,
         }
+        # A remote API server may have only a subset of storage clouds
+        # enabled (e.g. the shared GKE API server only enables AWS), and
+        # specifying a store whose cloud is disabled on the server fails the
+        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled on
+        # the server.
+        if smoke_tests_utils.is_remote_server_test():
+            enabled_storage_cloud_names = {
+                str(cloud).lower()
+                for cloud in smoke_tests_utils.get_enabled_cloud_storages()
+            }
+            pinned_stores = {
+                store_str: store_type
+                for store_str, store_type in pinned_stores.items()
+                if store_type.to_cloud().lower() in enabled_storage_cloud_names
+            }
+            assert pinned_stores, ('No object store enabled on the API server: '
+                                   f'{enabled_storage_cloud_names}')
         # For Azure, the bucket lands in the configured storage account when
         # the API server shares the client config, or in the default per-user
         # account (AzureBlobStore's default region) when a remote API server
         # does not receive the client config. Check both.
-        az_account_names = [
-            test_mount_and_storage.TestStorageWithCredentials.
-            get_az_storage_account_name()
-        ]
-        try:
-            default_az_account = (storage_lib.AzureBlobStore.
-                                  get_default_storage_account_name('eastus'))
-            if default_az_account not in az_account_names:
-                az_account_names.append(default_az_account)
-        except Exception:  # pylint: disable=broad-except
-            pass
+        az_account_names = []
+        if storage_lib.StoreType.AZURE in pinned_stores.values():
+            az_account_names.append(
+                test_mount_and_storage.TestStorageWithCredentials.
+                get_az_storage_account_name())
+            try:
+                default_az_account = (
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        'eastus'))
+                if default_az_account not in az_account_names:
+                    az_account_names.append(default_az_account)
+            except Exception:  # pylint: disable=broad-except
+                pass
         output_check_cmds = []
         for store_str, store_type in pinned_stores.items():
             bucket_name = f'{output_storage_name}-{store_str}'
