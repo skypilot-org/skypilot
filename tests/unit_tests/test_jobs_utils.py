@@ -225,6 +225,62 @@ def test_terminate_cluster_graceful_no_timeout(mock_set_internal,
                                           graceful_timeout=None)
 
 
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_pins_active_workspace_from_cluster_record(
+        mock_set_internal, mock_sky_down, mock_get_cluster) -> None:
+    """Controller-side callers (cancel/recovery teardown) run with the
+    daemon-process workspace context, which falls back to 'default'.
+    Without pinning, `_check_owner_identity_with_record` raises
+    `ClusterOwnerIdentityMismatchError` for any cluster whose recorded
+    workspace is not 'default'.
+
+    This test pins the cluster row to workspace 'team-a' and asserts the
+    active workspace during the `core.down` call is 'team-a'.
+    """
+    from sky import skypilot_config
+    mock_get_cluster.return_value = {
+        'name': 'test-cluster',
+        'workspace': 'team-a',
+    }
+
+    observed_workspace = []
+
+    def _record_workspace(*args, **kwargs):
+        observed_workspace.append(skypilot_config.get_active_workspace())
+
+    mock_sky_down.side_effect = _record_workspace
+
+    utils.terminate_cluster('test-cluster')
+
+    mock_get_cluster.assert_called_once_with('test-cluster')
+    assert observed_workspace == [
+        'team-a'
+    ], (f'Expected active workspace to be pinned to the cluster row '
+        f"workspace 'team-a' during core.down, got: {observed_workspace}")
+
+
+@mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_no_record_skips_workspace_pin(
+        mock_set_internal, mock_sky_down, mock_get_cluster) -> None:
+    """If the cluster row is already gone, there is no workspace to pin
+    — `core.down` will raise `ClusterDoesNotExist` and we return. The
+    function must NOT crash trying to enter
+    `local_active_workspace_ctx(None)`.
+    """
+    mock_get_cluster.return_value = None
+    mock_sky_down.side_effect = ClusterDoesNotExist('test-cluster')
+
+    # Must not raise.
+    utils.terminate_cluster('test-cluster')
+
+    mock_get_cluster.assert_called_once_with('test-cluster')
+    mock_sky_down.assert_called_once()
+
+
 def test_cancel_signal_file_no_graceful():
     """Test that cancel_jobs_by_id writes an empty signal file (touch)
     for non-graceful cancels on the new controller."""

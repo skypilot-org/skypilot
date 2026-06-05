@@ -182,6 +182,26 @@ def terminate_cluster(
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
+
+    # Pin the active workspace to the cluster's recorded workspace before
+    # calling `core.down`. Controller-side callers (cancel and recovery
+    # teardown paths) run in the system/daemon process, without this pin
+    # `skypilot_config.get_active_workspace()` falls back to the default
+    # workspace and the owner-identity check at
+    # `backend_utils._check_owner_identity_with_record` fails for any
+    # cluster whose recorded workspace is not 'default'.
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    cluster_workspace = record.get('workspace') if record else None
+    workspace_ctx: contextlib.AbstractContextManager
+    if cluster_workspace:
+        workspace_ctx = skypilot_config.local_active_workspace_ctx(
+            cluster_workspace)
+    else:
+        # Cluster row already gone: `core.down` will raise
+        # `ClusterDoesNotExist` immediately and we return — no
+        # workspace to pin.
+        workspace_ctx = contextlib.nullcontext()
+
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11
@@ -198,9 +218,10 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            core.down(cluster_name,
-                      graceful=graceful,
-                      graceful_timeout=graceful_timeout)
+            with workspace_ctx:
+                core.down(cluster_name,
+                          graceful=graceful,
+                          graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
