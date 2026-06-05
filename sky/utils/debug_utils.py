@@ -121,6 +121,8 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.workspaces.delete': (),
     'sky.workspaces.get': (),
     'sky.workspaces.get_config': (),
+    'sky.workspaces.batch_add_users': (),
+    'sky.workspaces.batch_remove_users': (),
     'sky.recipes.list': (),
     'sky.recipes.get': (),
     'sky.recipes.delete': (),
@@ -167,6 +169,15 @@ class DebugDumpContext(TypedDict):
     request_ids: Set[str]
     cluster_names: Set[str]
     managed_job_ids: Set[int]
+    # Provenance sidecars: requests added by a cross-link helper because
+    # they reference a job (resp. cluster). When we later iterate
+    # request_ids to expand the context further, we skip these to break
+    # the job→request→job and cluster→request→cluster cycles. Without
+    # these, an over-broad matcher (body.name, body.all_users, body.all,
+    # or any cluster touching many requests) drags unrelated resources
+    # into the dump.
+    request_ids_via_job: Set[str]
+    request_ids_via_cluster: Set[str]
     errors: List[Dict[str, str]]
 
 
@@ -186,7 +197,13 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
             if new_ids:
                 logger.debug(f'Cross-link: cluster {cluster_name!r} -> '
                              f'{len(new_ids)} requests: {sorted(new_ids)}')
+            # Only tag IDs that weren't already in the context. Otherwise
+            # a user-seeded or recent-context request would inherit the
+            # via_cluster restriction and get skipped in
+            # _get_clusters_from_requests.
+            newly_added = new_ids - debug_dump_context['request_ids']
             debug_dump_context['request_ids'] |= new_ids
+            debug_dump_context['request_ids_via_cluster'] |= newly_added
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get requests for cluster '
                            f'{cluster_name}: {e}')
@@ -286,6 +303,14 @@ def _get_requests_from_managed_jobs(
                 logger.debug(f'Cross-link: managed jobs -> request '
                              f'{request.request_id} ({request.name}) '
                              f'via {match_reason}')
+                # Only tag IDs that weren't already in the context.
+                # Otherwise a user-seeded or recent-context request
+                # would inherit the via_job restriction and get skipped
+                # in _get_managed_jobs_from_requests.
+                if (request.request_id
+                        not in debug_dump_context['request_ids']):
+                    debug_dump_context['request_ids_via_job'].add(
+                        request.request_id)
                 debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get requests for managed jobs: {e}')
@@ -298,13 +323,22 @@ def _get_requests_from_managed_jobs(
 
 
 def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
-    """Get cluster names from the given request IDs."""
-    if not debug_dump_context['request_ids']:
+    """Get cluster names from the given request IDs.
+
+    Skips requests that were themselves added because they reference a
+    cluster — that's a same-type re-expansion (cluster -> request ->
+    cluster) and would let a cluster that touched many requests drag
+    every other cluster touched by those requests into the dump.
+    """
+    # Requests added by _get_requests_from_clusters must not re-seed
+    # cluster_names here. Other origins (user seed, recent context,
+    # _get_requests_from_managed_jobs) remain free to expand.
+    request_ids = (debug_dump_context['request_ids'] -
+                   debug_dump_context['request_ids_via_cluster'])
+    if not request_ids:
         return
-    logger.debug(
-        f'Getting clusters for {len(debug_dump_context["request_ids"])} '
-        f'requests')
-    for request_id in debug_dump_context['request_ids']:
+    logger.debug(f'Getting clusters for {len(request_ids)} requests')
+    for request_id in request_ids:
         try:
             request = requests_lib.get_request(request_id,
                                                fields=['cluster_name'])
@@ -329,13 +363,22 @@ def _get_managed_jobs_from_requests(
 
     If any request in the context is a managed job request (launch, cancel,
     logs), extract the job IDs from its body and add them to the context.
-    """
-    if not debug_dump_context['request_ids']:
-        return
-    logger.debug(f'Getting managed jobs for '
-                 f'{len(debug_dump_context["request_ids"])} requests')
 
-    for request_id in debug_dump_context['request_ids']:
+    Skips requests that were themselves added because they reference a
+    job — that's a same-type re-expansion (job -> request -> job) which
+    would let an over-broad matcher (body.name, body.all_users, body.all)
+    drag every sibling job of a batch-style request into the dump.
+    """
+    # Requests added by _get_requests_from_managed_jobs must not re-seed
+    # managed_job_ids here. Other origins (user seed, recent context,
+    # _get_requests_from_clusters) remain free to expand.
+    request_ids = (debug_dump_context['request_ids'] -
+                   debug_dump_context['request_ids_via_job'])
+    if not request_ids:
+        return
+    logger.debug(f'Getting managed jobs for {len(request_ids)} requests')
+
+    for request_id in request_ids:
         try:
             request = requests_lib.get_request(
                 request_id, fields=['name', 'request_body', 'return_value'])
@@ -1166,6 +1209,11 @@ def create_debug_dump(
         request_ids=resolved_request_ids,
         cluster_names=set(cluster_names or []),
         managed_job_ids=set(managed_job_ids or []),
+        # User-seeded and recent-context requests have no provenance
+        # restriction; only requests added by cross-link helpers
+        # populate these sidecars (see DebugDumpContext docstring).
+        request_ids_via_job=set(),
+        request_ids_via_cluster=set(),
         errors=[],
     )
 

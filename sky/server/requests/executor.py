@@ -46,6 +46,7 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
+from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -63,6 +64,7 @@ from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -354,6 +356,68 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
     return RequestQueue(factory.create_queue(schedule_type.value))
 
 
+# Request names where a non-explicit workspace pick is worth surfacing
+# at INFO level (i.e. visible in the streamed CLI output, not just debug
+# logs). Resource-creating commands record the resolved workspace into
+# durable state (cluster.workspace / job_info.workspace) — users care
+# which workspace that ended up being. Read-only commands resolve the
+# same way under the hood but the log line would just be noise.
+#
+# To extend coverage to other resource-creating verbs (e.g. SERVE_UP),
+# add the request_name here.
+_RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG = {
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.CLUSTER_LAUNCH.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LAUNCH.value,
+}
+
+# Sources we DON'T announce, even on a resource-creating request:
+#   EXPLICIT          — the user already named the workspace; repeating
+#                       it in the log is noise.
+#   DEFAULT_FALLBACK  — landing on 'default' is the pre-existing implicit
+#                       behavior; surfacing it on every launch for every
+#                       single-default user would clutter output for the
+#                       common case while telling them nothing new.
+# PREFERRED / SINGLE_MEMBERSHIP are the cases worth surfacing — the user
+# may not realize where the resource landed.
+_SILENT_WORKSPACE_RESOLUTION_SOURCES = {
+    workspace_constants.WORKSPACE_SOURCE_EXPLICIT,
+    workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK,
+}
+
+
+def _should_apply_workspace_resolver(is_daemon: bool,
+                                     client_api_version: Optional[int]) -> bool:
+    """Returns True iff the per-user workspace resolver should run for
+    this request. Three gates, in order:
+
+      (a) skip daemons / system-user requests — the system user is admin
+          and would land on 'default' via the default-fallback step
+          anyway; the resolver would add a DB read + permission check per
+          daemon tick (thousands per hour) for zero behavioral change.
+      (b) skip when the client API version is below the version that
+          added /users/me/workspace + WorkspaceAmbiguousError handling —
+          old clients wouldn't know how to interpret the new error
+          format, so preserve the legacy permission-denied path that
+          they already handle. The version travels on the RequestBody
+          itself (`client_api_version` field) so it is available in the
+          worker process; `versions.get_remote_api_version()` returns
+          None in workers because the underlying ContextVar set by
+          APIVersionMiddleware does not propagate across process
+          boundaries.
+      (c) skip when active_workspace was explicitly set on the wire
+          (anywhere in the merged config) — respect explicit user intent;
+          preferred MUST be ignored when the user names a workspace.
+    """
+    if is_daemon:
+        return False
+    if (client_api_version is None or client_api_version <
+            server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION):
+        return False
+    return not skypilot_config.is_active_workspace_set()
+
+
 @contextlib.contextmanager
 def override_request_env_and_config(
         request_body: payloads.RequestBody, request_id: str,
@@ -425,20 +489,67 @@ def override_request_env_and_config(
             # Skip permission check for sky.workspaces.get request
             # as it is used to determine which workspaces the user
             # has access to.
-            if request_name != 'sky.workspaces.get':
-                try:
-                    # Reject requests that the user does not have permission
-                    # to access.
-                    workspaces_core.reject_request_for_unauthorized_workspace(
+            if request_name == 'sky.workspaces.get':
+                logger.debug(f'{request_id} skipping workspace check for '
+                             f'{request_name}')
+                yield
+            else:
+                # If the client did not explicitly set active_workspace,
+                # resolve it from the user's memberships (preferred ->
+                # default if accessible -> single-membership) instead of
+                # always landing on the bare 'default' literal. Explicit
+                # intent (any value, including 'default') is passed through
+                # unchanged. See _should_apply_workspace_resolver for the
+                # exact gate conditions (daemon skip, client API version,
+                # explicit-intent respect).
+                workspace_ctx: contextlib.AbstractContextManager = (
+                    contextlib.nullcontext())
+                # Read the client's API version from the request body, not
+                # from versions.get_remote_api_version() — the ContextVar
+                # the latter reads is set by APIVersionMiddleware in the
+                # FastAPI async context but does not propagate into worker
+                # processes (BurstableExecutor = ProcessPoolExecutor).
+                client_api_version = getattr(request_body, 'client_api_version',
+                                             None)
+                if _should_apply_workspace_resolver(is_daemon,
+                                                    client_api_version):
+                    resolution = workspaces_core.resolve_workspace_for_user(
                         user)
-                except exceptions.PermissionDeniedError as e:
-                    logger.debug(
-                        f'{request_id} permission denied to workspace: '
-                        f'{skypilot_config.get_active_workspace()}: {e}')
-                    raise e
-            logger.debug(
-                f'{request_id} permission granted to {request_name} request')
-            yield
+                    workspace_ctx = (skypilot_config.local_active_workspace_ctx(
+                        resolution.workspace))
+                    logger.debug(f'{request_id} resolved workspace '
+                                 f'{resolution.workspace!r} from '
+                                 f'{resolution.source} for user {user.name}')
+                    # For resource-creating commands, surface the
+                    # resolver's pick at INFO level so the user sees
+                    # which workspace their cluster / job actually
+                    # landed in. Two filters compose:
+                    #   - request_name whitelist (resource-creating verbs)
+                    #   - source NOT in the silent set (EXPLICIT /
+                    #     DEFAULT_FALLBACK) — EXPLICIT repeats what the
+                    #     user just said; DEFAULT_FALLBACK is the silent
+                    #     pre-existing behavior. Only PREFERRED /
+                    #     SINGLE_MEMBERSHIP are worth surfacing.
+                    if (request_name in
+                            _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG
+                            and resolution.source
+                            not in _SILENT_WORKSPACE_RESOLUTION_SOURCES):
+                        logger.info(f'Using workspace {resolution.workspace!r} '
+                                    f'(source: {resolution.source}).')
+                with workspace_ctx:
+                    try:
+                        # Reject requests that the user does not have
+                        # permission to access.
+                        workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
+                            user)
+                    except exceptions.PermissionDeniedError as e:
+                        logger.debug(
+                            f'{request_id} permission denied to workspace: '
+                            f'{skypilot_config.get_active_workspace()}: {e}')
+                        raise e
+                    logger.debug(f'{request_id} permission granted to '
+                                 f'{request_name} request')
+                    yield
     finally:
         # We need to call the save_timeline() since atexit will not be
         # triggered as multiple requests can be sharing the same process.
@@ -806,6 +917,16 @@ async def prepare_request_async(
             models.User(id=user_id,
                         name=user_id,
                         user_type=models.UserType.SYSTEM.value))
+    # Capture the client's API version from the FastAPI dispatch context
+    # into the request body so it survives the process boundary into the
+    # worker that runs the request. APIVersionMiddleware set the
+    # ContextVar from the X-SkyPilot-API-Version header; reading it here
+    # (still in the async dispatch process) and stamping the body is the
+    # one place where header -> body translation happens, so neither the
+    # Python SDK nor the dashboard need their own stamping logic. Old
+    # clients (no header) yield None, which the worker-side gate treats
+    # as "skip the workspace resolver".
+    request_body.client_api_version = versions.get_remote_api_version()
     request = api_requests.Request(
         request_id=request_id,
         name=server_constants.REQUEST_NAME_PREFIX + request_name,
@@ -870,6 +991,38 @@ async def schedule_request_async(
                                                auth_user=auth_user)
     await schedule_prepared_request(request_task, ignore_return_value,
                                     precondition, retryable)
+
+
+async def schedule_internal_daemon_async(
+        daemon: 'daemons.InternalRequestDaemon') -> None:
+    """Submit an internal daemon's request to the executor.
+
+    Idempotent under concurrent callers (multiple uvicorn workers in the
+    same process; multiple replicas sharing a PG-backed request store):
+
+    - First caller inserts a fresh PENDING row + enqueues onto the task
+      queue.
+    - Subsequent callers UPDATE `request_body` / `name` /
+      `schedule_type` on the existing row (so the persisted env_vars
+      reflect *this* process's `os.environ` rather than whatever the
+      original creator captured) and skip the enqueue (the existing
+      task_queue entry from the original creator remains in place).
+
+    This replaces the previous "schedule_request_async → catch
+    RequestAlreadyExistsError → log debug" pattern for daemon
+    requests: the dedup contract is identical (exactly one concurrent
+    caller wins the insert race and enqueues), but losing callers now
+    actively refresh env-bearing columns on the existing row instead
+    of leaving stale state in place.
+    """
+    request = api_requests.build_internal_daemon_request(daemon)
+    inserted = await api_requests.create_or_refresh_internal_daemon_async(
+        request)
+    if inserted:
+        await schedule_prepared_request(request, retryable=True)
+    else:
+        logger.debug(f'Internal daemon {daemon.id} row refreshed (existed); '
+                     'enqueue skipped.')
 
 
 async def schedule_prepared_request(request_task: api_requests.Request,

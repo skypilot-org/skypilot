@@ -7,7 +7,7 @@ workdir: .
 setup: |
   set -e
   sudo apt update
-  uv pip install --system --prerelease allow azure-cli
+  uv pip install --system --prerelease allow "azure-cli<2.87.0"
   uv pip install --system -e '.[all]'
 
 run: |

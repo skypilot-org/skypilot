@@ -551,6 +551,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'quota'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
+    ('kubernetes', 'set_pod_resource_limits'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
     ('gcp', 'vpc_name'),
@@ -762,4 +763,4 @@ SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
 MAX_NODE_NAME_LINEAGE = 10
 
 # Clouds that provide storage only (no compute).
-STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata', 'huggingface']

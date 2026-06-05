@@ -3,7 +3,8 @@ import json
 import pathlib
 import threading
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Sequence,
+                    Tuple, Union)
 import zlib
 
 import click
@@ -26,6 +27,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import dag_utils
+from sky.utils import rich_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -411,9 +413,24 @@ def cancel(
     return server_common.get_request_id(response=response)
 
 
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@rest.retry_transient_errors()
+@typing.overload
+def tail_logs(
+    name: Optional[str] = None,
+    job_id: Optional[int] = None,
+    follow: bool = True,
+    controller: bool = False,
+    refresh: bool = False,
+    tail: Optional[int] = None,
+    tail_offset: Optional[int] = None,
+    output_stream: Optional['io.TextIOBase'] = None,
+    task: Optional[Union[str, int]] = None,
+    *,  # keyword only separator
+    preload_content: Literal[True] = True
+) -> Optional[int]:
+    ...
+
+
+@typing.overload
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
               follow: bool = True,
@@ -421,8 +438,29 @@ def tail_logs(name: Optional[str] = None,
               refresh: bool = False,
               tail: Optional[int] = None,
               tail_offset: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None,
-              task: Optional[Union[str, int]] = None) -> Optional[int]:
+              output_stream: None = None,
+              task: Optional[Union[str, int]] = None,
+              *,
+              preload_content: Literal[False]) -> Iterator[Optional[str]]:
+    ...
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@rest.retry_transient_errors()
+def tail_logs(
+    name: Optional[str] = None,
+    job_id: Optional[int] = None,
+    follow: bool = True,
+    controller: bool = False,
+    refresh: bool = False,
+    tail: Optional[int] = None,
+    tail_offset: Optional[int] = None,
+    output_stream: Optional['io.TextIOBase'] = None,
+    task: Optional[Union[str, int]] = None,
+    *,  # keyword only separator
+    preload_content: bool = True
+) -> Union[Optional[int], Iterator[Optional[str]]]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -436,17 +474,26 @@ def tail_logs(name: Optional[str] = None,
         refresh: Whether to restart the jobs controller if it is stopped.
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
-            console.
+            console. Cannot be used with preload_content=False.
         task: Task identifier to view logs for a specific task in a JobGroup.
             If an int, it is treated as a task ID. If a str, it is treated as
             a task name. If None, logs for all tasks are shown.
+        preload_content: if False, returns an Iterator[str | None] containing
+            the logs without the function blocking on the retrieval of the
+            entire log. Iterator returns None when the log has been completely
+            streamed. Default True. Cannot be used with output_stream.
 
     Returns:
-        Exit code based on success or failure of the job. 0 if success,
-        100 if the job failed. See exceptions.JobExitCode for possible exit
-        codes.
-        Will return None if follow is False
-        (see note in sky/client/sdk.py::stream_response)
+        If preload_content is True:
+            Exit code based on success or failure of the job. 0 if success,
+            100 if the job failed. See exceptions.JobExitCode for possible exit
+            codes.
+            Will return None if follow is False
+            (see note in sky/client/sdk.py::stream_response)
+        If preload_content is False:
+            Iterator[str | None] containing the logs without the function
+            blocking on the retrieval of the entire log. Iterator returns None
+            when the log has been completely streamed.
 
     Request Raises:
         ValueError: invalid arguments.
@@ -458,6 +505,9 @@ def tail_logs(name: Optional[str] = None,
     if tail_offset is not None and tail_offset < 0:
         raise ValueError(f'tail_offset must be None or a non-negative integer, '
                          f'got {tail_offset}.')
+    if output_stream is not None and not preload_content:
+        raise ValueError(
+            'output_stream cannot be specified when preload_content is False')
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
@@ -476,13 +526,16 @@ def tail_logs(name: Optional[str] = None,
         timeout=(5, None))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
-    # Log request is idempotent when tail is None or 0 (both stream from
-    # the beginning), thus can resume previous streaming point on retry.
-    return sdk.stream_response(request_id=request_id,
-                               response=response,
-                               output_stream=output_stream,
-                               resumable=(tail is None or tail == 0),
-                               get_result=follow)
+    if preload_content:
+        # Log request is idempotent when tail is None or 0 (both stream from
+        # the beginning), thus can resume previous streaming point on retry.
+        return sdk.stream_response(request_id=request_id,
+                                   response=response,
+                                   output_stream=output_stream,
+                                   resumable=(tail is None or tail == 0),
+                                   get_result=follow)
+    else:
+        return rich_utils.decode_rich_status(response)
 
 
 @context.contextual

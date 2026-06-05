@@ -602,6 +602,15 @@ def _replace_yaml_dicts(
     for exclude_restore_key_name, value in excluded_results.items():
         curr = new_config
         for key in exclude_restore_key_name[:-1]:
+            # _restore_block may have replaced an ancestor block wholesale
+            # with the old config (e.g. 'provider'), which can lack an
+            # intermediate key that only exists in the new config (or have
+            # it present but null). This happens when restarting a cluster
+            # created before a feature that added a nested provider field
+            # (e.g. Nebius `provider.security_group`). Recreate the path so
+            # we can still apply the new value instead of raising KeyError.
+            if not isinstance(curr.get(key), dict):
+                curr[key] = {}
             curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
     return yaml_utils.dump_yaml_str(new_config)
@@ -2894,6 +2903,32 @@ def _update_cluster_status(
         status_reason = _summarize_pod_reasons(node_statuses,
                                                handle.launched_nodes,
                                                node_health)
+
+        # When the per-pod live status doesn't name a cause, recover it from a
+        # durable signal. Two races are covered:
+        # - Eviction (ephemeral-storage / disk / memory pressure) is emitted as
+        #   a kubelet event while the pod can still report Running/Ready and
+        #   pod.status.reason has not caught up -> read the events.
+        # - A run-phase OOMKilled lives in the container's last_state and
+        #   survives the restart, but the Ready condition flips back to True
+        #   once the container is running again, so a snapshot that raced the
+        #   restart misses it -> re-read the pods' current+previous states.
+        # Bounded: only on an abnormal k8s cluster with no status reason.
+        if not status_reason and isinstance(launched_resources.cloud,
+                                            clouds.Kubernetes):
+            try:
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                if ray_config and 'provider' in ray_config:
+                    pod_names = list(node_statuses.keys())
+                    status_reason = (
+                        k8s_instance.get_cluster_failure_reason_from_events(
+                            ray_config['provider'], pod_names) or
+                        k8s_instance.get_cluster_failure_reason_from_pods(
+                            ray_config['provider'], pod_names) or '')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get pod failure reason for '
+                             f'{cluster_name!r}: {e}')
 
         # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
         # be checked before some_nodes_not_stopped, which would otherwise

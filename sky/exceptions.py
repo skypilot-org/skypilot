@@ -276,20 +276,20 @@ class SkyPilotExcludeArgsBaseException(Exception):
     pass
 
 
-class CommandError(SkyPilotExcludeArgsBaseException):
-    """Raised when a command fails.
+class CommandFailureException(SkyPilotExcludeArgsBaseException):
+    """Raised if a command fails for some reason.
 
     Args:
-        returncode: The returncode of the command.
         command: The command that was run.
-        error_message: The error message to print.
-        detailed_reason: The stderr of the command.
+        failure: The mode of failure.
+        error_msg: The error message to print.
+        detailed_reason: Detailed output from the failure, if possible.
     """
 
-    def __init__(self, returncode: int, command: str, error_msg: str,
+    def __init__(self, command: str, failure: str, error_msg: str,
                  detailed_reason: Optional[str]) -> None:
-        self.returncode = returncode
         self.command = command
+        self.failure = failure
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
 
@@ -300,9 +300,32 @@ class CommandError(SkyPilotExcludeArgsBaseException):
                     not env_options.Options.SHOW_DEBUG_INFO.get()):
                 # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
-            message = (f'Command {command} failed with return code '
-                       f'{returncode}.\n{error_msg}\n{detailed_reason}')
+            message = (f'Command {command} {failure}.\n'
+                       f'{error_msg}\n{detailed_reason}')
         super().__init__(message)
+
+
+class CommandError(CommandFailureException):
+    """Raised when a command returns a non-zero exit code.
+
+    Args:
+        returncode: The returncode of the command.
+        command: The command that was run.
+        error_msg: The error message to print.
+        detailed_reason: The stderr of the command.
+        failure: Normally constructed from returncode, but included for serde.
+    """
+
+    def __init__(self,
+                 returncode: int,
+                 command: str,
+                 error_msg: str,
+                 detailed_reason: Optional[str],
+                 failure: Optional[str] = None) -> None:
+        self.returncode = returncode
+        if failure is None:
+            failure = f'failed with return code {returncode}'
+        super().__init__(command, failure, error_msg, detailed_reason)
 
 
 class ClusterNotUpError(Exception):
@@ -446,6 +469,59 @@ class InvalidRecipeNameError(Exception):
 class InvalidWorkspaceNameError(Exception):
     """Raised when the workspace name is invalid."""
     pass
+
+
+class WorkspaceAmbiguousError(SkyPilotExcludeArgsBaseException):
+    """Raised when a user belongs to multiple workspaces and none is chosen.
+
+    Carries the list of accessible workspace names so callers (CLI / API
+    handlers) can format consistent guidance pointing the user at
+    `sky workspace use <name>` or `~/.sky/config.yaml`. The `--workspace`
+    flag is listed as a footnote because it only exists on the launch
+    commands (`sky launch` / `sky jobs launch`); listing it as a main
+    fix would mislead users running `sky status` / `sky queue` / etc.
+
+    `note` is an optional drift explanation populated when the user has a
+    saved preference that is no longer accessible — so the user understands
+    why their previous default stopped working.
+    """
+
+    # Recovery guidance shared between the exception message and the
+    # `sky workspace info` hint paragraph. Kept as a classmethod so the
+    # two surfaces don't drift; not parameterized on `accessible` because
+    # both call sites already show the list separately (the exception
+    # message via the preamble, the CLI via the `Accessible:` tree row).
+    @classmethod
+    def recovery_hint(cls) -> str:
+        return ('SkyPilot can\'t pick one automatically for this command. '
+                'To proceed:\n'
+                '  - run `sky workspace use <name>` to set your default, or\n'
+                '  - set `active_workspace: <name>` in `~/.sky/config.yaml`.\n'
+                '\n'
+                'Or, for a one-shot override on `sky launch` / '
+                '`sky jobs launch`, pass `--workspace <name>`.')
+
+    def __init__(self, accessible: List[str], note: Optional[str] = None):
+        self.accessible = sorted(accessible)
+        self.note = note
+        names = ', '.join(self.accessible)
+        note_line = f'\nNote: {note}.' if note else ''
+        super().__init__(f'You belong to multiple workspaces: {names}.'
+                         f'{note_line}\n{self.recovery_hint()}')
+
+    def __reduce__(self):
+        # SkyPilot's request executor pickles exceptions raised by a
+        # request (see sky/server/requests/serializers/encoders.py)
+        # and unpickles them in the client. The default exception
+        # pickle protocol reconstructs via `cls(*self.args)`, where
+        # `self.args` is the (already-formatted) message string set
+        # by super().__init__ above. Reconstructing via
+        # `WorkspaceAmbiguousError(message_string)` would then sort
+        # the individual characters of that string into `accessible`
+        # and rebuild a garbled guidance message. Override
+        # `__reduce__` to preserve the real constructor arguments
+        # across the round-trip.
+        return (self.__class__, (self.accessible, self.note))
 
 
 class RecipeAlreadyExistsError(Exception):
@@ -661,6 +737,16 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class NoWorkspaceAccessError(PermissionDeniedError):
+    """Raised when the user has no accessible workspaces at all.
+
+    A subclass of PermissionDeniedError so existing handlers still catch it,
+    while specific tests / UI can distinguish "zero accessible workspaces"
+    from a per-workspace permission denial.
+    """
     pass
 
 

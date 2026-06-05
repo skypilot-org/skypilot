@@ -907,6 +907,12 @@ def get_service_schema():
                         'timeout_seconds': {
                             'type': 'number',
                         },
+                        'endpoint_probe_interval_seconds': {
+                            'type': 'number',
+                        },
+                        'consecutive_failure_threshold_timeout': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -922,6 +928,16 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'load_balancer': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'stream_timeout_seconds': {
+                        'type': 'number',
+                    },
+                },
             },
             'pool': {
                 'type': 'object',
@@ -1557,6 +1573,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+    'namespace': {
+        'type': 'string',
+    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -2435,6 +2454,9 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        'namespace': {
+                            'type': 'string',
+                        },
                         'kueue': {
                             'type': 'object',
                             'required': [],
@@ -2475,6 +2497,9 @@ def get_config_schema():
                                 'additionalProperties':
                                     _allow_additional_properties(),
                                 'properties': {
+                                    'namespace': {
+                                        'type': 'string',
+                                    },
                                     'kueue': {
                                         'type': 'object',
                                         'required': [],

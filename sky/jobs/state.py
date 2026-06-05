@@ -29,6 +29,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import retries as db_retries
 from sky.utils.plugin_extensions import ExternalClusterFailure
 
 if typing.TYPE_CHECKING:
@@ -278,6 +279,23 @@ def create_table(engine: sqlalchemy.engine.Engine):
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
 
 
+async def _retry_session(operation):
+    """Run `operation(session)` in a fresh async session with retry on
+    transient DB errors. Use when a function has non-DB side effects
+    (event logs, callbacks) that must run exactly once; wrap only the
+    session block with this helper. For pure-leaf DB functions, prefer
+    the `@db_retries.retry_async` decorator on the function itself.
+    """
+
+    async def _do(attempt):  # pylint: disable=unused-argument
+        del attempt
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            return await operation(session)
+
+    return await db_retries.with_db_retries_async(_do)
+
+
 async def _describe_task_transition_failure(session: sql_async.AsyncSession,
                                             job_id: int, task_id: int) -> str:
     """Return a human-readable description when a task transition fails."""
@@ -297,6 +315,75 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
     except Exception as exc:  # pylint: disable=broad-except
         details += f' Error fetching task details: {exc}'
     return details
+
+
+async def _retry_task_status_update(
+    job_id: int,
+    task_id: int,
+    target_status: 'ManagedJobStatus',
+    update: Callable[[sql_async.AsyncSession], Awaitable[int]],
+    failure_prefix: str,
+) -> None:
+    """Run a one-row task status update with commit-lost-safe retry."""
+    prior_update_matched = False
+
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            count = await update(session)
+            if count == 1:
+                prior_update_matched = True
+            await session.commit()
+            if count == 1:
+                return
+            if count == 0 and attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(spot_table.c.status).where(
+                        sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                        spot_table.c.task_id == task_id)))
+                row = current.fetchone()
+                if row is not None and row[0] == target_status.value:
+                    return
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = f'{failure_prefix} ({count} rows updated. {details})'
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
+
+    await db_retries.with_db_retries_async(_op)
+
+
+async def _retry_schedule_state_update(
+    job_id: int,
+    target_state: 'ManagedJobScheduleState',
+    update: Callable[[sql_async.AsyncSession], Awaitable[int]],
+    idempotent: bool = False,
+) -> None:
+    """Run a one-row schedule-state update with commit-lost-safe retry."""
+    prior_update_matched = False
+
+    async def _op(attempt: int) -> None:
+        nonlocal prior_update_matched
+        engine = await _db_manager.get_async_engine()
+        async with sql_async.AsyncSession(engine) as session:
+            count = await update(session)
+            if count == 1:
+                prior_update_matched = True
+            await session.commit()
+            if count == 1 or idempotent:
+                return
+            assert count == 0, (job_id, count)
+            if count == 0 and attempt > 0 and prior_update_matched:
+                current = await session.execute(
+                    sqlalchemy.select(job_info_table.c.schedule_state).where(
+                        job_info_table.c.spot_job_id == job_id))
+                row = current.fetchone()
+                if row is not None and row[0] == target_state.value:
+                    return
+            assert False, (job_id, count)
+
+    await db_retries.with_db_retries_async(_op)
 
 
 # job_duration is the time a job actually runs (including the
@@ -443,8 +530,9 @@ class ManagedJobStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
     # FAILED: The job is finished with failure from the user's program.
     FAILED = 'FAILED'
-    # FAILED_SETUP: The job is finished with failure from the user's setup
-    # script.
+    # FAILED_SETUP: The job is finished with failure during setup -- either the
+    # user's setup script, or a deterministic cluster/runtime setup failure such
+    # as the job's pod being OOMKilled before the job started.
     FAILED_SETUP = 'FAILED_SETUP'
     # FAILED_PRECHECKS: the underlying `sky.launch` fails due to precheck
     # errors only. I.e., none of the failover exceptions, if any, is due to
@@ -808,8 +896,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING,
                               'Job is in backoff')
 
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -822,15 +909,11 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
                     spot_table.c.end_at.is_(None),
                 )).values({spot_table.c.status: ManagedJobStatus.PENDING.value})
         )
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = ('Failed to set the task back to pending. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
+
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.PENDING,
+                                    _op,
+                                    'Failed to set the task back to pending.')
     # Do not call callback_func here, as we don't use the callback for PENDING.
 
 
@@ -848,8 +931,8 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
 
     await add_job_event_async(job_id, task_id, target_status,
                               'Job is restarting')
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session):
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -867,6 +950,8 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
                        f'({count} rows updated. {details})')
             logger.error(message)
             raise exceptions.ManagedJobStatusError(message)
+
+    await _retry_session(_op)
     # Do not call callback_func here, as it should only be invoked for the
     # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
 
@@ -988,6 +1073,7 @@ def set_pending_cancelled(job_id: int):
         return count > 0
 
 
+@db_retries.retry
 def set_local_log_file(job_id: int, task_id: Optional[int],
                        local_log_file: str):
     """Set the local log file for a job."""
@@ -1566,6 +1652,47 @@ def get_status_counts() -> Dict[str, int]:
     return results
 
 
+def get_status_counts_by_workspace_user_cloud(
+) -> List[Tuple[Optional[str], Optional[str], Optional[str], str, int]]:
+    """Return task counts grouped by workspace/user/cloud/status.
+
+    Each tuple is (workspace, user_hash, cloud, status, count). NULL values
+    are returned as None. Used by the Prometheus collector to emit
+    per-workspace/user/cloud labeled gauges. Includes both active and
+    terminal statuses — terminal counts on a gauge grow monotonically as
+    the DB accumulates rows, which is awkward (a Counter incremented at
+    state-transition would be more semantically correct), but operators
+    explicitly want success/failure visibility and `delta(...)` over a
+    window approximates the per-period rate.
+
+    The join is on (spot, job_info) — spot rows whose job_info parent has
+    been deleted are skipped, but spot rows whose job_info has NULL
+    workspace/user_hash/cloud (PENDING jobs, pre-workspaces rows) are
+    kept with None labels.
+    """
+    query = sqlalchemy.select(
+        job_info_table.c.workspace,
+        job_info_table.c.user_hash,
+        job_info_table.c.cloud,
+        spot_table.c.status,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).select_from(
+        spot_table.join(
+            job_info_table,
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+        )).group_by(
+            job_info_table.c.workspace,
+            job_info_table.c.user_hash,
+            job_info_table.c.cloud,
+            spot_table.c.status,
+        )
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return [(row[0], row[1], row[2], str(row[3]), int(row[4])) for row in rows]
+
+
 def get_managed_jobs_with_filters(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,
@@ -1855,6 +1982,7 @@ def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
     }
 
 
+@db_retries.retry
 def get_pool_from_job_id(job_id: int) -> Optional[str]:
     """Get the pool from the job id."""
     engine = _db_manager.get_engine()
@@ -1875,6 +2003,7 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
         session.commit()
 
 
+@db_retries.retry
 def set_job_infra(job_id: int,
                   cloud: Optional[str] = None,
                   region: Optional[str] = None,
@@ -2047,6 +2176,7 @@ async def set_job_id_on_pool_cluster_async(job_id: int,
         await session.commit()
 
 
+@db_retries.retry
 def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
     """Get the cluster name and job id on the pool from the managed job id."""
     engine = _db_manager.get_engine()
@@ -2061,6 +2191,7 @@ def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
         return info[0], info[1]
 
 
+@db_retries.retry_async
 async def get_pool_submit_info_async(
         job_id: int) -> Tuple[Optional[str], Optional[int]]:
     """Get the cluster name and job id on the pool from the managed job id."""
@@ -2098,6 +2229,7 @@ def set_api_access_token_id(job_id: int, token_id: str) -> None:
         session.commit()
 
 
+@db_retries.retry
 def get_api_access_token_id(job_id: int) -> Optional[str]:
     """Get the API access token ID for a managed job."""
     engine = _db_manager.get_engine()
@@ -2110,6 +2242,7 @@ def get_api_access_token_id(job_id: int) -> Optional[str]:
         return result[0]
 
 
+@db_retries.retry_async
 async def scheduler_set_launching_async(job_id: int):
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -2125,8 +2258,8 @@ async def scheduler_set_launching_async(job_id: int):
 
 async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
@@ -2137,9 +2270,10 @@ async def scheduler_set_alive_async(job_id: int) -> None:
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.ALIVE.value
                 }))
-        changes = result.rowcount
-        await session.commit()
-        assert changes == 1, (job_id, changes)
+        return result.rowcount
+
+    await _retry_schedule_state_update(job_id, ManagedJobScheduleState.ALIVE,
+                                       _op)
 
 
 def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
@@ -2262,6 +2396,36 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         return job_ids
 
 
+def get_nonterminal_job_counts_by_pool(pool: str) -> Dict[str, int]:
+    """Get the number of nonterminal jobs per cluster in a pool.
+
+    Returns a dict mapping cluster_name to the count of nonterminal jobs
+    running on that cluster. Uses a single GROUP BY query instead of
+    per-cluster queries.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        query = sqlalchemy.select(
+            job_info_table.c.current_cluster_name,
+            # pylint: disable=not-callable
+            sqlalchemy.func.count(
+                spot_table.c.spot_job_id.distinct()
+            )).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+            ).where(
+                sqlalchemy.and_(
+                    ~spot_table.c.status.in_([
+                        status.value
+                        for status in ManagedJobStatus.terminal_statuses()
+                    ]),
+                    job_info_table.c.pool == pool,
+                )).group_by(job_info_table.c.current_cluster_name)
+        rows = session.execute(query).fetchall()
+        return {row[0]: row[1] for row in rows if row[0] is not None}
+
+
 def get_nonterminal_job_ids_by_pool_grouped(
         pool: str) -> Dict[Optional[str], List[int]]:
     """Get nonterminal job ids in a pool, grouped by current_cluster_name.
@@ -2377,6 +2541,7 @@ def get_pool_worker_used_resources(
     return total_resources
 
 
+@db_retries.retry_async
 async def get_waiting_job_async(
         pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
@@ -2484,6 +2649,7 @@ def get_workspace(job_id: int) -> str:
         return job_workspace
 
 
+@db_retries.retry
 def get_file_mounts_blob_id(job_id: int) -> Optional[str]:
     """Return the file_mounts_blob_id persisted for a job, if any."""
     engine = _db_manager.get_engine()
@@ -2503,6 +2669,7 @@ async def get_latest_task_id_status_async(
     return get_latest_task_id_from_statuses(id_statuses)
 
 
+@db_retries.retry_async
 async def get_all_task_ids_statuses_async(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     """Returns all (task_id, status) pairs for a job (async version)."""
@@ -2529,9 +2696,9 @@ async def set_starting_async(job_id: int,
     """Set the task to starting state."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.STARTING,
                               'Job is starting')
-    engine = await _db_manager.get_async_engine()
     logger.info('Launching the spot cluster...')
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session: sql_async.AsyncSession) -> int:
         values = {
             spot_table.c.resources: resources_str,
             spot_table.c.submitted_at: submit_time,
@@ -2549,15 +2716,10 @@ async def set_starting_async(job_id: int,
                     spot_table.c.status == ManagedJobStatus.PENDING.value,
                     spot_table.c.end_at.is_(None),
                 )).values(values))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = ('Failed to set the task to starting. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
+
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.STARTING,
+                                    _op, 'Failed to set the task to starting.')
     await callback_func('SUBMITTED')
     await callback_func('STARTING')
 
@@ -2567,9 +2729,9 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     """Set the task to started state."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has started')
-    engine = await _db_manager.get_async_engine()
     logger.info('Job started.')
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2585,15 +2747,10 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                     spot_table.c.start_at: start_time,
                     spot_table.c.last_recovered_at: start_time,
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = (f'Failed to set the task to started. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
+
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
+                                    _op, 'Failed to set the task to started.')
     await callback_func('STARTED')
 
 
@@ -2609,6 +2766,7 @@ def get_job_status_with_task_id(job_id: int,
         return ManagedJobStatus(status[0]) if status else None
 
 
+@db_retries.retry_async
 async def get_job_status_with_task_id_async(
         job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
     engine = await _db_manager.get_async_engine()
@@ -2646,11 +2804,10 @@ async def set_recovering_async(
 
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
                               reason, code)
-    engine = await _db_manager.get_async_engine()
     logger.info('=== Recovering... ===')
     current_time = time.time()
 
-    async with sql_async.AsyncSession(engine) as session:
+    async def _op(session: sql_async.AsyncSession) -> int:
         if force_transit_to_recovering:
             status_condition = spot_table.c.status.in_(
                 [s.value for s in ManagedJobStatus.processing_statuses()])
@@ -2658,6 +2815,18 @@ async def set_recovering_async(
             status_condition = (
                 spot_table.c.status == ManagedJobStatus.RUNNING.value)
 
+        # RUNNING and WINDING_DOWN are the "still doing job work"
+        # states (set_succeeded_async treats them equivalently, and
+        # `set_winding_down` itself doesn't accumulate). Forced
+        # recovery may revisit PENDING/STARTING/RECOVERING rows on
+        # resume or commit-lost retry; do not re-accumulate there.
+        should_accumulate_duration = sqlalchemy.and_(
+            spot_table.c.status.in_([
+                ManagedJobStatus.RUNNING.value,
+                ManagedJobStatus.WINDING_DOWN.value,
+            ]),
+            spot_table.c.last_recovered_at >= 0,
+        )
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2668,25 +2837,19 @@ async def set_recovering_async(
                 )).values({
                     spot_table.c.status: ManagedJobStatus.RECOVERING.value,
                     spot_table.c.job_duration: sqlalchemy.case(
-                        (spot_table.c.last_recovered_at >= 0,
-                         spot_table.c.job_duration + current_time -
-                         spot_table.c.last_recovered_at),
+                        (should_accumulate_duration, spot_table.c.job_duration +
+                         current_time - spot_table.c.last_recovered_at),
                         else_=spot_table.c.job_duration),
                     spot_table.c.last_recovered_at: sqlalchemy.case(
                         (spot_table.c.last_recovered_at < 0, current_time),
                         else_=spot_table.c.last_recovered_at),
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = ('Failed to set the task to recovering with '
-                       'force_transit_to_recovering='
-                       f'{force_transit_to_recovering}. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
+
+    await _retry_task_status_update(
+        job_id, task_id, ManagedJobStatus.RECOVERING, _op,
+        ('Failed to set the task to recovering with '
+         f'force_transit_to_recovering={force_transit_to_recovering}.'))
     await callback_func('RECOVERING')
 
 
@@ -2695,8 +2858,8 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
     """Set the task to recovered."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has recovered')
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2710,15 +2873,10 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
                     spot_table.c.recovery_count: spot_table.c.recovery_count +
                                                  1,
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = (f'Failed to set the task to recovered. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
+
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
+                                    _op, 'Failed to set the task to recovered.')
     logger.info('==== Recovered. ====')
     await callback_func('RECOVERED')
 
@@ -2752,8 +2910,8 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
     """Set the task to succeeded, if it is in a non-terminal state."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.SUCCEEDED,
                               'Job has succeeded')
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2768,15 +2926,10 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                     spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
                     spot_table.c.end_at: end_time,
                 }))
-        count = result.rowcount
-        await session.commit()
-        if count != 1:
-            details = await _describe_task_transition_failure(
-                session, job_id, task_id)
-            message = (f'Failed to set the task to succeeded. '
-                       f'({count} rows updated. {details})')
-            logger.error(message)
-            raise exceptions.ManagedJobStatusError(message)
+        return result.rowcount
+
+    await _retry_task_status_update(job_id, task_id, ManagedJobStatus.SUCCEEDED,
+                                    _op, 'Failed to set the task to succeeded.')
     await callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
@@ -2793,16 +2946,14 @@ async def set_failed_async(
     """Set an entire job or task to failed."""
     await add_job_event_async(job_id, task_id, failure_type,
                               f'Job failed: {failure_reason}')
-    engine = await _db_manager.get_async_engine()
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
-    fields_to_set: Dict[str, Any] = {
-        spot_table.c.status: failure_type.value,
-        spot_table.c.failure_reason: failure_reason,
-    }
-    updated = False
-    async with sql_async.AsyncSession(engine) as session:
+    async def _op(session):
+        fields_to_set: Dict[str, Any] = {
+            spot_table.c.status: failure_type.value,
+            spot_table.c.failure_reason: failure_reason,
+        }
         # Get previous status
         result = await session.execute(
             sqlalchemy.select(
@@ -2837,7 +2988,9 @@ async def set_failed_async(
                 sqlalchemy.and_(*where_conditions)).values(fields_to_set))
         count = result.rowcount
         await session.commit()
-        updated = count > 0
+        return count > 0
+
+    updated = await _retry_session(_op)
     if callback_func and updated:
         await callback_func('FAILED')
     logger.info(failure_reason)
@@ -2894,8 +3047,8 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     states."""
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
                               'Job is cancelling')
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session):
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2905,7 +3058,9 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
                     {spot_table.c.status: ManagedJobStatus.CANCELLING.value}))
         count = result.rowcount
         await session.commit()
-        updated = count > 0
+        return count > 0
+
+    updated = await _retry_session(_op)
     if updated:
         logger.info('Cancelling the job...')
         await callback_func('CANCELLING')
@@ -2917,9 +3072,8 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
                               'Job has been cancelled')
-    engine = await _db_manager.get_async_engine()
-    updated = False
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session):
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2931,7 +3085,9 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
                 }))
         count = result.rowcount
         await session.commit()
-        updated = count > 0
+        return count > 0
+
+    updated = await _retry_session(_op)
     if updated:
         logger.info('Job cancelled.')
         await callback_func('CANCELLED')
@@ -2939,6 +3095,7 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
         logger.info('Cancellation skipped, job is not CANCELLING')
 
 
+@db_retries.retry_async
 async def remove_ha_recovery_script_async(job_id: int) -> None:
     """Remove the HA recovery script for a job."""
     engine = await _db_manager.get_async_engine()
@@ -2967,8 +3124,8 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
 async def scheduler_set_done_async(job_id: int,
                                    idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
+
+    async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
@@ -2979,10 +3136,10 @@ async def scheduler_set_done_async(job_id: int,
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.DONE.value
                 }))
-        updated_count = result.rowcount
-        await session.commit()
-        if not idempotent:
-            assert updated_count == 1, (job_id, updated_count)
+        return result.rowcount
+
+    await _retry_schedule_state_update(job_id, ManagedJobScheduleState.DONE,
+                                       _op, idempotent)
 
 
 # ==== needed for codegen ====
@@ -3231,6 +3388,7 @@ async def _get_all_task_ids_async(job_id: int) -> List[int]:
         return [row[0] for row in result.fetchall()]
 
 
+@db_retries.retry_async
 async def add_job_event_async(
         job_id: int,
         task_id: Optional[int],
@@ -3318,6 +3476,35 @@ def get_job_events(job_id: int,
         'reason': row[4],
         'timestamp': row[5],
     } for row in rows]
+
+
+def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
+    """Return {job_id: reason} for the most recent RECOVERING event per job.
+
+    Only jobs with a non-empty RECOVERING reason are included. Used to surface
+    why a job is currently recovering (e.g. an OOMKilled pod) in the
+    `details` column. A single batched query keeps this off the per-job path.
+    """
+    if not job_ids:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_events_table.c.spot_job_id,
+                job_events_table.c.reason,
+            ).where(
+                sqlalchemy.and_(
+                    job_events_table.c.spot_job_id.in_(job_ids),
+                    job_events_table.c.new_status ==
+                    ManagedJobStatus.RECOVERING.value,
+                )).order_by(job_events_table.c.timestamp.desc())).fetchall()
+    # rows are newest-first; keep the first (latest) non-empty reason per job.
+    reasons: Dict[int, str] = {}
+    for spot_job_id, reason in rows:
+        if spot_job_id not in reasons and reason:
+            reasons[spot_job_id] = reason
+    return reasons
 
 
 async def cleanup_job_events_with_retention_async(

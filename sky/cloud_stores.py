@@ -19,6 +19,7 @@ from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
@@ -747,6 +748,197 @@ class VastDataCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class HFCloudStorage(CloudStorage):
+    """Hugging Face Buckets and Hub repos."""
+
+    # huggingface_hub>=1.5 needs click>=8.4, but the runtime's pinned
+    # ray==2.9.3 crashes its CLI under click>=8.3 (ray-project/ray#56747), so
+    # `ray status` fails and the cluster gets stuck in INIT. We use only the
+    # huggingface_hub SDK (its `hf` CLI is the sole click user), so older click
+    # is fine -- cap it with a uv override. Not the simpler forms because:
+    #   - `install "huggingface_hub>=1.5" "click<8.3.0"` makes click a co-req
+    #     conflicting with click>=8.4, so uv downgrades huggingface_hub instead.
+    #   - installing huggingface_hub then a separate `install "click<8.3.0"`
+    #     leaves click at 8.4.x between the commands, racing `ray status`.
+    # An override caps click in one resolution (never installed at >=8.3) and
+    # keeps huggingface_hub latest. uv's --overrides takes a file only.
+    _HF_UV_OVERRIDE_FILE = '~/.sky/hf_uv_override.txt'
+    _GET_HF_HUB = [
+        'mkdir -p ~/.sky',
+        # Write atomically + only if absent so parallel COPY syncs don't race.
+        f'[ -f {_HF_UV_OVERRIDE_FILE} ] || '
+        f'(tmpfile=$(mktemp {_HF_UV_OVERRIDE_FILE}.XXXXXX) && '
+        f'printf "click<8.3.0\\n" > "$tmpfile" && '
+        f'mv -f "$tmpfile" {_HF_UV_OVERRIDE_FILE})',
+        f'{constants.SKY_UV_PIP_CMD} install '
+        f'--overrides {_HF_UV_OVERRIDE_FILE} "huggingface_hub>=1.5"',
+    ]
+    _TOKEN_HELPER = """
+token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
+if not token:
+    for candidate in ('~/.cache/huggingface/token', '~/.huggingface/token'):
+        path = os.path.expanduser(candidate)
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as f:
+                token = f.read().strip() or None
+            if token:
+                break
+"""
+
+    def is_directory(self, url: str) -> bool:
+        if data_utils.is_hf_bucket_path(url):
+            bucket_id, path = data_utils.split_hf_path(url)
+            path = path.rstrip('/')
+            if not path:
+                return True
+            entries = list(huggingface.api().list_bucket_tree(
+                bucket_id,
+                prefix=path,
+                recursive=False,
+                token=huggingface.get_token()))
+            prefix = f'{path}/'
+            for entry in entries:
+                entry_path = getattr(entry, 'path', '').rstrip('/')
+                if entry_path == path and getattr(entry, 'type',
+                                                  'file') == 'file':
+                    return False
+                if entry_path.startswith(prefix):
+                    return True
+            return True
+
+        repo_type, repo_id, revision, path = data_utils.split_hf_repo_path(url)
+        path = path.rstrip('/')
+        if not path:
+            # Repo root is always a directory.
+            return True
+        # ``list_repo_tree(path_in_repo=path)`` lists the immediate children
+        # of ``path`` when it is a directory and raises
+        # ``EntryNotFoundError`` / HTTP 404 when it is a file (or doesn't
+        # exist). This is much cheaper than ``repo_info(...).siblings`` for
+        # large repos, which eagerly fetches metadata for every file.
+        try:
+            list(huggingface.api().list_repo_tree(
+                repo_id=repo_id,
+                repo_type=repo_type,
+                revision=revision,
+                path_in_repo=path,
+                recursive=False,
+                token=huggingface.get_token()))
+            return True
+        except Exception as e:  # pylint: disable=broad-except
+            errors = huggingface.hf_hub_errors()
+            not_found_types = tuple(cls for cls in (
+                getattr(errors, 'EntryNotFoundError', None),
+                getattr(errors, 'RepositoryNotFoundError', None),
+            ) if cls is not None)
+            status_code = getattr(getattr(e, 'response', None), 'status_code',
+                                  None)
+            if isinstance(e, not_found_types) or status_code == 404:
+                return False
+            raise
+
+    @classmethod
+    def _python_command(cls, code: str) -> str:
+        python = f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/python'
+        return ' && '.join(cls._GET_HF_HUB +
+                           [f'{python} -c {shlex.quote(code)}'])
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        if data_utils.is_hf_bucket_path(source):
+            code = '\n'.join([
+                'import os',
+                'from huggingface_hub import HfApi',
+                self._TOKEN_HELPER,
+                # SkyPilot hands us a wrapped destination like
+                # ``~/.sky/file_mounts/...``. We invoke huggingface_hub
+                # directly (no shell), so ``~`` must be expanded in Python.
+                f'dest = os.path.expanduser({destination!r})',
+                (f'HfApi().sync_bucket({source!r}, dest, '
+                 'token=token, quiet=True)'),
+            ])
+            return self._python_command(code)
+
+        repo_type, repo_id, revision, sub_path = data_utils.split_hf_repo_path(
+            source)
+        if sub_path:
+            # ``snapshot_download`` preserves repo-relative paths under
+            # ``local_dir``. Staging into a temp dir and moving only the
+            # sub-path contents avoids producing ``<destination>/<sub_path>``
+            # (which doubles when the destination is named after sub_path).
+            sub_path_norm = sub_path.rstrip('/')
+            allow_pattern = f'{sub_path_norm}/*'
+            code = '\n'.join([
+                'import os',
+                'import shutil',
+                'import tempfile',
+                'from huggingface_hub import snapshot_download',
+                self._TOKEN_HELPER,
+                f'dest = os.path.expanduser({destination!r})',
+                'os.makedirs(dest, exist_ok=True)',
+                'tmp_dir = tempfile.mkdtemp()',
+                'try:',
+                (f'    snapshot_download(repo_id={repo_id!r}, '
+                 f'repo_type={repo_type!r}, revision={revision!r}, '
+                 f'local_dir=tmp_dir, allow_patterns=[{allow_pattern!r}], '
+                 f'token=token)'),
+                (f'    src = os.path.join(tmp_dir, *{sub_path_norm!r}'
+                 f'.split("/"))'),
+                '    if os.path.isdir(src):',
+                '        for entry in os.listdir(src):',
+                ('            shutil.move(os.path.join(src, entry), '
+                 'os.path.join(dest, entry))'),
+                'finally:',
+                '    shutil.rmtree(tmp_dir, ignore_errors=True)',
+            ])
+        else:
+            code = '\n'.join([
+                'import os',
+                'from huggingface_hub import snapshot_download',
+                self._TOKEN_HELPER,
+                f'dest = os.path.expanduser({destination!r})',
+                (f'snapshot_download(repo_id={repo_id!r}, '
+                 f'repo_type={repo_type!r}, revision={revision!r}, '
+                 f'local_dir=dest, allow_patterns=None, '
+                 f'token=token)'),
+            ])
+        return self._python_command(code)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        if data_utils.is_hf_bucket_path(source):
+            bucket_id, path = data_utils.split_hf_path(source)
+            code = '\n'.join([
+                'import os',
+                'from huggingface_hub import HfApi',
+                self._TOKEN_HELPER,
+                f'dest = os.path.expanduser({destination!r})',
+                (f'HfApi().download_bucket_files({bucket_id!r}, '
+                 f'files=[({path!r}, dest)], raise_on_missing_files=True, '
+                 f'token=token)'),
+            ])
+            return self._python_command(code)
+
+        repo_type, repo_id, revision, path = data_utils.split_hf_repo_path(
+            source)
+        code = '\n'.join([
+            'import os',
+            'import shutil',
+            'import tempfile',
+            'from huggingface_hub import hf_hub_download',
+            self._TOKEN_HELPER,
+            f'dest = os.path.expanduser({destination!r})',
+            'tmp_dir = tempfile.mkdtemp()',
+            'try:',
+            (f'    downloaded = hf_hub_download(repo_id={repo_id!r}, '
+             f'repo_type={repo_type!r}, revision={revision!r}, '
+             f'filename={path!r}, local_dir=tmp_dir, token=token)'),
+            '    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)',
+            '    shutil.copy2(downloaded, dest)',
+            'finally:',
+            '    shutil.rmtree(tmp_dir, ignore_errors=True)',
+        ])
+        return self._python_command(code)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -766,6 +958,7 @@ _REGISTRY = {
     'nebius': NebiusCloudStorage(),
     'cw': CoreWeaveCloudStorage(),
     'vastdata': VastDataCloudStorage(),
+    'hf': HFCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

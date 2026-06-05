@@ -8,6 +8,7 @@ from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
                     TYPE_CHECKING)
 
 if TYPE_CHECKING:
+    from sky.server import daemons as daemons_lib
     from sky.server.requests.requests import Request
     from sky.server.requests.requests import RequestStatus
     from sky.server.requests.requests import RequestTaskFilter
@@ -58,6 +59,43 @@ class RequestBackend(abc.ABC):
 
         Returns:
             True if a new request was created, False if it already exists.
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def create_or_refresh_internal_daemon_async(
+            self, request: 'Request') -> bool:
+        """For an internal daemon request: insert a fresh PENDING row or
+        refresh env-bearing columns on an existing row.
+
+        Returns True if a new row was inserted (caller should enqueue
+        the request onto the task queue), False if an existing row was
+        refreshed in-place (the task_queue entry from the original
+        creator stays in place; do NOT enqueue again).
+
+        Atomic + idempotent under concurrent callers. Replaces
+        `create_if_not_exists_async` on the daemon submission path:
+        the dedup contract is identical (exactly one concurrent caller
+        gets True), but losing callers also UPDATE `request_body`,
+        `name`, and `schedule_type` on the existing row so the
+        persisted `env_vars` reflect the current process's
+        `os.environ` rather than whatever the original creator
+        captured (which may be from a previous deployment generation
+        in HA setups).
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def delete_orphan_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons_lib.InternalRequestDaemon'],
+    ) -> None:
+        """Delete daemon-shaped rows whose `request_id` is not in
+        `internal_daemons` (daemon was renamed / removed in code),
+        along with any task_queue entries (for backends with a
+        persistent queue).
+
+        Idempotent under concurrent callers.
         """
         raise NotImplementedError
 
