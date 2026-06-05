@@ -143,5 +143,5 @@ run: |
       --checkpoint-path "$RUN_DIR/checkpoints/$CKPT_ITER" \
       --config-file "$RUN_DIR/config.yaml" \
       -o "$RUN_DIR/model"
-    echo ">>> Fine-tuned safetensors written to the cosmos3-checkpoints volume: $RUN_DIR/model"
+    echo ">>> Fine-tuned safetensors written to: $RUN_DIR/model"
   fi

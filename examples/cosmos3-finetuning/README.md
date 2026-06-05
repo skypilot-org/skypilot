@@ -50,9 +50,8 @@ outputs outlive the job's cluster:
 sky volumes apply examples/cosmos3-finetuning/cosmos3_checkpoints_volume.yaml
 ```
 
-This creates a 1 Ti `cosmos3-checkpoints` PVC. See
-[`cosmos3_checkpoints_volume.yaml`](cosmos3_checkpoints_volume.yaml) to set the size,
-storage class, or access mode for your cluster.
+This creates a 1 Ti `cosmos3-checkpoints` PVC. See `cosmos3_checkpoints_volume.yaml`
+to set the size, storage class, or access mode for your cluster.
 
 ### 2. Launch the fine-tuning job
 
@@ -67,7 +66,7 @@ The first run downloads ~35 GB in `setup` (base model + VAE + dataset; 30+ min, 
 looks idle during the quiet downloads), then trains + exports.
 
 > **Multiple Kubernetes clusters?** Pin one with `--infra k8s/<context>`. To run on a
-> cloud instead, see *Using a cloud bucket* below.
+> cloud instead, see [Using a cloud bucket instead of a volume](#using-a-cloud-bucket-instead-of-a-volume) below.
 
 **Smoke test** (a few steps to exercise the whole pipeline, still checkpoints + exports):
 

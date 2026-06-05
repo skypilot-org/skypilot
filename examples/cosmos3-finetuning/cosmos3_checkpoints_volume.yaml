@@ -15,9 +15,10 @@ size: 1000Gi
 
 config:
   # ReadWriteMany lets the volume be reattached across managed-job recoveries
-  # (and shared by all nodes if you scale to multi-node). Point storage_class_name
-  # at a class in your cluster that supports RWX (e.g. a shared filesystem such as
-  # JuiceFS, Nebius shared FS, AWS EFS, or GCP Filestore). Drop both lines to fall
-  # back to your cluster's default StorageClass (typically ReadWriteOnce).
+  # (and shared by all nodes if you scale to multi-node). It needs a storage class
+  # that supports RWX (e.g. a shared filesystem such as JuiceFS, Nebius shared FS,
+  # AWS EFS, or GCP Filestore) -- set storage_class_name to one below. If your
+  # cluster only has ReadWriteOnce block storage, change access_mode to
+  # ReadWriteOnce (this single-node job works fine with it).
   access_mode: ReadWriteMany
-  # storage_class_name: csi-mounted-fs-path-sc
+  # storage_class_name: csi-mounted-fs-path-sc  # omit to use the default StorageClass
