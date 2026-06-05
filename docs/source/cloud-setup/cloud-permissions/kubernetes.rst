@@ -240,6 +240,11 @@ following role and configure SkyPilot to use it via
       - apiGroups: ["apps"]
         resources: ["deployments"]
         verbs: ["get", "list"]
+      # Required for emitting a breadcrumb event when the cluster autodowns
+      # itself, which the API server reads back to record the autostop.
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create"]
 
 To use a custom workload service account, create the service account and role
 above, then set the following in :ref:`~/.sky/config.yaml <config-yaml>`:
