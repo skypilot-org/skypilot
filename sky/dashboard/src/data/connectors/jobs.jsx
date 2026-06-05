@@ -471,6 +471,12 @@ export async function getPoolStatus() {
     const data = await fetchedData.json();
     const poolData = data.return_value ? JSON.parse(data.return_value) : [];
 
+    // Skip the active-jobs fetch entirely when there are no pools — the
+    // job counts it computes have nothing to attach to.
+    if (poolData.length === 0) {
+      return { pools: [], controllerStopped: false };
+    }
+
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
