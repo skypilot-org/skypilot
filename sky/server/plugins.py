@@ -682,3 +682,46 @@ def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
 def get_extension_context() -> Optional[ExtensionContext]:
     """Return the extension context created during plugin loading."""
     return _EXTENSION_CONTEXT
+
+
+# ---------------------------------------------------------------------------
+# Managed-jobs controller robustness hooks
+# ---------------------------------------------------------------------------
+#
+# These module-level registries let an out-of-tree plugin install custom
+# behavior for the managed-jobs controller's outer DB-write boundary
+# without forking ``sky.jobs.state``. They are intentionally side-effect-free
+# until a plugin calls ``register_managed_jobs_db_write_wrapper``; when no
+# wrapper is registered, ``sky.jobs.state.set_failed_async`` and friends
+# behave exactly as before.
+#
+# The wrapper is invoked as ``await wrapper(impl, *args, **kwargs)`` and is
+# expected to ultimately return ``await impl(*args, **kwargs)`` (with any
+# retry, idempotency, or swallow-on-exhaustion logic the plugin wants to
+# layer on top). It must not raise on its own — letting an exception escape
+# the wrapper for a terminal write defeats the point. See
+# ``sky/jobs/state.py`` for the call sites.
+
+_managed_jobs_db_write_wrapper: Optional[Any] = None
+
+
+def register_managed_jobs_db_write_wrapper(wrapper: Any) -> None:
+    """Register a plugin-supplied wrapper for managed-jobs terminal writes.
+
+    ``wrapper`` is an async callable with signature
+    ``async def wrapper(impl, *args, **kwargs)``. It will be invoked instead
+    of the underlying ``set_failed_async`` / ``set_cancelling_async`` /
+    ``set_cancelled_async`` implementation. The wrapper is responsible for
+    delegating to ``impl`` (typically with retry/swallow semantics).
+
+    Only one wrapper may be registered at a time; calling this again
+    replaces the previous one. With no wrapper registered, the writers run
+    unwrapped (current OSS behavior).
+    """
+    global _managed_jobs_db_write_wrapper
+    _managed_jobs_db_write_wrapper = wrapper
+
+
+def get_managed_jobs_db_write_wrapper() -> Optional[Any]:
+    """Return the registered managed-jobs db-write wrapper, or ``None``."""
+    return _managed_jobs_db_write_wrapper

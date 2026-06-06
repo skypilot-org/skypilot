@@ -1821,30 +1821,51 @@ class JobController:
             cancelled = True
             raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(
-                f'Unexpected error in JobsController run for task {task_id}')
-            with ux_utils.enable_traceback():
-                logger.error(traceback.format_exc())
-            msg = ('Unexpected error occurred: ' +
-                   common_utils.format_exception(e, use_bracket=True))
-            logger.error(msg)
-            await self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
-                msg)
+            await self._handle_run_exception(task_id, e)
         finally:
-            callback_func = managed_job_utils.event_callback_func(
-                job_id=self._job_id,
-                task_id=task_id,
-                task=self._dag.tasks[task_id])
-            await managed_job_state.set_cancelling_async(
+            await self._after_run_cleanup(task_id, cancelled)
+
+    async def _handle_run_exception(self, task_id: int,
+                                    exc: BaseException) -> None:
+        """Handle an unknown exception escaping the main ``run`` loop.
+
+        Default behavior: log and mark the task FAILED_CONTROLLER. Plugins
+        may monkey-patch this method to install a typed exception
+        taxonomy (e.g. routing transient DB errors away from terminal
+        writes) without changing the OSS catch-all wrapping in ``run``.
+        """
+        logger.error(
+            f'Unexpected error in JobsController run for task {task_id}')
+        with ux_utils.enable_traceback():
+            logger.error(traceback.format_exc())
+        msg = ('Unexpected error occurred: ' +
+               common_utils.format_exception(exc, use_bracket=True))
+        logger.error(msg)
+        await self._update_failed_task_state(
+            task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER, msg)
+
+    async def _after_run_cleanup(self, task_id: int, cancelled: bool) -> None:
+        """Post-``run`` cleanup writes for the per-task coroutine.
+
+        Default behavior: write CANCELLING (and, if the task was not
+        externally cancelled, CANCELLED) on the way out. Plugins may
+        monkey-patch this to skip these writes when an earlier handler
+        already marked the task terminal, or to wrap the writes with
+        retry/swallow semantics for the DB-down case.
+        """
+        callback_func = managed_job_utils.event_callback_func(
+            job_id=self._job_id,
+            task_id=task_id,
+            task=self._dag.tasks[task_id])
+        await managed_job_state.set_cancelling_async(
+            job_id=self._job_id, callback_func=callback_func)
+        if not cancelled:
+            # the others haven't been run yet so we can set them to
+            # cancelled immediately (no resources to clean up).
+            # if we are running and get cancelled, we need to clean up the
+            # resources first so this will be done later.
+            await managed_job_state.set_cancelled_async(
                 job_id=self._job_id, callback_func=callback_func)
-            if not cancelled:
-                # the others haven't been run yet so we can set them to
-                # cancelled immediately (no resources to clean up).
-                # if we are running and get cancelled, we need to clean up the
-                # resources first so this will be done later.
-                await managed_job_state.set_cancelled_async(
-                    job_id=self._job_id, callback_func=callback_func)
 
     async def _update_failed_task_state(
             self, task_id: int,
@@ -2191,6 +2212,11 @@ class ControllerManager:
 
         cancelling = False
         graceful, graceful_timeout = False, None
+        # Pre-declare so the post-run cleanup helper can accept these as
+        # arguments uniformly. They are only used when ``cancelling`` is True,
+        # which only happens after the CancelledError branch populates both.
+        task_id: Optional[int] = None
+        dag: Any = None
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
@@ -2270,68 +2296,99 @@ class ControllerManager:
                          f'{common_utils.format_exception(e)}')
             raise
         finally:
+            await self._after_run_job_loop_cleanup(
+                job_id=job_id,
+                task_id=task_id,
+                dag=dag,
+                pool=pool,
+                graceful=graceful,
+                graceful_timeout=graceful_timeout,
+                cancelling=cancelling)
+
+    async def _after_run_job_loop_cleanup(self,
+                                          job_id: int,
+                                          task_id: Optional[int],
+                                          dag: Any,
+                                          pool: Optional[str],
+                                          graceful: bool,
+                                          graceful_timeout: Optional[float],
+                                          cancelling: bool) -> None:
+        """Post-``run_job_loop`` cleanup: cluster teardown + terminal writes.
+
+        Default behavior preserves the existing OSS sequence: run
+        ``_cleanup``; on cleanup failure stamp ``FAILED_CONTROLLER``;
+        flush a ``set_cancelled_async`` if cancelling; stamp
+        ``FAILED_CONTROLLER`` if the job is still non-terminal; then
+        bookkeeping (``job_done_async``, ``starting`` set, ``job_tasks``
+        dict).
+
+        Plugins may monkey-patch this method to layer retry/swallow on
+        the two ``set_failed_async`` writes (so a DB blip during teardown
+        does not leave a zombie row) or to short-circuit them entirely
+        when an earlier handler already wrote a terminal state.
+        """
+        try:
+            await self._cleanup(job_id,
+                                pool=pool,
+                                graceful=graceful,
+                                graceful_timeout=graceful_timeout)
+            logger.info(
+                f'Cluster of managed job {job_id} has been cleaned up.')
+        except Exception as e:  # pylint: disable=broad-except
+            failure_reason = ('Failed to clean up: '
+                              f'{common_utils.format_exception(e)}')
+            await managed_job_state.set_failed_async(
+                job_id,
+                task_id=None,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
+                failure_reason=failure_reason,
+                override_terminal=True)
+
+        if cancelling:
+            # Since it's set with cancelling
+            assert task_id is not None, job_id
+            await managed_job_state.set_cancelled_async(
+                job_id=job_id,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=task_id,
+                    task=dag.tasks[task_id]))
+
+        # We should check job status after 'set_cancelled', otherwise
+        # the job status is not terminal.
+        job_status = await managed_job_state.get_status_async(job_id)
+        assert job_status is not None
+        # The job can be non-terminal if the controller exited abnormally,
+        # e.g. failed to launch cluster after reaching the MAX_RETRY.
+        if not job_status.is_terminal():
+            logger.info(f'Previous job status: {job_status.value}')
+            await managed_job_state.set_failed_async(
+                job_id,
+                task_id=None,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
+                failure_reason=(
+                    'Unexpected error occurred. For details, '
+                    f'run: sky jobs logs --controller {job_id}'))
+
+        await scheduler.job_done_async(job_id)
+
+        async with self._job_tasks_lock:
             try:
-                await self._cleanup(job_id,
-                                    pool=pool,
-                                    graceful=graceful,
-                                    graceful_timeout=graceful_timeout)
-                logger.info(
-                    f'Cluster of managed job {job_id} has been cleaned up.')
-            except Exception as e:  # pylint: disable=broad-except
-                failure_reason = ('Failed to clean up: '
-                                  f'{common_utils.format_exception(e)}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=failure_reason,
-                    override_terminal=True)
+                # just in case we were cancelled or some other error
+                # occurred during launch
+                self.starting.remove(job_id)
+                # its fine if we notify again, better to wake someone up
+                # and have them go to sleep again, then have some stuck
+                # sleeping.
+                self._starting_signal.notify()
+            except KeyError:
+                pass
 
-            if cancelling:
-                # Since it's set with cancelling
-                assert task_id is not None, job_id
-                await managed_job_state.set_cancelled_async(
-                    job_id=job_id,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=job_id, task_id=task_id,
-                        task=dag.tasks[task_id]))
-
-            # We should check job status after 'set_cancelled', otherwise
-            # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
-            assert job_status is not None
-            # The job can be non-terminal if the controller exited abnormally,
-            # e.g. failed to launch cluster after reaching the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {job_id}'))
-
-            await scheduler.job_done_async(job_id)
-
-            async with self._job_tasks_lock:
-                try:
-                    # just in case we were cancelled or some other error
-                    # occurred during launch
-                    self.starting.remove(job_id)
-                    # its fine if we notify again, better to wake someone up
-                    # and have them go to sleep again, then have some stuck
-                    # sleeping.
-                    self._starting_signal.notify()
-                except KeyError:
-                    pass
-
-            # Remove the job from the job_tasks dictionary.
-            async with self._job_tasks_lock:
-                if job_id in self.job_tasks:
-                    del self.job_tasks[job_id]
+        # Remove the job from the job_tasks dictionary.
+        async with self._job_tasks_lock:
+            if job_id in self.job_tasks:
+                del self.job_tasks[job_id]
 
     async def start_job(
         self,
