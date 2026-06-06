@@ -2354,6 +2354,9 @@ function UsersTable({
               <TableRow>
                 {showBulkColumn && (
                   <TableHead className="w-8 whitespace-nowrap">
+                    {/* Header "select all" stays visible as a discoverable
+                        cue that the table supports selection; row checkboxes
+                        remain hover-only to reduce clutter. */}
                     <input
                       type="checkbox"
                       aria-label="Select all users on this page"
@@ -2439,16 +2442,24 @@ function UsersTable({
                   (currentUserRole === 'admin' ||
                     user.userId === currentUserId);
                 return (
-                  <TableRow key={user.userId}>
+                  <TableRow key={user.userId} className="group">
                     {showBulkColumn && (
                       <TableCell className="w-8 whitespace-nowrap">
                         {!isSystemUser && (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select user ${user.usernameDisplay || user.userId}`}
-                            checked={selectedUserIds.has(user.userId)}
-                            onChange={() => toggleSelectOne(user.userId)}
-                          />
+                          <div
+                            className={`transition-opacity duration-150 ${
+                              selectedUserIds.size > 0
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              aria-label={`Select user ${user.usernameDisplay || user.userId}`}
+                              checked={selectedUserIds.has(user.userId)}
+                              onChange={() => toggleSelectOne(user.userId)}
+                            />
+                          </div>
                         )}
                       </TableCell>
                     )}
