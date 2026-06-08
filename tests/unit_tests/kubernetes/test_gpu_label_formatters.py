@@ -367,25 +367,46 @@ class TestAcceleratorNameMatches:
         assert _accelerator_name_matches('H100-80GB',
                                          ['h100', 'nvidia-h100-sxm-80gb'])
 
-        # Same for A100-80GB (already existed but worth testing)
-        assert _accelerator_name_matches('A100', ['a100-80gb'])
-        assert _accelerator_name_matches('A100-80GB', ['a100'])
+        # Unlike H100, 'A100' (40GB) and 'A100-80GB' (80GB) are *different*
+        # hardware, not a rename of the same GPU, so they must NOT match. See
+        # test_distinct_canonical_variants_do_not_match.
+        assert not _accelerator_name_matches('A100', ['a100-80gb'])
+        assert not _accelerator_name_matches('A100-80GB', ['a100'])
 
-        # GH200 variants (GH200-480GB is a possible variant)
+        # GH200-480GB is a non-canonical legacy/descriptive label for the
+        # canonical 'GH200', so it still matches via the prefix rule.
         assert _accelerator_name_matches('GH200', ['gh200-480gb'])
         assert _accelerator_name_matches('GH200-480GB', ['gh200'])
 
     def test_no_cross_variant_matching(self):
         """Test that different GPU variants don't incorrectly match.
 
-        H100 and H100-MEGA are different GPUs and should not match each
-        other. However, due to prefix matching, H100 will match H100-MEGA.
-        This is a known limitation that's acceptable because:
-        1. It's unlikely a user launches with H100-MEGA and expects H100
-        2. Not matching would break backward compat for valid cases
+        'H100' and 'H100-MEGA' are distinct canonical names (different GPUs),
+        so they must not match each other. Only explicit canonicalization
+        aliases (e.g. 'H100' <-> 'H100-80GB') match between two canonical names.
         """
-        # These will match due to prefix logic - this is expected behavior
-        assert _accelerator_name_matches('H100', ['h100-mega'])
-        # But ensure unrelated GPUs don't match
+        assert not _accelerator_name_matches('H100', ['h100-mega'])
+        assert not _accelerator_name_matches('H100-MEGA', ['h100'])
+        # Unrelated GPUs don't match either.
         assert not _accelerator_name_matches('H200', ['h100-mega'])
         assert not _accelerator_name_matches('A100', ['h100-mega'])
+
+    def test_distinct_canonical_variants_do_not_match(self):
+        """Distinct canonical memory variants must never match.
+
+        A request for a larger-memory variant must not be satisfied by the
+        smaller one (or vice versa), regardless of what other nodes exist:
+        scheduling an 'A100-80GB' job onto a 40GB A100 node would OOM. Only
+        explicitly aliased canonicalization renames (e.g. 'H100' <->
+        'H100-80GB', same hardware) may match between two canonical names.
+        """
+        assert not _accelerator_name_matches('A100-80GB', ['a100'])
+        assert not _accelerator_name_matches('A100', ['a100-80gb'])
+        assert not _accelerator_name_matches('V100-32GB', ['v100'])
+        assert not _accelerator_name_matches('V100', ['v100-32gb'])
+        # Even when the raw 40GB GFD label is also in the viable list.
+        assert not _accelerator_name_matches('A100-80GB',
+                                             ['nvidia-a100-sxm4-40gb', 'a100'])
+        # The genuine same-hardware rename still matches.
+        assert _accelerator_name_matches('H100', ['h100-80gb'])
+        assert _accelerator_name_matches('H100-80GB', ['h100'])

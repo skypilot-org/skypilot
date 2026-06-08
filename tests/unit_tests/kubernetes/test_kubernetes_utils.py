@@ -746,6 +746,79 @@ def test_heterogenous_gpu_detection():
         assert available == {'H100': 1}
 
 
+def test_get_accelerator_label_selects_correct_memory_variant():
+    """An A100-80GB request must resolve to an 80GB node, not a 40GB one.
+
+    On a cluster with both A100 (40GB) and A100-80GB nodes, the GFD label
+    'NVIDIA-A100-SXM4-40GB' (canonical 'A100') is a *different* GPU from
+    'A100-80GB' and must not satisfy the request -- even though it is listed
+    first. The request must be pinned to the 80GB node's label.
+    """
+    key_name = 'nvidia.com/gpu.product'
+    # 40GB node intentionally first to show selection is order-independent.
+    node_labels = {
+        'node-40gb': [(key_name, 'NVIDIA-A100-SXM4-40GB')],
+        'node-80gb': [(key_name, 'NVIDIA-A100-SXM4-80GB')],
+    }
+    with mock.patch(
+            'sky.provision.kubernetes.utils.detect_accelerator_resource',
+            return_value=(True, {'nvidia.com/gpu'})), \
+         mock.patch(
+             'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+             return_value=(utils.GFDLabelFormatter(), node_labels)):
+        key, values, _, _ = utils.get_accelerator_label_key_values(
+            'ctx', 'A100-80GB', 1)
+        assert key == key_name
+        assert values == ['NVIDIA-A100-SXM4-80GB']
+
+        key, values, _, _ = utils.get_accelerator_label_key_values(
+            'ctx', 'A100', 1)
+        assert key == key_name
+        assert values == ['NVIDIA-A100-SXM4-40GB']
+
+
+def test_get_accelerator_label_no_match_for_missing_memory_variant():
+    """An A100-80GB request must fail loudly when only 40GB A100 nodes exist.
+
+    Previously the request would silently fall back to the 40GB label (and OOM
+    at runtime). The 40GB node is a different GPU, so it must not match at all.
+    """
+    key_name = 'nvidia.com/gpu.product'
+    node_labels = {
+        'n1': [(key_name, 'NVIDIA-A100-SXM4-40GB')],
+        'n2': [(key_name, 'NVIDIA-A100-SXM4-40GB')],
+    }
+    with mock.patch(
+            'sky.provision.kubernetes.utils.detect_accelerator_resource',
+            return_value=(True, {'nvidia.com/gpu'})), \
+         mock.patch(
+             'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+             return_value=(utils.GFDLabelFormatter(), node_labels)):
+        with pytest.raises(exceptions.ResourcesUnavailableError):
+            utils.get_accelerator_label_key_values('ctx', 'A100-80GB', 1)
+
+
+def test_get_accelerator_label_matches_canonicalization_alias():
+    """A request must still match a renamed canonical label (same hardware).
+
+    A cluster launched before a GPU name canonicalization change may request
+    'H100' while nodes are now labeled 'H100-80GB' (e.g. NVIDIA-H100-80GB-HBM3,
+    the same hardware). The explicit alias keeps this working.
+    """
+    key_name = 'nvidia.com/gpu.product'
+    node_labels = {'node-h100': [(key_name, 'NVIDIA-H100-80GB-HBM3')]}
+    with mock.patch(
+            'sky.provision.kubernetes.utils.detect_accelerator_resource',
+            return_value=(True, {'nvidia.com/gpu'})), \
+         mock.patch(
+             'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+             return_value=(utils.GFDLabelFormatter(), node_labels)):
+        key, values, _, _ = utils.get_accelerator_label_key_values(
+            'ctx', 'H100', 1)
+        assert key == key_name
+        assert values == ['NVIDIA-H100-80GB-HBM3']
+
+
 def test_low_priority_pod_filtering():
     """Tests that low priority pods (e.g., CoreWeave HPC verification) are excluded from GPU allocation calculations."""
     # Mock node with 8 GPUs

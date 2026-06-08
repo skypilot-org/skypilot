@@ -795,14 +795,21 @@ def _accelerator_name_matches(requested_acc: str,
                               viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
 
-    For backward compatibility with GPU name changes (e.g., when canonical names
-    like 'H200' are added to replace fallback names like 'H200-SXM-80GB'), this
-    function also matches if one name is a prefix of the other separated by '-'.
+    A request matches a node's GPU name when they denote compatible hardware:
+    - An exact (case-insensitive) match.
+    - A canonical name against a non-canonical legacy/descriptive label for the
+      same GPU, matched via a '-'-separated prefix. This keeps clusters working
+      across GPU name canonicalization changes, e.g. a node label that maps to
+      the canonical 'H200' also matching the older fallback 'H200-SXM-80GB'
+      (and vice versa), or 'GH200' matching 'GH200-480GB'.
+    - Two canonical names that are explicit aliases of the same hardware (see
+      gpu_names.are_canonical_aliases), e.g. 'H100' <-> 'H100-80GB'.
 
-    This handles cases where:
-    - Clusters were launched with fallback names (e.g., 'H200-SXM-80GB') but
-      after upgrading, the same label now maps to canonical name (e.g., 'H200').
-    - Users specify canonical names but the cluster uses fallback names.
+    Crucially, two *distinct* canonical names are different hardware and do NOT
+    match: 'A100' (40GB) must never satisfy an 'A100-80GB' request (and vice
+    versa), nor 'V100' (16GB) a 'V100-32GB' request, nor 'H100' an 'H100-MEGA'
+    request. The prefix rule is therefore only applied when at least one side is
+    a non-canonical name.
 
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
@@ -811,13 +818,22 @@ def _accelerator_name_matches(requested_acc: str,
     Returns:
         True if the requested accelerator matches any viable name.
     """
+    canonical_lower = {name.lower() for name in gpu_names.CANONICAL_GPU_NAMES}
     requested_lower = requested_acc.lower()
+    requested_is_canonical = requested_lower in canonical_lower
     for viable in viable_names:
         viable_lower = viable.lower()
         if requested_lower == viable_lower:
             return True
-        # Check prefix match with '-' separator for backward compatibility.
-        # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
+        if requested_is_canonical and viable_lower in canonical_lower:
+            # Both are canonical names: they are distinct hardware unless
+            # explicitly aliased (a canonicalization rename of the same GPU).
+            if gpu_names.are_canonical_aliases(requested_lower, viable_lower):
+                return True
+            continue
+        # Exactly one side is a non-canonical (legacy/descriptive) label, e.g.
+        # 'H200-SXM-80GB' for 'H200'. Treat it as a match for its canonical
+        # form via a '-'-separated prefix match in either direction.
         shorter, longer = ((requested_lower, viable_lower)
                            if len(requested_lower) <= len(viable_lower) else
                            (viable_lower, requested_lower))
