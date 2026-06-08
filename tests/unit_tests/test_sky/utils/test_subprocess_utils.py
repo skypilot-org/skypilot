@@ -318,6 +318,7 @@ class TestSafeChildren(unittest.TestCase):
     def test_access_denied_triggers_fallback_with_log(self):
         proc = mock.MagicMock(spec=psutil.Process)
         proc.pid = 100
+        proc.create_time.return_value = 1000.0
         proc.children.side_effect = psutil.AccessDenied(pid=200,
                                                         name='foo',
                                                         msg='denied')
@@ -334,7 +335,9 @@ class TestSafeChildren(unittest.TestCase):
                 with self.assertLogs(subprocess_utils.logger.name,
                                      level='WARNING') as cm:
                     result = subprocess_utils._safe_children(proc)
-        mock_fb.assert_called_once_with(100)
+        # parent_ctime must be plumbed through so the fallback can
+        # reject PID-reuse phantoms (mirrors psutil.Process.children).
+        mock_fb.assert_called_once_with(100, 1000.0)
         self.assertIs(result, fallback_sentinel)
         # The warning must include the offending PID + the signals we
         # could still extract via dir-getattr / lnk_file-read so future
@@ -343,6 +346,25 @@ class TestSafeChildren(unittest.TestCase):
         self.assertIn('pid=200', joined)
         self.assertIn('uid=1337', joined)
         self.assertIn('/usr/sbin/agent', joined)
+
+    def test_access_denied_then_parent_gone_returns_empty(self):
+        # If the parent process disappears between the AccessDenied and
+        # the create_time snapshot, we can't run the PID-reuse defense,
+        # so the safest behaviour is to return [].
+        proc = mock.MagicMock(spec=psutil.Process)
+        proc.pid = 100
+        proc.children.side_effect = psutil.AccessDenied(pid=200)
+        proc.create_time.side_effect = psutil.NoSuchProcess(pid=100)
+        with mock.patch.object(subprocess_utils,
+                               '_fallback_children') as mock_fb:
+            with mock.patch.object(subprocess_utils,
+                                   '_pid_diag',
+                                   return_value={}):
+                with self.assertLogs(subprocess_utils.logger.name,
+                                     level='WARNING'):
+                    result = subprocess_utils._safe_children(proc)
+        mock_fb.assert_not_called()
+        self.assertEqual(result, [])
 
     def test_no_such_process_returns_empty_silently(self):
         proc = mock.MagicMock(spec=psutil.Process)
@@ -368,6 +390,12 @@ class TestFallbackChildren(unittest.TestCase):
         return (f'{pid} ({comm}) S {ppid} 0 0 0 -1 4194304 0 0 0 0 0 0 0 0 '
                 f'20 0 1 0 0 0 0 0 0').encode()
 
+    def _fake_proc(self, pid: int, ctime: float):
+        # psutil.Process(pid) returns an object with .pid and .create_time().
+        m = mock.MagicMock(spec=psutil.Process, pid=pid)
+        m.create_time.return_value = ctime
+        return m
+
     def test_returns_descendants_skipping_unreadable(self):
         # Tree: 100 → {200 → {300}, 201}. 200 is unreadable (EACCES);
         # the fallback should still return 201 (sibling of 200) but
@@ -387,21 +415,50 @@ class TestFallbackChildren(unittest.TestCase):
                                'listdir',
                                return_value=[str(p) for p in tree] + ['self']):
             with mock.patch.object(subprocess_utils, 'open', fake_open):
-                # Avoid psutil.Process() touching the real /proc for fake PIDs.
-                with mock.patch.object(subprocess_utils.psutil,
-                                       'Process',
-                                       side_effect=lambda p: mock.MagicMock(
-                                           spec=psutil.Process, pid=p)):
-                    result = subprocess_utils._fallback_children(100)
+                # All real children have ctime >= parent's 100.0 so PID-reuse
+                # defense doesn't filter anything out.
+                with mock.patch.object(
+                        subprocess_utils.psutil,
+                        'Process',
+                        side_effect=lambda p: self._fake_proc(p, 200.0)):
+                    result = subprocess_utils._fallback_children(
+                        100, parent_ctime=100.0)
 
         result_pids = sorted(p.pid for p in result)
         self.assertEqual(result_pids, [201])
+
+    def test_pid_reuse_phantom_is_excluded(self):
+        # Tree: 100 → {201, 202}. 201 has an *earlier* ctime than parent
+        # 100 — it must be a recycled PID, not a real descendant, and
+        # must NOT be returned. 202 is legit and must be returned.
+        tree = {100: 1, 201: 100, 202: 100}
+
+        def fake_open(path, *args, **kwargs):
+            for pid, ppid in tree.items():
+                if path == f'/proc/{pid}/stat':
+                    return mock.mock_open(
+                        read_data=self._stat_bytes(pid, ppid))(*args, **kwargs)
+            raise FileNotFoundError(path)
+
+        ctime = {201: 50.0, 202: 200.0}  # 201 predates parent (100.0)
+        with mock.patch.object(subprocess_utils.os,
+                               'listdir',
+                               return_value=[str(p) for p in tree]):
+            with mock.patch.object(subprocess_utils, 'open', fake_open):
+                with mock.patch.object(subprocess_utils.psutil,
+                                       'Process',
+                                       side_effect=lambda p: self._fake_proc(
+                                           p, ctime.get(p, 200.0))):
+                    result = subprocess_utils._fallback_children(
+                        100, parent_ctime=100.0)
+        self.assertEqual([p.pid for p in result], [202])
 
     def test_non_linux_returns_empty(self):
         # If psutil already failed and we're not on Linux, there is no
         # better source — return [] rather than guessing.
         with mock.patch.object(subprocess_utils.sys, 'platform', 'darwin'):
-            self.assertEqual(subprocess_utils._fallback_children(1), [])
+            self.assertEqual(
+                subprocess_utils._fallback_children(1, parent_ctime=0.0), [])
 
 
 class TestKillProcessDaemonTolerates(unittest.TestCase):

@@ -1,4 +1,5 @@
 """Utility functions for subprocesses."""
+import collections
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -55,7 +56,13 @@ def _safe_children(process: 'psutil.Process') -> List['psutil.Process']:
             f'(pid={bad_pid} uid={diag.get("uid", "?")} '
             f'exe={diag.get("exe", "?")}); falling back to /proc walk '
             f'that ignores unreadable PIDs.')
-        return _fallback_children(process.pid)
+        # Snapshot the parent's create_time so the fallback can reject any
+        # PID whose create_time predates the parent
+        try:
+            parent_ctime = process.create_time()
+        except psutil.Error:
+            return []
+        return _fallback_children(process.pid, parent_ctime)
 
 
 def _pid_diag(pid: int) -> Dict[str, str]:
@@ -74,13 +81,16 @@ def _pid_diag(pid: int) -> Dict[str, str]:
     return diag
 
 
-def _fallback_children(parent_pid: int) -> List['psutil.Process']:
+def _fallback_children(parent_pid: int,
+                       parent_ctime: float) -> List['psutil.Process']:
     """Resilient descendant walk: read /proc/<N>/stat, ignore failures.
 
-    Mirrors the BFS in ``psutil.Process.children(recursive=True)`` but
+    Mirrors the DFS in ``psutil.Process.children(recursive=True)`` but
     silently drops PIDs whose stat we cannot read (the very condition
-    that brought us here). Linux only; on other platforms returns [] —
-    if psutil itself failed there, we have no better source.
+    that brought us here). ``parent_ctime`` is the parent's create_time;
+    descendants whose create_time predates it are PID-reuse phantoms and
+    are excluded. Linux only; on other platforms returns [] — if psutil
+    itself failed there, we have no better source.
     """
     if not sys.platform.startswith('linux'):
         return []
@@ -107,7 +117,7 @@ def _fallback_children(parent_pid: int) -> List['psutil.Process']:
             ppid_map[pid] = int(data[rpar + 2:].split()[1])
         except (ValueError, IndexError):
             continue
-    # Traversal pattern (DFS via stack.pop) matches the upstream
+    # Traversal pattern (DFS via deque.pop) matches the upstream
     # psutil.Process.children(recursive=True) implementation; order does
     # not matter for our callers, which kill the whole subtree anyway.
     children_of: Dict[int, List[int]] = {}
@@ -115,7 +125,7 @@ def _fallback_children(parent_pid: int) -> List['psutil.Process']:
         children_of.setdefault(ppid, []).append(pid)
     descendants: List['psutil.Process'] = []
     seen: Set[int] = set()
-    stack: List[int] = [parent_pid]
+    stack: 'collections.deque[int]' = collections.deque([parent_pid])
     while stack:
         cur = stack.pop()
         if cur in seen:
@@ -123,13 +133,16 @@ def _fallback_children(parent_pid: int) -> List['psutil.Process']:
         seen.add(cur)
         for child_pid in children_of.get(cur, []):
             try:
-                descendants.append(psutil.Process(child_pid))
+                child = psutil.Process(child_pid)
+                # PID-reuse defense
+                if parent_ctime <= child.create_time():
+                    descendants.append(child)
+                    stack.append(child_pid)
             except psutil.Error:
                 # NoSuchProcess / ZombieProcess / AccessDenied — in this
                 # degraded LSM fallback we drop the PID and keep walking
                 # so kill_children_processes can still clean up the rest.
                 pass
-            stack.append(child_pid)
     return descendants
 
 
