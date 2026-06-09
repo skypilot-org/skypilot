@@ -824,6 +824,20 @@ def _accelerator_name_matches(requested_acc: str,
         if longer.startswith(shorter):
             # Ensure it's a proper prefix (followed by '-' or end of string)
             if len(longer) == len(shorter) or longer[len(shorter)] == '-':
+                # Guard against the OOM direction: a request must not be
+                # satisfied by a node with strictly LESS device memory (e.g.
+                # an 'A100-80GB' request on a 40GB 'A100' node). Only applies
+                # when both names have known memory; same-or-larger node
+                # memory still matches, which preserves backward compatibility
+                # (an 'A100' request may still land on an 'A100-80GB' node) and
+                # same-hardware renames (e.g. 'H100' == 'H100-80GB', both 80GB).
+                requested_mem = gpu_names.get_canonical_gpu_memory_gib(
+                    requested_lower)
+                viable_mem = gpu_names.get_canonical_gpu_memory_gib(
+                    viable_lower)
+                if (requested_mem is not None and viable_mem is not None and
+                        requested_mem > viable_mem):
+                    continue
                 return True
     return False
 

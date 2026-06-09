@@ -367,13 +367,36 @@ class TestAcceleratorNameMatches:
         assert _accelerator_name_matches('H100-80GB',
                                          ['h100', 'nvidia-h100-sxm-80gb'])
 
-        # Same for A100-80GB (already existed but worth testing)
-        assert _accelerator_name_matches('A100', ['a100-80gb'])
-        assert _accelerator_name_matches('A100-80GB', ['a100'])
-
         # GH200 variants (GH200-480GB is a possible variant)
         assert _accelerator_name_matches('GH200', ['gh200-480gb'])
         assert _accelerator_name_matches('GH200-480GB', ['gh200'])
+
+    def test_memory_variant_no_oom_match(self):
+        """A request must not match a node with less device memory.
+
+        A request for the 80GB variant must not be silently scheduled onto a
+        40GB node (which would OOM at runtime), while the harmless reverse
+        direction and same-hardware renames keep matching.
+        """
+        # OOM direction: 80GB request must not match a 40GB node.
+        assert not _accelerator_name_matches('A100-80GB', ['a100'])
+        assert not _accelerator_name_matches('A100-80GB',
+                                             ['nvidia-a100-sxm4-40gb', 'a100'])
+        assert not _accelerator_name_matches('V100-32GB', ['v100'])
+
+        # Backward-compat direction: a smaller-memory request may still land
+        # on a larger-memory node (pre-existing benign behavior).
+        assert _accelerator_name_matches('A100', ['a100-80gb'])
+        assert _accelerator_name_matches('V100', ['v100-32gb'])
+
+        # Same-hardware renames (equal memory) must still match.
+        assert _accelerator_name_matches('H100', ['h100-80gb'])
+        assert _accelerator_name_matches('H100-80GB', ['h100'])
+
+        # H100-MEGA is the same H100 80GB silicon (A3 Mega instance), so
+        # cross-matching with H100 is harmless and preserved.
+        assert _accelerator_name_matches('H100', ['h100-mega'])
+        assert _accelerator_name_matches('H100-MEGA', ['h100'])
 
     def test_no_cross_variant_matching(self):
         """Test that different GPU variants don't incorrectly match.

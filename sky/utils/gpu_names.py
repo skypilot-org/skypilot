@@ -1,5 +1,7 @@
 """Canonical GPU names shared across backends (Kubernetes, Slurm, etc.)."""
 
+from typing import Optional
+
 # Canonical GPU names for GPU detection and labeling.
 #
 # IMPORTANT: Order matters — more-specific names must come before
@@ -47,3 +49,33 @@ CANONICAL_GPU_NAMES = [
     'K80',
     'M60',
 ]
+
+# Single-device memory (GiB) for canonical GPU names that participate in
+# memory-variant prefix relationships (e.g. 'A100' 40GB vs 'A100-80GB' 80GB).
+# Used to distinguish a real memory variant (different hardware) from a
+# same-hardware rename (e.g. 'H100' == 'H100-80GB', equal memory) during
+# prefix-based name matching, so that an 'A100-80GB' request is not silently
+# scheduled onto a 40GB A100 node.
+#
+# This is a conservative allowlist: only names listed here are disambiguated.
+# Any other pair keeps the legacy prefix-match behavior. Add an entry only
+# when a canonical name has a sibling that differs solely by a memory suffix.
+CANONICAL_GPU_MEMORY_GIB = {
+    'A100': 40,
+    'A100-80GB': 80,
+    'V100': 16,
+    'V100-32GB': 32,
+}
+_CANONICAL_GPU_MEMORY_GIB_LOWER = {
+    k.lower(): v for k, v in CANONICAL_GPU_MEMORY_GIB.items()
+}
+
+
+def get_canonical_gpu_memory_gib(name: str) -> Optional[int]:
+    """Returns the single-device memory (GiB) for a canonical GPU name.
+
+    Lookup is case-insensitive. Returns None if the name is not a known
+    memory-variant canonical name (in which case callers should fall back to
+    their default matching behavior).
+    """
+    return _CANONICAL_GPU_MEMORY_GIB_LOWER.get(name.lower())
