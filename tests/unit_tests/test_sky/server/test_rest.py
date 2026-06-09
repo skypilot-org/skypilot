@@ -1,4 +1,5 @@
 """Unit tests for the SkyPilot REST API client module."""
+import threading
 import time
 from unittest import mock
 
@@ -446,8 +447,14 @@ class TestRetryOnServerUnavailableDecorator:
                     "Server error")
             return "success"
 
+        # Only record sleeps from this thread: mock.patch('time.sleep') is
+        # process-wide, so a background thread's sleep loop would otherwise
+        # flood sleep_times and make the count assertion flaky.
+        test_thread_id = threading.get_ident()
+
         def mock_sleep(seconds):
-            sleep_times.append(seconds)
+            if threading.get_ident() == test_thread_id:
+                sleep_times.append(seconds)
 
         with mock.patch('time.sleep', side_effect=mock_sleep):
             result = failing_function()
