@@ -630,13 +630,13 @@ def test_make_safe_symlink_command_default_uses_sudo():
     assert 'sudo ln -s /home/user/.sky/etc/config /etc/config' in cmd
 
 
-def test_make_safe_symlink_command_empty_sudo_omits_sudo():
-    """Passing sudo='' drops the prefix so the command does not depend on a
-    sudo binary (e.g. a container already running as root)."""
+def test_make_safe_symlink_command_empty_sudo_cmd_omits_sudo():
+    """Passing sudo_cmd='' drops the prefix so the command does not depend on
+    a sudo binary (e.g. a container already running as root)."""
     cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
-        source='/etc/config', target='/home/user/.sky/etc/config', sudo='')
+        source='/etc/config', target='/home/user/.sky/etc/config', sudo_cmd='')
     assert 'sudo' not in cmd
-    assert cmd.lstrip().startswith('mkdir -p /etc')
+    assert cmd.startswith('mkdir -p /etc')
     assert 'ln -s /home/user/.sky/etc/config /etc/config' in cmd
 
 
