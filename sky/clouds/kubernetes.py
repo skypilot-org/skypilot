@@ -966,8 +966,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
-            'k8s_fusermount_shared_dir':
-                kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
+            'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
             'k8s_fusermount_setup_command':
                 kubernetes_fuse.get_fusermount_shim_setup_command(
                     sudo_cmd='$(prefix_cmd)',

@@ -5,8 +5,7 @@ from sky.provision.kubernetes import fuse
 
 def test_fusermount_shim_setup_command_uses_supplied_sudo_and_shared_dir():
     command = fuse.get_fusermount_shim_setup_command(
-        sudo_cmd='$(prefix_cmd)',
-        shared_dir='/var/run/fusermount')
+        sudo_cmd='$(prefix_cmd)', shared_dir='/var/run/fusermount')
 
     assert '$(prefix_cmd) cp -p "$FUSERMOUNT_PATH"' in command
     assert ('$(prefix_cmd) ln -sf "/var/run/fusermount/fusermount-shim" '
