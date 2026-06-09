@@ -493,7 +493,11 @@ class FileMountHelper(object):
         return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
 
     @classmethod
-    def make_safe_symlink_command(cls, *, source: str, target: str) -> str:
+    def make_safe_symlink_command(cls,
+                                  *,
+                                  source: str,
+                                  target: str,
+                                  sudo_cmd: str = 'sudo') -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
         All intermediate directories of 'source' will be owned by $(whoami),
@@ -505,6 +509,12 @@ class FileMountHelper(object):
         This function is needed because a simple 'ln -s target source' may
         fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
         or may not exist, can end with a slash, or may need sudo access, etc.
+
+        'sudo_cmd' is the command prepended to privileged steps (mkdir, chown,
+        rm, ln); it defaults to 'sudo'. Pass an empty string when the caller
+        already has enough privilege and a sudo binary may be absent -- e.g. a
+        container running as root, or a minimal image without sudo installed --
+        so the command does not depend on sudo being on PATH.
 
         Cases of <target: local> file mounts and their behaviors:
 
@@ -521,7 +531,7 @@ class FileMountHelper(object):
         assert os.path.isabs(source), source
         assert not source.endswith('/') and not target.endswith('/'), (source,
                                                                        target)
-        # Below, use sudo in case the symlink needs sudo access to create.
+        sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
         dir_of_symlink = os.path.dirname(source)
@@ -529,27 +539,27 @@ class FileMountHelper(object):
             # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
             # chown $(whoami) on it so user can use these intermediate dirs
             # (excluding /).
-            f'sudo mkdir -p {dir_of_symlink}',
+            f'{sudo}mkdir -p {dir_of_symlink}',
             # p: path so far
             ('(p=""; '
              f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             'p=${p}/${w}; sudo chown $(whoami) $p; done)')
+             f'p=${{p}}/${{w}}; {sudo}chown $(whoami) $p; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
         #     directory).
         commands += [
             # Error out if source is an existing, non-symlink directory/file.
-            f'((test -L {source} && sudo rm {source} &>/dev/null) || '
+            f'((test -L {source} && {sudo}rm {source} >/dev/null 2>&1) || '
             f'(test ! -e {source} || '
             f'(echo "!!! Failed mounting because path exists ({source})"; '
             'exit 1)))',
         ]
         commands += [
             # Link.
-            f'sudo ln -s {target} {source}',
+            f'{sudo}ln -s {target} {source}',
             # chown.  -h to affect symlinks only.
-            f'sudo chown -h $(whoami) {source}',
+            f'{sudo}chown -h $(whoami) {source}',
         ]
         return ' && '.join(commands)
 
