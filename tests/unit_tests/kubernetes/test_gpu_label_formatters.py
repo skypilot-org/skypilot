@@ -35,6 +35,25 @@ class TestCanonicalGPUNames:
         # T4g must come before T4
         assert names.index('T4g') < names.index('T4')
 
+    def test_gpu_device_memory_parsing(self):
+        """Memory resolution is scoped to tracked families (A100/V100)."""
+        # Bare names with an explicit memory entry.
+        assert gpu_names.get_gpu_device_memory_gib('A100') == 40
+        assert gpu_names.get_gpu_device_memory_gib('v100') == 16
+        # Memory suffix parsed for tracked families (incl. the 'A100-80G' typo).
+        assert gpu_names.get_gpu_device_memory_gib('A100-80GB') == 80
+        assert gpu_names.get_gpu_device_memory_gib('A100-80G') == 80
+        assert gpu_names.get_gpu_device_memory_gib('V100-32GB') == 32
+        # Untracked families are NOT parsed -> None, keeping the blast radius
+        # limited. Raw labels and renames fall back to default matching.
+        assert gpu_names.get_gpu_device_memory_gib('GH200-480GB') is None
+        assert gpu_names.get_gpu_device_memory_gib(
+            'nvidia-a100-sxm4-40gb') is None
+        assert gpu_names.get_gpu_device_memory_gib('H100') is None
+        assert gpu_names.get_gpu_device_memory_gib('H100-80GB') is None
+        assert gpu_names.get_gpu_device_memory_gib('H100-MEGA') is None
+        assert gpu_names.get_gpu_device_memory_gib('A10G') is None
+
     def test_canonical_gpu_names_contains_latest_gpus(self):
         """Test that all latest generation GPUs are included."""
         names = gpu_names.CANONICAL_GPU_NAMES
@@ -383,6 +402,15 @@ class TestAcceleratorNameMatches:
         assert not _accelerator_name_matches('A100-80GB',
                                              ['nvidia-a100-sxm4-40gb', 'a100'])
         assert not _accelerator_name_matches('V100-32GB', ['v100'])
+
+        # Same, but with names that are NOT canonicalized. On a Kubernetes-only
+        # cluster a user-typed 'A100-80G' (missing the 'B') is not normalized to
+        # 'A100-80GB', so the guard must parse the memory suffix to still reject
+        # the 40GB node. This is the exact shape that reached production.
+        assert not _accelerator_name_matches('A100-80G', ['a100'])
+        assert not _accelerator_name_matches('A100-80G',
+                                             ['nvidia-a100-sxm4-40gb', 'a100'])
+        assert not _accelerator_name_matches('V100-32G', ['v100'])
 
         # Backward-compat direction: a smaller-memory request may still land
         # on a larger-memory node (pre-existing benign behavior).
