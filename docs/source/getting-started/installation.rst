@@ -998,7 +998,6 @@ Next, configure the endpoint URL for OCI Object Storage. Replace ``<namespace>``
   AWS_CONFIG_FILE=~/.oci/s3.config aws configure set endpoint_url \
     https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com --profile oci
   AWS_CONFIG_FILE=~/.oci/s3.config aws configure set region <region> --profile oci
-  AWS_CONFIG_FILE=~/.oci/s3.config aws configure set s3.addressing_style path --profile oci
 
 .. note::
 

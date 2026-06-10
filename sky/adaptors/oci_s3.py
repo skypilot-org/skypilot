@@ -16,8 +16,11 @@ using AWS-style credential/config files:
         endpoint_url = https://<namespace>.compat.objectstorage.\
             <region>.oci.customer-oci.com
         region = <region>
-        s3 =
-            addressing_style = path
+
+Requests use path-style addressing (the bucket in the URL path, not the
+hostname): it is what the namespaced compat endpoint expects, and it works
+for every legal OCI bucket name — names with uppercase or underscores are
+not valid DNS labels, so virtual-hosted addressing cannot reach them.
 
 The presence of both files opts the deployment into the S3-compatible API
 for `oci://` storage (see use_s3_api()); without them, SkyPilot uses the
@@ -279,10 +282,6 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
             hints += (f'\n{_INDENT_PREFIX}  $ AWS_CONFIG_FILE='
                       f'{OCI_S3_CONFIG_PATH} aws configure set region '
                       f'<region> --profile {OCI_S3_PROFILE_NAME}')
-            hints += (f'\n{_INDENT_PREFIX}  $ AWS_CONFIG_FILE='
-                      f'{OCI_S3_CONFIG_PATH} aws configure set '
-                      f's3.addressing_style path --profile '
-                      f'{OCI_S3_PROFILE_NAME}')
         hints += f'\n{_INDENT_PREFIX}For more info: '
         hints += 'https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm'  # pylint: disable=line-too-long
 
