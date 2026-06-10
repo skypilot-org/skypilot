@@ -1858,6 +1858,14 @@ def terminate_instances(
         # terminating workers only (head services should remain).
         _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
+    # Let plugins clean up external resources they associate with the
+    # cluster (e.g. objects created by an external scheduler or admission
+    # system for the cluster's pod group). Runs after the pods are deleted
+    # so cleanup cannot race controllers that derive state from live pods.
+    plugin_extensions.TerminationCleanup.run(cluster_name_on_cloud,
+                                             provider_config,
+                                             worker_only=worker_only)
+
 
 def cleanup_cluster_resources(
     cluster_name_on_cloud: str,

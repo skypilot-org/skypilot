@@ -10,6 +10,7 @@ from sky.utils.plugin_extensions.external_failure_source import (
 from sky.utils.plugin_extensions.node_info_source import NodeInfoSource
 from sky.utils.plugin_extensions.pod_info_source import PodInfoSource
 from sky.utils.plugin_extensions.recipe_validator import RecipeValidator
+from sky.utils.plugin_extensions.termination_cleanup import TerminationCleanup
 
 __all__ = [
     'ExternalClusterFailure',
@@ -17,4 +18,5 @@ __all__ = [
     'NodeInfoSource',
     'PodInfoSource',
     'RecipeValidator',
+    'TerminationCleanup',
 ]
