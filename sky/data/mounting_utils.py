@@ -115,6 +115,7 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
                                  mount_path: str,
                                  _bucket_sub_path: Optional[str] = None,
                                  endpoint_url: Optional[str] = None,
+                                 region: Optional[str] = None,
                                  cred_env: str = '',
                                  rclone_extra_flags: str = '',
                                  goofys_extra_flags: str = '',
@@ -131,6 +132,9 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
         _bucket_sub_path: Optional sub-path within the bucket.
         endpoint_url: S3-compatible endpoint URL. If None, uses the
             default AWS S3 endpoint.
+        region: SigV4 signing region. If None, goofys defaults to
+            'us-east-1'. Required for providers that validate the signing
+            region against a region-specific endpoint (e.g. OCI).
         cred_env: Credential environment variable prefix string
             (e.g., 'AWS_SHARED_CREDENTIALS_FILE=... AWS_PROFILE=... ').
         rclone_extra_flags: Extra flags for rclone mount command
@@ -156,6 +160,10 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
     if endpoint_url:
         rclone_extra_flags += f'--s3-endpoint {endpoint_url} '
         goofys_extra_flags += f'--endpoint {endpoint_url} '
+
+    if region:
+        rclone_extra_flags += f'--s3-region {region} '
+        goofys_extra_flags += f'--region {region} '
 
     if read_only:
         rclone_extra_flags += '--read-only '
@@ -241,16 +249,28 @@ def get_oci_s3_mount_cmd(oci_s3_credentials_path: str,
                          bucket_name: str,
                          endpoint_url: str,
                          mount_path: str,
+                         region: Optional[str] = None,
                          _bucket_sub_path: Optional[str] = None,
                          read_only: bool = False) -> str:
-    """Returns a command to mount an OCI bucket via the S3-compatible API."""
+    """Returns a command to mount an OCI bucket via the S3-compatible API.
+
+    OCI validates the SigV4 signing region against the region-specific
+    endpoint, so the region must be passed explicitly; goofys would
+    otherwise default to 'us-east-1' and be rejected. OCI also returns 501
+    for uploads using aws-chunked content encoding, which goofys's AWS SDK
+    enables by default to carry a trailing checksum; AWS_REQUEST_CHECKSUM_
+    CALCULATION=when_required disables it so writes are sent as plain PUTs.
+    """
     cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={oci_s3_credentials_path} '
-                f'AWS_PROFILE={oci_s3_profile_name}')
+                f'AWS_PROFILE={oci_s3_profile_name} '
+                'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
+                'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required')
     return _get_s3_compatible_mount_cmd(
         bucket_name=bucket_name,
         mount_path=mount_path,
         _bucket_sub_path=_bucket_sub_path,
         endpoint_url=endpoint_url,
+        region=region,
         cred_env=cred_env,
         rclone_extra_flags='--s3-force-path-style=true',
         read_only=read_only)

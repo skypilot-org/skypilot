@@ -1832,6 +1832,9 @@ class S3CompatibleConfig:
     credentials_file: Optional[str] = None
     config_file: Optional[str] = None
     extra_cli_args: Optional[List[str]] = None
+    # Extra environment variables to prefix onto the AWS CLI upload commands.
+    # Used by OCI to disable aws-chunked uploads (see OciS3CompatibleStore).
+    extra_cli_env: Optional[Dict[str, str]] = None
 
     # Provider-specific settings
     cloud_name: str = ''
@@ -1845,6 +1848,8 @@ class S3CompatibleConfig:
     def __post_init__(self):
         if self.extra_cli_args is None:
             self.extra_cli_args = []
+        if self.extra_cli_env is None:
+            self.extra_cli_env = {}
 
 
 class S3CompatibleStore(AbstractStore):
@@ -2285,6 +2290,8 @@ class S3CompatibleStore(AbstractStore):
             if self.config.config_file:
                 cmd = 'AWS_CONFIG_FILE=' + \
                 f'{self.config.config_file} {cmd}'
+            for env_key, env_val in (self.config.extra_cli_env or {}).items():
+                cmd = f'{env_key}={env_val} {cmd}'
 
             return cmd
 
@@ -2333,6 +2340,8 @@ class S3CompatibleStore(AbstractStore):
             if self.config.config_file:
                 cmd = 'AWS_CONFIG_FILE=' + \
                 f'{self.config.config_file} {cmd}'
+            for env_key, env_val in (self.config.extra_cli_env or {}).items():
+                cmd = f'{env_key}={env_val} {cmd}'
 
             return cmd
 
@@ -5307,6 +5316,14 @@ class OciS3CompatibleStore(S3CompatibleStore):
             get_endpoint_url=oci_s3.get_endpoint,
             credentials_file=oci_s3.OCI_S3_CREDENTIALS_PATH,
             config_file=oci_s3.OCI_S3_CONFIG_PATH,
+            # OCI returns 501 for aws-chunked uploads, which the AWS CLI
+            # enables by default to carry a trailing checksum. Disable it so
+            # `aws s3 sync` uploads are sent as plain (non-chunked) requests.
+            # Response validation is relaxed to match.
+            extra_cli_env={
+                'AWS_REQUEST_CHECKSUM_CALCULATION': 'when_required',
+                'AWS_RESPONSE_CHECKSUM_VALIDATION': 'when_required',
+            },
             cloud_name=str(clouds.OCI()),
             default_region=oci_s3.get_region(),
             mount_cmd_factory=cls._get_oci_s3_mount_cmd,
@@ -5336,7 +5353,8 @@ class OciS3CompatibleStore(S3CompatibleStore):
             bucket_name,
             endpoint_url,
             mount_path,
-            bucket_sub_path,
+            region=oci_s3.get_region(),
+            _bucket_sub_path=bucket_sub_path,
             read_only=read_only)
 
     def mount_cached_command(self,
