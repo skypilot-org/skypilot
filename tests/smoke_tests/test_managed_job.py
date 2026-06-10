@@ -1424,9 +1424,10 @@ def test_managed_jobs_mount_cached_flush_on_exit(generic_cloud: str):
     """
     name = smoke_tests_utils.get_cluster_name()
     writer_name, reader_name = f'{name}-w', f'{name}-r'
-    timestamp = int(time.time())
-    storage_name = f'sky-test-mc-flush-{timestamp}'
-    marker = f'flushed-{timestamp}'
+    # Embed the cluster name (unique per test run) so parallel workers
+    # can't collide on the bucket.
+    storage_name = f'sky-test-mc-flush-{name}'
+    marker = f'flushed-{int(time.time())}'
     writer_yaml = 'tests/test_yamls/test_managed_jobs_mount_cached_writer.yaml'
     reader_yaml = 'tests/test_yamls/test_managed_jobs_mount_cached_reader.yaml'
     test = smoke_tests_utils.Test(
@@ -1470,7 +1471,7 @@ def test_managed_jobs_multinode_storage(generic_cloud: str):
     """Multi-node managed job with storage: every node must materialize
     the COPY bucket and FUSE-mount the MOUNT bucket independently."""
     name = smoke_tests_utils.get_cluster_name()
-    storage_name = f'sky-test-multinode-{int(time.time())}'
+    storage_name = f'sky-test-multinode-{name}'
     task_yaml = 'tests/test_yamls/test_managed_jobs_multinode_storage.yaml'
     test = smoke_tests_utils.Test(
         'managed_jobs_multinode_storage',
