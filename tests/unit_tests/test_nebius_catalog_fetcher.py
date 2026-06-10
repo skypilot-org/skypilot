@@ -59,6 +59,7 @@ def _response(cost='1.25',
     total_cost = _Proto(aggregation_unit=_Proto(unit=unit))
     if cost_type == 'general':
         total_cost.general = _Proto(total=_Proto(cost=cost))
+        total_cost.WhichOneof = lambda _: 'general'
     elif cost_type == 'range':
         total_cost.range = _Proto()
         total_cost.WhichOneof = lambda _: 'range'
@@ -114,8 +115,8 @@ def _install_fake_nebius_modules(monkeypatch, responses):
     monkeypatch.setattr(fetch_nebius, 'compute', lambda: fake_compute)
     monkeypatch.setattr(fetch_nebius, 'nebius_common', lambda: fake_common)
     monkeypatch.setattr(fetch_nebius.nebius, 'sdk', lambda: object())
-    monkeypatch.setattr(fetch_nebius, '_pack_any', lambda message:
-                        _PackedAny(message))
+    monkeypatch.setattr(fetch_nebius, '_pack_any',
+                        lambda message: _PackedAny(message))
 
     return FakeCalculatorServiceClient
 
