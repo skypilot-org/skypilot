@@ -650,7 +650,7 @@ def get_expirable_clouds(
             # add remote_identity of each context if it exists
             remote_identities: Optional[Union[str, List[Dict[str, str]]]] = None
             for context in contexts:
-                context_remote_identity = skypilot_config.get_effective_region_config(
+                context_remote_identity = skypilot_config.get_effective_workspace_region_config(
                     cloud='kubernetes',
                     region=context,
                     keys=('remote_identity',),
@@ -666,7 +666,7 @@ def get_expirable_clouds(
                         assert isinstance(remote_identities, list)
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
-            global_remote_identity = skypilot_config.get_effective_region_config(
+            global_remote_identity = skypilot_config.get_effective_workspace_region_config(
                 cloud='kubernetes',
                 region=None,
                 keys=('remote_identity',),
@@ -684,7 +684,7 @@ def get_expirable_clouds(
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
         else:
-            remote_identities = skypilot_config.get_effective_region_config(
+            remote_identities = skypilot_config.get_effective_workspace_region_config(
                 cloud=str(cloud).lower(),
                 region=None,
                 keys=('remote_identity',),
@@ -796,7 +796,7 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_effective_region_config(
+    remote_identity_config = skypilot_config.get_effective_workspace_region_config(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('remote_identity',),
@@ -862,7 +862,7 @@ def write_cluster_config(
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_effective_region_config(
+        remote_identity_config = skypilot_config.get_effective_workspace_region_config(
             cloud=cloud_str.lower(),
             region=region.name,
             keys=('remote_identity',),
