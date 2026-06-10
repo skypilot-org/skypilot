@@ -1449,7 +1449,12 @@ def test_managed_jobs_mount_cached_flush_on_exit(generic_cloud: str):
                 job_name=reader_name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
-            (f's=$(sky jobs logs -n {reader_name} --no-follow); echo "$s"; '
+            # Look up logs by job id: name-based lookup only matches
+            # running jobs, and the reader has already finished.
+            (f'JOB_ID=$(sky jobs queue | grep " {reader_name} " | head -1 '
+             f"| awk '{{print $1}}'); "
+             f'test -n "$JOB_ID"; '
+             f's=$(sky jobs logs "$JOB_ID" --no-follow); echo "$s"; '
              f'echo "$s" | grep -q {marker}'),
         ],
         (f'sky jobs cancel -y -n {writer_name} || true; '
@@ -1485,7 +1490,12 @@ def test_managed_jobs_multinode_storage(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
-            (f's=$(sky jobs logs -n {name} --no-follow); echo "$s"; '
+            # Look up logs by job id: name-based lookup only matches
+            # running jobs, and the job has already finished.
+            (f'JOB_ID=$(sky jobs queue | grep " {name} " | head -1 '
+             f"| awk '{{print $1}}'); "
+             f'test -n "$JOB_ID"; '
+             f's=$(sky jobs logs "$JOB_ID" --no-follow); echo "$s"; '
              f'echo "$s" | grep -q STORAGE_OK_RANK_0; '
              f'echo "$s" | grep -q STORAGE_OK_RANK_1'),
         ],
