@@ -23,6 +23,7 @@ from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import oci_s3
 from sky.adaptors import vastdata
 from sky.clouds import gcp
 from sky.data import data_utils
@@ -551,6 +552,78 @@ class OciCloudStorage(CloudStorage):
         return download_via_ocicli
 
 
+class OciS3CloudStorage(CloudStorage):
+    """OCI Cloud Storage accessed via the S3-compatible API.
+
+    Used in place of OciCloudStorage when the S3-compatible credential
+    files are present (see sky.adaptors.oci_s3), so remote nodes only need
+    the AWS CLI and the mounted credential files, not the OCI CLI or the
+    native OCI credentials.
+    """
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether OCI 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object
+        whose name is a prefix of other objects.
+        """
+        oci_s3_resource = oci_s3.resource('s3')
+        bucket_name, path = data_utils.split_oci_path(url)
+        bucket = oci_s3_resource.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.oci/s3.config).
+        assert 'oci://' in source, 'oci:// is not in source'
+        source = source.replace('oci://', 's3://')
+        download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
+                               f'{oci_s3.OCI_S3_CREDENTIALS_PATH} '
+                               f'AWS_CONFIG_FILE={oci_s3.OCI_S3_CONFIG_PATH} '
+                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
+                               f'{source} {destination} '
+                               f'--profile={oci_s3.OCI_S3_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        assert 'oci://' in source, 'oci:// is not in source'
+        source = source.replace('oci://', 's3://')
+        download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
+                               f'{oci_s3.OCI_S3_CREDENTIALS_PATH} '
+                               f'AWS_CONFIG_FILE={oci_s3.OCI_S3_CONFIG_PATH} '
+                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
+                               f'--profile={oci_s3.OCI_S3_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 class NebiusCloudStorage(CloudStorage):
     """Nebius Cloud Storage."""
 
@@ -945,8 +1018,14 @@ def get_storage_from_path(url: str) -> CloudStorage:
     if result.scheme not in _REGISTRY:
         assert False, (f'Scheme {result.scheme} not found in'
                        f' supported storage ({_REGISTRY.keys()}); path {url}')
+    if result.scheme == 'oci' and oci_s3.use_s3_api():
+        return _OCI_S3_CLOUD_STORAGE
     return _REGISTRY[result.scheme]
 
+
+# Serves oci:// instead of _REGISTRY['oci'] when the S3-compatible
+# credential files are present (see get_storage_from_path).
+_OCI_S3_CLOUD_STORAGE = OciS3CloudStorage()
 
 # Maps bucket's URIs prefix(scheme) to its corresponding storage class
 _REGISTRY = {

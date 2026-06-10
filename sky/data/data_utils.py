@@ -25,6 +25,7 @@ from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import oci_s3
 from sky.adaptors import vastdata
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -745,6 +746,7 @@ class Rclone:
         NEBIUS = 'NEBIUS'
         COREWEAVE = 'COREWEAVE'
         VASTDATA = 'VASTDATA'
+        OCI = 'OCI'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -765,6 +767,7 @@ class Rclone:
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
                 Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
                 Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
+                Rclone.RcloneStores.OCI: 'sky-oci',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -903,6 +906,26 @@ class Rclone:
                     acl = private
                     force_path_style = false
                     """)
+            elif self is Rclone.RcloneStores.OCI:
+                oci_s3_session = oci_s3.session()
+                oci_s3_credentials = oci_s3.get_oci_s3_credentials(
+                    oci_s3_session)
+                endpoint_url = oci_s3.get_endpoint()
+                access_key_id = oci_s3_credentials.access_key
+                secret_access_key = oci_s3_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    acl = private
+                    force_path_style = true
+                    """)
+                oci_region = oci_s3.get_region()
+                if oci_region:
+                    config += f'region = {oci_region}\n'
             elif self is Rclone.RcloneStores.VASTDATA:
                 vastdata_session = vastdata.session()
                 vastdata_credentials = vastdata.get_vastdata_credentials(
@@ -1080,6 +1103,28 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def create_oci_s3_client() -> Client:
+    """Create a client for OCI Object Storage's S3-compatible API."""
+    return oci_s3.client('s3')
+
+
+def verify_oci_s3_bucket(name: str) -> bool:
+    """Verify an OCI bucket exists via the S3-compatible API."""
+    client = create_oci_s3_client()
+    try:
+        client.head_bucket(Bucket=name)
+        return True
+    except oci_s3.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
+        error_code = e.response['Error']['Code']
+        if error_code == '403':
+            logger.error(f'Access denied to OCI bucket {name}')
+        elif error_code == '404':
+            logger.debug(f'OCI bucket {name} does not exist')
+        else:
+            logger.debug(f'Unexpected error checking OCI bucket {name}: {e}')
+        return False
 
 
 def create_coreweave_client() -> Client:

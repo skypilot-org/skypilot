@@ -236,6 +236,26 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
         read_only=read_only)
 
 
+def get_oci_s3_mount_cmd(oci_s3_credentials_path: str,
+                         oci_s3_profile_name: str,
+                         bucket_name: str,
+                         endpoint_url: str,
+                         mount_path: str,
+                         _bucket_sub_path: Optional[str] = None,
+                         read_only: bool = False) -> str:
+    """Returns a command to mount an OCI bucket via the S3-compatible API."""
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={oci_s3_credentials_path} '
+                f'AWS_PROFILE={oci_s3_profile_name}')
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        cred_env=cred_env,
+        rclone_extra_flags='--s3-force-path-style=true',
+        read_only=read_only)
+
+
 def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                            vastdata_profile_name: str,
                            bucket_name: str,

@@ -32,6 +32,7 @@ from sky.adaptors import huggingface
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import oci_s3
 from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
@@ -1399,7 +1400,10 @@ class Storage(object):
                         sync_on_reconstruction=self.sync_on_reconstruction,
                         _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.OCI:
-                    store = OciStore.from_metadata(
+                    oci_store_cls: Type[AbstractStore] = (
+                        OciS3CompatibleStore
+                        if oci_s3.use_s3_api() else OciStore)
+                    store = oci_store_cls.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
@@ -1521,7 +1525,8 @@ class Storage(object):
         elif store_type == StoreType.IBM:
             store_cls = IBMCosStore
         elif store_type == StoreType.OCI:
-            store_cls = OciStore
+            store_cls = (OciS3CompatibleStore
+                         if oci_s3.use_s3_api() else OciStore)
         elif store_type == StoreType.HF:
             store_cls = HuggingFaceStore
         else:
@@ -5242,6 +5247,106 @@ class VastDataStore(S3CompatibleStore):
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.VASTDATA.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.VASTDATA.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            config)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
+class OciS3CompatibleStore(S3CompatibleStore):
+    """OciS3CompatibleStore represents the backend for OCI buckets accessed
+    via OCI Object Storage's Amazon S3 Compatibility API.
+
+    https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm
+
+    It shares StoreType.OCI and the oci:// prefix with the native OciStore;
+    which class serves a request is decided at the StoreType.OCI dispatch
+    sites based on oci_s3.use_s3_api(). It must therefore not be decorated
+    with @register_s3_compatible_store: the registry is consulted before
+    the StoreType.OCI dispatch branches, and registering under 'OCI' would
+    take over all OCI dispatch unconditionally.
+    """
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = None,
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
+        # The native OciStore supports a <bucket>@<region> suffix. The
+        # S3-compatible endpoint is pinned to a single region, so a region
+        # suffix cannot be honored here.
+        for bucket_expr in (name, source):
+            if isinstance(bucket_expr,
+                          str) and bucket_expr.startswith('oci://'):
+                bucket_expr = data_utils.split_oci_path(bucket_expr)[0]
+            if isinstance(bucket_expr, str) and '@' in bucket_expr:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageNameError(
+                        f'<bucket>@<region> ({bucket_expr!r}) is not '
+                        'supported when accessing OCI via the S3-compatible '
+                        'API; the region is determined by the endpoint in '
+                        f'{oci_s3.OCI_S3_CONFIG_PATH}.')
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction, _bucket_sub_path)
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for the OCI S3-compatible API."""
+        return S3CompatibleConfig(
+            store_type='OCI',
+            url_prefix='oci://',
+            client_factory=lambda region: data_utils.create_oci_s3_client(),
+            resource_factory=lambda name: oci_s3.resource('s3').Bucket(name),
+            split_path=data_utils.split_oci_path,
+            verify_bucket=data_utils.verify_oci_s3_bucket,
+            aws_profile=oci_s3.OCI_S3_PROFILE_NAME,
+            get_endpoint_url=oci_s3.get_endpoint,
+            credentials_file=oci_s3.OCI_S3_CREDENTIALS_PATH,
+            config_file=oci_s3.OCI_S3_CONFIG_PATH,
+            cloud_name=str(clouds.OCI()),
+            default_region=oci_s3.get_region(),
+            mount_cmd_factory=cls._get_oci_s3_mount_cmd,
+        )
+
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        """Validates the store name using OCI bucket naming rules.
+
+        OCI bucket names allow uppercase letters and underscores, which the
+        generic S3 rules would reject; buckets created via the native API
+        must remain accessible via the S3-compatible API.
+        """
+        return OciStore.validate_name(name)
+
+    @classmethod
+    def _get_oci_s3_mount_cmd(cls,
+                              bucket_name: str,
+                              mount_path: str,
+                              bucket_sub_path: Optional[str],
+                              read_only: bool = False) -> str:
+        """Factory method for the OCI S3-compatible mount command."""
+        endpoint_url = oci_s3.get_endpoint()
+        return mounting_utils.get_oci_s3_mount_cmd(
+            oci_s3.OCI_S3_CREDENTIALS_PATH,
+            oci_s3.OCI_S3_PROFILE_NAME,
+            bucket_name,
+            endpoint_url,
+            mount_path,
+            bucket_sub_path,
+            read_only=read_only)
+
+    def mount_cached_command(self,
+                             mount_path: str,
+                             config: Optional[MountCachedConfig] = None) -> str:
+        """OCI S3-compatible cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.OCI.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.OCI.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
