@@ -1430,6 +1430,10 @@ def test_managed_jobs_mount_cached_flush_on_exit(generic_cloud: str):
     marker = f'flushed-{int(time.time())}'
     writer_yaml = 'tests/test_yamls/test_managed_jobs_mount_cached_writer.yaml'
     reader_yaml = 'tests/test_yamls/test_managed_jobs_mount_cached_reader.yaml'
+    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
+    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
+    get_job_id_cmd = (f'sky jobs queue | grep {reader_name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
     test = smoke_tests_utils.Test(
         'managed_jobs_mount_cached_flush_on_exit',
         [
@@ -1449,13 +1453,8 @@ def test_managed_jobs_mount_cached_flush_on_exit(generic_cloud: str):
                 job_name=reader_name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
-            # Look up logs by job id: name-based lookup only matches
-            # running jobs, and the reader has already finished.
-            (f'JOB_ID=$(sky jobs queue | grep " {reader_name} " | head -1 '
-             f"| awk '{{print $1}}'); "
-             f'test -n "$JOB_ID"; '
-             f's=$(sky jobs logs "$JOB_ID" --no-follow); echo "$s"; '
-             f'echo "$s" | grep -q {marker}'),
+            (f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
+             f'echo "$s"; echo "$s" | grep -q {marker}'),
         ],
         (f'sky jobs cancel -y -n {writer_name} || true; '
          f'sky jobs cancel -y -n {reader_name} || true; '
@@ -1478,6 +1477,10 @@ def test_managed_jobs_multinode_storage(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-multinode-{name}'
     task_yaml = 'tests/test_yamls/test_managed_jobs_multinode_storage.yaml'
+    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
+    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
     test = smoke_tests_utils.Test(
         'managed_jobs_multinode_storage',
         [
@@ -1490,13 +1493,8 @@ def test_managed_jobs_multinode_storage(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
-            # Look up logs by job id: name-based lookup only matches
-            # running jobs, and the job has already finished.
-            (f'JOB_ID=$(sky jobs queue | grep " {name} " | head -1 '
-             f"| awk '{{print $1}}'); "
-             f'test -n "$JOB_ID"; '
-             f's=$(sky jobs logs "$JOB_ID" --no-follow); echo "$s"; '
-             f'echo "$s" | grep -q STORAGE_OK_RANK_0; '
+            (f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
+             f'echo "$s"; echo "$s" | grep -q STORAGE_OK_RANK_0; '
              f'echo "$s" | grep -q STORAGE_OK_RANK_1'),
         ],
         (f'sky jobs cancel -y -n {name} || true; '
