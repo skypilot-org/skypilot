@@ -537,8 +537,14 @@ def download_and_stream_job_log(
         # only on '\n' keeps it O(real lines). We also drop the per-line
         # flush: stdout is block-buffered (~8KB), so a hard crash loses at
         # most the last buffer, not the whole copy -- and the authoritative
-        # copy is the synced run.log on disk anyway.
-        with open(log_file, 'r', encoding='utf-8', newline='\n') as f:
+        # copy is the synced run.log on disk anyway. errors='replace' so a
+        # stray invalid-UTF-8 byte in the user log can't abort the copy
+        # mid-stream (matches log_lib's decode handling).
+        with open(log_file,
+                  'r',
+                  encoding='utf-8',
+                  newline='\n',
+                  errors='replace') as f:
             # Stream the logs to the console without reading the whole file into
             # memory.
             start_streaming = False
