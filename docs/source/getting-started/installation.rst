@@ -973,7 +973,7 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
       default:
         compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
-OCI also offers `Object Storage <https://www.oracle.com/cloud/storage/object-storage/>`_, which supports both a native API and an `S3-compatible API <https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm>`_.
+OCI also offers `Object Storage <https://www.oracle.com/cloud/storage/object-storage/>`__, which supports both a native API and an `S3-compatible API <https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm>`__.
 SkyPilot can download/upload data to OCI buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up OCI Object Storage, first create a `Customer Secret Key <https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingcredentials.htm#create-secret-key>`_ from the OCI console.
 
 SkyPilot uses separate configuration files for OCI Object Storage to avoid conflicts with your AWS credentials. Run the following command to configure your OCI Object Storage credentials:
