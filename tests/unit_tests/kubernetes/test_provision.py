@@ -12,6 +12,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes.instance import logger
+from sky.utils import plugin_extensions
 
 
 def _remove_colorama_escape_codes(error_output):
@@ -3196,3 +3197,78 @@ class TestInspectPodStatusInitContainerReason:
         assert len(pending_logs) == 1
         assert 'init container' in pending_logs[0]
         assert 'Pulling image' not in pending_logs[0]
+
+
+class TestTerminationCleanup:
+    """Tests for the TerminationCleanup extension point on termination.
+
+    Plugins can register cleanup callbacks for external per-cluster
+    resources; terminate_instances must invoke them after the pods are
+    deleted, pass through worker_only, and never let a callback failure
+    fail the termination.
+    """
+
+    _PROVIDER_CONFIG = {'namespace': 'default', 'context': 'test-context'}
+
+    @pytest.fixture(autouse=True)
+    def _isolate_callbacks(self):
+        saved = plugin_extensions.TerminationCleanup._callbacks
+        plugin_extensions.TerminationCleanup._callbacks = []
+        yield
+        plugin_extensions.TerminationCleanup._callbacks = saved
+
+    def _make_pod(self, name: str):
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {}
+        return pod
+
+    def _run_terminate(self, monkeypatch, worker_only=False):
+        pods = {'head': self._make_pod('test-cluster-abcd1234-head')}
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_namespace_from_config',
+            lambda _: 'default')
+        monkeypatch.setattr(
+            'sky.provision.kubernetes.utils.get_context_from_config',
+            lambda _: 'test-context')
+        monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
+                            lambda *args, **kwargs: pods)
+        monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                            lambda *args, **kwargs: False)
+        monkeypatch.setattr(instance, '_terminate_node', mock.MagicMock())
+        monkeypatch.setattr(instance, '_is_head', lambda pod: False)
+        monkeypatch.setattr(instance, '_delete_cluster_services',
+                            mock.MagicMock())
+        instance.terminate_instances('test-cluster-abcd1234',
+                                     self._PROVIDER_CONFIG,
+                                     worker_only=worker_only)
+
+    def test_callback_invoked_on_full_termination(self, monkeypatch):
+        callback = mock.MagicMock(__name__='callback')
+        plugin_extensions.TerminationCleanup.register(callback)
+        self._run_terminate(monkeypatch)
+        callback.assert_called_once_with('test-cluster-abcd1234',
+                                         self._PROVIDER_CONFIG, False)
+
+    def test_callback_invoked_with_worker_only(self, monkeypatch):
+        """worker_only is passed through; the callback decides what to do."""
+        callback = mock.MagicMock(__name__='callback')
+        plugin_extensions.TerminationCleanup.register(callback)
+        self._run_terminate(monkeypatch, worker_only=True)
+        callback.assert_called_once_with('test-cluster-abcd1234',
+                                         self._PROVIDER_CONFIG, True)
+
+    def test_no_callbacks_registered(self, monkeypatch):
+        assert not plugin_extensions.TerminationCleanup.is_registered()
+        self._run_terminate(monkeypatch)
+
+    def test_callback_failure_does_not_fail_termination(self, monkeypatch):
+        failing = mock.MagicMock(__name__='failing',
+                                 side_effect=RuntimeError('boom'))
+        succeeding = mock.MagicMock(__name__='succeeding')
+        plugin_extensions.TerminationCleanup.register(failing)
+        plugin_extensions.TerminationCleanup.register(succeeding)
+        self._run_terminate(monkeypatch)
+        failing.assert_called_once()
+        # A failing callback must not prevent later callbacks from running.
+        succeeding.assert_called_once()
