@@ -3196,3 +3196,69 @@ class TestInspectPodStatusInitContainerReason:
         assert len(pending_logs) == 1
         assert 'init container' in pending_logs[0]
         assert 'Pulling image' not in pending_logs[0]
+
+
+class TestConfigureRuntimeClass:
+    """Tests for _configure_runtime_class.
+
+    A falsy runtimeClassName (e.g. '' or None from a
+    kubernetes.pod_config override) means the user explicitly disabled
+    the runtime class. It must be stripped from ALL pods: the
+    Kubernetes API rejects an empty string with 'resource name may not
+    be empty', so leaving it on CPU-only pods breaks their creation.
+    """
+
+    def _pod_spec(self, runtime_class_name=...):
+        spec = {'containers': [{'name': 'c'}]}
+        if runtime_class_name is not ...:
+            spec['runtimeClassName'] = runtime_class_name
+        return {'spec': spec}
+
+    def test_cpu_pod_empty_string_override_is_stripped(self):
+        pod_spec = self._pod_spec(runtime_class_name='')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=False)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_cpu_pod_none_override_is_stripped(self):
+        pod_spec = self._pod_spec(runtime_class_name=None)
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=False,
+                                          needs_gpus_nvidia=False)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_gpu_pod_falsy_override_not_replaced_with_nvidia(self):
+        pod_spec = self._pod_spec(runtime_class_name='')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_gpu_pod_gets_nvidia_when_runtime_exists(self):
+        pod_spec = self._pod_spec()
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=True)
+        assert pod_spec['spec']['runtimeClassName'] == 'nvidia'
+
+    def test_gpu_pod_unchanged_when_runtime_missing(self):
+        pod_spec = self._pod_spec()
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=False,
+                                          needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_user_custom_runtime_class_is_preserved(self):
+        pod_spec = self._pod_spec(runtime_class_name='sysbox-runc')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=True)
+        assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'
+
+    def test_cpu_pod_custom_runtime_class_is_preserved(self):
+        pod_spec = self._pod_spec(runtime_class_name='sysbox-runc')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=False)
+        assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'

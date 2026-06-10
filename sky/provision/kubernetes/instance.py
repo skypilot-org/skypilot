@@ -1255,6 +1255,27 @@ def _wait_for_deployment_pod(context,
         'ready.')
 
 
+def _configure_runtime_class(pod_spec: Dict[str,
+                                            Any], nvidia_runtime_exists: bool,
+                             needs_gpus_nvidia: bool) -> None:
+    """Sets or strips runtimeClassName on the pod spec in-place.
+
+    A falsy runtimeClassName (e.g. '' or None from a
+    kubernetes.pod_config override) means the user explicitly disabled
+    the runtime class. It is stripped from all pods regardless of GPU
+    requests: the Kubernetes API rejects pods with an empty-string
+    runtimeClassName ('resource name may not be empty'), and it must
+    also suppress the automatic 'nvidia' assignment below.
+    """
+    spec = pod_spec['spec']
+    if 'runtimeClassName' in spec and not spec['runtimeClassName']:
+        del spec['runtimeClassName']
+        return
+    if (nvidia_runtime_exists and needs_gpus_nvidia and
+            'runtimeClassName' not in spec):
+        spec['runtimeClassName'] = 'nvidia'
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -1417,12 +1438,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
-    if nvidia_runtime_exists and needs_gpus_nvidia:
-        spec = pod_spec['spec']
-        if 'runtimeClassName' not in spec:
-            spec['runtimeClassName'] = 'nvidia'
-        elif not spec['runtimeClassName']:
-            del spec['runtimeClassName']
+    _configure_runtime_class(pod_spec, nvidia_runtime_exists, needs_gpus_nvidia)
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
