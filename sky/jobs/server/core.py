@@ -1575,6 +1575,15 @@ def tail_logs(name: Optional[str],
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    # A non-positive tail (0 or -1) is the established "all lines" sentinel
+    # (e.g. `sky jobs logs --tail 0`, and the dashboard log-download button
+    # which posts tail=0). Normalize it to None at this single server-side
+    # entry point so downstream tailing -- the OSS backward-seek reader, which
+    # asserts tail > 0, and any log-runtime plugin -- does not have to
+    # special-case it. Without this, tail=0 reaches the backward-seek read and
+    # raises AssertionError, producing an empty log download.
+    if tail is not None and tail <= 0:
+        tail = None
     # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():

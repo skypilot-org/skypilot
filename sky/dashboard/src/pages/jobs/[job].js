@@ -1246,6 +1246,11 @@ function JobDetailsContent({
           selectedNode,
           isController: false,
           onNodesExtracted,
+          // Forward the refresh-button signal so a plugin owning this slot
+          // can re-fetch on refresh (the OSS streamer it replaces consumes
+          // the same flag). Without this the refresh button is a no-op for
+          // plugin-owned log panels.
+          refreshTrigger: refreshFlag,
         }}
         fallback={defaultLogsContent}
       />
@@ -1285,6 +1290,8 @@ function JobDetailsContent({
           status: jobData.status,
           isPreStart,
           isController: true,
+          // Forward the refresh-button signal (see jobs.detail.logs slot).
+          refreshTrigger: refreshFlag,
         }}
         fallback={defaultControllerLogsContent}
       />
