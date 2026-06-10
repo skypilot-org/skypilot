@@ -1,0 +1,21 @@
+# Multi-node managed job with storage: every node must materialize the
+# COPY bucket and FUSE-mount the MOUNT bucket independently.
+num_nodes: 2
+
+envs:
+  TEST_BUCKET: ""
+
+file_mounts:
+  /copy_dir:
+    name: ${TEST_BUCKET}
+    source: ~/tmp-workdir
+    mode: COPY
+  /mnt/data:
+    name: ${TEST_BUCKET}
+    mode: MOUNT
+
+run: |
+  set -ex
+  ls /copy_dir/foo
+  ls /mnt/data/foo
+  echo "STORAGE_OK_RANK_${SKYPILOT_NODE_RANK}"
