@@ -98,16 +98,14 @@ def _pack_any(message: Any) -> Any:
 
 
 def _make_create_instance_request(parent_id: str, platform_name: str,
-                                  preset_name: str,
-                                  preemptible: bool) -> Any:
+                                  preset_name: str, preemptible: bool) -> Any:
     """Builds a Compute CreateInstanceRequest for billing estimates."""
     compute_v1 = compute()
     instance_spec_kwargs = {
-        'resources':
-            compute_v1.ResourcesSpec(
-                platform=platform_name,
-                preset=preset_name,
-            )
+        'resources': compute_v1.ResourcesSpec(
+            platform=platform_name,
+            preset=preset_name,
+        )
     }
     if preemptible:
         instance_spec_kwargs['preemptible'] = compute_v1.PreemptibleSpec(
@@ -120,7 +118,9 @@ def _make_create_instance_request(parent_id: str, platform_name: str,
 
 
 def _make_estimate_batch_request(
-        parent_id: str, platform_name: str, preset_name: str,
+        parent_id: str,
+        platform_name: str,
+        preset_name: str,
         preemptible: bool,
         offer_types: Optional[List[OfferType]] = None) -> Any:
     """Builds a billing v1 EstimateBatchRequest for one compute preset."""
@@ -192,7 +192,7 @@ def _get_hourly_total_cost(response: Any) -> decimal.Decimal:
 
     total = getattr(general, 'total', None)
     cost = getattr(total, 'cost', None)
-    if not cost:
+    if cost is None or cost == '':
         raise ValueError(
             'Nebius billing estimate hourly total cost is missing cost.')
 
