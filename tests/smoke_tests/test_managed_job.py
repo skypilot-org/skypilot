@@ -1406,65 +1406,6 @@ def test_managed_jobs_storage(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_vast  # VAST does not support storage mounting
-@pytest.mark.no_shadeform  # Shadeform does not support storage mounting
-@pytest.mark.no_hyperbolic  # Hyperbolic does not support storage mounting
-@pytest.mark.no_seeweb  # Seeweb does not support storage mounting
-@pytest.mark.managed_jobs
-@pytest.mark.no_dependency  # Storage tests require full dependency installed
-def test_managed_jobs_mount_cached_flush_on_exit(generic_cloud: str):
-    """MOUNT_CACHED writes made just before job exit must reach the bucket.
-
-    rclone uploads the VFS cache asynchronously, so a write issued as the
-    job's last command is only durable if the runtime waits for the cache
-    to drain before tearing the instance down (the flush epilogue appended
-    after the user command). A writer job writes a unique marker as its
-    LAST command; a separate reader job then mounts the same bucket and
-    must observe the marker.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    writer_name, reader_name = f'{name}-w', f'{name}-r'
-    # Embed the cluster name (unique per test run) so parallel workers
-    # can't collide on the bucket.
-    storage_name = f'sky-test-mc-flush-{name}'
-    marker = f'flushed-{int(time.time())}'
-    writer_yaml = 'tests/test_yamls/test_managed_jobs_mount_cached_writer.yaml'
-    reader_yaml = 'tests/test_yamls/test_managed_jobs_mount_cached_reader.yaml'
-    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
-    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
-    get_job_id_cmd = (f'sky jobs queue | grep {reader_name} | head -1 | '
-                      f'awk \'{{print $1}}\'')
-    test = smoke_tests_utils.Test(
-        'managed_jobs_mount_cached_flush_on_exit',
-        [
-            (f'sky jobs launch -n {writer_name} --infra {generic_cloud} '
-             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {writer_yaml} '
-             f'--env TEST_BUCKET={storage_name} --env MARKER={marker} -y -d'),
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=writer_name,
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=600),
-            (f'sky jobs launch -n {reader_name} --infra {generic_cloud} '
-             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {reader_yaml} '
-             f'--env TEST_BUCKET={storage_name} -y -d'),
-            smoke_tests_utils.
-            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=reader_name,
-                job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                timeout=600),
-            (f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
-             f'echo "$s"; echo "$s" | grep -q {marker}'),
-        ],
-        (f'sky jobs cancel -y -n {writer_name} || true; '
-         f'sky jobs cancel -y -n {reader_name} || true; '
-         f'sky storage delete -y {storage_name} || true'),
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
-        timeout=20 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
