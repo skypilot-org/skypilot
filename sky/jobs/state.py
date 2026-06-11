@@ -3622,33 +3622,63 @@ def get_job_events(job_id: int,
     } for row in rows]
 
 
-def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
-    """Return {job_id: reason} for the most recent RECOVERING event per job.
+def _get_latest_event_reasons(
+    job_ids_by_status: Dict['ManagedJobStatus', List[int]]
+) -> Dict['ManagedJobStatus', Dict[int, str]]:
+    """Return {status: {job_id: reason}} for the latest event of each status.
 
-    Only jobs with a non-empty RECOVERING reason are included. Used to surface
-    why a job is currently recovering (e.g. an OOMKilled pod) in the
-    `details` column. A single batched query keeps this off the per-job path.
+    Fetches the most recent non-empty event reason per (status, job_id) in a
+    single batched query, to stay off the per-job path and avoid extra DB
+    round trips when several statuses are needed at once. Each job_id is
+    matched only against the status it was requested under, so a job's
+    historical events of other statuses are ignored.
     """
-    if not job_ids:
-        return {}
+    result: Dict['ManagedJobStatus',
+                 Dict[int, str]] = {status: {} for status in job_ids_by_status}
+    conditions = [
+        sqlalchemy.and_(
+            job_events_table.c.new_status == status.value,
+            job_events_table.c.spot_job_id.in_(job_ids),
+        ) for status, job_ids in job_ids_by_status.items() if job_ids
+    ]
+    if not conditions:
+        return result
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
             sqlalchemy.select(
                 job_events_table.c.spot_job_id,
+                job_events_table.c.new_status,
                 job_events_table.c.reason,
-            ).where(
-                sqlalchemy.and_(
-                    job_events_table.c.spot_job_id.in_(job_ids),
-                    job_events_table.c.new_status ==
-                    ManagedJobStatus.RECOVERING.value,
-                )).order_by(job_events_table.c.timestamp.desc())).fetchall()
-    # rows are newest-first; keep the first (latest) non-empty reason per job.
-    reasons: Dict[int, str] = {}
-    for spot_job_id, reason in rows:
+            ).where(sqlalchemy.or_(*conditions)).order_by(
+                job_events_table.c.timestamp.desc())).fetchall()
+    # rows are newest-first; keep the first (latest) non-empty reason per
+    # (status, job_id).
+    for spot_job_id, new_status, reason in rows:
+        reasons = result[ManagedJobStatus(new_status)]
         if spot_job_id not in reasons and reason:
             reasons[spot_job_id] = reason
-    return reasons
+    return result
+
+
+def get_latest_recovery_and_pending_reasons(
+        recovering_job_ids: List[int],
+        pending_job_ids: List[int]) -> Tuple[Dict[int, str], Dict[int, str]]:
+    """Return (recovery_reasons, pending_reasons) in a single DB query.
+
+    Each dict maps job_id -> the most recent non-empty event reason for that
+    status. Used to surface why a job is currently recovering (e.g. an
+    OOMKilled pod) or still pending (e.g. it was just submitted to the queue
+    or is in launch backoff) in the `details` column; both were previously
+    only visible in the event table. Fetches both in one round trip to stay
+    off the per-job path.
+    """
+    reasons = _get_latest_event_reasons({
+        ManagedJobStatus.RECOVERING: recovering_job_ids,
+        ManagedJobStatus.PENDING: pending_job_ids,
+    })
+    return (reasons[ManagedJobStatus.RECOVERING],
+            reasons[ManagedJobStatus.PENDING])
 
 
 async def cleanup_job_events_with_retention_async(
