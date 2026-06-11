@@ -2733,6 +2733,10 @@ export function GPUs() {
         name: r.name || r.id,
         clusters: 0,
         jobs: 0,
+        // Storage-only infrastructure (object storage that cannot host
+        // clusters or managed jobs). Such rows render a "—" in the Clusters
+        // and Jobs columns instead of a misleading 0.
+        storageOnly: r.storageOnly === true,
       }));
     return [...base, ...extras];
   }, [cloudInfraData, workspaceEnabledClouds, extraInfraRows]);
@@ -3060,7 +3064,14 @@ export function GPUs() {
                           </div>
                         </td>
                         <td className="p-3">
-                          {clusterDataLoading ? (
+                          {cloud.storageOnly ? (
+                            <span
+                              className="text-gray-400"
+                              title="Storage-only infrastructure does not run clusters"
+                            >
+                              —
+                            </span>
+                          ) : clusterDataLoading ? (
                             <SkeletonBadge />
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
@@ -3069,7 +3080,14 @@ export function GPUs() {
                           )}
                         </td>
                         <td className="p-3">
-                          {sshAndKubeJobsDataLoading ? (
+                          {cloud.storageOnly ? (
+                            <span
+                              className="text-gray-400"
+                              title="Storage-only infrastructure does not run managed jobs"
+                            >
+                              —
+                            </span>
+                          ) : sshAndKubeJobsDataLoading ? (
                             <SkeletonBadge />
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
