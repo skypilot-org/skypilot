@@ -735,7 +735,8 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # `kubernetes: null` in YAML parses to None; must not raise TypeError.
         result = core._compare_workspace_configs(
-            {'kubernetes': None}, {'kubernetes': {
+            {'kubernetes': None},
+            {'kubernetes': {
                 'allowed_contexts': ['ctx-a']
             }})
         self.assertFalse(result.additive_allowed_contexts)
