@@ -3478,12 +3478,12 @@ def get_job_events(job_id: int,
     } for row in rows]
 
 
-def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
-    """Return {job_id: reason} for the most recent RECOVERING event per job.
+def _get_latest_event_reasons(job_ids: List[int],
+                              new_status: 'ManagedJobStatus') -> Dict[int, str]:
+    """Return {job_id: reason} for the most recent event of `new_status`.
 
-    Only jobs with a non-empty RECOVERING reason are included. Used to surface
-    why a job is currently recovering (e.g. an OOMKilled pod) in the
-    `details` column. A single batched query keeps this off the per-job path.
+    Only jobs with a non-empty reason for that status are included. A single
+    batched query keeps this off the per-job path.
     """
     if not job_ids:
         return {}
@@ -3496,8 +3496,7 @@ def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
             ).where(
                 sqlalchemy.and_(
                     job_events_table.c.spot_job_id.in_(job_ids),
-                    job_events_table.c.new_status ==
-                    ManagedJobStatus.RECOVERING.value,
+                    job_events_table.c.new_status == new_status.value,
                 )).order_by(job_events_table.c.timestamp.desc())).fetchall()
     # rows are newest-first; keep the first (latest) non-empty reason per job.
     reasons: Dict[int, str] = {}
@@ -3505,6 +3504,28 @@ def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
         if spot_job_id not in reasons and reason:
             reasons[spot_job_id] = reason
     return reasons
+
+
+def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
+    """Return {job_id: reason} for the most recent RECOVERING event per job.
+
+    Only jobs with a non-empty RECOVERING reason are included. Used to surface
+    why a job is currently recovering (e.g. an OOMKilled pod) in the
+    `details` column.
+    """
+    return _get_latest_event_reasons(job_ids, ManagedJobStatus.RECOVERING)
+
+
+def get_latest_pending_reasons(job_ids: List[int]) -> Dict[int, str]:
+    """Return {job_id: reason} for the most recent PENDING event per job.
+
+    Only jobs with a non-empty PENDING reason are included. Used to surface
+    why a job is currently pending (e.g. it was just submitted to the queue or
+    is in launch backoff) in the `details` column, mirroring
+    get_latest_recovery_reasons. Previously this reason was only visible in the
+    event table, not in the job details view.
+    """
+    return _get_latest_event_reasons(job_ids, ManagedJobStatus.PENDING)
 
 
 async def cleanup_job_events_with_retention_async(

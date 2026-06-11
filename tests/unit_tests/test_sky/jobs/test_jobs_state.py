@@ -780,3 +780,70 @@ class TestGetLatestRecoveryReasons:
                                                 _mock_managed_jobs_db_conn):
         state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
         assert state.get_latest_recovery_reasons([1]) == {}
+
+
+class TestGetLatestPendingReasons:
+    """Tests for get_latest_pending_reasons."""
+
+    def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
+        assert state.get_latest_pending_reasons([]) == {}
+
+    def test_latest_reason_wins_and_filters(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # Job 1: two PENDING events -> the latest reason wins.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job is in backoff',
+                            timestamp=late)
+        # Job 2: a RUNNING event is ignored; only the PENDING reason returns.
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job started',
+                            timestamp=late)
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue',
+                            timestamp=early)
+        # Job 3 has a PENDING event but is not requested.
+        state.add_job_event(3,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'unrelated',
+                            timestamp=late)
+        result = state.get_latest_pending_reasons([1, 2])
+        assert result == {
+            1: 'Job is in backoff',
+            2: 'Job submitted to queue',
+        }
+
+    def test_empty_reason_skipped(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # The most recent PENDING event has an empty reason -> fall back to
+        # the most recent non-empty one.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            'Job submitted to queue',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.PENDING,
+                            '',
+                            timestamp=late)
+        assert state.get_latest_pending_reasons([1]) == {
+            1: 'Job submitted to queue'
+        }
+
+    def test_no_pending_events_returns_empty(self, _mock_managed_jobs_db_conn):
+        state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
+        assert state.get_latest_pending_reasons([1]) == {}

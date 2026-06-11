@@ -2292,8 +2292,9 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
 def _format_job_details(*,
                         job: Dict[str, Any],
                         highest_blocking_priority: int,
-                        recovery_reason: Optional[str] = None) -> None:
-    """Add details about schedule state / backoff / recovery."""
+                        recovery_reason: Optional[str] = None,
+                        pending_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery / pending."""
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2330,6 +2331,13 @@ def _format_job_details(*,
             if hint is not None:
                 detail += f' ({hint})'
         job['details'] = detail
+    elif pending_reason:
+        # Surface why a job is still PENDING (e.g. it was submitted to the
+        # controller queue or is in launch backoff) so the reason is visible
+        # in the job details view, not just the event table. Collapse
+        # whitespace so a multi-line reason renders on a single line in the
+        # details column.
+        job['details'] = ' '.join(pending_reason.split())
     else:
         job['details'] = None
 
@@ -2523,6 +2531,7 @@ def get_managed_job_queue(
     # small, transient subset) and done in one query to stay off the per-job
     # path. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
+    pending_reasons: Dict[int, str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
@@ -2530,13 +2539,25 @@ def get_managed_job_queue(
         ]
         recovery_reasons = managed_job_state.get_latest_recovery_reasons(
             recovering_job_ids)
+        # Same for PENDING jobs: surface the latest PENDING event reason in
+        # `details`, which was previously only visible in the event table.
+        # Scoped to PENDING jobs (a small, transient subset) and done in one
+        # query to stay off the per-job path.
+        pending_job_ids = [
+            job['job_id']
+            for job in jobs
+            if job['status'] == managed_job_state.ManagedJobStatus.PENDING.value
+        ]
+        pending_reasons = managed_job_state.get_latest_pending_reasons(
+            pending_job_ids)
 
     for job in jobs:
         if not fields or 'details' in fields:
             _format_job_details(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
-                recovery_reason=recovery_reasons.get(job['job_id']))
+                recovery_reason=recovery_reasons.get(job['job_id']),
+                pending_reason=pending_reasons.get(job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
