@@ -186,7 +186,8 @@ def test_get_excluded_files_from_skyignore_negation_order(
         skyignore_negation_dir):
     # Last matching pattern wins (gitignore semantics): re-include config.json,
     # then exclude it again on a later line.
-    _write_skyignore(skyignore_negation_dir, """\
+    _write_skyignore(
+        skyignore_negation_dir, """\
         *.json
         !config.json
         config.json
