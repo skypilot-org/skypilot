@@ -393,6 +393,31 @@ class TestGetManagedJobQueue:
         assert job['cluster_resources'] == '-'
         assert job['cluster_resources_full'] == '-'
 
+    def test_unlaunched_job_does_not_show_requested_resources(
+            self, monkeypatch):
+        """A job that never launched does not show requested resources.
+
+        The cached resources fallback only applies when the job was actually
+        launched (infra persisted); a PENDING job with a requested resources
+        string should still show '-' for cluster resources.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.PENDING,
+                resources='1x[CPU:1+]',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+        assert job['infra'] == '-'
+
     def test_status_converted_to_string(self, monkeypatch):
         """Test that status is converted from enum to string."""
         jobs = [self._make_test_job(1)]

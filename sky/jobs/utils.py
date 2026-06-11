@@ -2535,7 +2535,12 @@ def get_managed_job_queue(
                 job['zone'] = zone if zone else '-'
                 # The launched cluster resources string is not persisted, so
                 # fall back to the requested resources string from the DB.
-                cached_resources = job.get('resources')
+                # Only do so if the job was actually launched at least once
+                # (i.e. the infra was persisted); otherwise (e.g. PENDING
+                # jobs, or jobs that failed before launching) showing the
+                # requested resources as the launched resources is
+                # misleading.
+                cached_resources = job.get('resources') if cloud else None
                 job['cluster_resources'] = (cached_resources
                                             if cached_resources else '-')
                 job['cluster_resources_full'] = (cached_resources
