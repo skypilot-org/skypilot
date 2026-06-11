@@ -28,18 +28,16 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
 
     Patterns follow .gitignore semantics: lines are applied in order, and a
     line starting with '!' re-includes (un-excludes) files that an earlier
-    pattern excluded. As in git, the last matching pattern wins, so we keep
-    the exclusion list ordered and add/remove entries as we process each line.
+    pattern excluded. As in git, the last matching pattern wins. The order of
+    the returned list does not matter, so we accumulate the result in a set,
+    adding files for exclude patterns and discarding them for negations.
     """
-    # Ordered list of excluded paths; ``excluded_set`` mirrors it for O(1)
-    # membership checks and de-duplication.
-    excluded_list: List[str] = []
-    excluded_set: Set[str] = set()
+    excluded_files: Set[str] = set()
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
 
-    def _matching_files(pattern: str) -> List[str]:
+    def _matching_files(pattern: str) -> Set[str]:
         # Make parsing consistent with rsync.
         # Rsync uses '/' as current directory.
         if pattern.startswith('/'):
@@ -50,9 +48,10 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
         matching_files = glob.glob(os.path.join(expand_src_dir_path, pattern),
                                    recursive=True)
         # Process filenames to comply with cloud rsync format.
-        return [
-            os.path.relpath(path, expand_src_dir_path) for path in matching_files
-        ]
+        return {
+            os.path.relpath(path, expand_src_dir_path)
+            for path in matching_files
+        }
 
     try:
         with open(skyignore_path, 'r', encoding='utf-8') as f:
@@ -66,20 +65,14 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                     pattern = line[1:].strip()
                     if not pattern:
                         continue
-                    for file_path in _matching_files(pattern):
-                        if file_path in excluded_set:
-                            excluded_set.discard(file_path)
-                            excluded_list.remove(file_path)
+                    excluded_files -= _matching_files(pattern)
                 else:
-                    for file_path in _matching_files(line):
-                        if file_path not in excluded_set:
-                            excluded_set.add(file_path)
-                            excluded_list.append(file_path)
+                    excluded_files |= _matching_files(line)
     except IOError as e:
         logger.warning(f'Error reading {skyignore_path}: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
-    return excluded_list
+    return list(excluded_files)
 
 
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
