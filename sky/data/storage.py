@@ -5287,12 +5287,15 @@ class OciS3CompatibleStore(S3CompatibleStore):
                  _bucket_sub_path: Optional[str] = None):
         # The native OciStore supports a <bucket>@<region> suffix. The
         # S3-compatible endpoint is pinned to a single region, so a region
-        # suffix cannot be honored here.
+        # suffix cannot be honored here. Only reject @ in source when it is
+        # an oci:// URI; a local path containing @ is valid.
         for bucket_expr in (name, source):
-            if isinstance(bucket_expr,
-                          str) and bucket_expr.startswith('oci://'):
+            if not isinstance(bucket_expr, str):
+                continue
+            is_oci_uri = bucket_expr.startswith('oci://')
+            if is_oci_uri:
                 bucket_expr = data_utils.split_oci_path(bucket_expr)[0]
-            if isinstance(bucket_expr, str) and '@' in bucket_expr:
+            if (bucket_expr == name or is_oci_uri) and '@' in bucket_expr:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         f'<bucket>@<region> ({bucket_expr!r}) is not '

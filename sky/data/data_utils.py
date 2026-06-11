@@ -1116,7 +1116,7 @@ def verify_oci_s3_bucket(name: str) -> bool:
     try:
         client.head_bucket(Bucket=name)
         return True
-    except oci_s3.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
+    except oci_s3.botocore_exceptions().ClientError as e:
         error_code = e.response['Error']['Code']
         if error_code == '403':
             logger.error(f'Access denied to OCI bucket {name}')

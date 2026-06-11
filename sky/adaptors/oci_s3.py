@@ -123,6 +123,22 @@ def session():
         return session_
 
 
+def _botocore_config():
+    """Return a botocore Config suitable for OCI's S3-compatible API.
+
+    OCI's S3-compatible API returns 501 for uploads that use aws-chunked
+    content encoding, which newer AWS SDKs enable by default to carry a
+    trailing integrity checksum. Restrict checksum calculation to
+    when_required so PutObject is sent as a plain (non-chunked) request.
+    Response validation is relaxed to match, so downloads of checksummed
+    objects aren't rejected.
+    https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi_topic-Amazon_S3_Compatibility_API_Support.htm
+    """
+    return botocore.config.Config(s3={'addressing_style': 'path'},
+                                  request_checksum_calculation='when_required',
+                                  response_checksum_validation='when_required')
+
+
 @annotations.lru_cache(scope='global')
 def resource(resource_name: str, **kwargs):
     """Create an OCI S3-compatible resource.
@@ -146,17 +162,7 @@ def resource(resource_name: str, **kwargs):
         aws_access_key_id=oci_s3_credentials.access_key,
         aws_secret_access_key=oci_s3_credentials.secret_key,
         region_name=get_region(),
-        config=botocore.config.Config(
-            s3={'addressing_style': 'path'},
-            # OCI's S3-compatible API returns 501 for uploads that use
-            # aws-chunked content encoding, which newer AWS SDKs enable by
-            # default to carry a trailing integrity checksum. Restrict
-            # checksum calculation to when_required so PutObject is sent as
-            # a plain (non-chunked) request. Response validation is relaxed
-            # to match, so downloads of checksummed objects aren't rejected.
-            # https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi_topic-Amazon_S3_Compatibility_API_Support.htm
-            request_checksum_calculation='when_required',
-            response_checksum_validation='when_required'),
+        config=_botocore_config(),
         **kwargs)
 
 
@@ -182,17 +188,7 @@ def client(service_name: str):
         aws_access_key_id=oci_s3_credentials.access_key,
         aws_secret_access_key=oci_s3_credentials.secret_key,
         region_name=get_region(),
-        config=botocore.config.Config(
-            s3={'addressing_style': 'path'},
-            # OCI's S3-compatible API returns 501 for uploads that use
-            # aws-chunked content encoding, which newer AWS SDKs enable by
-            # default to carry a trailing integrity checksum. Restrict
-            # checksum calculation to when_required so PutObject is sent as
-            # a plain (non-chunked) request. Response validation is relaxed
-            # to match, so downloads of checksummed objects aren't rejected.
-            # https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi_topic-Amazon_S3_Compatibility_API_Support.htm
-            request_checksum_calculation='when_required',
-            response_checksum_validation='when_required'),
+        config=_botocore_config(),
     )
 
 

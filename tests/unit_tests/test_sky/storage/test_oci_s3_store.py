@@ -104,6 +104,19 @@ class TestOciS3CompatibleStore(unittest.TestCase):
             storage_lib.OciS3CompatibleStore(name='bucket',
                                              source='oci://bucket@us-sanjose-1')
 
+    def test_local_source_with_at_sign_accepted(self):
+        # A local path containing '@' (e.g. run@v2) must not be rejected.
+        # Only oci:// source URIs are inspected for the <bucket>@<region> form.
+        # The region-suffix check runs before super().__init__; mock the
+        # parent constructor so the test never validates credentials or
+        # touches the cloud (the real initialize() creates missing buckets).
+        with mock.patch.object(storage_lib.S3CompatibleStore,
+                               '__init__',
+                               return_value=None) as mock_parent_init:
+            storage_lib.OciS3CompatibleStore(name='bucket',
+                                             source='~/ckpts/run@v2')
+        mock_parent_init.assert_called_once()
+
     def test_validate_name_follows_oci_rules(self):
         # OCI bucket names allow uppercase letters and underscores, which
         # the generic S3 naming rules would reject.
