@@ -3066,7 +3066,7 @@ export function GPUs() {
                         <td className="p-3">
                           {cloud.storageOnly ? (
                             <span
-                              className="py-0.5 text-gray-400 text-xs font-medium"
+                              className="px-1.5 py-0.5 text-gray-400 text-xs font-medium"
                               title="Storage-only infrastructure does not run clusters"
                             >
                               —
@@ -3082,7 +3082,7 @@ export function GPUs() {
                         <td className="p-3">
                           {cloud.storageOnly ? (
                             <span
-                              className="py-0.5 text-gray-400 text-xs font-medium"
+                              className="px-1.5 py-0.5 text-gray-400 text-xs font-medium"
                               title="Storage-only infrastructure does not run managed jobs"
                             >
                               —
