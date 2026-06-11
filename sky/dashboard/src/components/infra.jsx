@@ -3065,12 +3065,11 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {cloud.storageOnly ? (
-                            <span
-                              className="px-1.5 py-0.5 text-gray-400 text-xs font-medium"
-                              title="Storage-only infrastructure does not run clusters"
-                            >
-                              —
-                            </span>
+                            <NonCapitalizedTooltip content="Storage-only infrastructure does not run clusters">
+                              <span className="px-1.5 py-0.5 text-gray-400 text-xs font-medium cursor-help">
+                                —
+                              </span>
+                            </NonCapitalizedTooltip>
                           ) : clusterDataLoading ? (
                             <SkeletonBadge />
                           ) : (
@@ -3081,12 +3080,11 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {cloud.storageOnly ? (
-                            <span
-                              className="px-1.5 py-0.5 text-gray-400 text-xs font-medium"
-                              title="Storage-only infrastructure does not run managed jobs"
-                            >
-                              —
-                            </span>
+                            <NonCapitalizedTooltip content="Storage-only infrastructure does not run managed jobs">
+                              <span className="px-1.5 py-0.5 text-gray-400 text-xs font-medium cursor-help">
+                                —
+                              </span>
+                            </NonCapitalizedTooltip>
                           ) : sshAndKubeJobsDataLoading ? (
                             <SkeletonBadge />
                           ) : (
