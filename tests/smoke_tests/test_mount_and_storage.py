@@ -257,12 +257,16 @@ def test_concurrent_file_mounts_jobs_launch(generic_cloud: str):
 
 
 # ---------- storage ----------
-def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
-                                       storage_name: str,
-                                       empty_storage_name: str,
-                                       ls_hello_command: str, cloud: str,
-                                       only_mount: bool,
-                                       include_mount_cached: bool):
+def _storage_mounts_commands_generator(
+        f: TextIO,
+        cluster_name: str,
+        storage_name: str,
+        empty_storage_name: str,
+        ls_hello_command: str,
+        cloud: str,
+        only_mount: bool,
+        include_mount_cached: bool,
+        cloud_cmd_setup_cmd: Optional[str] = None):
     assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
@@ -304,8 +308,8 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
-        smoke_tests_utils.run_cloud_cmd_on_cluster(cluster_name,
-                                                   cmd=ls_hello_command),
+        smoke_tests_utils.run_cloud_cmd_on_cluster(
+            cluster_name, cmd=ls_hello_command, setup_cmd=cloud_cmd_setup_cmd),
         stop_command,
         f'sky start -y {cluster_name}',
         # Check if hello.txt from mounting bucket exists after restart in
@@ -610,14 +614,26 @@ def test_kubernetes_storage_mounts(storage_name_prefix: str):
                         f'{gcs_ls_cmd}; }} || {{ '
                         f'{azure_check_cmd}; }} || {{ '
                         f'{nebius_ls_cmd}; }}')
+    # The cloud-cmd cluster needs the cloud CLIs installed into the SkyPilot
+    # runtime venv to run the check. This must NOT be prepended to
+    # ls_hello_command directly: with a local API server the command runs
+    # verbatim on the local machine, where the venv does not exist, and the
+    # failed install would silently skip the `aws s3 ls` branch above and
+    # fall through to the wrong-cloud fallbacks.
     cloud_cmd_cluster_setup_cmd_list = controller_utils._get_cloud_dependencies_installation_commands(
         controller_utils.Controllers.JOBS_CONTROLLER)
     cloud_cmd_cluster_setup_cmd = ' && '.join(cloud_cmd_cluster_setup_cmd_list)
-    ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, empty_storage_name, ls_hello_command,
-            'kubernetes', False, False)
+            f,
+            name,
+            storage_name,
+            empty_storage_name,
+            ls_hello_command,
+            'kubernetes',
+            False,
+            False,
+            cloud_cmd_setup_cmd=cloud_cmd_cluster_setup_cmd)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,

@@ -1302,9 +1302,9 @@ def test_managed_jobs_storage(generic_cloud: str):
             '2> /dev/null || true')
         all_output_checks = ' && '.join(output_check_cmds)
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, f'{cloud_dependencies_setup_cmd}; '
-            f'{try_activating_gcp_service_account}; '
-            f'{all_output_checks}')
+            name, f'{try_activating_gcp_service_account}; '
+            f'{all_output_checks}',
+            setup_cmd=cloud_dependencies_setup_cmd)
         # Replace the single output bucket in the YAML with one per store, and
         # write output.txt to each. 'sky-output-bucket' is replaced with the
         # unique output_storage_name below, same as for other clouds.
