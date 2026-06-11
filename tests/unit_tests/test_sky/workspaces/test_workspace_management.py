@@ -649,6 +649,193 @@ class TestWorkspaceManagement(unittest.TestCase):
         # Should not call resource checker since no users were removed
         mock_check_resources.assert_not_called()
 
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_additive_allowed_contexts(
+            self, mock_get_users_for_role, mock_get_users):
+        """allowed_contexts-only changes are flagged additive or not."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # Sentinel for "allowed_contexts is absent from the kubernetes block".
+        absent = object()
+
+        def k8s_config(allowed_contexts):
+            kubernetes = {}
+            if allowed_contexts is not absent:
+                kubernetes['allowed_contexts'] = allowed_contexts
+            return {'kubernetes': kubernetes}
+
+        # (current_contexts, new_contexts, expected_additive)
+        cases = [
+            (['ctx-a'], ['ctx-a', 'ctx-b'], True),  # append
+            (['ctx-a', 'ctx-b'], ['ctx-a'], False),  # removal
+            # Reorder keeps the same set, so nothing is stranded -> additive.
+            (['ctx-a', 'ctx-b'], ['ctx-b', 'ctx-a'], True),
+            (['ctx-a'], 'all', True),  # broaden to all
+            ('all', ['ctx-a'], False),  # narrow from all
+            (absent, ['ctx-a'], False),  # absent -> list
+            (['ctx-a'], absent, False),  # list -> absent
+        ]
+        for current_contexts, new_contexts, expected in cases:
+            with self.subTest(current=current_contexts, new=new_contexts):
+                result = core._compare_workspace_configs(
+                    k8s_config(current_contexts), k8s_config(new_contexts))
+                self.assertEqual(result.additive_allowed_contexts, expected)
+                # allowed_contexts changed, so this is never user-access-only.
+                self.assertFalse(result.only_user_access_changes)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_additive_contexts_with_other_changes(
+            self, mock_get_users_for_role, mock_get_users):
+        """Additive contexts alongside any other change is not additive."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # Additive contexts but a sibling kubernetes field also changed.
+        result = core._compare_workspace_configs(
+            {'kubernetes': {
+                'allowed_contexts': ['ctx-a'],
+                'namespace': 'n1'
+            }}, {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a', 'ctx-b'],
+                    'namespace': 'n2'
+                }
+            })
+        self.assertFalse(result.additive_allowed_contexts)
+
+        # Additive contexts but a non-kubernetes field also changed.
+        result = core._compare_workspace_configs(
+            {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a']
+                },
+                'gcp': {
+                    'project_id': 'p1'
+                }
+            }, {
+                'kubernetes': {
+                    'allowed_contexts': ['ctx-a', 'ctx-b']
+                },
+                'gcp': {
+                    'project_id': 'p2'
+                }
+            })
+        self.assertFalse(result.additive_allowed_contexts)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_added_user_and_additive_contexts(
+            self, mock_get_users_for_role, mock_get_users):
+        """Adding a user and a context together is still flagged additive."""
+        mock_get_users.side_effect = lambda config, **_kw: config.get(
+            'allowed_users', [])
+        mock_get_users_for_role.return_value = []
+
+        current_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'kubernetes': {
+                'allowed_contexts': ['ctx-a']
+            }
+        }
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1', 'user2'],
+            'kubernetes': {
+                'allowed_contexts': ['ctx-a', 'ctx-b']
+            }
+        }
+
+        result = core._compare_workspace_configs(current_config, new_config)
+
+        # User-access was stripped before the context comparison, so the added
+        # user does not block additive detection.
+        self.assertTrue(result.additive_allowed_contexts)
+        self.assertFalse(result.only_user_access_changes)
+        self.assertEqual(set(result.added_users), {'user2'})
+        self.assertEqual(result.removed_users, [])
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_additive_contexts(
+            self, mock_compare_configs, mock_check_resources):
+        """Additive allowed_contexts changes skip the teardown check."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            additive_allowed_contexts=True)
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # Additive context changes do not require an empty workspace.
+        mock_check_resources.assert_not_called()
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_added_user_and_additive_contexts(
+            self, mock_compare_configs, mock_check_resources, mock_check_users):
+        """Adding a user and a context together skips all teardown checks."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=['user1'],
+            allowed_users_new=['user1', 'user2'],
+            removed_users=[],
+            added_users=['user2'],
+            additive_allowed_contexts=True)
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # No removed users -> no user resource check; additive contexts -> no
+        # workspace teardown check.
+        mock_check_resources.assert_not_called()
+        mock_check_users.assert_not_called()
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_added_user_non_additive_contexts(
+            self, mock_compare_configs, mock_check_resources):
+        """Adding a user with a non-additive context change keeps the guard."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=True,
+            private_new=True,
+            allowed_users_changed=True,
+            allowed_users_old=['user1'],
+            allowed_users_new=['user1', 'user2'],
+            removed_users=[],
+            added_users=['user2'],
+            additive_allowed_contexts=False)
+        mock_check_resources.return_value = None
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # Non-additive change -> teardown guard still enforced.
+        mock_check_resources.assert_called_once_with([('test-workspace',
+                                                       'update')])
+
 
 class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
     """Tests that existing workspaces with non-conforming names still work."""
