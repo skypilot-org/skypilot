@@ -997,7 +997,9 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
         if setup_cmd is not None:
             # Group `cmd` so that a setup failure fails the whole command
             # instead of falling through to any `||` branches in `cmd`.
-            cmd = f'{setup_cmd} && {{ {cmd}; }}'
+            # Strip trailing semicolons from `cmd` first: `;;` inside the
+            # group is a bash syntax error.
+            cmd = f'{setup_cmd} && {{ {cmd.rstrip().rstrip(";")}; }}'
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
         wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
             cluster_name=cluster_name,
