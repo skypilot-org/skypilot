@@ -40,6 +40,15 @@ describe('extractLinksFromLogs', () => {
     expect(links).toEqual({ 'W&B Run': WANDB_URL });
   });
 
+  it('skips non-string entries without throwing', () => {
+    const links = extractLinksFromLogs(
+      [null, undefined, 42, { msg: 'metadata' }, WANDB_LINE],
+      BUILTIN_URL_PATTERNS,
+      {}
+    );
+    expect(links).toEqual({ 'W&B Run': WANDB_URL });
+  });
+
   it('preserves existing matches', () => {
     const existing = { 'W&B Run': 'https://wandb.ai/a/b/runs/first' };
     const links = extractLinksFromLogs(

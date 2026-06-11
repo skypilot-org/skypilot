@@ -69,6 +69,13 @@ export const extractLinksFromLogs = (logLines, patterns, existingMatches) => {
       break;
     }
 
+    // Plugins can feed arbitrary arrays through `onLogLines`; skip
+    // non-string entries instead of letting one bad element throw and
+    // take down the page.
+    if (typeof line !== 'string') {
+      continue;
+    }
+
     // Strip ANSI escape codes so color/reset sequences adjacent to a URL
     // do not leak into the matched token. Lines from the OSS streamer are
     // already stripped (this is a no-op); raw buffers forwarded by log
