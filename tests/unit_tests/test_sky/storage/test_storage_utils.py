@@ -139,6 +139,85 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     assert len(excluded_files) == len(expected_excluded_files)
 
 
+@pytest.fixture
+def skyignore_negation_dir():
+    """A directory with json files and a .skyignore using '!' negation."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        files = [
+            'a.json',
+            'b.json',
+            'config.json',
+            'keep.txt',
+            'data/keep.json',
+            'data/config.json',
+        ]
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('test content')
+        yield temp_dir
+
+
+def _write_skyignore(dir_path, content):
+    skyignore_path = os.path.join(dir_path, constants.SKY_IGNORE_FILE)
+    with open(skyignore_path, 'w', encoding='utf-8') as f:
+        f.write(textwrap.dedent(content))
+
+
+def test_get_excluded_files_from_skyignore_negation(skyignore_negation_dir):
+    # Exclude all json files, then re-include config.json via '!'.
+    _write_skyignore(skyignore_negation_dir, """\
+        *.json
+        !config.json
+        """)
+    excluded_files = storage_utils.get_excluded_files_from_skyignore(
+        skyignore_negation_dir)
+
+    # config.json (at any depth) is re-included, so it must NOT be excluded.
+    assert 'config.json' not in excluded_files
+    assert os.path.join('data', 'config.json') not in excluded_files
+    # All other json files remain excluded; keep.txt is untouched.
+    expected_excluded = {'a.json', 'b.json', os.path.join('data', 'keep.json')}
+    assert set(excluded_files) == expected_excluded
+
+
+def test_get_excluded_files_from_skyignore_negation_order(
+        skyignore_negation_dir):
+    # Last matching pattern wins (gitignore semantics): re-include config.json,
+    # then exclude it again on a later line.
+    _write_skyignore(skyignore_negation_dir, """\
+        *.json
+        !config.json
+        config.json
+        """)
+    excluded_files = storage_utils.get_excluded_files_from_skyignore(
+        skyignore_negation_dir)
+
+    # The trailing 'config.json' line re-excludes it.
+    assert 'config.json' in excluded_files
+    # And it should appear exactly once (no duplicates from add/remove/add).
+    assert excluded_files.count('config.json') == 1
+
+
+def test_get_excluded_files_from_skyignore_negation_no_match(
+        skyignore_negation_dir):
+    # A '!' line that matches nothing already-excluded is a no-op.
+    _write_skyignore(skyignore_negation_dir, """\
+        *.json
+        !nonexistent.json
+        """)
+    excluded_files = storage_utils.get_excluded_files_from_skyignore(
+        skyignore_negation_dir)
+
+    expected_excluded = {
+        'a.json', 'b.json', 'config.json',
+        os.path.join('data', 'keep.json'),
+        os.path.join('data', 'config.json')
+    }
+    assert set(excluded_files) == expected_excluded
+
+
 def test_get_excluded_files_from_gitignore(gitignore_dir):
     # Test function
     excluded_files = storage_utils.get_excluded_files_from_gitignore(
