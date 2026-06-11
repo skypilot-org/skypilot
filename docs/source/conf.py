@@ -181,8 +181,10 @@ html_favicon = '_static/favicon.ico'
 # relative to this directory. They are copied after the builtin static files,
 # so a file named 'default.css' will overwrite the builtin 'default.css'.
 html_static_path = ['_static']
-html_js_files = ['custom.js']
-html_css_files = ['custom.css']
+# Bump the version query string when changing these files so browsers don't
+# serve stale cached copies.
+html_js_files = ['custom.js?v=2']
+html_css_files = ['custom.css?v=2']
 
 # Allowing cross references in markdown files to be parsed
 myst_heading_anchors = 7
