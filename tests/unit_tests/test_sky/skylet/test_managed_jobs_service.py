@@ -329,8 +329,10 @@ class TestGetJobTable:
         assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
         )
         assert target_job.resources == '{}'
-        assert target_job.cluster_resources == '-'
-        assert target_job.cluster_resources_full == '-'
+        # No live cluster handle (job not launched), so cluster_resources falls
+        # back to the requested resources string cached in the DB.
+        assert target_job.cluster_resources == '{}'
+        assert target_job.cluster_resources_full == '{}'
         assert target_job.cloud == '-'
         assert target_job.region == '-'
         assert target_job.infra == '-'
@@ -391,8 +393,10 @@ class TestGetJobTable:
         assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
         )
         assert target_job.resources == '{}'
-        assert target_job.cluster_resources == '-'
-        assert target_job.cluster_resources_full == '-'
+        # No live cluster handle (job not launched), so cluster_resources falls
+        # back to the requested resources string cached in the DB.
+        assert target_job.cluster_resources == '{}'
+        assert target_job.cluster_resources_full == '{}'
         assert target_job.cloud == '-'
         assert target_job.region == '-'
         assert target_job.infra == '-'
