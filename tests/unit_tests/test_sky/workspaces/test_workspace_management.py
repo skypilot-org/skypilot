@@ -727,6 +727,27 @@ class TestWorkspaceManagement(unittest.TestCase):
 
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_kubernetes_block_is_none(
+            self, mock_get_users_for_role, mock_get_users):
+        """A null kubernetes block must not crash and is not additive."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # `kubernetes: null` in YAML parses to None; must not raise TypeError.
+        result = core._compare_workspace_configs(
+            {'kubernetes': None}, {'kubernetes': {
+                'allowed_contexts': ['ctx-a']
+            }})
+        self.assertFalse(result.additive_allowed_contexts)
+
+        result = core._compare_workspace_configs(
+            {'kubernetes': {
+                'allowed_contexts': ['ctx-a']
+            }}, {'kubernetes': None})
+        self.assertFalse(result.additive_allowed_contexts)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     def test_compare_workspace_configs_added_user_and_additive_contexts(
             self, mock_get_users_for_role, mock_get_users):
         """Adding a user and a context together is still flagged additive."""

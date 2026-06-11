@@ -174,8 +174,11 @@ def _extract_k8s_allowed_contexts(
     Returns a tuple of (config_without_that_field, allowed_contexts_value). The
     value is None when the field is absent. The input config is not mutated.
     """
-    kubernetes_config = config.get('kubernetes', {})
-    if 'allowed_contexts' not in kubernetes_config:
+    # The kubernetes block may be missing or explicitly null (e.g. a bare
+    # `kubernetes:` in YAML), so guard against non-dict values.
+    kubernetes_config = config.get('kubernetes')
+    if (not isinstance(kubernetes_config, dict) or
+            'allowed_contexts' not in kubernetes_config):
         return config, None
     remaining = dict(config)
     remaining['kubernetes'] = {
