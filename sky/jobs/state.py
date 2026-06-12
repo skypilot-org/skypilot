@@ -1494,11 +1494,18 @@ def build_managed_jobs_with_filters_no_status_query(
     pool_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
     count_only: bool = False,
     count_unique_jobs: bool = False,
     status_count: bool = False,
 ) -> sqlalchemy.Select:
-    """Build a query to get managed jobs from the database with filters."""
+    """Build a query to get managed jobs from the database with filters.
+
+    submitted_after / submitted_before are epoch seconds (matching the
+    ``submitted_at`` column) and restrict the result to jobs submitted within
+    the inclusive window.
+    """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
     # existing controller before #1982, the job_info table may not exist,
@@ -1566,6 +1573,10 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.where(job_info_table.c.pool.like(f'%{pool_match}%'))
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
+    if submitted_after is not None:
+        query = query.where(spot_table.c.submitted_at >= submitted_after)
+    if submitted_before is not None:
+        query = query.where(spot_table.c.submitted_at <= submitted_before)
     return query
 
 
@@ -1579,6 +1590,8 @@ def build_managed_jobs_with_filters_query(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
     count_only: bool = False,
     count_unique_jobs: bool = False,
 ) -> sqlalchemy.Select:
@@ -1592,6 +1605,8 @@ def build_managed_jobs_with_filters_query(
         pool_match=pool_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         count_only=count_only,
         count_unique_jobs=count_unique_jobs,
     )
@@ -1609,6 +1624,8 @@ def get_status_count_with_filters(
     pool_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Dict[str, int]:
     """Get the status count of the managed jobs with filters."""
     query = build_managed_jobs_with_filters_no_status_query(
@@ -1620,6 +1637,8 @@ def get_status_count_with_filters(
         pool_match=pool_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         status_count=True,
     )
     query = query.group_by(spot_table.c.status)
@@ -1703,6 +1722,8 @@ def get_managed_jobs_with_filters(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     sort_by: Optional[str] = None,
@@ -1757,6 +1778,8 @@ def get_managed_jobs_with_filters(
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         count_unique_jobs=True,
     )
     with orm.Session(engine) as session:
@@ -1779,6 +1802,8 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
         ).with_only_columns(spot_table.c.spot_job_id).group_by(
             spot_table.c.spot_job_id)
 
@@ -1834,6 +1859,8 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
         )
 
     # Apply sorting
