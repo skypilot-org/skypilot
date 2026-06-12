@@ -5,8 +5,11 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import jobs as managed_jobs
+from sky import sky_logging
 from sky.schemas.api import responses
 from sky.server import common as server_common
+
+logger = sky_logging.init_logger(__name__)
 
 
 class QueueResultVersion(enum.Enum):
@@ -77,6 +80,11 @@ def get_managed_job_queue(
                                   fields,
                                   statuses=statuses)), QueueResultVersion.V2
     except exceptions.APINotSupportedError:
+        if statuses is not None:
+            logger.warning(
+                'Filtering by status is not supported in your API server. '
+                'Please upgrade to a newer API server to use --status. '
+                'Showing all jobs.')
         return typing.cast(
             server_common.RequestId[
                 Union[List[responses.ManagedJobRecord],
