@@ -5962,6 +5962,22 @@ def jobs_launch(
                     f'{ux_utils.RESET_BOLD}')
 
 
+class StatusList(click.Choice):
+    """Comma-separated, case-insensitive choices.
+
+    Returns a list so a single ``--status FAILED,FAILED_SETUP`` and a repeated
+    ``--status FAILED --status FAILED_SETUP`` are both accepted; with
+    ``multiple=True`` the option then yields a tuple of lists to flatten.
+    """
+
+    def convert(self, value, param, ctx):
+        return [
+            super(StatusList, self).convert(v.strip(), param, ctx)
+            for v in value.split(',')
+            if v.strip()
+        ]
+
+
 @jobs.command('queue', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
@@ -5990,11 +6006,11 @@ def jobs_launch(
 @click.option('--status',
               'statuses',
               multiple=True,
-              type=click.Choice([s.value for s in ManagedJobStatus],
-                                case_sensitive=False),
+              type=StatusList([s.value for s in ManagedJobStatus],
+                              case_sensitive=False),
               required=False,
-              help='Filter by status; repeat for multiple '
-              '(e.g. --status FAILED --status FAILED_SETUP).')
+              help='Filter by status, comma-separated or repeated '
+              '(e.g. --status FAILED,FAILED_SETUP).')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -6003,7 +6019,7 @@ def jobs_launch(
 def jobs_queue(verbose: bool,
                refresh: bool,
                skip_finished: bool,
-               statuses: Tuple[str, ...],
+               statuses: Tuple[List[str], ...],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6064,11 +6080,11 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
-    (Tip) To filter by status, use ``--status`` (repeat for multiple):
+    (Tip) To filter by status, use ``--status`` (comma-separated or repeated):
 
     .. code-block:: bash
 
-      sky jobs queue --status FAILED --status FAILED_SETUP
+      sky jobs queue --status FAILED,FAILED_SETUP
 
     (Tip) To show only active (pending/running) jobs, use ``-s``:
 
@@ -6079,6 +6095,7 @@ def jobs_queue(verbose: bool,
     """
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
+    status_filter = [status for group in statuses for status in group] or None
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         max_num_jobs_to_show = (limit if not all else None)
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
@@ -6096,8 +6113,7 @@ def jobs_queue(verbose: bool,
                                                    all_users=all_users,
                                                    limit=max_num_jobs_to_show,
                                                    fields=fields,
-                                                   statuses=list(statuses) or
-                                                   None)
+                                                   statuses=status_filter)
 
         def get_pool_status():
             try:

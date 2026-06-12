@@ -7,6 +7,7 @@ import json
 from unittest import mock
 
 from click import testing as cli_testing
+import pytest
 
 from sky.catalog import common as catalog_common
 from sky.client import sdk
@@ -188,8 +189,23 @@ class TestJobsQueueJsonOutput:
         assert len(parsed) == 2
         assert parsed[1]['status'] == 'SUCCEEDED'
 
-    def test_status_filter_forwarded(self, monkeypatch):
-        """--status flags are forwarded to the queue call as a list."""
+    @pytest.mark.parametrize(
+        'args,expected',
+        [
+            # Repeated flag.
+            (['--status', 'FAILED', '--status', 'FAILED_SETUP'
+             ], ['FAILED', 'FAILED_SETUP']),
+            # Comma-separated single flag.
+            (['--status', 'FAILED,FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']),
+            # Mixed repeated + comma-separated, order preserved.
+            (['--status', 'RUNNING,FAILED', '--status', 'FAILED_SETUP'
+             ], ['RUNNING', 'FAILED', 'FAILED_SETUP']),
+            # Case-insensitive, with surrounding whitespace.
+            (['--status', 'failed, failed_setup'], ['FAILED', 'FAILED_SETUP']),
+        ])
+    def test_status_filter_forwarded(self, monkeypatch, args, expected):
+        """--status accepts repeated and comma-separated values as a flat list.
+        """
         records = [self._make_job_record()]
         mock_result = (records, 1, {'RUNNING': 1}, 0)
         captured = {}
@@ -205,12 +221,18 @@ class TestJobsQueueJsonOutput:
                             lambda *a, **kw: mock_result)
 
         runner = cli_testing.CliRunner()
-        result = runner.invoke(
-            command.jobs_queue,
-            ['-o', 'json', '--status', 'FAILED', '--status', 'FAILED_SETUP'])
+        result = runner.invoke(command.jobs_queue, ['-o', 'json'] + args)
 
         assert result.exit_code == 0, result.output
-        assert captured['statuses'] == ['FAILED', 'FAILED_SETUP']
+        assert captured['statuses'] == expected
+
+    def test_status_filter_rejects_invalid(self):
+        """An unknown status value is rejected with a non-zero exit code."""
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.jobs_queue,
+                               ['-o', 'json', '--status', 'FAILED,BOGUS'])
+        assert result.exit_code != 0
+        assert 'BOGUS' in result.output
 
 
 class TestGpusListJsonOutput:
