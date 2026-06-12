@@ -85,6 +85,21 @@ import { trackUserAction, trackFilterUsed } from '@/lib/analytics';
 
 const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
 
+// Statuses for which a managed job actually occupies GPUs and should be
+// counted toward a user's GPU usage. A job's accelerators are derived from its
+// live cluster handle, so a STARTING job (cluster still provisioning, e.g. a
+// k8s pod sitting Pending) can report accelerators it has not yet been
+// allocated, inflating per-user GPU totals above physical cluster capacity.
+// Only count jobs that have actually acquired GPUs: RUNNING, RECOVERING (a
+// previously-running job re-acquiring the same resources), and CANCELLING (the
+// cluster still holds GPUs until teardown completes). PENDING/SUBMITTED jobs
+// have no cluster handle and already report no accelerators.
+const GPU_CONSUMING_JOB_STATUSES = new Set([
+  'RUNNING',
+  'RECOVERING',
+  'CANCELLING',
+]);
+
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
   {
@@ -146,6 +161,32 @@ const getGPUCount = (accelerators, source) => {
   }
 
   return 0;
+};
+
+// Extract num_nodes from a cluster_resources_full string (e.g. "3x(...)").
+// Defaults to 1 when the count cannot be determined.
+const extractNumNodes = (clusterResourcesFull) => {
+  if (!clusterResourcesFull || typeof clusterResourcesFull !== 'string') {
+    return 1;
+  }
+  const match = clusterResourcesFull.match(/^(\d+)x/);
+  return match ? parseInt(match[1], 10) : 1;
+};
+
+// Total GPUs a managed job currently occupies, across all of its nodes.
+// Returns 0 for jobs that have not actually been allocated GPUs yet (see
+// GPU_CONSUMING_JOB_STATUSES) so per-user GPU totals never exceed the physical
+// cluster capacity.
+export const getJobGpuCount = (job) => {
+  if (!GPU_CONSUMING_JOB_STATUSES.has(job.status)) {
+    return 0;
+  }
+  const gpuCountPerNode = getGPUCount(
+    job.accelerators,
+    `Job ${job.job_name || job.job_id}`
+  );
+  const numNodes = extractNumNodes(job.resources_str_full);
+  return gpuCountPerNode * numNodes;
 };
 
 // Helper function to fetch clusters and managed jobs data with independent error handling
@@ -1585,18 +1626,6 @@ function UsersTable({
           updateCombinedLookup(userId, infra, gpuType, 1, 0, gpuCount);
         }
 
-        // Helper to extract num_nodes from cluster_resources_full (e.g., "3x(...)")
-        const extractNumNodes = (clusterResourcesFull) => {
-          if (
-            !clusterResourcesFull ||
-            typeof clusterResourcesFull !== 'string'
-          ) {
-            return 1;
-          }
-          const match = clusterResourcesFull.match(/^(\d+)x/);
-          return match ? parseInt(match[1], 10) : 1;
-        };
-
         // Process jobs to build lookup
         for (const job of jobsData || []) {
           if (!ACTIVE_JOB_STATUSES.has(job.status)) continue;
@@ -1606,14 +1635,9 @@ function UsersTable({
 
           const gpuType = extractGPUType(job.accelerators);
           const infra = job.infra;
-          const gpuCountPerNode = getGPUCount(
-            job.accelerators,
-            `Job ${job.job_id}`
-          );
-
-          // Multiply by number of nodes to get total GPU count
-          const numNodes = extractNumNodes(job.resources_str_full);
-          const gpuCount = gpuCountPerNode * numNodes;
+          // The job is always counted toward the (active) job count, but only
+          // contributes GPUs if it has actually been allocated them.
+          const gpuCount = getJobGpuCount(job);
 
           updateCombinedLookup(userId, infra, gpuType, 0, 1, gpuCount);
         }
@@ -1656,13 +1680,7 @@ function UsersTable({
               ACTIVE_JOB_STATUSES.has(job.status)
             ) {
               jobCount++;
-              const gpuCountPerNode = getGPUCount(
-                job.accelerators,
-                `Job ${job.job_id}`
-              );
-              // Multiply by number of nodes to get total GPU count
-              const numNodes = extractNumNodes(job.resources_str_full);
-              jobGPUCount += gpuCountPerNode * numNodes;
+              jobGPUCount += getJobGpuCount(job);
             }
           }
 
@@ -2883,10 +2901,7 @@ function ServiceAccountTokensView({
               ACTIVE_JOB_STATUSES.has(job.status)
             ) {
               jobCount++;
-              jobGPUCount += getGPUCount(
-                job.accelerators,
-                `Job ${job.job_name || job.job_id}`
-              );
+              jobGPUCount += getJobGpuCount(job);
             }
           }
 
