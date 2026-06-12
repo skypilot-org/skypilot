@@ -107,6 +107,12 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('is_primary_in_job_group',
                       sqlalchemy.Boolean,
                       server_default=None),
+    # The task status at the moment it entered EMERGENCY_RECOVERING, so the
+    # resume logic can re-attach to a healthy RUNNING cluster instead of
+    # tearing it down. NULL when not in EMERGENCY_RECOVERING.
+    sqlalchemy.Column('status_before_emergency',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -180,6 +186,16 @@ job_info_table = sqlalchemy.Table(
     # by API server. This id is a reference to the blob.
     sqlalchemy.Column('file_mounts_blob_id',
                       sqlalchemy.Text,
+                      server_default=None),
+    # Emergency recovery attempts used in the current episode (bounded retry
+    # budget for unexpected controller errors). NULL means 0.
+    sqlalchemy.Column('emergency_recovery_count',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    # Timestamp of the most recent emergency recovery attempt; used for
+    # retry backoff and budget decay.
+    sqlalchemy.Column('last_emergency_recovery_at',
+                      sqlalchemy.Float,
                       server_default=None),
 )
 
@@ -519,6 +535,15 @@ class ManagedJobStatus(enum.Enum):
     # RECOVERING: The cluster is preempted, and the controller process is
     # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
+    # EMERGENCY_RECOVERING: The job controller hit an unexpected internal
+    # error (e.g. external mutation of the job state, or an unhandled
+    # exception in the controller), and SkyPilot is automatically restarting
+    # job management from scratch. Unlike RECOVERING (the *cluster* was
+    # preempted or failed), the cluster may be perfectly healthy; the task
+    # status prior to the emergency is saved in status_before_emergency so
+    # that the resume logic can re-attach to a healthy cluster without
+    # restarting the workload.
+    EMERGENCY_RECOVERING = 'EMERGENCY_RECOVERING'
     # CANCELLING: The job is requested to be cancelled by the user, and the
     # controller is cleaning up the cluster.
     CANCELLING = 'CANCELLING'
@@ -590,6 +615,7 @@ class ManagedJobStatus(enum.Enum):
             cls.RUNNING,
             cls.WINDING_DOWN,
             cls.RECOVERING,
+            cls.EMERGENCY_RECOVERING,
         ]
 
     @classmethod
@@ -619,6 +645,8 @@ class ManagedJobStatus(enum.Enum):
                 cls.FAILED_NO_RESOURCE,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN:
                 cls.WINDING_DOWN,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_EMERGENCY_RECOVERING:
+                cls.EMERGENCY_RECOVERING,
         }
 
         if protobuf_value not in protobuf_to_enum:
@@ -658,6 +686,8 @@ class ManagedJobStatus(enum.Enum):
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
             ManagedJobStatus.WINDING_DOWN:
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN,
+            ManagedJobStatus.EMERGENCY_RECOVERING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_EMERGENCY_RECOVERING,
         }
 
         if self not in enum_to_protobuf:
@@ -672,6 +702,7 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
     ManagedJobStatus.WINDING_DOWN: colorama.Fore.CYAN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
+    ManagedJobStatus.EMERGENCY_RECOVERING: colorama.Fore.CYAN,
     ManagedJobStatus.SUCCEEDED: colorama.Fore.GREEN,
     ManagedJobStatus.FAILED: colorama.Fore.RED,
     ManagedJobStatus.FAILED_PRECHECKS: colorama.Fore.RED,
