@@ -74,4 +74,9 @@ describe('getJobGpuCount', () => {
       )
     ).toBe(8);
   });
+
+  it('returns 0 for a null or undefined job', () => {
+    expect(getJobGpuCount(null)).toBe(0);
+    expect(getJobGpuCount(undefined)).toBe(0);
+  });
 });

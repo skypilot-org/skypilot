@@ -178,7 +178,7 @@ const extractNumNodes = (clusterResourcesFull) => {
 // GPU_CONSUMING_JOB_STATUSES) so per-user GPU totals never exceed the physical
 // cluster capacity.
 export const getJobGpuCount = (job) => {
-  if (!GPU_CONSUMING_JOB_STATUSES.has(job.status)) {
+  if (!job || !GPU_CONSUMING_JOB_STATUSES.has(job.status)) {
     return 0;
   }
   const gpuCountPerNode = getGPUCount(
