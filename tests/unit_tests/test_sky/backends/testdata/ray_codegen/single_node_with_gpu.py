@@ -284,9 +284,19 @@ def run_with_log(
 
     # pylint: disable=subprocess-popen-preexec-fn
     # preexec_fn is the only way to set PR_SET_CHILD_SUBREAPER on the
-    # child between fork() and execve(). We're not running in a
-    # multi-threaded process at this point (run_with_log is the launcher
-    # itself), so the usual fork-with-locks-held risk doesn't apply.
+    # child between fork() and execve(). run_with_log IS reached from
+    # multi-threaded contexts (e.g. ThreadPoolExecutor workers in the
+    # API server path — empirically verified), so we cannot rely on
+    # "single-threaded fork" being safe. The reason this is still
+    # safe: subprocess_utils.set_child_subreaper() resolves the libc
+    # handle at module import (in the main thread, before any
+    # threading), and only performs an async-signal-safe prctl(2)
+    # syscall between fork() and execve(). It does NOT allocate memory,
+    # take any lock, or call any non-AS-safe library function in the
+    # forked child, so it cannot deadlock the way ctypes.util.find_library
+    # would. Caller-supplied preexec_fn is chained after ours; if that
+    # function is not AS-safe and the caller is multi-threaded, that
+    # is a pre-existing issue independent of this change.
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
