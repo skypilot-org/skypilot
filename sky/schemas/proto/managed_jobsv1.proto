@@ -91,6 +91,9 @@ message GetJobTableRequest {
   // Sorting parameters, added in ManagedJobsService v14.
   optional string sort_by = 13;
   optional string sort_order = 14;
+  // Time-range filter on submitted_at (epoch seconds).
+  optional double submitted_after = 15;
+  optional double submitted_before = 16;
 }
 
 message ManagedJobInfo {
