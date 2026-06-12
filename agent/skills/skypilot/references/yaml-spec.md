@@ -772,6 +772,17 @@ resources:
   image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
 ```
 
+You can also boot from a private `Shared Image Gallery
+<https://learn.microsoft.com/en-us/azure/virtual-machines/shared-image-galleries>`_
+image by giving its full image-version resource ID. The gallery may live in a
+different subscription than the cluster, as long as your credentials can read
+it:
+
+```yaml
+resources:
+  image_id: /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery>/images/<image>/versions/<version>
+```
+
 **OCI**
 
 To find OCI images: https://docs.oracle.com/en-us/iaas/images
