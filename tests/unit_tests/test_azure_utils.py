@@ -74,6 +74,12 @@ def test_parse_shared_image_gallery_id():
         '/subscriptions/sub-123/resourceGroups/my-rg/providers/'
         'Microsoft.ManagedIdentity/userAssignedIdentities/my-msi') is None
 
+    # A syntactically valid ARM id that matches the gallery image-version path
+    # but omits the resource-group scope must return None (not raise KeyError).
+    assert azure_utils.parse_shared_image_gallery_id(
+        '/subscriptions/sub-123/providers/Microsoft.Compute/galleries/'
+        'my-gallery/images/my-image/versions/1.0.3') is None
+
 
 def _mock_compute_client(size_in_gb):
     client = mock.MagicMock()

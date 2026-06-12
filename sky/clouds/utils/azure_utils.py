@@ -40,12 +40,24 @@ def parse_shared_image_gallery_id(
             parsed.get('child_type_1', '').lower() != 'images' or
             parsed.get('child_type_2', '').lower() != 'versions'):
         return None
+    subscription_id = parsed.get('subscription')
+    resource_group = parsed.get('resource_group')
+    gallery_name = parsed.get('name')
+    image_name = parsed.get('child_name_1')
+    version = parsed.get('child_name_2')
+    # A syntactically valid ARM id can match the gallery image-version path yet
+    # omit a scope segment (e.g. no ``resourceGroups``), leaving a component
+    # unset. Treat that as "not a SIG id" so ``validate_image_id`` raises a
+    # clean ValueError instead of a KeyError here.
+    if not all(
+        (subscription_id, resource_group, gallery_name, image_name, version)):
+        return None
     return {
-        'subscription_id': parsed['subscription'],
-        'resource_group': parsed['resource_group'],
-        'gallery_name': parsed['name'],
-        'image_name': parsed['child_name_1'],
-        'version': parsed['child_name_2'],
+        'subscription_id': subscription_id,
+        'resource_group': resource_group,
+        'gallery_name': gallery_name,
+        'image_name': image_name,
+        'version': version,
     }
 
 
@@ -169,7 +181,7 @@ def get_shared_image_gallery_image_size(
             raise exceptions.ResourcesUnavailableError(
                 f'OS disk size unavailable for Azure Shared Image Gallery '
                 f'image {image_name} version {version}.')
-        return os_disk_image.size_in_gb
+        return float(os_disk_image.size_in_gb)
     except azure.exceptions().AzureError as e:
         raise exceptions.ResourcesUnavailableError(
             f'Failed to get Shared Image Gallery image size: {e}.') from e
