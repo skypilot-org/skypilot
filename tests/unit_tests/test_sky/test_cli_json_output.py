@@ -188,6 +188,30 @@ class TestJobsQueueJsonOutput:
         assert len(parsed) == 2
         assert parsed[1]['status'] == 'SUCCEEDED'
 
+    def test_status_filter_forwarded(self, monkeypatch):
+        """--status flags are forwarded to the queue call as a list."""
+        records = [self._make_job_record()]
+        mock_result = (records, 1, {'RUNNING': 1}, 0)
+        captured = {}
+
+        def fake_get_managed_job_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_get_managed_job_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *a, **kw: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(
+            command.jobs_queue,
+            ['-o', 'json', '--status', 'FAILED', '--status', 'FAILED_SETUP'])
+
+        assert result.exit_code == 0, result.output
+        assert captured['statuses'] == ['FAILED', 'FAILED_SETUP']
+
 
 class TestGpusListJsonOutput:
     """Tests for `sky gpus list -o json` output format."""

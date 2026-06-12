@@ -178,6 +178,7 @@ def queue_v2(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    statuses: Optional[List[str]] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -193,6 +194,7 @@ def queue_v2(
         fields: Fields to get for the managed jobs.
         sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
         sort_order: Sort direction ('asc' or 'desc').
+        statuses: Only return jobs whose status is in this list.
 
     Returns:
         The request ID of the queue request.
@@ -251,6 +253,7 @@ def queue_v2(
         fields=fields,
         sort_by=sort_by,
         sort_order=sort_order,
+        statuses=statuses,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(

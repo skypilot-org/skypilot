@@ -5987,6 +5987,14 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
+@click.option('--status',
+              'statuses',
+              multiple=True,
+              type=click.Choice([s.value for s in ManagedJobStatus],
+                                case_sensitive=False),
+              required=False,
+              help='Filter by status; repeat for multiple '
+              '(e.g. --status FAILED --status FAILED_SETUP).')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -5995,6 +6003,7 @@ def jobs_launch(
 def jobs_queue(verbose: bool,
                refresh: bool,
                skip_finished: bool,
+               statuses: Tuple[str, ...],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6055,6 +6064,18 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
+    (Tip) To filter by status, use ``--status`` (repeat for multiple):
+
+    .. code-block:: bash
+
+      sky jobs queue --status FAILED --status FAILED_SETUP
+
+    (Tip) To show only active (pending/running) jobs, use ``-s``:
+
+    .. code-block:: bash
+
+      sky jobs queue -s
+
     """
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
@@ -6074,7 +6095,9 @@ def jobs_queue(verbose: bool,
                                                    skip_finished=skip_finished,
                                                    all_users=all_users,
                                                    limit=max_num_jobs_to_show,
-                                                   fields=fields)
+                                                   fields=fields,
+                                                   statuses=list(statuses) or
+                                                   None)
 
         def get_pool_status():
             try:

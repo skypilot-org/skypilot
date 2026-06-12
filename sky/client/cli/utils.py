@@ -36,6 +36,7 @@ def get_managed_job_queue(
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    statuses: Optional[List[str]] = None,
 ) -> Tuple[server_common.RequestId[Union[List[responses.ManagedJobRecord],
                                          Tuple[List[responses.ManagedJobRecord],
                                                int, Dict[str, int], int]]],
@@ -51,6 +52,7 @@ def get_managed_job_queue(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+        statuses: Only return jobs whose status is in this list.
 
     Returns:
         - the request ID of the queue request
@@ -67,8 +69,13 @@ def get_managed_job_queue(
                 Union[List[responses.ManagedJobRecord],
                       Tuple[List[responses.ManagedJobRecord], int,
                             Dict[str, int], int]]],
-            managed_jobs.queue_v2(refresh, skip_finished, all_users, job_ids,
-                                  limit, fields)), QueueResultVersion.V2
+            managed_jobs.queue_v2(refresh,
+                                  skip_finished,
+                                  all_users,
+                                  job_ids,
+                                  limit,
+                                  fields,
+                                  statuses=statuses)), QueueResultVersion.V2
     except exceptions.APINotSupportedError:
         return typing.cast(
             server_common.RequestId[
