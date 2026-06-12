@@ -6,7 +6,6 @@ import logging
 import os
 import pathlib
 import platform
-import shutil
 import time
 import traceback
 from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
@@ -24,6 +23,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core as managed_jobs_core
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server.requests import log_provider
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants as skylet_constants
@@ -712,17 +712,17 @@ def _dump_request_id_info(
                     'traceback': _full_traceback()
                 })
 
-        # Copy request log file
+        # Copy request log file. Routed through the LogProvider so that
+        # deployments whose request logs are not on the local filesystem
+        # can fetch them from wherever they live.
         try:
-            log_path = (pathlib.Path(
-                server_constants.REQUEST_LOG_PATH_PREFIX).expanduser() /
-                        f'{request_id}.log')
-            if log_path.exists():
-                shutil.copy2(log_path, os.path.join(request_dir, 'request.log'))
+            copied = log_provider.get_log_provider().copy_log_file(
+                request_id, log_provider.RequestLogType.REQUEST,
+                pathlib.Path(request_dir) / 'request.log')
+            if copied:
                 logger.debug(f'Copied request log for {request_id}')
             else:
-                logger.debug(f'Request log not found for {request_id}: '
-                             f'{log_path}')
+                logger.debug(f'Request log not found for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to copy log for request {request_id}: {e}')
             if errors is not None:
@@ -736,11 +736,10 @@ def _dump_request_id_info(
         # Copy debug log file (only exists when
         # ENABLE_REQUEST_DEBUG_LOGGING is enabled)
         try:
-            debug_log_path = pathlib.Path(
-                sky_logging.DEBUG_LOG_DIR) / f'{request_id}.log'
-            if debug_log_path.exists():
-                shutil.copy2(debug_log_path,
-                             os.path.join(request_dir, 'request_debug.log'))
+            copied = log_provider.get_log_provider().copy_log_file(
+                request_id, log_provider.RequestLogType.DEBUG,
+                pathlib.Path(request_dir) / 'request_debug.log')
+            if copied:
                 logger.debug(f'Copied debug log for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(

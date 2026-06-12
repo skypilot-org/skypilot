@@ -1,12 +1,45 @@
 """Provider for request logs."""
 import abc
+import enum
 import pathlib
+import shutil
 from typing import AsyncGenerator, Optional
 
 from sky import sky_logging
+from sky.server import constants as server_constants
 from sky.server import stream_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+class RequestLogType(enum.Enum):
+    """Types of per-request log files."""
+    # The request execution log, written by the executor to
+    # REQUEST_LOG_PATH_PREFIX/<request_id>.log.
+    REQUEST = 'request'
+    # The request debug log, written to DEBUG_LOG_DIR/<request_id>.log
+    # when SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING is enabled.
+    DEBUG = 'debug'
+
+
+def local_log_path(request_id: str, log_type: RequestLogType) -> pathlib.Path:
+    """Return the local filesystem path for a request's log file.
+
+    Raises:
+        ValueError: if request_id would escape the log directory
+            (path traversal).
+    """
+    if log_type == RequestLogType.REQUEST:
+        prefix = pathlib.Path(
+            server_constants.REQUEST_LOG_PATH_PREFIX).expanduser()
+    else:
+        prefix = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
+    log_path = (prefix / f'{request_id}.log').resolve()
+    try:
+        log_path.relative_to(prefix.resolve())
+    except ValueError:
+        raise ValueError(f'Invalid request_id: {request_id!r}') from None
+    return log_path
 
 
 class LogProvider(abc.ABC):
@@ -38,6 +71,23 @@ class LogProvider(abc.ABC):
         """
         del request_id, log_path, plain_logs, tail, follow, polling_interval
         yield ''
+
+    def copy_log_file(self, request_id: str, log_type: RequestLogType,
+                      dest_path: pathlib.Path) -> bool:
+        """Copy a request's log file to dest_path (e.g. for a debug dump).
+
+        The default implementation copies from the local filesystem.
+        Providers backed by other log stores may override this to fetch
+        the log from wherever it lives.
+
+        Returns:
+            True if the log file was found and copied, False otherwise.
+        """
+        src_path = local_log_path(request_id, log_type)
+        if not src_path.exists():
+            return False
+        shutil.copy2(src_path, dest_path)
+        return True
 
 
 class LocalLogProvider(LogProvider):

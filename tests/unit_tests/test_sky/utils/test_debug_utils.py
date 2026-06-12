@@ -11,6 +11,7 @@ import zipfile
 import pytest
 
 from sky.server import constants as server_constants
+from sky.server.requests import log_provider as log_provider_lib
 from sky.server.requests import request_names
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
@@ -2285,20 +2286,25 @@ class TestDumpRequestIdInfo:
         assert not errors
         assert not (tmp_path / 'requests').exists()
 
-    @mock.patch('sky.utils.debug_utils.shutil.copy2')
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_copies_log_file_when_exists(self, mock_get_request, mock_copy2,
-                                         tmp_path):
-        """Should copy request log when it exists."""
+    def test_copies_log_file_when_exists(self, mock_get_request,
+                                         mock_get_provider, tmp_path):
+        """Should copy request log via the LogProvider."""
         mock_get_request.return_value = _make_request(request_id='req-log')
+        provider = mock.MagicMock()
+        provider.copy_log_file.return_value = True
+        mock_get_provider.return_value = provider
 
-        with mock.patch('pathlib.Path.exists', return_value=True):
-            errors: List[Dict[str, str]] = []
-            debug_utils._dump_request_id_info({'req-log'}, str(tmp_path),
-                                              errors)
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-log'}, str(tmp_path), errors)
 
-        # copy2 should be called at least once (for the log file)
-        assert mock_copy2.called
+        # copy_log_file should be called for the request log
+        assert provider.copy_log_file.called
+        dest_paths = [
+            call.args[2] for call in provider.copy_log_file.call_args_list
+        ]
+        assert any(p.name == 'request.log' for p in dest_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -2433,3 +2439,69 @@ class TestDumpClusterInfo:
             data = json.load(f)
         assert len(data) == 1
         assert data[0]['request_id'] == 'req-a'
+
+
+class TestDumpRequestIdInfoLogCollection:
+    """_dump_request_id_info collects logs via the LogProvider."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_get_request(self):
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        return_value=None):
+            yield
+
+    def test_logs_collected_via_log_provider(self, tmp_path):
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            del request_id  # unused
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text('request log content')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        request_dir = tmp_path / 'requests' / 'req-1'
+        assert (request_dir / 'request.log').exists()
+        assert (request_dir /
+                'request.log').read_text() == 'request log content'
+        # Debug log copy returned False -> no file, and that is not an
+        # error.
+        assert not (request_dir / 'request_debug.log').exists()
+        assert not errors
+
+        # Both log types were requested from the provider.
+        log_types = [
+            call.args[1] for call in provider.copy_log_file.call_args_list
+        ]
+        assert log_provider_lib.RequestLogType.REQUEST in log_types
+        assert log_provider_lib.RequestLogType.DEBUG in log_types
+
+    def test_provider_failure_is_recorded(self, tmp_path):
+        provider = mock.MagicMock()
+        provider.copy_log_file.side_effect = OSError('fetch failed')
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        # Failures are recorded in the errors manifest but do not abort
+        # the dump.
+        assert any(e['resource'] == 'req-1/log' for e in errors)
+
+    def test_default_provider_copies_local_files(self, tmp_path):
+        src = tmp_path / 'src.log'
+        src.write_text('local content')
+        with mock.patch('sky.server.requests.log_provider.local_log_path',
+                        return_value=src):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-2'}, str(tmp_path), errors)
+
+        request_dir = tmp_path / 'requests' / 'req-2'
+        assert (request_dir / 'request.log').read_text() == 'local content'
+        assert not errors
