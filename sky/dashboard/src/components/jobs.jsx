@@ -487,6 +487,8 @@ export function ManagedJobsTable({
   const expandedRowRef = useRef(null);
   const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState([]);
+  // Time-range filter on submitted_at, in seconds. null means "all time".
+  const [timeRangeSeconds, setTimeRangeSeconds] = useState(null);
   const [statusCounts, setStatusCounts] = useState({});
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
@@ -543,6 +545,15 @@ export function ManagedJobsTable({
     // For activeTab === 'all' and showAllMode === true, show all jobs
     return [];
   }, [selectedStatuses, showAllMode, activeTab]);
+
+  // Convert the selected time range to an absolute submitted_after epoch
+  // (seconds), recomputed on each render so the window stays anchored to now.
+  const submittedAfter = React.useMemo(() => {
+    if (timeRangeSeconds === null) {
+      return undefined;
+    }
+    return Date.now() / 1000 - timeRangeSeconds;
+  }, [timeRangeSeconds]);
 
   // Convert sortConfig to API format
   const sortBy = React.useMemo(
@@ -638,6 +649,7 @@ export function ManagedJobsTable({
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
+          submittedAfter,
           page: currentPage,
           limit: pageSize,
           sortBy,
@@ -743,6 +755,7 @@ export function ManagedJobsTable({
       currentPage,
       pageSize,
       computedStatuses,
+      submittedAfter,
       sortBy,
       sortOrder,
       userScope,
@@ -825,6 +838,13 @@ export function ManagedJobsTable({
       fetchData({ includeStatus: true });
     }
   }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
+
+  // Fetch on time-range filter changes
+  React.useEffect(() => {
+    if (!isInitialFetch.current && preloadingComplete) {
+      fetchData({ includeStatus: true });
+    }
+  }, [timeRangeSeconds, fetchData, preloadingComplete]);
 
   // Fetch on sort config changes for server-side sorting
   // Skip on initial fetch (sortConfig has default value)
@@ -2209,6 +2229,29 @@ export function ManagedJobsTable({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
+            <label className="flex items-center text-sm text-gray-600">
+              <span className="mr-1.5">Submitted:</span>
+              <select
+                aria-label="Filter jobs by submission time"
+                className="rounded border border-gray-200 bg-white px-2 py-0.5 text-sm text-gray-700"
+                value={
+                  timeRangeSeconds === null ? 'all' : String(timeRangeSeconds)
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  React.startTransition(() => {
+                    setTimeRangeSeconds(v === 'all' ? null : Number(v));
+                    setCurrentPage(1);
+                  });
+                }}
+              >
+                <option value="all">All time</option>
+                <option value={String(24 * 60 * 60)}>Last 24h</option>
+                <option value={String(7 * 24 * 60 * 60)}>Last 7d</option>
+                <option value={String(14 * 24 * 60 * 60)}>Last 14d</option>
+                <option value={String(30 * 24 * 60 * 60)}>Last 30d</option>
+              </select>
+            </label>
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
