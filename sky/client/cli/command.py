@@ -5987,6 +5987,13 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
+@click.option(
+    '--since',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted within this time window, relative to now '
+          '(e.g. "30m", "48h", "7d", "2w"). A bare number is seconds.'))
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -5995,6 +6002,7 @@ def jobs_launch(
 def jobs_queue(verbose: bool,
                refresh: bool,
                skip_finished: bool,
+               since: Optional[str],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6055,7 +6063,17 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
+    (Tip) To show only jobs submitted in the last 7 days, use ``--since``:
+
+    .. code-block:: bash
+
+      sky jobs queue --since 7d
+
     """
+    submitted_after = None
+    if since is not None:
+        submitted_after = time.time() - resources_utils.parse_time_seconds(
+            since)
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
@@ -6070,11 +6088,13 @@ def jobs_queue(verbose: bool,
         # Call both cli_utils.get_managed_job_queue and managed_jobs.pool_status
         # in parallel
         def get_managed_jobs_queue():
-            return cli_utils.get_managed_job_queue(refresh=refresh,
-                                                   skip_finished=skip_finished,
-                                                   all_users=all_users,
-                                                   limit=max_num_jobs_to_show,
-                                                   fields=fields)
+            return cli_utils.get_managed_job_queue(
+                refresh=refresh,
+                skip_finished=skip_finished,
+                all_users=all_users,
+                limit=max_num_jobs_to_show,
+                fields=fields,
+                submitted_after=submitted_after)
 
         def get_pool_status():
             try:
