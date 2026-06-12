@@ -180,8 +180,8 @@ async def score_batch(items: List[RewardRequest]) -> List[RewardResponse]:
         return []
 
     sandboxes = await sandbox.create.aio(name="reward",
-                                             num_sandboxes=len(items),
-                                             pool=POOL_NAME)
+                                         num_sandboxes=len(items),
+                                         pool=POOL_NAME)
     try:
         rewards = await asyncio.gather(
             *(score_one(sb, item) for sb, item in zip(sandboxes, items)))
@@ -203,10 +203,10 @@ def ensure_pool():
     """
     try:
         sandbox.create_pool(name=POOL_NAME,
-                                image=POOL_IMAGE,
-                                cpus=1,
-                                memory_gb=2,
-                                replicas=POOL_REPLICAS)
+                            image=POOL_IMAGE,
+                            cpus=1,
+                            memory_gb=2,
+                            replicas=POOL_REPLICAS)
         print(f"Created warm pool '{POOL_NAME}' "
               f"(image={POOL_IMAGE}, replicas={POOL_REPLICAS})")
     except Exception as e:  # pylint: disable=broad-except
