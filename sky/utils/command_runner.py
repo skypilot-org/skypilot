@@ -44,6 +44,14 @@ _INTERACTIVE_AUTH_LOCK = threading.Lock()
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
+# Timeout (seconds) for the remote home-directory probe. This is a trivial
+# `echo ~` and should return near-instantly. We bound it so that a hung
+# connection to an unhealthy/terminating node (e.g. a `kubectl exec` into a pod
+# stuck in Terminating, which `--pod-running-timeout` does NOT bound) is killed
+# instead of blocking the caller indefinitely. The bound is enforced via
+# run_with_log's timeout, which SIGKILLs the underlying process.
+_GET_REMOTE_HOME_DIR_TIMEOUT_SECONDS = 20
+
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
 # shooting a lot of messages to the output. --info=progress2 is used
@@ -64,6 +72,13 @@ RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
+# rsync's --timeout is an *idle* I/O timeout: it aborts only if no data is
+# transferred for this many seconds. Unlike a wall-clock cap, it does not
+# truncate a large-but-actively-progressing transfer (e.g. syncing a multi-GB
+# log over a slow link), while still killing a connection that has black-holed
+# against an unhealthy/terminating node within ~this many seconds.
+RSYNC_IO_TIMEOUT_SECONDS = 120
+RSYNC_IO_TIMEOUT_OPTION = f'--timeout={RSYNC_IO_TIMEOUT_SECONDS}'
 
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
@@ -342,10 +357,21 @@ class CommandRunner:
         # Some container images print MOTD when login shells start, which can
         # contaminate command output. We use a unique pattern to extract the
         # actual home directory reliably.
-        rc, output, stderr = self.run('echo "SKYPILOT_HOME_DIR: $(echo ~)"',
-                                      require_outputs=True,
-                                      separate_stderr=True,
-                                      stream_logs=False)
+        try:
+            rc, output, stderr = self.run(
+                'echo "SKYPILOT_HOME_DIR: $(echo ~)"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+                # Bound this trivial probe so it cannot hang forever on an
+                # unhealthy/terminating node. run_with_log SIGKILLs the
+                # underlying process on timeout.
+                timeout=_GET_REMOTE_HOME_DIR_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as e:
+            raise ValueError(
+                'Failed to get remote home directory: timed out after '
+                f'{_GET_REMOTE_HOME_DIR_TIMEOUT_SECONDS}s. The node may be '
+                'unhealthy or stuck terminating.') from e
         if rc != 0:
             raise ValueError('Failed to get remote home directory: '
                              f'{output + stderr}')
@@ -463,6 +489,11 @@ class CommandRunner:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
         rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
+        # Idle I/O timeout so a stalled connection (e.g. to an unhealthy or
+        # terminating node) cannot hang rsync indefinitely. This is an idle
+        # bound, not a total-transfer cap, so it does not truncate large
+        # transfers that are still making progress.
+        rsync_command.append(RSYNC_IO_TIMEOUT_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.
