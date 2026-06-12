@@ -4,6 +4,7 @@ processes of proc_pid.
 """
 import argparse
 import os
+import pathlib
 import signal
 import sys
 import time
@@ -20,12 +21,48 @@ USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
 REAP_WEDGED_PARENTS_ENV_VAR = 'SKYPILOT_REAP_WEDGED_PARENTS'
 
 # How long a zombie descendant must persist before we treat its parent
-# as wedged and SIGKILL it. Configurable via env var; default 30 s.
-# 30 s gives a normal program plenty of time to call wait()/reap a
-# briefly-zombie child between fork() and the parent's next instruction;
-# real wedges sit at zombie for the entire lifetime of the wedged ancestor.
+# as wedged and SIGKILL it. Configurable via env var; default 60 s.
+# A well-behaved program reaps any child it forked within microseconds
+# to milliseconds; the conservative 60 s threshold avoids false-positive
+# kills of programs that happen to use unusual reap patterns (raw os.fork
+# without wait, very-slow polling loops) while still catching real wedges
+# (which sit at zombie for the entire lifetime of the wedged ancestor).
+# Users for whom 60 s is too aggressive can disable the sweep entirely
+# via SKYPILOT_REAP_WEDGED_PARENTS=0.
 ZOMBIE_GRACE_ENV_VAR = 'SKYPILOT_ZOMBIE_GRACE_SECONDS'
-_DEFAULT_ZOMBIE_GRACE_SECONDS = 30.0
+_DEFAULT_ZOMBIE_GRACE_SECONDS = 60.0
+
+# How long to wait for a SIGTERM to take effect before escalating to
+# SIGKILL on a wedged ancestor. Some wedge shapes are signal-interruptible
+# (e.g. signal.pause(), mp.Event().wait()) — a second SIGTERM unwinds them.
+# Sending SIGTERM first, then SIGKILL on timeout, lets those processes
+# exit cleanly (running their atexit hooks) instead of being force-killed.
+_WEDGE_SIGTERM_GRACE_SECONDS = 5.0
+
+# Daemon log file (separate per task — sharing a path across daemons would
+# interleave concurrent writes). Set by main() so that helper functions
+# can log via _log(); when this is None we fall back to /dev/null-equivalent
+# silence rather than risk writes to a closed/missing file.
+_LOG_PATH: Optional[str] = None
+
+
+def _log(message: str) -> None:
+    """Append a single log line to the daemon's log file (if set).
+
+    Daemonize() detaches stdout/stderr from the parent (and
+    kill_process_daemon spawns us with stdout=DEVNULL/stderr=DEVNULL),
+    so plain print() goes nowhere. Route everything through this helper
+    so wedge-kill events and other diagnostics are recoverable from
+    ~/.sky/subprocess_daemon-<pid>.log after the fact.
+    """
+    if _LOG_PATH is None:
+        return
+    try:
+        with open(_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(f'[{time.strftime("%Y-%m-%d %H:%M:%S")}] {message}\n')
+    except OSError:
+        # Best-effort logging; never crash the daemon over a log write.
+        pass
 
 
 def daemonize():
@@ -92,23 +129,73 @@ def kill_process_group(pgid: int) -> bool:
     return True
 
 
+def _term_then_kill(target: psutil.Process,
+                    grace_seconds: float = _WEDGE_SIGTERM_GRACE_SECONDS) -> str:
+    """Send SIGTERM, wait up to grace_seconds for exit, then SIGKILL if alive.
+
+    Returns a short tag describing the outcome ('term' / 'kill' / 'gone' /
+    'denied') for logging.
+
+    Why TERM-first even for a "wedged" process: many wedge shapes are
+    signal-interruptible. Empirically, processes wedged in signal.pause(),
+    mp.Event().wait(), or other blocking-but-signal-aware calls unwind
+    cleanly on a second SIGTERM (the handler runs, the originating except
+    block has already executed, the exception propagates to top-level and
+    the process exits naturally). Force-killing those would skip atexit
+    handlers and child-cleanup that the program might still complete.
+    For wedges that truly ignore SIGTERM, SIGKILL still fires after
+    grace_seconds.
+    """
+    try:
+        target.terminate()
+    except psutil.NoSuchProcess:
+        return 'gone'
+    except psutil.AccessDenied:
+        return 'denied'
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline:
+        try:
+            if not target.is_running() or target.status() == (
+                    psutil.STATUS_ZOMBIE):
+                return 'term'
+        except psutil.NoSuchProcess:
+            return 'term'
+        time.sleep(0.5)
+    try:
+        target.kill()
+        return 'kill'
+    except psutil.NoSuchProcess:
+        return 'term'
+    except psutil.AccessDenied:
+        return 'denied'
+
+
 def _zombie_wedge_sweep(descendants: List[psutil.Process],
                         zombie_first_seen: Dict[int,
                                                 float], grace_seconds: float,
                         proc_pid: int, parent_pid: int) -> None:
-    """Age each zombie descendant; SIGKILL the wedged parent of any that
-    have outlived the grace period.
+    """Age each zombie descendant; force-kill the wedged parent of any
+    that have outlived the grace period.
 
     A wedged process — one whose SIGTERM handler raised an exception out
     of the wait path — accumulates zombie children that never get reaped.
     When a zombie has been zombie for > grace_seconds, its parent isn't
-    just slow, it's stuck; SIGKILL is the only way out. The PPID-transition
-    machinery in the caller then handles the parent's still-alive siblings
-    on the next tick (they reparent to the subreaper, which is proc_pid).
+    just slow, it's stuck; SIGTERM is tried first (some wedge shapes are
+    signal-interruptible and exit cleanly on a 2nd SIGTERM), then SIGKILL
+    after a short grace if still alive. The PPID-transition machinery in
+    the caller then handles the parent's still-alive siblings on the next
+    tick (they reparent to the subreaper, which is proc_pid).
 
     Excluded targets: PID 1, the watched subreaper itself, and the outer
-    parent (the SkyPilot orchestrator) — killing any of those would
-    bring the whole task down, defeating the daemon's purpose.
+    parent (the SkyPilot orchestrator) — killing any of those would bring
+    the whole task down, defeating the daemon's purpose.
+
+    False-positive risk note: programs that use raw os.fork() without ever
+    calling wait() will leave indefinite zombies that this sweep will
+    treat as wedges. The default 60 s grace is conservative; most users
+    won't hit this. Set SKYPILOT_REAP_WEDGED_PARENTS=0 to disable, or
+    raise SKYPILOT_ZOMBIE_GRACE_SECONDS if the workload is known to leave
+    long-lived benign zombies.
     """
     now = time.monotonic()
     for descendant in descendants:
@@ -133,24 +220,20 @@ def _zombie_wedge_sweep(descendants: List[psutil.Process],
             continue
         try:
             wedged = psutil.Process(wedged_ppid)
-            print(
-                f'Wedge detected: descendant pid={descendant.pid} has been '
-                f'zombie for >{grace_seconds:.0f}s under ppid={wedged_ppid} '
-                f'({wedged.name()}); the parent has stopped reaping its '
-                f'children. SIGKILLing the wedged parent so any still-alive '
-                f'siblings reparent to the subreaper (pid={proc_pid}) and '
-                f'get cleaned up by the PPID-transition sweep.',
-                file=sys.stderr,
-                flush=True)
-            wedged.kill()
+            wedged_name = wedged.name()
         except psutil.NoSuchProcess:
-            pass
-        except psutil.AccessDenied as e:
-            print(
-                f'Wedge detected but SIGKILL denied for ppid={wedged_ppid}: '
-                f'{e}',
-                file=sys.stderr,
-                flush=True)
+            zombie_first_seen.pop(descendant.pid, None)
+            continue
+        _log(f'Wedge detected: descendant pid={descendant.pid} has been '
+             f'zombie for >{grace_seconds:.0f}s under ppid={wedged_ppid} '
+             f'({wedged_name}); the parent has stopped reaping its children. '
+             f'Sending SIGTERM, escalating to SIGKILL after '
+             f'{_WEDGE_SIGTERM_GRACE_SECONDS:.0f}s if still alive.')
+        outcome = _term_then_kill(wedged)
+        _log(f'Wedge cleanup for ppid={wedged_ppid}: outcome={outcome}. '
+             f'Any still-alive siblings will reparent to the subreaper '
+             f'(pid={proc_pid}) and be cleaned up by the PPID-transition '
+             f'sweep.')
         # Either we killed the wedged parent (zombie will be reaped by
         # the new init), or we hit AccessDenied (won't retry until the
         # zombie pid is reused). Either way, drop the entry.
@@ -203,6 +286,22 @@ def main():
             'while the children are still running.'),
     )
     args = parser.parse_args()
+
+    # Open a per-daemon log file in ~/.sky/. kill_process_daemon spawns
+    # us with stdout/stderr both routed to /dev/null, so plain prints
+    # would be invisible — without this log, wedge-kill events would
+    # leave no audit trail.
+    global _LOG_PATH
+    try:
+        log_dir = pathlib.Path(os.path.expanduser('~/.sky'))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        _LOG_PATH = str(log_dir / f'subprocess_daemon-{args.proc_pid}.log')
+        _log(f'Daemon started: proc_pid={args.proc_pid} '
+             f'parent_pid={args.parent_pid} pid={os.getpid()}')
+    except OSError:
+        # If we cannot open the log file, continue without logging
+        # rather than crash the daemon.
+        _LOG_PATH = None
 
     process = None
     parent_process = None

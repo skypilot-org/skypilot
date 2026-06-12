@@ -1073,11 +1073,13 @@ def test_kubernetes_wedged_parent_zombie_reaping():
 
     Assertion:
       - The wedge sweep ages the zombie helper; once it has been zombie
-        for the configured grace period (30 s default, see
+        for the configured grace period (60 s default, see
         ``subprocess_daemon._DEFAULT_ZOMBIE_GRACE_SECONDS``), the daemon
-        SIGKILLs the wedged parent. The worker then reparents to the
-        subreaper, and the existing PPID-transition logic terminates it.
-        Both child PIDs are gone within ~50 s of the SIGTERM.
+        sends SIGTERM to the wedged parent (signal-interruptible wedges
+        exit here) and escalates to SIGKILL after a 5 s grace. The worker
+        then reparents to the subreaper, and the existing PPID-transition
+        logic terminates it. Both child PIDs are gone within ~80 s of the
+        SIGTERM.
     """
     name = smoke_tests_utils.get_cluster_name()
     cfg = 'tests/test_yamls/orphan_reap_sigterm_wedge.yaml'
@@ -1099,9 +1101,9 @@ def test_kubernetes_wedged_parent_zombie_reaping():
         # catches it, raises KeyboardInterrupt, falls into signal.pause().
         f'ssh {name} "kill $P" && '
         f'echo "T-0: sent SIGTERM to parent $P" && '
-        # Daemon polls every 1 s; zombie grace default = 30 s; SIGKILL
-        # escalation + PPID-transition cleanup adds a few more. Allow 50 s.
-        f'sleep 50 && '
+        # Daemon polls every 1 s; zombie grace default = 60 s; SIGTERM
+        # phase = 5 s; PPID-transition cleanup adds a few more. Allow 80 s.
+        f'sleep 80 && '
         # Both children gone? Parent gone?
         f'if ssh {name} "kill -0 $W 2>/dev/null"; then '
         f'  echo "FAIL: worker $W still alive — wedge not detected"; exit 1; fi && '
