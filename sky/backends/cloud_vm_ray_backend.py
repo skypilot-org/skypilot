@@ -2007,8 +2007,18 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
+        # A handle is created before provisioning runs, so nothing is set up
+        # on the cluster yet; bulk_provision() fills in the real record on
+        # completion. Defaulting to no-Ray keeps teardown of a cluster that
+        # crashed or recovered mid-provisioning from attempting `ray stop` on
+        # a cluster where Ray never started.
         self.provision_runtime_metadata = (
-            provision_common.ProvisionRuntimeMetadata())
+            provision_common.ProvisionRuntimeMetadata(
+                has_ray=False,
+                has_skylet=False,
+                has_job_queue=False,
+                ssh_available=False,
+            ))
 
     def __repr__(self):
         return (f'ResourceHandle('
