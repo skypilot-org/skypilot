@@ -1033,7 +1033,7 @@ def test_kubernetes_orphan_process_reaping():
     test = smoke_tests_utils.Test(
         'kubernetes_orphan_process_reaping',
         [
-            f'sky launch -y -c {name} {cfg}',
+            f'sky launch -y -c {name} -d {cfg}',
             repro_and_assert,
         ],
         teardown=f'sky down -y {name}',
@@ -1114,7 +1114,7 @@ def test_kubernetes_wedged_parent_zombie_reaping():
     test = smoke_tests_utils.Test(
         'kubernetes_wedged_parent_zombie_reaping',
         [
-            f'sky launch -y -c {name} {cfg}',
+            f'sky launch -y -c {name} -d {cfg}',
             repro_and_assert,
         ],
         teardown=f'sky down -y {name}',
