@@ -2404,6 +2404,7 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
+                        **_REMOTE_IDENTITY_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -2417,6 +2418,8 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
+                        'remote_identity':
+                            (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                     },
                     'additionalProperties': False,
                 },
@@ -2524,10 +2527,12 @@ def get_config_schema():
                                         },
                                     },
                                     **_extra_kubernetes_properties,
+                                    **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                                 },
                             },
                         },
                         **_extra_kubernetes_properties,
+                        **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                     },
                     # On the server, plugins have registered
                     # their properties via

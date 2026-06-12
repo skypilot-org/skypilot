@@ -25,6 +25,7 @@ from sky.users import resolver as user_resolver
 from sky.users import token_service
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import resource_checker
 from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
@@ -142,6 +143,7 @@ def set_user_preferred_workspace(
 
 
 @router.get('/me/workspace')
+@context.contextual
 def get_user_workspace(
     request: fastapi.Request,
     requested: Optional[str] = None,
@@ -301,6 +303,7 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
 
 
 @router.post('/update')
+@context.contextual
 def user_update(request: fastapi.Request,
                 user_update_body: payloads.UserUpdateBody) -> None:
     """Updates the user role."""
@@ -375,6 +378,7 @@ def user_update(request: fastapi.Request,
 
 
 @router.post('/batch_update')
+@context.contextual
 def user_batch_update(request: fastapi.Request,
                       body: payloads.UserBatchUpdateBody) -> Dict[str, Any]:
     """Updates the role for a batch of users.
@@ -519,6 +523,7 @@ def _delete_user(user_id: str) -> None:
 
 
 @router.post('/delete')
+@context.contextual
 def user_delete(request: fastapi.Request,
                 user_delete_body: payloads.UserDeleteBody) -> None:
     current_user = request.state.auth_user

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   API_VERSION_HEADER,
@@ -471,6 +471,12 @@ export async function getPoolStatus() {
     const data = await fetchedData.json();
     const poolData = data.return_value ? JSON.parse(data.return_value) : [];
 
+    // Skip the active-jobs fetch entirely when there are no pools — the
+    // job counts it computes have nothing to attach to.
+    if (poolData.length === 0) {
+      return { pools: [], controllerStopped: false };
+    }
+
     // Also fetch managed jobs to get job counts by pool
     let jobsData = { jobs: [] };
     try {
@@ -533,6 +539,9 @@ export async function getPoolStatus() {
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
+  // Track the last seen refresh trigger so we only invalidate the cache when
+  // it actually increments (a manual refresh), not on every effect run.
+  const prevRefreshTriggerRef = useRef(refreshTrigger);
 
   const loading = loadingJobData;
 
@@ -543,10 +552,21 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Fetch the specific job by ID with all fields for complete data
-        const allJobsData = await dashboardCache.get(getManagedJobs, [
+        // Fetch the specific job by ID with all fields for complete data.
+        const cacheArgs = [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
-        ]);
+        ];
+        // Drop the cached entry only when the refresh trigger actually
+        // increments (a manual refresh), so the click fetches fresh data.
+        // Guarding on `> 0` instead would also invalidate the new job's
+        // cache when navigating between jobs while the trigger stays elevated
+        // (the parent keeps refreshTrigger state across jobId changes),
+        // defeating the cache on initial load.
+        if (refreshTrigger > prevRefreshTriggerRef.current) {
+          dashboardCache.invalidate(getManagedJobs, cacheArgs);
+        }
+        prevRefreshTriggerRef.current = refreshTrigger;
+        const allJobsData = await dashboardCache.get(getManagedJobs, cacheArgs);
 
         // Filter for ALL tasks matching this job_id (supports multi-task jobs)
         const matchingJobs =

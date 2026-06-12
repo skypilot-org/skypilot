@@ -620,3 +620,30 @@ def test_replace_yaml_dicts_restores_new_nested_field_when_old_is_null():
         backend_utils._RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
     result = yaml_utils.read_yaml_str(out)
     assert result['provider']['security_group']['GroupName'] == 'new-name'
+
+
+def test_make_safe_symlink_command_default_uses_sudo():
+    """By default the privileged steps are prefixed with sudo."""
+    cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source='/etc/config', target='/home/user/.sky/etc/config')
+    assert 'sudo mkdir -p /etc' in cmd
+    assert 'sudo ln -s /home/user/.sky/etc/config /etc/config' in cmd
+
+
+def test_make_safe_symlink_command_empty_sudo_cmd_omits_sudo():
+    """Passing sudo_cmd='' drops the prefix so the command does not depend on
+    a sudo binary (e.g. a container already running as root)."""
+    cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source='/etc/config', target='/home/user/.sky/etc/config', sudo_cmd='')
+    assert 'sudo' not in cmd
+    assert cmd.startswith('mkdir -p /etc')
+    assert 'ln -s /home/user/.sky/etc/config /etc/config' in cmd
+
+
+def test_make_safe_symlink_command_leaves_target_unquoted():
+    """The target is interpolated unquoted so a leading ~ still expands to
+    $HOME at runtime -- the wrapped file-mount dir starts with ~/."""
+    cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
+        source='/etc/config', target='~/.sky/file_mounts/etc/config')
+    assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
+    assert "'~/.sky/file_mounts/etc/config'" not in cmd

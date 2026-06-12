@@ -1212,7 +1212,7 @@ async def cluster_event_retention_daemon():
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: Literal[False] = False,
     limit: Optional[int] = ...,
 ) -> List[str]:
@@ -1223,7 +1223,7 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: Literal[True],
     limit: Optional[int] = ...,
 ) -> List[Dict[str, Union[str, int]]]:
@@ -1234,7 +1234,7 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: bool = ...,
     limit: Optional[int] = ...,
 ) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
@@ -1245,7 +1245,7 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: bool = False,
     limit: Optional[int] = None
 ) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
@@ -1256,11 +1256,11 @@ def get_cluster_events(
             is specified.
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
-        event_type: Type of the event.
+        event_type: Event type, or a list of event types to include.
         include_timestamps: If True, returns list of dicts with 'reason' and
             'transitioned_at' fields. If False, returns list of reason strings.
-        limit: If specified, returns at most this many events (most recent).
-            If None, returns all events.
+        limit: If specified, returns at most this many events (most recent),
+            across all the requested event types. If None, returns all events.
 
     Returns:
         If include_timestamps is False: List of reason strings.
@@ -1274,20 +1274,27 @@ def get_cluster_events(
     if cluster_hash is None:
         raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
+    event_types = ([event_type]
+                   if isinstance(event_type, ClusterEventType) else event_type)
+    type_filter = cluster_event_table.c.type.in_(
+        [et.value for et in event_types])
+
     with orm.Session(engine) as session:
         if limit is not None:
             # To get the most recent N events in ASC order, we use a subquery:
             # 1. Get most recent N events (ORDER BY DESC LIMIT N)
             # 2. Re-order them by ASC
-            subquery = session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash, type=event_type.value).order_by(
+            subquery = session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                type_filter).order_by(
                     cluster_event_table.c.transitioned_at.desc()).limit(
                         limit).subquery()
             rows = session.query(subquery).order_by(
                 subquery.c.transitioned_at.asc()).all()
         else:
-            rows = session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash, type=event_type.value).order_by(
+            rows = session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                type_filter).order_by(
                     cluster_event_table.c.transitioned_at.asc()).all()
 
     if include_timestamps:
@@ -1296,6 +1303,50 @@ def get_cluster_events(
             'transitioned_at': row.transitioned_at
         } for row in rows]
     return [row.reason for row in rows]
+
+
+@db_retries.retry
+def get_cluster_events_by_name(
+    cluster_name: str,
+    event_types: List[ClusterEventType],
+    limit: Optional[int] = None,
+) -> List[Dict[str, Union[str, int]]]:
+    """Returns cluster events looked up by the persisted cluster name.
+
+    Unlike get_cluster_events, this filters on the cluster_events ``name``
+    column directly instead of resolving the name to a hash via the clusters
+    table. This means events remain queryable after the cluster row (and its
+    name->hash mapping) has been removed on teardown, which matters for
+    finished managed jobs whose clusters have already been torn down.
+
+    Args:
+        cluster_name: Name of the cluster.
+        event_types: Event types to include.
+        limit: If specified, returns at most this many events (most recent),
+            across all the requested event types.
+
+    Returns:
+        List of dicts with 'reason' and 'transitioned_at' (unix timestamp)
+        fields, ordered from newest to oldest.
+    """
+    if not event_types:
+        return []
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    with orm.Session(engine) as session:
+        query = session.query(
+            cluster_event_table.c.reason,
+            cluster_event_table.c.transitioned_at,
+        ).filter(cluster_event_table.c.name == cluster_name,
+                 cluster_event_table.c.type.in_(type_values)).order_by(
+                     cluster_event_table.c.transitioned_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
+    return [{
+        'reason': row.reason,
+        'transitioned_at': row.transitioned_at,
+    } for row in rows]
 
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:

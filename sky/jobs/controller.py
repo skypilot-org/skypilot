@@ -285,23 +285,32 @@ class JobController:
                                             'managed_jobs',
                                             f'job-id-{self._job_id}')
 
+        def _persist_local_log_file(local_log_file: str) -> None:
+            # Persist the log path for the current task so it can be accessed
+            # after the job finishes. Do this as early as possible -- right
+            # after the log is synced down, before the (potentially minutes-
+            # long for multi-GB logs) re-stream into the controller log --
+            # so the dashboard can serve the job's logs immediately instead
+            # of showing "already in terminal state" until the re-stream
+            # completes.
+            managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                 local_log_file)
+
         log_file = None
         if managed_job_runtime.is_registered():
             log_file = managed_job_runtime.download_logs(
                 handle, self._job_id, task_id)
+            if log_file is not None:
+                _persist_local_log_file(log_file)
         if log_file is None:
             log_file = controller_utils.download_and_stream_job_log(
                 self._backend,
                 handle,
                 managed_job_logs_dir,
                 job_ids=[str(job_id_on_pool_cluster)]
-                if job_id_on_pool_cluster is not None else None)
-        if log_file is not None:
-            # Set the path of the log file for the current task, so it can
-            # be accessed even after the job is finished
-            managed_job_state.set_local_log_file(self._job_id, task_id,
-                                                 log_file)
-        else:
+                if job_id_on_pool_cluster is not None else None,
+                on_downloaded=_persist_local_log_file)
+        if log_file is None:
             logger.warning(
                 f'No log file was downloaded for job {self._job_id}, '
                 f'task {task_id}')

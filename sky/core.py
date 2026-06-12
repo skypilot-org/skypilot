@@ -339,7 +339,10 @@ def get_cluster_events(
             is specified.
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
-        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        event_type: Type of events to retrieve (e.g. 'STATUS_CHANGE' or
+            'DEBUG'). Multiple types may be requested as a comma-separated
+            string (e.g. 'STATUS_CHANGE,LAUNCH_PROGRESS'); the results are
+            merged and ordered by timestamp.
         include_timestamps: If True, returns list of dicts with 'reason' and
             'transitioned_at' fields. If False, returns list of reason strings.
         limit: If specified, returns at most this many events (most recent).
@@ -351,11 +354,19 @@ def get_cluster_events(
             'transitioned_at' (unix timestamp) fields.
         Events are ordered from oldest to newest.
     """
-    event_type_enum = global_user_state.ClusterEventType(event_type)
+    event_type_enums = [
+        global_user_state.ClusterEventType(event_type_str.strip())
+        for event_type_str in event_type.split(',')
+        if event_type_str.strip()
+    ]
+    if not event_type_enums:
+        # Reject blank/empty input rather than silently matching nothing
+        # (an empty type list translates to `type IN ()`, i.e. no events).
+        raise ValueError(f'No valid cluster event type in {event_type!r}.')
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,
-        event_type=event_type_enum,
+        event_type=event_type_enums,
         include_timestamps=include_timestamps,
         limit=limit)
 

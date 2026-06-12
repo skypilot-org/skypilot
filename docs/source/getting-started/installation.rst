@@ -973,6 +973,36 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
       default:
         compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
+OCI also offers `Object Storage <https://www.oracle.com/cloud/storage/object-storage/>`__, which supports both a native API and an `S3-compatible API <https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm>`__.
+SkyPilot can download/upload data to OCI buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up OCI Object Storage, first create a `Customer Secret Key <https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingcredentials.htm#create-secret-key>`_ from the OCI console.
+
+SkyPilot uses separate configuration files for OCI Object Storage to avoid conflicts with your AWS credentials. Run the following command to configure your OCI Object Storage credentials:
+
+.. code-block:: shell
+
+  AWS_SHARED_CREDENTIALS_FILE=~/.oci/s3.credentials aws configure --profile oci
+
+When prompted, enter your OCI Object Storage credentials:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]:
+  Default output format [None]: json
+
+Next, configure the endpoint URL for OCI Object Storage. Replace ``<namespace>`` and ``<region>`` with your tenancy's object storage namespace and region:
+
+.. code-block:: shell
+
+  AWS_CONFIG_FILE=~/.oci/s3.config aws configure set endpoint_url \
+    https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com --profile oci
+  AWS_CONFIG_FILE=~/.oci/s3.config aws configure set region <region> --profile oci
+
+.. note::
+
+  When the S3-compatible credential files (``~/.oci/s3.credentials`` and ``~/.oci/s3.config``) are present, SkyPilot will use the S3-compatible API for ``oci://`` storage, and the native OCI API key (``~/.oci/config``) is **not** required for storage operations. Without the S3-compatible credential files, SkyPilot falls back to the native OCI SDK path.
+
 Lambda Cloud |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

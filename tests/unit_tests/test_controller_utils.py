@@ -1,5 +1,7 @@
 """Test the controller_utils module."""
+import contextlib
 import importlib
+import io
 import multiprocessing
 import os
 from typing import Any, Dict, Set
@@ -13,6 +15,7 @@ from sky import resources as resources_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import registry
@@ -1079,3 +1082,105 @@ class TestIsJobsConsolidationMode:
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):
             controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
             extra.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# download_and_stream_job_log
+# ---------------------------------------------------------------------------
+
+_MARKER = log_lib.LOG_FILE_START_STREAMING_AT  # 'Waiting for task resources on '
+
+
+def _backend_with_run_log(run_log_bytes: bytes, tmp_path):
+    """Build a fake backend whose sync_down_logs yields a dir with run.log.
+
+    Returns (backend, handle, local_dir). The run.log is written with raw
+    bytes so tests control '\\r' vs '\\n' exactly.
+    """
+    synced_dir = os.path.join(str(tmp_path), 'synced')
+    os.makedirs(synced_dir, exist_ok=True)
+    with open(os.path.join(synced_dir, 'run.log'), 'wb') as f:
+        f.write(run_log_bytes)
+    backend = mock.MagicMock()
+    backend.sync_down_logs.return_value = {'cluster': synced_dir}
+    handle = mock.MagicMock()
+    local_dir = os.path.join(str(tmp_path), 'managed_logs')
+    return backend, handle, local_dir
+
+
+def test_download_and_stream_job_log_persists_before_reprint(tmp_path):
+    """on_downloaded must fire with the run.log path BEFORE the log is
+    re-streamed into the controller log.
+
+    The jobs controller uses this callback to persist local_log_file
+    immediately so the dashboard can serve logs without waiting for the
+    (potentially minutes-long) re-stream.
+    """
+    run_log = (b'boilerplate-before-marker\n' + _MARKER.encode() +
+               b'42 nodes.\n'
+               b'REPRINT-CONTENT-SENTINEL\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    seen: Dict[str, Any] = {}
+    captured = io.StringIO()
+
+    def on_downloaded(path: str) -> None:
+        seen['path'] = path
+        # Snapshot what has been written to the controller log so far: the
+        # re-stream must NOT have run yet at callback time.
+        seen['stdout_at_callback'] = captured.getvalue()
+
+    with contextlib.redirect_stdout(captured):
+        result = controller_utils.download_and_stream_job_log(
+            backend, handle, local_dir, on_downloaded=on_downloaded)
+
+    out = captured.getvalue()
+    # Callback fired with the synced run.log path, and that is the return val.
+    assert seen.get('path') is not None
+    assert seen['path'].endswith(os.path.join('synced', 'run.log'))
+    assert result == seen['path']
+    # Callback fired BEFORE the re-stream emitted the post-marker content.
+    assert 'REPRINT-CONTENT-SENTINEL' not in seen['stdout_at_callback']
+    # The re-stream did eventually emit the post-marker content...
+    assert 'REPRINT-CONTENT-SENTINEL' in out
+    # ...but filtered out the pre-marker boilerplate.
+    assert 'boilerplate-before-marker' not in out
+
+
+def test_download_and_stream_job_log_does_not_split_on_carriage_return(
+        tmp_path):
+    r"""Carriage-return progress output must not be split / translated.
+
+    With the universal-newline default, every '\r' is treated as a line
+    boundary, exploding a multi-GB log (e.g. `aws s3 cp` progress) into
+    millions of lines and making the re-stream take minutes. The re-stream
+    opens the log with newline='\n' so it splits only on '\n'.
+    """
+    # One real ('\n') line after the marker, holding 3 '\r' progress updates.
+    run_log = (_MARKER.encode() + b'8 nodes.\n'
+               b'prog-a\rprog-b\rprog-c\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        controller_utils.download_and_stream_job_log(backend, handle, local_dir)
+    out = captured.getvalue()
+
+    # The carriage returns are preserved verbatim. Pre-fix (universal
+    # newlines) this would have been emitted as 'prog-a\nprog-b\nprog-c\n'.
+    assert 'prog-a\rprog-b\rprog-c\n' in out
+
+
+def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):
+    """When sync_down_logs finds nothing, return None and never call back."""
+    backend = mock.MagicMock()
+    backend.sync_down_logs.return_value = {}
+    handle = mock.MagicMock()
+    local_dir = os.path.join(str(tmp_path), 'managed_logs')
+
+    called = []
+    result = controller_utils.download_and_stream_job_log(
+        backend, handle, local_dir, on_downloaded=lambda p: called.append(p))
+
+    assert result is None
+    assert not called

@@ -140,7 +140,7 @@ jobs:
       message: "nightly-build-pypi --aws"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--aws"}'
-      timeout_minutes: 90  # Increased from 60 (actual: ~70min)
+      timeout_minutes: 180  # p50 69m / p95 128m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -154,7 +154,7 @@ jobs:
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot-nightly"
       pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--kubernetes --base-branch pypi/skypilot-nightly"}'
-      timeout_minutes: 60
+      timeout_minutes: 240  # p50 104m / p95 ~227m; old 60m timed out 18/28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -168,7 +168,7 @@ jobs:
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot"
       pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--base-branch pypi/skypilot"}'
-      timeout_minutes: 60
+      timeout_minutes: 90  # p50 48m / p95 67m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -182,7 +182,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --resource-heavy"}'
-      timeout_minutes: 100
+      timeout_minutes: 150  # p50 70m / p95 115m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -196,7 +196,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
-      timeout_minutes: 180  # Increased from 80 (actual: ~163min with queue delays)
+      timeout_minutes: 270  # p50 107m / p95 222m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -210,7 +210,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency"}'
-      timeout_minutes: 120  # Increased from 80 (actual: ~99min)
+      timeout_minutes: 270  # p50 97m / p95 185m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -224,8 +224,7 @@ jobs:
       message: "nightly-build-pypi --remote-server --kubernetes"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
-      timeout_minutes: 120  # Increased from 80 (actual: ~97min)
-      sleep_seconds: 600  # 10 minute delay to reduce buildkite resource usage
+      timeout_minutes: 300  # p50 134m / p95 264m; old 120m timed out 23/28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -239,7 +238,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --jobs-consolidation --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --no-resource-heavy"}'
-      timeout_minutes: 90  # Increased from 60 (actual: ~79min)
+      timeout_minutes: 210  # p50 94m / p95 168m; old 90m timed out 17/28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -252,7 +251,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi shared-gke-api-server with postgres tests"
       pipeline: "nightly-build-shared-gke-api-server"
-      timeout_minutes: 180  # Increased from 120 to account for queue delays
+      timeout_minutes: 300  # p50 144m / p95 ~250m (excludes rare multi-hour hangs)
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -266,7 +265,7 @@ jobs:
       message: "nightly-build-pypi test_minimal --slurm"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "-k test_minimal --slurm", "FILE_PATTERN": "test_basic.py"}'
-      timeout_minutes: 60
+      timeout_minutes: 90  # p50 10m / p95 53m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 

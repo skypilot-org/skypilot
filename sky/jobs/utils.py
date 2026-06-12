@@ -182,6 +182,21 @@ def terminate_cluster(
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
+
+    # Pin the active workspace to the cluster's recorded workspace before
+    # calling `core.down`. Controller-side callers (cancel and recovery
+    # teardown paths) run in the system/daemon process, without this pin
+    # `skypilot_config.get_active_workspace()` falls back to the default
+    # workspace and the owner-identity check at
+    # `backend_utils._check_owner_identity_with_record` fails for any
+    # cluster whose recorded workspace is not 'default'.
+    # DB lookup once outside the loop — cluster workspace is immutable.
+    # `None` when the cluster row is already gone: `core.down` will then
+    # raise `ClusterDoesNotExist` immediately and we return — no
+    # workspace to pin in that case.
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    cluster_workspace = record.get('workspace') if record else None
+
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11
@@ -198,9 +213,18 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            core.down(cluster_name,
-                      graceful=graceful,
-                      graceful_timeout=graceful_timeout)
+            # Construct the ctx inside the loop: `local_active_workspace_ctx`
+            # is a `@contextlib.contextmanager` generator and cannot be
+            # re-entered — reusing one instance across retries raises
+            # `RuntimeError` from the spent generator and masks the real
+            # failure.
+            workspace_ctx: contextlib.AbstractContextManager = (
+                skypilot_config.local_active_workspace_ctx(cluster_workspace)
+                if cluster_workspace else contextlib.nullcontext())
+            with workspace_ctx:
+                core.down(cluster_name,
+                          graceful=graceful,
+                          graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.

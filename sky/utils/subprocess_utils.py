@@ -1,4 +1,5 @@
 """Utility functions for subprocesses."""
+import collections
 import ctypes
 import ctypes.util
 import multiprocessing
@@ -35,6 +36,116 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 _fd_limit_warning_shown = False
+
+_PROCFS = '/proc'
+
+
+def _safe_children(process: 'psutil.Process') -> List['psutil.Process']:
+    """Tolerant wrapper around ``process.children(recursive=True)``."""
+    try:
+        return process.children(recursive=True)
+    except psutil.NoSuchProcess:
+        # Parent process exited, skip
+        return []
+    except psutil.AccessDenied as e:
+        # process.children will lookup all processes in the same PID namespace,
+        # and we will encounter this error if there is a process we cannot
+        # access. Log and ignore it with _fallback_children()
+        bad_pid = getattr(e, 'pid', None)
+        diag = _pid_diag(bad_pid) if bad_pid is not None else {}
+        logger.warning(
+            f'psutil.Process.children() hit AccessDenied '
+            f'(pid={bad_pid} uid={diag.get("uid", "?")} '
+            f'exe={diag.get("exe", "?")}); falling back to /proc walk '
+            f'that ignores unreadable PIDs.')
+        # Snapshot the parent's create_time so the fallback can reject any
+        # PID whose create_time predates the parent
+        try:
+            parent_ctime = process.create_time()
+        except psutil.Error:
+            return []
+        return _fallback_children(process.pid, parent_ctime)
+
+
+def _pid_diag(pid: int) -> Dict[str, str]:
+    """Best-effort identification of a PID whose /proc/<pid>/stat read
+    was just denied for some reasons."""
+    diag: Dict[str, str] = {}
+    try:
+        st = os.stat(f'{_PROCFS}/{pid}')
+        diag['uid'] = str(st.st_uid)
+    except OSError:
+        pass
+    try:
+        diag['exe'] = os.readlink(f'{_PROCFS}/{pid}/exe')
+    except OSError:
+        pass
+    return diag
+
+
+def _fallback_children(parent_pid: int,
+                       parent_ctime: float) -> List['psutil.Process']:
+    """Resilient descendant walk: read /proc/<N>/stat, ignore failures.
+
+    Mirrors the DFS in ``psutil.Process.children(recursive=True)`` but
+    silently drops PIDs whose stat we cannot read (the very condition
+    that brought us here). ``parent_ctime`` is the parent's create_time;
+    descendants whose create_time predates it are PID-reuse phantoms and
+    are excluded. Linux only; on other platforms returns [] — if psutil
+    itself failed there, we have no better source.
+    """
+    if not sys.platform.startswith('linux'):
+        return []
+    try:
+        entries = os.listdir(_PROCFS)
+    except OSError:
+        return []
+    ppid_map: Dict[int, int] = {}
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open(f'{_PROCFS}/{pid}/stat', 'rb') as f:
+                data = f.read()
+        except OSError:
+            # FileNotFoundError, ProcessLookupError, PermissionError —
+            # any read failure: skip this PID and keep walking the rest.
+            continue
+        try:
+            # stat format: "<pid> (<comm>) <state> <ppid> ..."; comm can
+            # contain spaces and ')', so locate the *last* ')'.
+            rpar = data.rfind(b')')
+            ppid_map[pid] = int(data[rpar + 2:].split()[1])
+        except (ValueError, IndexError):
+            continue
+    # Traversal pattern (DFS via deque.pop) matches the upstream
+    # psutil.Process.children(recursive=True) implementation; order does
+    # not matter for our callers, which kill the whole subtree anyway.
+    children_of: Dict[int, List[int]] = {}
+    for pid, ppid in ppid_map.items():
+        children_of.setdefault(ppid, []).append(pid)
+    descendants: List['psutil.Process'] = []
+    seen: Set[int] = set()
+    stack: 'collections.deque[int]' = collections.deque([parent_pid])
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        for child_pid in children_of.get(cur, []):
+            try:
+                child = psutil.Process(child_pid)
+                # PID-reuse defense
+                if parent_ctime <= child.create_time():
+                    descendants.append(child)
+                    stack.append(child_pid)
+            except psutil.Error:
+                # NoSuchProcess / ZombieProcess / AccessDenied — in this
+                # degraded LSM fallback we drop the PID and keep walking
+                # so kill_children_processes can still clean up the rest.
+                pass
+    return descendants
 
 
 @timeline.event
@@ -205,7 +316,11 @@ def kill_children_processes(parent_pids: Optional[Union[
             parent_processes.append(process)
 
     for parent_process in parent_processes:
-        child_processes = parent_process.children(recursive=True)
+        # _safe_children() so that an EACCES on a single unrelated PID
+        # (hardened-host LSM policy) does not abort the whole cleanup and
+        # leave children behind. The explicitly given parent_process is
+        # killed regardless of enumeration results.
+        child_processes = _safe_children(parent_process)
         if parent_pids is not None:
             kill_process_with_grace_period(parent_process, force=force)
         logger.debug(f'Killing child processes: {child_processes}')
@@ -415,12 +530,15 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
             implementations have corner cases where subprocesses might not be
             killed. Refer to subprocess_daemon.py for more details.
     """
-    # Get initial children list
+    # Get initial children list via _safe_children so that an EACCES from
+    # a hardened-host LSM policy doesn't abort us before the daemon is
+    # registered. See _safe_children for the failure mode and rationale.
     try:
         process = psutil.Process(process_pid)
-        initial_children = [p.pid for p in process.children(recursive=True)]
     except psutil.NoSuchProcess:
-        initial_children = []
+        initial_children: List[int] = []
+    else:
+        initial_children = [p.pid for p in _safe_children(process)]
 
     parent_pid = os.getpid()
     daemon_script = os.path.join(

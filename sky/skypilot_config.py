@@ -394,20 +394,38 @@ def get_effective_region_config(cloud: str,
 
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
-    """Returns the workspace config."""
-    # TODO(zhwu): Instead of just returning the workspace specific config, we
-    # should return the config that already merges the global config, so that
-    # the caller does not need to manually merge the global config with
-    # the workspace specific config.
+    """Returns the workspace cloud config, deep-merged with global cloud config.
+
+    Workspace-specific values override global values. Fields not set in the
+    workspace block are inherited from the global cloud config. This allows
+    workspaces to override only the fields they need (e.g., namespace)
+    without losing other global settings (e.g., allowed_contexts).
+    """
     if workspace is None:
         workspace = get_active_workspace()
-    clouds = get_nested(keys=(
+
+    # Get workspace-specific cloud overrides
+    workspace_clouds = get_nested(keys=(
         'workspaces',
         workspace,
-    ), default_value=None)
-    if clouds is None:
-        return config_utils.Config()
-    return clouds.get(cloud.lower(), config_utils.Config())
+    ),
+                                  default_value=None)
+    workspace_cloud = None
+    if isinstance(workspace_clouds, dict):
+        ws = workspace_clouds.get(cloud.lower())
+        if isinstance(ws, dict):
+            workspace_cloud = ws
+
+    # Deep-merge workspace cloud config on top of global cloud config.
+    # get_nested internally does deepcopy + _recursive_update.
+    merged = _get_loaded_config().get_nested(
+        keys=(cloud.lower(),),
+        default_value=config_utils.Config(),
+        override_configs={cloud.lower(): workspace_cloud}
+        if workspace_cloud else None)
+    if isinstance(merged, dict):
+        return config_utils.Config(merged)
+    return config_utils.Config()
 
 
 @contextlib.contextmanager

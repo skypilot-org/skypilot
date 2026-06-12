@@ -13,6 +13,7 @@ from sky.skylet import constants
 from sky.users import rbac
 from sky.users import server
 from sky.utils import common
+from sky.utils import common_utils
 
 
 class TestGetUserType:
@@ -1142,3 +1143,35 @@ charlie,pw789,user
         assert result['total_processed'] == 2
         assert len(result['parse_errors']) == 1
         assert 'Line 3: Invalid number of columns' in result['parse_errors'][0]
+
+
+class TestUserContextIsolation:
+    """The sync user handlers run under @context.contextual.
+
+    They must set the request user in their own per-request context (so
+    workspace/RBAC resolution sees the caller) without leaking it into the
+    process-global context after the handler returns. user_delete is the
+    simplest of the four (get_user_workspace/user_update/user_batch_update
+    share the same @context.contextual + set_current_user pattern).
+    """
+
+    def test_user_delete_user_context_is_isolated_and_not_leaked(self):
+        user = models.User(id='u-alice', name='alice')
+        request = mock.MagicMock()
+        request.state.auth_user = user
+
+        captured = {}
+
+        def _capture(user_id):
+            # Runs inside the handler's context; current user must be ours.
+            captured['inside'] = common_utils.get_current_user().id
+
+        before = common_utils.get_current_user().id
+        with mock.patch.object(server, '_delete_user', side_effect=_capture):
+            server.user_delete(
+                request=request,
+                user_delete_body=payloads.UserDeleteBody(user_id='u-bob'))
+        after = common_utils.get_current_user().id
+
+        assert captured['inside'] == 'u-alice'  # set inside the context
+        assert after == before  # no leak after the handler returns
