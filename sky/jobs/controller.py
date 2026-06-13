@@ -275,14 +275,25 @@ class JobController:
         logger.info('Initializing JobsController for job_id=%s', job_id)
 
         self._job_id = job_id
-        self._dag = _get_dag(job_id)
-        self._dag_name = self._dag.name
-        logger.info(f'Loaded DAG: {self._dag}')
-
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
         self._pool = pool
         self._rank = rank
         logger.info(f'Rank for job {self._job_id}: {self._rank}')
+
+        self._load_dag()
+
+    def _load_dag(self) -> None:
+        """(Re)load the job's DAG and set up per-task environment variables.
+
+        Called at init and again before each emergency-recovery retry: parts
+        of the job loop mutate the in-memory task objects (e.g.
+        StrategyExecutor.make strips job_recovery from the task's
+        resources), so a retry must start from a freshly loaded DAG rather
+        than the state the failed attempt left behind.
+        """
+        self._dag = _get_dag(self._job_id)
+        self._dag_name = self._dag.name
+        logger.info(f'Loaded DAG: {self._dag}')
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -2142,6 +2153,7 @@ class JobController:
             # CancelledError) or finishes the terminal task cleanly.
             logger.info(f'Job {self._job_id} task {task_id} is cancelling or '
                         'terminal; retrying the job loop to let it complete.')
+            await asyncio.to_thread(self._load_dag)
             return (_EmergencyDecision.RETRY, None)
 
         # 4. If the error escaped mid-launch, the job may still hold a
@@ -2158,6 +2170,10 @@ class JobController:
                          'process must have mutated it. Standing down.')
             self._usurped = True
             return (_EmergencyDecision.USURPED, None)
+
+        # The retry must start from a freshly loaded DAG: the failed attempt
+        # may have left the in-memory task objects mutated (see _load_dag).
+        await asyncio.to_thread(self._load_dag)
 
         self._emergency_backoff_seconds = min(
             jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS *

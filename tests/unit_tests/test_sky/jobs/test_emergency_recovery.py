@@ -301,6 +301,9 @@ class _RetryLoopHarness:
         jc._emergency_backoff_seconds = None
         jc._run_one_task = AsyncMock(side_effect=body_effects)
         jc._update_failed_task_state = AsyncMock()
+        # The real _load_dag reloads from the DB; the harness keeps the
+        # mocked dag.
+        jc._load_dag = MagicMock()
         self.jc = jc
 
         # State collaborators, default to the happy path: we own the job,
