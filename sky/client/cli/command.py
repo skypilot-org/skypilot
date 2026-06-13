@@ -6022,7 +6022,7 @@ class StatusList(click.Choice):
               type=StatusList([s.value for s in ManagedJobStatus],
                               case_sensitive=False),
               required=False,
-              help='Filter by status, comma-separated or repeated '
+              help='Filter by status, comma-separated '
               '(e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a '
               'deprecated alias for --skip-finished.')
 @flags.all_users_option('Show jobs from all users.')
@@ -6094,8 +6094,7 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
-    (Tip) To filter by status, use ``-s``/``--status`` (comma-separated or
-    repeated):
+    (Tip) To filter by status, use ``-s``/``--status`` (comma-separated):
 
     .. code-block:: bash
 
