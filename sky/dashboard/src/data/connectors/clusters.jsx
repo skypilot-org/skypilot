@@ -561,10 +561,7 @@ export function useClusterData(options = {}) {
   // Serialize filters for stable dependency comparison
   const filtersKey = JSON.stringify(filters);
 
-  const {
-    initialPage = 1,
-    initialLimit = 10,
-  } = options;
+  const { initialPage = 1, initialLimit = 10 } = options;
 
   const [data, setData] = useState([]);
   const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
@@ -577,9 +574,15 @@ export function useClusterData(options = {}) {
   const [hasPrev, setHasPrev] = useState(false);
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
+  const isInitialMount = useRef(true);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change, but skip on initial mount
+  // so the page number read from the URL isn't overwritten.
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     setPage(1);
   }, [filtersKey]);
 

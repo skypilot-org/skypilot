@@ -909,13 +909,11 @@ export function ManagedJobsTable({
   }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
   // Reset to first page when activeTab, filters, pageSize, or sort changes.
-  // Skip on initial mount to preserve the page from the URL.
-  const skipPageResetRef = useRef(true);
+  // Guard with isInitialFetch so the page number read from the URL isn't
+  // overwritten during initialization (filter hydration from URL params
+  // triggers setFilters which would otherwise reset the page).
   useEffect(() => {
-    if (skipPageResetRef.current) {
-      skipPageResetRef.current = false;
-      return;
-    }
+    if (isInitialFetch.current) return;
     setCurrentPage(1);
   }, [activeTab, filters, pageSize, sortConfig]);
 
@@ -2112,49 +2110,49 @@ export function ManagedJobsTable({
                   back. The toggle is harmless when the table is empty
                   and indispensable as soon as anything else changes. */}
               {(() => {
-                  const selectTab = (tab) => {
-                    React.startTransition(() => {
-                      setActiveTab(tab);
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
-                      setCurrentPage(1);
-                    });
-                  };
-                  const isActive = activeTab === 'active' && showAllMode;
-                  const isAll = activeTab === 'all' && showAllMode;
-                  return (
-                    <div
-                      role="tablist"
-                      aria-label="Filter jobs by activity"
-                      className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+                const selectTab = (tab) => {
+                  React.startTransition(() => {
+                    setActiveTab(tab);
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                    setCurrentPage(1);
+                  });
+                };
+                const isActive = activeTab === 'active' && showAllMode;
+                const isAll = activeTab === 'all' && showAllMode;
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by activity"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => selectTab('active')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
                     >
-                      <button
-                        role="tab"
-                        aria-selected={isActive}
-                        onClick={() => selectTab('active')}
-                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                          isActive
-                            ? 'bg-white text-gray-900 shadow-sm'
-                            : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                      >
-                        Active
-                      </button>
-                      <button
-                        role="tab"
-                        aria-selected={isAll}
-                        onClick={() => selectTab('all')}
-                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                          isAll
-                            ? 'bg-white text-gray-900 shadow-sm'
-                            : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                      >
-                        All
-                      </button>
-                    </div>
-                  );
-                })()}
+                      Active
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isAll}
+                      onClick={() => selectTab('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isAll
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      All
+                    </button>
+                  </div>
+                );
+              })()}
               {(() => {
                 if (!currentUser) return null;
                 const explicitUserFilter = (filters || []).find(
