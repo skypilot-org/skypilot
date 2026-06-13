@@ -1490,12 +1490,15 @@ def get_handles_from_cluster_names(
 @metrics_lib.time_me
 def get_cluster_name_to_handle_map(
     is_managed: Optional[bool] = None,
+    cluster_names: Optional[List[str]] = None,
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         query = session.query(cluster_table.c.name, cluster_table.c.handle)
         if is_managed is not None:
             query = query.filter(cluster_table.c.is_managed == int(is_managed))
+        if cluster_names is not None:
+            query = query.filter(cluster_table.c.name.in_(cluster_names))
         rows = query.all()
     name_to_handle = {}
     for row in rows:

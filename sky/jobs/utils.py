@@ -2392,6 +2392,7 @@ def get_managed_job_queue(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    optimize_handle_map: bool = False,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -2409,6 +2410,12 @@ def get_managed_job_queue(
         fields: The fields to include in the response.
         sort_by: The field to sort by.
         sort_order: The sort order ('asc' or 'desc').
+        optimize_handle_map: If True, only load the cluster handles referenced
+            by the (possibly paginated) jobs in this response, instead of all
+            managed cluster handles. The handle map is only consulted for these
+            jobs, so this is behavior-preserving; it avoids deserializing every
+            managed cluster's handle, which dominates the cost at scale (e.g.
+            60K+ jobs with a small page size).
 
     Returns:
         A dictionary containing the managed job queue.
@@ -2452,10 +2459,30 @@ def get_managed_job_queue(
         sort_order=sort_order,
     )
 
+    def _job_cluster_name(job: Dict[str, Any]) -> Optional[str]:
+        """The cluster name a job's handle is looked up under."""
+        cluster_name = job.get('current_cluster_name', None)
+        if cluster_name is None:
+            cluster_name = generate_managed_job_cluster_name(
+                job['task_name'], job['job_id'])
+        return cluster_name
+
     if cluster_handle_required:
         # Fetch the cluster name to handle map for managed clusters only.
+        handle_cluster_names = None
+        if optimize_handle_map:
+            # Only load handles for the clusters referenced by the (possibly
+            # paginated) jobs. The map below is only consulted for these
+            # clusters (via _job_cluster_name), so restricting the query is
+            # behavior-preserving while avoiding deserializing every managed
+            # cluster's handle.
+            handle_cluster_names = list({
+                name for name in (_job_cluster_name(job) for job in jobs)
+                if name is not None
+            })
         cluster_name_to_handle = (
-            global_user_state.get_cluster_name_to_handle_map(is_managed=True))
+            global_user_state.get_cluster_name_to_handle_map(
+                is_managed=True, cluster_names=handle_cluster_names))
 
     highest_blocking_priority = constants.MIN_PRIORITY
     if not fields or 'details' in fields:
@@ -2491,10 +2518,7 @@ def get_managed_job_queue(
             job['schedule_state'] = None
 
         if cluster_handle_required:
-            cluster_name = job.get('current_cluster_name', None)
-            if cluster_name is None:
-                cluster_name = generate_managed_job_cluster_name(
-                    job['task_name'], job['job_id'])
+            cluster_name = _job_cluster_name(job)
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
