@@ -22,9 +22,24 @@ _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
 
 
+def _resolve_skyignore_pattern(pattern: str,
+                               src_dir: str) -> Set[str]:
+    """Resolve a .skyignore pattern to a set of relative file paths."""
+    if pattern.startswith('/'):
+        pattern = '.' + pattern
+    else:
+        pattern = '**/' + pattern
+    matching_files = glob.glob(os.path.join(src_dir, pattern),
+                               recursive=True)
+    return {os.path.relpath(f, src_dir) for f in matching_files}
+
+
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
     """List files and patterns ignored by the .skyignore file
     in the given source directory.
+
+    Supports negation patterns (lines starting with '!') that
+    re-include files previously excluded, same as .gitignore.
     """
     excluded_list: Set[str] = set()
     expand_src_dir_path = os.path.expanduser(src_dir_path)
@@ -35,22 +50,21 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
         with open(skyignore_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith('#'):
-                    # Make parsing consistent with rsync.
-                    # Rsync uses '/' as current directory.
-                    if line.startswith('/'):
-                        line = '.' + line
-                    else:
-                        line = '**/' + line
-                    # Find all files matching the pattern.
-                    matching_files = glob.glob(os.path.join(
-                        expand_src_dir_path, line),
-                                               recursive=True)
-                    # Process filenames to comply with cloud rsync format.
-                    for i in range(len(matching_files)):
-                        matching_files[i] = os.path.relpath(
-                            matching_files[i], expand_src_dir_path)
-                    excluded_list.update(matching_files)
+                if not line or line.startswith('#'):
+                    continue
+                if line.startswith('!'):
+                    # Negation: re-include files matching the pattern
+                    # after stripping the '!' prefix.
+                    pattern = line[1:]
+                    if not pattern:
+                        continue
+                    matching = _resolve_skyignore_pattern(
+                        pattern, expand_src_dir_path)
+                    excluded_list.difference_update(matching)
+                else:
+                    matching = _resolve_skyignore_pattern(
+                        line, expand_src_dir_path)
+                    excluded_list.update(matching)
     except IOError as e:
         logger.warning(f'Error reading {skyignore_path}: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
