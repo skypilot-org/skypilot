@@ -124,14 +124,21 @@ def bootstrap_instances(
                                           [], enable_efa)
                 logger.debug('Default security group created.')
             except exceptions.NoClusterLaunchedError as e:
-                if 'not authorized to perform: ec2:CreateSecurityGroup' in str(
-                        e):
+                # Since CreateSecurityGroup includes TagSpecifications, AWS
+                # may report the denied action as either
+                # ec2:CreateSecurityGroup or ec2:CreateTags, so check the
+                # underlying error code instead of matching the action name
+                # in the error message.
+                cause = e.__cause__
+                if (isinstance(cause,
+                               aws.botocore_exceptions().ClientError) and
+                        cause.response['Error']['Code']
+                        == 'UnauthorizedOperation'):
                     # User does not have permission to create the default
                     # security group.
                     logger.debug('User does not have permission to create '
                                  'the default security group. '
                                  f'{e}')
-                    pass
                 else:
                     raise e
 

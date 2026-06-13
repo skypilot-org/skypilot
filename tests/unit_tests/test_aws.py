@@ -3,8 +3,10 @@ import typing
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+from botocore import exceptions as botocore_exceptions
 import pytest
 
+from sky import exceptions
 from sky import logs
 from sky import resources
 from sky import skypilot_config
@@ -12,6 +14,7 @@ from sky.backends import backend_utils
 from sky.clouds import Region
 from sky.clouds import Zone
 from sky.clouds.aws import AWS
+from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
 from sky.provision.aws import config
 from sky.utils import common_utils
@@ -373,6 +376,102 @@ def test_security_group_tagged_on_create():
             'Value': 'true',
         }],
     }]
+
+
+def _bootstrap_with_default_sg_creation_error(monkeypatch, client_error):
+    """Run bootstrap_instances with a custom security group configured and
+    the (best-effort) default security group creation failing with
+    `client_error`."""
+    custom_sg = MagicMock(id='sg-custom', group_name='my-custom-sg')
+    # Non-empty rules so the existing rules are not modified.
+    custom_sg.ip_permissions = [{'IpProtocol': '-1'}]
+    custom_sg.ip_permissions_egress = [{'IpProtocol': '-1'}]
+
+    mock_ec2 = MagicMock()
+    mock_ec2.meta.client.exceptions.ClientError = (
+        botocore_exceptions.ClientError)
+    mock_ec2.meta.client.create_security_group.side_effect = client_error
+
+    def fake_get_sg(ec2, vpc_id, group_name):
+        del ec2, vpc_id  # Unused.
+        if group_name == 'my-custom-sg':
+            return custom_sg
+        # The default security group does not exist, so its creation will
+        # be attempted (and fail with client_error).
+        return None
+
+    mock_subnet = MagicMock()
+    mock_subnet.subnet_id = 'subnet-123'
+
+    monkeypatch.setattr('sky.adaptors.aws.resource',
+                        lambda *args, **kwargs: mock_ec2)
+    monkeypatch.setattr(config, 'get_security_group_from_vpc_id', fake_get_sg)
+    monkeypatch.setattr(config, '_get_subnet_and_vpc_id',
+                        lambda *args, **kwargs: ([mock_subnet], 'vpc-123'))
+
+    provision_config = provision_common.ProvisionConfig(
+        provider_config={
+            'region': 'us-east-1',
+            'security_group': {
+                'GroupName': 'my-custom-sg'
+            },
+        },
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'IamInstanceProfile': {
+                'Name': 'skypilot-v1'
+            },
+            'ImageId': 'ami-12345',
+        },
+        count=1,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None)
+    return config.bootstrap_instances('us-east-1', 'test-cluster',
+                                      provision_config)
+
+
+@pytest.mark.parametrize('denied_action',
+                         ['ec2:CreateSecurityGroup', 'ec2:CreateTags'])
+def test_default_sg_creation_unauthorized_is_best_effort(
+        monkeypatch, denied_action):
+    """UnauthorizedOperation on default SG creation should not fail launch.
+
+    Since CreateSecurityGroup includes TagSpecifications, AWS may report the
+    denied action as either ec2:CreateSecurityGroup or ec2:CreateTags. Both
+    must be tolerated, as the default security group is only a best-effort
+    optimization when a custom security group is configured.
+    See https://github.com/skypilot-org/skypilot/issues/9466.
+    """
+    client_error = botocore_exceptions.ClientError(
+        {
+            'Error': {
+                'Code': 'UnauthorizedOperation',
+                'Message': ('You are not authorized to perform this '
+                            'operation. User: arn:aws:iam::123:user/test is '
+                            f'not authorized to perform: {denied_action} on '
+                            'resource: arn:aws:ec2:us-east-1:123:'
+                            'security-group/*')
+            }
+        }, 'CreateSecurityGroup')
+    result = _bootstrap_with_default_sg_creation_error(monkeypatch,
+                                                       client_error)
+    # The launch proceeds with the custom security group.
+    assert result.node_config['SecurityGroupIds'] == ['sg-custom']
+
+
+def test_default_sg_creation_other_errors_still_raise(monkeypatch):
+    """Non-permission errors on default SG creation should still surface."""
+    client_error = botocore_exceptions.ClientError(
+        {
+            'Error': {
+                'Code': 'RequestLimitExceeded',
+                'Message': 'Request limit exceeded.'
+            }
+        }, 'CreateSecurityGroup')
+    with pytest.raises(exceptions.NoClusterLaunchedError):
+        _bootstrap_with_default_sg_creation_error(monkeypatch, client_error)
 
 
 def test_ssm_default(monkeypatch):
