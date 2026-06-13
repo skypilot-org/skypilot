@@ -476,7 +476,6 @@ export function ManagedJobsTable({
   preloadingComplete,
   lastFetchedTime,
 }) {
-  const router = useRouter();
   const [sortConfig, setSortConfig] = useState({
     key: 'id',
     direction: 'descending',
@@ -532,35 +531,26 @@ export function ManagedJobsTable({
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
 
-  // Sync page/pageSize to URL query params
+  // Sync page/pageSize to URL query params.
+  // Use window.history.replaceState instead of router.replace to avoid
+  // triggering Next.js re-renders that cascade into filter resets.
   useEffect(() => {
-    if (!router.isReady) return;
-    const query = { ...router.query };
-    let changed = false;
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
     if (currentPage > 1) {
-      if (query.page !== String(currentPage)) {
-        query.page = String(currentPage);
-        changed = true;
-      }
-    } else if (query.page) {
-      delete query.page;
-      changed = true;
+      url.searchParams.set('page', String(currentPage));
+    } else {
+      url.searchParams.delete('page');
     }
     if (pageSize !== 10) {
-      if (query.pageSize !== String(pageSize)) {
-        query.pageSize = String(pageSize);
-        changed = true;
-      }
-    } else if (query.pageSize) {
-      delete query.pageSize;
-      changed = true;
+      url.searchParams.set('pageSize', String(pageSize));
+    } else {
+      url.searchParams.delete('pageSize');
     }
-    if (changed) {
-      router.replace({ pathname: router.pathname, query }, undefined, {
-        shallow: true,
-      });
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url.toString());
     }
-  }, [currentPage, pageSize, router.isReady]);
+  }, [currentPage, pageSize]);
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);

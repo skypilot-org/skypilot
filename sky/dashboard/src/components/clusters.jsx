@@ -580,7 +580,6 @@ export function ClusterTable({
   setOptionValues,
   preloadingComplete,
 }) {
-  const router = useRouter();
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -629,35 +628,26 @@ export function ClusterTable({
     initialLimit: getInitialLimit(),
   });
 
-  // Sync page/limit to URL query params
+  // Sync page/limit to URL query params.
+  // Use window.history.replaceState instead of router.replace to avoid
+  // triggering Next.js re-renders that cascade into filter resets.
   useEffect(() => {
-    if (!router.isReady) return;
-    const query = { ...router.query };
-    let changed = false;
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
     if (page > 1) {
-      if (query.page !== String(page)) {
-        query.page = String(page);
-        changed = true;
-      }
-    } else if (query.page) {
-      delete query.page;
-      changed = true;
+      url.searchParams.set('page', String(page));
+    } else {
+      url.searchParams.delete('page');
     }
     if (limit !== 10) {
-      if (query.pageSize !== String(limit)) {
-        query.pageSize = String(limit);
-        changed = true;
-      }
-    } else if (query.pageSize) {
-      delete query.pageSize;
-      changed = true;
+      url.searchParams.set('pageSize', String(limit));
+    } else {
+      url.searchParams.delete('pageSize');
     }
-    if (changed) {
-      router.replace({ pathname: router.pathname, query }, undefined, {
-        shallow: true,
-      });
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url.toString());
     }
-  }, [page, limit, router.isReady]);
+  }, [page, limit]);
 
   // Track loading state for parent component
   const [isInitialLoad, setIsInitialLoad] = useState(true);
