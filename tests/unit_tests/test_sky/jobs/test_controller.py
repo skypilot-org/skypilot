@@ -9,6 +9,7 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import time
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -16,8 +17,10 @@ from unittest.mock import patch
 
 import pytest
 
+from sky.jobs import controller
 from sky.jobs import state as managed_job_state
 from sky.jobs.controller import ControllerManager
+from sky.jobs.controller import JobController
 from sky.utils import common
 
 
@@ -702,6 +705,262 @@ class TestJobGroupRecovery:
 
         # Task 1 FAILED, so overall should be False
         assert all_succeeded is False
+
+
+class TestCancelAndDrainTasks:
+    """Tests for the _cancel_and_drain_tasks helper."""
+
+    @pytest.mark.asyncio
+    async def test_cancels_and_drains_all_tasks(self):
+        """All tasks are cancelled and fully exited on return."""
+        exited: List[int] = []
+
+        async def child(i: int):
+            try:
+                await asyncio.Event().wait()  # Block until cancelled.
+            except asyncio.CancelledError:
+                # Simulate non-trivial unwinding.
+                await asyncio.sleep(0.02)
+                exited.append(i)
+                raise
+
+        tasks = [asyncio.create_task(child(i)) for i in range(3)]
+        await asyncio.sleep(0.01)  # Let the children start.
+
+        await controller._cancel_and_drain_tasks(tasks)
+
+        assert all(t.done() for t in tasks)
+        assert sorted(exited) == [0, 1, 2]
+
+    @pytest.mark.asyncio
+    async def test_exception_while_unwinding_does_not_abort_drain(self):
+        """A task raising during unwind doesn't break draining the rest."""
+        exited: List[str] = []
+
+        async def bad():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                raise RuntimeError('unwind failed') from None
+
+        async def good():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.02)
+                exited.append('good')
+                raise
+
+        tasks = [asyncio.create_task(bad()), asyncio.create_task(good())]
+        await asyncio.sleep(0.01)
+
+        # Must not raise despite the RuntimeError from bad().
+        await controller._cancel_and_drain_tasks(tasks)
+
+        assert all(t.done() for t in tasks)
+        assert exited == ['good']
+
+    @pytest.mark.asyncio
+    async def test_empty_and_already_done_tasks(self):
+        """Handles empty input and tasks that already completed."""
+        await controller._cancel_and_drain_tasks([])
+
+        async def quick():
+            return 42
+
+        task = asyncio.create_task(quick())
+        await asyncio.sleep(0.01)
+        assert task.done()
+        await controller._cancel_and_drain_tasks([task])
+        assert task.result() == 42
+
+
+class TestJobGroupChildCancelAndDrain:
+    """Tests that JobGroup per-task monitors are cancelled AND drained.
+
+    When _run_job_group's monitoring is cancelled (user cancellation) or
+    fails, the per-task monitor tasks must be cancelled and fully awaited
+    before the function unwinds. asyncio.wait() does not cancel its
+    waitees, so without explicit cancel-and-drain an orphaned monitor can
+    keep running (e.g. complete a recovery launch) while the clusters are
+    torn down under it, leaking the cluster.
+    """
+
+    def _make_controller(self,
+                         num_tasks: int,
+                         primary_tasks: Optional[List[str]] = None):
+        """Build a JobController mock with the real _run_job_group bound."""
+        job_controller = MagicMock(spec=JobController)
+        job_controller._job_id = 1
+        job_controller._pool = None
+
+        dag = MagicMock()
+        dag.name = 'test-group'
+        tasks = []
+        for i in range(num_tasks):
+            t = MagicMock()
+            t.name = f'task-{i}'
+            t.envs = {}
+            tasks.append(t)
+        dag.tasks = tasks
+        dag.primary_tasks = primary_tasks or []
+        job_controller._dag = dag
+
+        async def fake_prepare(task, task_id, job_group_name, other_job_names):
+            del task, job_group_name, other_job_names  # unused
+            return (f'cluster-{task_id}', MagicMock())
+
+        job_controller._prepare_job_group_task_for_launch = fake_prepare
+        job_controller._run_job_group = JobController._run_job_group.__get__(
+            job_controller, JobController)
+        return job_controller
+
+    def _patches(self):
+        """Patch _run_job_group's module-level dependencies.
+
+        All tasks report RUNNING so the launch phase is skipped (resume
+        path) and the test goes straight to the monitoring phase.
+        """
+        return [
+            patch('sky.jobs.controller.managed_job_runtime.is_registered',
+                  return_value=False),
+            patch(
+                'sky.jobs.controller.managed_job_state.'
+                'get_job_status_with_task_id_async',
+                new=AsyncMock(
+                    return_value=managed_job_state.ManagedJobStatus.RUNNING)),
+            patch(
+                'sky.jobs.controller.global_user_state.'
+                'get_handle_from_cluster_name',
+                return_value=MagicMock()),
+            # Non-None means the task inlines DNS mappings, skipping the
+            # networking setup phase.
+            patch(
+                'sky.jobs.controller.job_group_networking.'
+                'dns_addresses_for_task',
+                return_value=MagicMock()),
+        ]
+
+    async def _wait_for(self, cond, timeout: float = 5.0):
+        start = time.time()
+        while not cond():
+            assert time.time() - start < timeout, 'Timed out in test setup'
+            await asyncio.sleep(0.01)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_drains_monitors_before_unwinding(self):
+        """Cancelling the group cancels+drains all per-task monitors.
+
+        Before the fix, cancellation propagated out of asyncio.wait()
+        leaving the monitor tasks running while run_job_loop's cancel flow
+        tore down the clusters under them.
+        """
+        job_controller = self._make_controller(num_tasks=2)
+        monitor_tasks: Dict[int, asyncio.Task] = {}
+        events: List[str] = []
+
+        async def fake_monitor(task_id, task, cluster_name, executor,
+                               job_group_name, tasks_handles, force_recovery):
+            monitor_tasks[task_id] = asyncio.current_task()
+            try:
+                await asyncio.Event().wait()  # Block until cancelled.
+            except asyncio.CancelledError:
+                # Simulate non-trivial unwinding (e.g. aborting an
+                # in-flight recovery launch).
+                await asyncio.sleep(0.05)
+                events.append(f'monitor-{task_id}-exited')
+                raise
+
+        job_controller._monitor_job_group_task = fake_monitor
+        cleanup_mock = AsyncMock()
+        job_controller._cleanup_job_group_clusters = cleanup_mock
+
+        patches = self._patches()
+        for p in patches:
+            p.start()
+        try:
+            run_task = asyncio.create_task(job_controller._run_job_group())
+            await self._wait_for(lambda: len(monitor_tasks) == 2)
+
+            run_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(run_task, timeout=10)
+
+            # By the time the CancelledError propagates out of
+            # _run_job_group, every monitor must have fully exited.
+            for task_id, monitor_task in monitor_tasks.items():
+                assert monitor_task.done(), (
+                    f'monitor for task {task_id} was orphaned')
+            assert sorted(events) == ['monitor-0-exited', 'monitor-1-exited']
+            # Cluster cleanup on cancellation is owned by run_job_loop's
+            # cancel flow, not by _run_job_group.
+            cleanup_mock.assert_not_awaited()
+        finally:
+            for p in patches:
+                p.stop()
+            for monitor_task in monitor_tasks.values():
+                monitor_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_monitor_failure_drains_monitors_before_cleanup(self):
+        """The monitoring-failure path drains monitors before cleanup.
+
+        Before the fix, the except-Exception path only requested
+        cancellation and immediately tore the clusters down, racing the
+        still-unwinding monitors.
+        """
+        # task-0 is primary and completes; task-1 is auxiliary and blocks.
+        job_controller = self._make_controller(num_tasks=2,
+                                               primary_tasks=['task-0'])
+        monitor_tasks: Dict[int, asyncio.Task] = {}
+        events: List[str] = []
+        primary_done = asyncio.Event()
+
+        async def fake_monitor(task_id, task, cluster_name, executor,
+                               job_group_name, tasks_handles, force_recovery):
+            monitor_tasks[task_id] = asyncio.current_task()
+            if task_id == 0:
+                await primary_done.wait()
+                return True
+            try:
+                await asyncio.Event().wait()  # Block until cancelled.
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+                events.append(f'monitor-{task_id}-exited')
+                raise
+
+        async def fake_cleanup(cluster_names):
+            del cluster_names  # unused
+            events.append('cleanup')
+
+        job_controller._monitor_job_group_task = fake_monitor
+        job_controller._cleanup_job_group_clusters = fake_cleanup
+        # All primaries completing triggers auxiliary termination; make it
+        # blow up to exercise the monitoring-failure path.
+        job_controller._terminate_auxiliary_jobs = AsyncMock(
+            side_effect=RuntimeError('termination failed'))
+
+        patches = self._patches()
+        for p in patches:
+            p.start()
+        try:
+            run_task = asyncio.create_task(job_controller._run_job_group())
+            await self._wait_for(lambda: len(monitor_tasks) == 2)
+            primary_done.set()
+
+            with pytest.raises(RuntimeError, match='termination failed'):
+                await asyncio.wait_for(run_task, timeout=10)
+
+            assert events == [
+                'monitor-1-exited', 'cleanup'
+            ], ('auxiliary monitor must fully exit before cluster cleanup, '
+                f'got: {events}')
+            assert monitor_tasks[1].done()
+        finally:
+            for p in patches:
+                p.stop()
+            for monitor_task in monitor_tasks.values():
+                monitor_task.cancel()
 
 
 class TestTaskCleanup:
