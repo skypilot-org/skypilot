@@ -202,10 +202,13 @@ class TestJobsQueueJsonOutput:
              ], ['RUNNING', 'FAILED', 'FAILED_SETUP']),
             # Case-insensitive, with surrounding whitespace.
             (['--status', 'failed, failed_setup'], ['FAILED', 'FAILED_SETUP']),
+            # The -s short flag works the same as --status.
+            (['-s', 'FAILED', '-s', 'FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']
+            ),
+            (['-s', 'FAILED,FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']),
         ])
     def test_status_filter_forwarded(self, monkeypatch, args, expected):
-        """--status accepts repeated and comma-separated values as a flat list.
-        """
+        """-s/--status accepts repeated and comma-separated values as a list."""
         records = [self._make_job_record()]
         mock_result = (records, 1, {'RUNNING': 1}, 0)
         captured = {}
@@ -233,6 +236,44 @@ class TestJobsQueueJsonOutput:
                                ['-o', 'json', '--status', 'FAILED,BOGUS'])
         assert result.exit_code != 0
         assert 'BOGUS' in result.output
+
+    def _run_capturing(self, monkeypatch, args):
+        """Invoke jobs_queue with args, returning (result, captured kwargs)."""
+        records = [self._make_job_record()]
+        mock_result = (records, 1, {'RUNNING': 1}, 0)
+        captured = {}
+
+        def fake_get_managed_job_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_get_managed_job_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *a, **kw: mock_result)
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.jobs_queue, ['-o', 'json'] + args)
+        return result, captured
+
+    def test_bare_s_is_deprecated_skip_finished_alias(self, monkeypatch):
+        """A bare -s (no value) maps to skip_finished and warns (TODO: 0.15.0).
+
+        statuses is not forwarded (the sentinel is stripped).
+        """
+        result, captured = self._run_capturing(monkeypatch, ['-s'])
+        assert result.exit_code == 0, result.output
+        assert captured['skip_finished'] is True
+        assert captured['statuses'] is None
+        assert 'deprecated' in result.output.lower()
+
+    def test_skip_finished_long_flag_does_not_warn(self, monkeypatch):
+        """--skip-finished keeps working and is not deprecated."""
+        result, captured = self._run_capturing(monkeypatch, ['--skip-finished'])
+        assert result.exit_code == 0, result.output
+        assert captured['skip_finished'] is True
+        assert captured['statuses'] is None
+        assert 'deprecated' not in result.output.lower()
 
 
 class TestGpusListJsonOutput:

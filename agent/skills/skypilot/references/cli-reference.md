@@ -461,8 +461,8 @@ Show statuses of managed jobs.
 - `--verbose`, `-v` — Show all information in full.
 - `--limit`, `-l` (default: `50`) — Number of jobs to show, default is 50, use "-a/--all" to show all jobs.
 - `--refresh`, `-r` — Query the latest statuses, restarting the jobs controller if stopped.
-- `--skip-finished`, `-s` — Show only pending/running jobs' information.
-- `--status` — Filter by status, comma-separated or repeated (e.g. --status FAILED,FAILED_SETUP).
+- `--skip-finished` — Show only pending/running jobs' information.
+- `-s`, `--status` — Filter by status, comma-separated or repeated (e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a deprecated alias for --skip-finished.
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.

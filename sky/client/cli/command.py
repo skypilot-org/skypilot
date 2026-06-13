@@ -5962,6 +5962,13 @@ def jobs_launch(
                     f'{ux_utils.RESET_BOLD}')
 
 
+# Value the ``-s``/``--status`` option takes when given with no argument. It is
+# a deprecated alias for ``--skip-finished`` (see jobs_queue).
+# TODO(kevin): remove in 0.15.0, after which a bare ``-s`` is invalid and ``-s``
+# is solely the short flag for ``--status``.
+_SKIP_FINISHED_SENTINEL = '__skip_finished__'
+
+
 class StatusList(click.Choice):
     """Comma-separated, case-insensitive choices.
 
@@ -5971,6 +5978,10 @@ class StatusList(click.Choice):
     """
 
     def convert(self, value, param, ctx):
+        # A bare ``-s`` yields the sentinel; pass it through unvalidated so the
+        # handler can treat it as --skip-finished.
+        if value == _SKIP_FINISHED_SENTINEL:
+            return [value]
         return [
             super(StatusList, self).convert(v.strip(), param, ctx)
             for v in value.split(',')
@@ -5998,19 +6009,22 @@ class StatusList(click.Choice):
     help='Query the latest statuses, restarting the jobs controller if stopped.'
 )
 @click.option('--skip-finished',
-              '-s',
               default=False,
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.option('--status',
+@click.option('-s',
+              '--status',
               'statuses',
+              is_flag=False,
+              flag_value=_SKIP_FINISHED_SENTINEL,
               multiple=True,
               type=StatusList([s.value for s in ManagedJobStatus],
                               case_sensitive=False),
               required=False,
               help='Filter by status, comma-separated or repeated '
-              '(e.g. --status FAILED,FAILED_SETUP).')
+              '(e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a '
+              'deprecated alias for --skip-finished.')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -6080,11 +6094,12 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
-    (Tip) To filter by status, use ``--status`` (comma-separated or repeated):
+    (Tip) To filter by status, use ``-s``/``--status`` (comma-separated or
+    repeated):
 
     .. code-block:: bash
 
-      sky jobs queue --status FAILED,FAILED_SETUP
+      sky jobs queue -s FAILED,FAILED_SETUP
 
     (Tip) To show only active (pending/running) jobs, use ``--skip-finished``:
 
@@ -6093,9 +6108,23 @@ def jobs_queue(verbose: bool,
       sky jobs queue --skip-finished
 
     """
+    status_filter = [status for group in statuses for status in group]
+    # TODO(kevin): remove in 0.15.0, along with _SKIP_FINISHED_SENTINEL and the
+    # flag_value on -s/--status.
+    if _SKIP_FINISHED_SENTINEL in status_filter:
+        click.secho(
+            'Warning: `-s` without a value is a deprecated alias for '
+            '`--skip-finished` and will be removed in 0.15.0. Use '
+            '`--skip-finished`, or pass a status (e.g. `-s RUNNING`).',
+            fg='yellow',
+            err=True)
+        skip_finished = True
+        status_filter = [
+            s for s in status_filter if s != _SKIP_FINISHED_SENTINEL
+        ]
+    status_filter = status_filter or None
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
-    status_filter = [status for group in statuses for status in group] or None
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         max_num_jobs_to_show = (limit if not all else None)
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
