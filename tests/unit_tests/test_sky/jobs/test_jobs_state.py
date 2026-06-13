@@ -161,6 +161,92 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
         loop.close()
 
 
+@pytest.fixture
+def _seed_multi_task_job(_mock_managed_jobs_db_conn):
+    """Seed a multi-task (pipeline) job plus an unrelated terminal job.
+
+    The pipeline job has task 0 SUCCEEDED and task 1 RUNNING, so the job
+    overall is still running. A second single-task FAILED job exists so that
+    filter assertions prove row selection among other jobs, not just against
+    a one-job database. Used to characterize how the row/task-level
+    `statuses` filter behaves on pipelines.
+
+    Returns a dict with 'pipeline_job_id' and 'failed_job_id'.
+    """
+
+    async def mock_callback(status: str):
+        pass
+
+    async def create_jobs():
+        pipeline_job_id = state.set_job_info_without_job_id(
+            name='pipe-status-test',
+            workspace='ws1',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        # Two tasks under one job.
+        state.set_pending(pipeline_job_id,
+                          task_id=0,
+                          task_name='extract',
+                          resources_str='{}',
+                          metadata='{}')
+        state.set_pending(pipeline_job_id,
+                          task_id=1,
+                          task_name='transform',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([pipeline_job_id], '/tmp/dag.yaml',
+                                    '/tmp/user.yaml', '/tmp/env', None, 100)
+        # Task 0 -> SUCCEEDED.
+        await state.set_starting_async(pipeline_job_id, 0, 'run_0', time.time(),
+                                       '{}', {}, mock_callback)
+        await state.set_started_async(pipeline_job_id, 0, time.time(),
+                                      mock_callback)
+        await state.set_succeeded_async(pipeline_job_id, 0, time.time(),
+                                        mock_callback)
+        # Task 1 -> RUNNING (job not done: no scheduler_set_done).
+        await state.set_starting_async(pipeline_job_id, 1, 'run_1', time.time(),
+                                       '{}', {}, mock_callback)
+        await state.set_started_async(pipeline_job_id, 1, time.time(),
+                                      mock_callback)
+
+        # An unrelated single-task job that already FAILED.
+        failed_job_id = state.set_job_info_without_job_id(
+            name='other-failed-job',
+            workspace='ws1',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        state.set_pending(failed_job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([failed_job_id], '/tmp/dag-failed.yaml',
+                                    '/tmp/user-failed.yaml', '/tmp/env-failed',
+                                    None, 100)
+        await state.set_starting_async(failed_job_id, 0, 'run_failed',
+                                       time.time(), '{}', {}, mock_callback)
+        await state.set_started_async(failed_job_id, 0, time.time(),
+                                      mock_callback)
+        await state.set_failed_async(failed_job_id, 0,
+                                     state.ManagedJobStatus.FAILED,
+                                     'Test failure', mock_callback)
+        state.scheduler_set_done(failed_job_id)
+        return {
+            'pipeline_job_id': pipeline_job_id,
+            'failed_job_id': failed_job_id,
+        }
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_jobs())
+    finally:
+        loop.close()
+
+
 class TestMapResponseFieldToDbColumn:
     """Test class for _map_response_field_to_db_column function."""
 
@@ -889,3 +975,74 @@ class TestSubmittedAtRangeFilter:
         # All three jobs are RUNNING; the window must cut the status counts.
         counts = state.get_status_count_with_filters(submitted_after=_T200)
         assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
+
+
+class TestMultiTaskStatusFilterCharacterization:
+    """Pin the CURRENT (row/task-level) behavior of the `statuses` filter on a
+    multi-task (pipeline) job.
+
+    The `statuses` filter matches individual task rows, unlike `skip_finished`,
+    which is job-level. So filtering a pipeline by a terminal status returns a
+    partial view of a job that is still running. These assertions characterize
+    today's behavior; if `statuses` is ever made job-aware, they are expected
+    to change.
+    """
+
+    def test_terminal_status_returns_only_the_finished_task(
+            self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        # --status SUCCEEDED returns only the pipeline's finished task, even
+        # though the job is still running (task 1 is RUNNING). The FAILED job
+        # does not match.
+        jobs, total = state.get_managed_jobs_with_filters(
+            statuses=[state.ManagedJobStatus.SUCCEEDED.value])
+        assert [(j['job_id'], j['task_id']) for j in jobs] == [(pipeline_id, 0)]
+        assert jobs[0]['status'] == state.ManagedJobStatus.SUCCEEDED
+        assert total == 1
+
+    def test_running_status_returns_only_the_running_task(
+            self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        jobs, total = state.get_managed_jobs_with_filters(
+            statuses=[state.ManagedJobStatus.RUNNING.value])
+        assert [(j['job_id'], j['task_id']) for j in jobs] == [(pipeline_id, 1)]
+        assert jobs[0]['status'] == state.ManagedJobStatus.RUNNING
+        assert total == 1
+
+    def test_failed_status_returns_only_the_other_job(self,
+                                                      _seed_multi_task_job):
+        failed_id = _seed_multi_task_job['failed_job_id']
+        jobs, total = state.get_managed_jobs_with_filters(
+            statuses=[state.ManagedJobStatus.FAILED.value])
+        assert [(j['job_id'], j['task_id']) for j in jobs] == [(failed_id, 0)]
+        assert jobs[0]['status'] == state.ManagedJobStatus.FAILED
+        assert total == 1
+
+    def test_both_statuses_return_both_tasks(self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        jobs, total = state.get_managed_jobs_with_filters(statuses=[
+            state.ManagedJobStatus.SUCCEEDED.value,
+            state.ManagedJobStatus.RUNNING.value,
+        ])
+        assert sorted((j['job_id'], j['task_id']) for j in jobs) == [
+            (pipeline_id, 0),
+            (pipeline_id, 1),
+        ]
+        # total counts unique jobs that have a matching task: two matching
+        # task rows, one job.
+        assert total == 1
+
+    def test_skip_finished_is_job_level(self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        # Contrast: skip_finished is job-level. The still-active pipeline
+        # keeps ALL its tasks, including the finished one, while the FAILED
+        # job is dropped entirely.
+        jobs, total = state.get_managed_jobs_with_filters(skip_finished=True)
+        assert sorted((j['job_id'], j['task_id']) for j in jobs) == [
+            (pipeline_id, 0),
+            (pipeline_id, 1),
+        ]
+        assert {j['status'] for j in jobs} == {
+            state.ManagedJobStatus.SUCCEEDED, state.ManagedJobStatus.RUNNING
+        }
+        assert total == 1

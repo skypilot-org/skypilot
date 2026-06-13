@@ -88,6 +88,14 @@ def test_managed_jobs_basic(generic_cloud: str):
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            # Filtering by --status keeps matching jobs and drops the rest:
+            # {name}-1 is CANCELLED, {name}-2 is RUNNING/SUCCEEDED. Use
+            # lowercase to exercise case-insensitive matching.
+            f's=$(sky jobs queue --status cancelled); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # Comma-separated values are also accepted.
+            f's=$(sky jobs queue --status running,succeeded); echo "$s"; '
+            f'echo "$s" | grep {name}-2 && ! echo "$s" | grep {name}-1',
         ],
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.

@@ -5,8 +5,11 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
 from sky import jobs as managed_jobs
+from sky import sky_logging
 from sky.schemas.api import responses
 from sky.server import common as server_common
+
+logger = sky_logging.init_logger(__name__)
 
 
 class QueueResultVersion(enum.Enum):
@@ -36,6 +39,7 @@ def get_managed_job_queue(
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    statuses: Optional[List[str]] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
 ) -> Tuple[server_common.RequestId[Union[List[responses.ManagedJobRecord],
@@ -53,6 +57,7 @@ def get_managed_job_queue(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+        statuses: Only return jobs whose status is in this list.
         submitted_after: Only show jobs submitted at or after this epoch time
             (seconds).
         submitted_before: Only show jobs submitted at or before this epoch
@@ -80,9 +85,20 @@ def get_managed_job_queue(
                 job_ids,
                 limit,
                 fields,
+                statuses=statuses,
                 submitted_after=submitted_after,
                 submitted_before=submitted_before)), QueueResultVersion.V2
     except exceptions.APINotSupportedError:
+        if statuses is not None:
+            logger.warning(
+                'Filtering by status is not supported in your API server. '
+                'Please upgrade to a newer API server to use --status. '
+                'Showing all jobs.')
+        if submitted_after is not None or submitted_before is not None:
+            logger.warning(
+                'Filtering by submission time is not supported in your API '
+                'server. Please upgrade to a newer API server to use '
+                '--since/--after/--before. Showing all jobs.')
         return typing.cast(
             server_common.RequestId[
                 Union[List[responses.ManagedJobRecord],
