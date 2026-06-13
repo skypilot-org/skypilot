@@ -59,6 +59,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import fencing
 from sky.jobs import file_content_utils
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -332,6 +333,7 @@ async def scheduled_launch(
     starting: Set[int],
     starting_lock: asyncio.Lock,
     starting_signal: asyncio.Condition,
+    fence: Optional[fencing.FencingToken] = None,
 ):
     """Launch as part of an ongoing job.
 
@@ -387,14 +389,17 @@ async def scheduled_launch(
     async with starting_lock:
         starting.add(job_id)
 
-    await state.scheduler_set_launching_async(job_id)
+    # On ownership loss this raises after the starting.add above, outside
+    # the try below -- the caller's failure handling (ultimately
+    # run_job_loop's unconditional finally tail) reclaims the entry.
+    await state.scheduler_set_launching_async(job_id, fence=fence)
 
     try:
         yield
     except Exception as e:
         raise e
     else:
-        await state.scheduler_set_alive_async(job_id)
+        await state.scheduler_set_alive_async(job_id, fence=fence)
     finally:
         async with starting_lock:
             starting.remove(job_id)
@@ -419,13 +424,15 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
     state.scheduler_set_done(job_id, idempotent)
 
 
-async def job_done_async(job_id: int, idempotent: bool = False):
+async def job_done_async(job_id: int,
+                         idempotent: bool = False,
+                         fence: Optional[fencing.FencingToken] = None):
     """Async version of job_done."""
     if idempotent and (await state.get_job_schedule_state_async(job_id)
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    await state.scheduler_set_done_async(job_id, idempotent)
+    await state.scheduler_set_done_async(job_id, idempotent, fence=fence)
 
 
 if __name__ == '__main__':

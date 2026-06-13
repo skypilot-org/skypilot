@@ -33,9 +33,11 @@ import time
 from typing import Any, Deque, Dict, List, Optional
 
 import sky
+from sky import exceptions
 from sky.batch import constants
 from sky.batch import io_formats
 from sky.client import sdk
+from sky.jobs import fencing
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants as skylet_constants
 
@@ -147,8 +149,13 @@ class BatchCoordinator:
                  output_formats_dict: List[Dict[str, Any]],
                  activate_env: str = '',
                  job_id: Optional[int] = None,
-                 is_resume: bool = False):
+                 is_resume: bool = False,
+                 fence: Optional[fencing.FencingToken] = None):
         self.dataset_path = dataset_path
+        # Ownership fence for the managed job's claim; shared with the
+        # controller coroutine. Worker threads pass it to their DB writes
+        # and consult fence.lost before destructive worker shutdowns.
+        self._fence = fence
         self.output_path = output_path
         self.batch_size = batch_size
         self.pool_name = pool_name
@@ -235,11 +242,16 @@ class BatchCoordinator:
         self.cancel()
         sys.exit(1)
 
+    def _fence_lost(self) -> bool:
+        """Whether this job's claim is known to be lost (no DB read)."""
+        return self._fence is not None and self._fence.lost
+
     def cancel(self) -> None:
         """Cancel the coordinator and shut down active workers.
 
         Sets the ``_cancelled`` flag so the dispatch loop breaks early,
-        then shuts down any active worker services.
+        then shuts down any active worker services (skipped when ownership
+        is lost; see _shutdown_worker).
         """
         self._cancelled = True
         with self._active_workers_lock:
@@ -286,7 +298,9 @@ class BatchCoordinator:
 
     def _save_batches_to_db(self) -> None:
         """Write all batch records to DB with PENDING status."""
-        managed_job_state.save_batch_states(self._managed_job_id, self.batches)
+        managed_job_state.save_batch_states(self._managed_job_id,
+                                            self.batches,
+                                            fence=self._fence)
         logger.info(f'Saved {len(self.batches)} batch records to DB')
 
     def _resume_from_db(self) -> None:
@@ -295,7 +309,8 @@ class BatchCoordinator:
         Resets any DISPATCHED (in-flight) batches back to PENDING, then
         rebuilds in-memory state from the persisted records.
         """
-        managed_job_state.reset_dispatched_batches(self._managed_job_id)
+        managed_job_state.reset_dispatched_batches(self._managed_job_id,
+                                                   fence=self._fence)
         records = managed_job_state.get_batch_states(self._managed_job_id)
         if not records:
             raise RuntimeError(
@@ -598,6 +613,14 @@ class BatchCoordinator:
                          cluster_name: str,
                          worker_job_id: Optional[int] = None) -> None:
         """Send shutdown signal and cancel worker job."""
+        if self._fence is not None and self._fence.lost:
+            # The per-replica worker services may now be serving the new
+            # claimant's coordinator; shutting them down here would break
+            # it. (The claimant's re-discovery loop self-heals regardless,
+            # but don't create the disruption in the first place.)
+            logger.error(f'Ownership lost for job {self._managed_job_id}: '
+                         f'skipping worker shutdown on {cluster_name}.')
+            return
         shutdown_code = self._generate_shutdown_code()
         task = sky.Task(name=f'batch-shutdown-{cluster_name}',
                         run=shutdown_code)
@@ -638,7 +661,7 @@ class BatchCoordinator:
             self._active_workers[cluster_name] = worker_job_id
 
         try:
-            while not self._cancelled:
+            while not self._cancelled and not self._fence_lost():
                 try:
                     batch_idx = self.pending_batches.popleft()
                 except IndexError:
@@ -650,7 +673,8 @@ class BatchCoordinator:
                 managed_job_state.set_batch_status(self._managed_job_id,
                                                    batch_idx,
                                                    'DISPATCHED',
-                                                   worker_cluster=cluster_name)
+                                                   worker_cluster=cluster_name,
+                                                   fence=self._fence)
 
                 try:
                     notify_code = self._generate_notify_code(batch_idx)
@@ -696,14 +720,22 @@ class BatchCoordinator:
 
                     # Mark batch as completed in DB.
                     managed_job_state.set_batch_status(self._managed_job_id,
-                                                       batch_idx, 'COMPLETED')
+                                                       batch_idx,
+                                                       'COMPLETED',
+                                                       fence=self._fence)
                     self.completed_count += 1
                     if self.completed_count == len(self.batches):
                         managed_job_state.set_winding_down(self._managed_job_id,
-                                                           task_id=0)
+                                                           task_id=0,
+                                                           fence=self._fence)
                     logger.info(
                         f'Batch {batch_idx} completed on {cluster_name} '
                         f'({self.completed_count}/{len(self.batches)})')
+                except exceptions.JobOwnershipLostError:
+                    # Not a batch failure: do not retry or write FAILED.
+                    # Propagates out of this thread to _dispatch_wrapper;
+                    # _dispatch_all re-raises it promptly.
+                    raise
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error(f'Batch {batch_idx} failed on '
                                  f'{cluster_name}: {e}')
@@ -713,7 +745,8 @@ class BatchCoordinator:
                             self._managed_job_id,
                             batch_idx,
                             'PENDING',
-                            retry_count=self._retry_counts[batch_idx])
+                            retry_count=self._retry_counts[batch_idx],
+                            fence=self._fence)
                         self.pending_batches.append(batch_idx)
                         backoff = (constants.RETRY_BACKOFF_BASE**
                                    self._retry_counts[batch_idx])
@@ -727,7 +760,8 @@ class BatchCoordinator:
                                                            batch_idx,
                                                            'FAILED',
                                                            retry_count=retries +
-                                                           1)
+                                                           1,
+                                                           fence=self._fence)
                         raise RuntimeError(
                             f'Batch {batch_idx} failed after '
                             f'{constants.MAX_RETRIES} retries: {e}') from e
@@ -777,6 +811,16 @@ class BatchCoordinator:
         # Monitor until all batches complete, periodically discovering
         # new workers and spawning threads for them.
         while not self._cancelled:
+            # Surface an ownership loss immediately -- without this, errors
+            # are only consulted after all batches settle, which can be
+            # hours away. The flag check covers losses detected without an
+            # exception reaching this thread.
+            for error in errors:
+                if isinstance(error, exceptions.JobOwnershipLostError):
+                    raise error
+            if self._fence_lost():
+                raise exceptions.JobOwnershipLostError(self._managed_job_id)
+
             if self.completed_count >= len(self.batches):
                 break
 

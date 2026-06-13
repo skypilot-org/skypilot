@@ -29,6 +29,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.batch import coordinator as batch_coordinator
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
+from sky.jobs import fencing
 from sky.jobs import file_content_utils
 from sky.jobs import job_group_networking
 from sky.jobs import log_gc
@@ -191,6 +192,7 @@ class JobController:
         starting_signal: asyncio.Condition,
         pool: Optional[str] = None,
         rank: Optional[int] = None,
+        fence: Optional[fencing.FencingToken] = None,
     ) -> None:
         """Initialize a ``JobsController``.
 
@@ -207,11 +209,15 @@ class JobController:
                 cluster.
             rank: Optional rank of the job that can be used to partition
                 workloads.
+            fence: Ownership fence for this job's claim, passed to all
+                claim-scoped state writes so a stale controller cannot
+                clobber a re-claimed job's state.
         """
 
         self.starting = starting
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
+        self._fence = fence
 
         logger.info('Initializing JobsController for job_id=%s', job_id)
 
@@ -454,12 +460,14 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 start_time=time.time(),
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
             await managed_job_state.set_succeeded_async(
                 job_id=self._job_id,
                 task_id=task_id,
                 end_time=time.time(),
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
             logger.info(f'Empty task {task_id} marked as succeeded immediately')
             return True
 
@@ -482,7 +490,8 @@ class JobController:
             self.starting_lock,
             self.starting_signal,
             file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
-                self._job_id))
+                self._job_id),
+            fence=self._fence)
         if not is_resume:
             submitted_at = time.time()
             if task_id == 0:
@@ -506,7 +515,8 @@ class JobController:
                 resources_str=resources_str,
                 specs=_build_task_specs(self._strategy_executor),
                 callback_func=callback_func,
-                full_resources_json=full_resources_json)
+                full_resources_json=full_resources_json,
+                fence=self._fence)
             logger.info(f'Submitted managed job {self._job_id} '
                         f'(task: {task_id}, name: {task.name!r}); '
                         f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
@@ -555,7 +565,8 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 start_time=remote_job_submitted_at,
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
 
         async with self.starting_lock:
             try:
@@ -670,6 +681,7 @@ class JobController:
             is_resume=is_resume,
             input_format_dict=metadata['batch_input_format'],
             output_formats_dict=metadata['batch_output_formats'],
+            fence=self._fence,
         )
 
         if not is_resume:
@@ -686,12 +698,14 @@ class JobController:
                     'max_restarts_on_errors': 0,
                     'recover_on_exit_codes': []
                 },
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
             await managed_job_state.set_started_async(
                 job_id=self._job_id,
                 task_id=task_id,
                 start_time=time.time(),
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
 
         try:
             await asyncio.to_thread(coordinator.run)
@@ -699,10 +713,15 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 end_time=time.time(),
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
             return True
         except asyncio.CancelledError:
             coordinator.cancel()
+            raise
+        except exceptions.JobOwnershipLostError:
+            # Not a coordinator failure: never convert ownership loss into a
+            # FAILED write against what may now be the new claimant's job.
             raise
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Batch coordinator failed: {e}', exc_info=True)
@@ -711,7 +730,8 @@ class JobController:
                 task_id=task_id,
                 failure_type=managed_job_state.ManagedJobStatus.FAILED,
                 failure_reason=str(e),
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
             return False
 
     async def _monitor_one_task(
@@ -836,7 +856,8 @@ class JobController:
                     self._job_id,
                     task_id,
                     end_time=success_end_time,
-                    callback_func=callback_func)
+                    callback_func=callback_func,
+                    fence=self._fence)
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
@@ -1030,7 +1051,8 @@ class JobController:
                             failure_type=managed_job_status,
                             failure_reason=failure_reason,
                             end_time=end_time,
-                            callback_func=callback_func)
+                            callback_func=callback_func,
+                            fence=self._fence)
                         return False
 
                 elif job_status is not None:
@@ -1046,7 +1068,8 @@ class JobController:
                         failure_type=managed_job_state.ManagedJobStatus.
                         FAILED_CONTROLLER,
                         failure_reason=failure_reason,
-                        callback_func=callback_func)
+                        callback_func=callback_func,
+                        fence=self._fence)
                     return False
                 else:
                     # job_status is None but cluster is UP - transient error
@@ -1120,6 +1143,7 @@ class JobController:
                 callback_func=callback_func,
                 external_failures=external_failures,
                 cluster_event_reason=cluster_event_reason,
+                fence=self._fence,
             )
 
             recovered_time = await executor.recover()
@@ -1136,7 +1160,8 @@ class JobController:
                 self._job_id,
                 task_id,
                 recovered_time=recovered_time,
-                callback_func=callback_func)
+                callback_func=callback_func,
+                fence=self._fence)
 
             # Call recovery callback if provided
             if on_recovery is not None:
@@ -1207,7 +1232,8 @@ class JobController:
             self.starting_lock,
             self.starting_signal,
             file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
-                self._job_id))
+                self._job_id),
+            fence=self._fence)
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -1220,7 +1246,8 @@ class JobController:
             time.time(),
             resources_str=resources_str,
             specs=_build_task_specs(executor),
-            callback_func=callback_func)
+            callback_func=callback_func,
+            fence=self._fence)
 
         return cluster_name, executor
 
@@ -1442,6 +1469,11 @@ class JobController:
                 logger.info('Phase 1: Skipping launch - resuming from '
                             'previous execution')
 
+        except exceptions.JobOwnershipLostError:
+            # The group clusters may belong to the new claimant now;
+            # stand-down (in run_job_loop's finally) decides what, if
+            # anything, to terminate.
+            raise
         except Exception as e:
             logger.error(f'Failed to launch clusters: {e}')
             await self._cleanup_job_group_clusters(cluster_names)
@@ -1470,7 +1502,8 @@ class JobController:
                     job_id=self._job_id,
                     task_id=task_id,
                     start_time=time.time(),
-                    callback_func=callback_func)
+                    callback_func=callback_func,
+                    fence=self._fence)
 
             return handle
 
@@ -1613,6 +1646,10 @@ class JobController:
                         task_results[completed_task_id] = False
                         task_name = tasks[completed_task_id].name
                         logger.info(f'Job {task_name} was terminated')
+                    except exceptions.JobOwnershipLostError:
+                        # Ownership loss is not a per-task failure result:
+                        # unwind the whole group (handled below).
+                        raise
                     except Exception as e:  # pylint: disable=broad-except
                         # TODO: avoid broad except
                         task_results[completed_task_id] = e
@@ -1650,6 +1687,17 @@ class JobController:
                                 # All auxiliary jobs terminated, exit loop
                                 break
 
+        except exceptions.JobOwnershipLostError:
+            # Stop the sibling monitors (they would keep driving launches
+            # and recoveries for a job this controller no longer owns), but
+            # never tear the group clusters down -- they may be the new
+            # claimant's. Drain so no monitor is mid-recovery when the
+            # stand-down disposition runs.
+            for async_task in monitor_async_tasks.values():
+                async_task.cancel()
+            await asyncio.gather(*monitor_async_tasks.values(),
+                                 return_exceptions=True)
+            raise
         except Exception as e:
             logger.error(f'Monitoring failed: {e}')
             # Cancel all remaining tasks
@@ -1677,7 +1725,14 @@ class JobController:
             elif check_result is not True:
                 all_succeeded = False
 
-        await self._cleanup_job_group_clusters(cluster_names)
+        if self._fence is not None and self._fence.lost:
+            # Ownership was lost without an exception reaching this point
+            # (e.g. flagged mid-teardown): leave the clusters to the
+            # stand-down disposition.
+            logger.error(f'Ownership lost for job {self._job_id}: skipping '
+                         'JobGroup cluster cleanup.')
+        else:
+            await self._cleanup_job_group_clusters(cluster_names)
         return all_succeeded
 
     async def _terminate_auxiliary_jobs(self, tasks: List['task_lib.Task'],
@@ -1717,11 +1772,16 @@ class JobController:
             except asyncio.CancelledError:
                 pass
 
-            # Set the task status to cancelled
+            # Set the task status to cancelled. Invariant: this fenced write
+            # runs BEFORE the cluster teardown below, so an ownership loss
+            # raises here and stops the teardown -- _cleanup_cluster must
+            # never run against a job this controller no longer owns.
             callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id, task_id=task_id, task=tasks[task_id])
             await managed_job_state.set_cancelling_async(
-                job_id=self._job_id, callback_func=callback_func)
+                job_id=self._job_id,
+                callback_func=callback_func,
+                fence=self._fence)
 
             # Clean up the cluster
             cluster_name = cluster_names[task_id]
@@ -1733,7 +1793,9 @@ class JobController:
                         f'Failed to cleanup cluster for {task_name}: {e}')
 
             await managed_job_state.set_cancelled_async(
-                job_id=self._job_id, callback_func=callback_func)
+                job_id=self._job_id,
+                callback_func=callback_func,
+                fence=self._fence)
 
         # Build termination coroutines with appropriate delays
         termination_coros = []
@@ -1748,7 +1810,14 @@ class JobController:
                 terminate_one(task_id, async_task, delay_secs))
 
         # Run all terminations in parallel
-        await asyncio.gather(*termination_coros, return_exceptions=True)
+        results = await asyncio.gather(*termination_coros,
+                                       return_exceptions=True)
+        # return_exceptions would silently discard an ownership loss raised
+        # by a fenced write inside terminate_one; surface it so the group
+        # unwinds to stand-down instead of proceeding as if cancelled.
+        for result in results:
+            if isinstance(result, exceptions.JobOwnershipLostError):
+                raise result
 
     async def _cleanup_job_group_clusters(
             self, cluster_names: typing.List[typing.Optional[str]]) -> None:
@@ -1829,6 +1898,12 @@ class JobController:
             # below.
             cancelled = True
             raise
+        except exceptions.JobOwnershipLostError:  # pylint: disable=try-except-raise
+            # Above the broad except below, which would otherwise convert an
+            # ownership loss into a FAILED_CONTROLLER write against what may
+            # now be the new claimant's job. run_job_loop routes this to the
+            # stand-down disposition.
+            raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(
                 f'Unexpected error in JobsController run for task {task_id}')
@@ -1841,19 +1916,29 @@ class JobController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
         finally:
-            callback_func = managed_job_utils.event_callback_func(
-                job_id=self._job_id,
-                task_id=task_id,
-                task=self._dag.tasks[task_id])
-            await managed_job_state.set_cancelling_async(
-                job_id=self._job_id, callback_func=callback_func)
-            if not cancelled:
-                # the others haven't been run yet so we can set them to
-                # cancelled immediately (no resources to clean up).
-                # if we are running and get cancelled, we need to clean up the
-                # resources first so this will be done later.
-                await managed_job_state.set_cancelled_async(
-                    job_id=self._job_id, callback_func=callback_func)
+            if self._fence is not None and self._fence.lost:
+                # Standing down: not-yet-run tasks belong to whoever holds
+                # the claim now; write nothing.
+                logger.error(f'Ownership lost for job {self._job_id}: '
+                             'skipping the remaining-task cancel writes.')
+            else:
+                callback_func = managed_job_utils.event_callback_func(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=self._dag.tasks[task_id])
+                await managed_job_state.set_cancelling_async(
+                    job_id=self._job_id,
+                    callback_func=callback_func,
+                    fence=self._fence)
+                if not cancelled:
+                    # the others haven't been run yet so we can set them to
+                    # cancelled immediately (no resources to clean up).
+                    # if we are running and get cancelled, we need to clean up
+                    # the resources first so this will be done later.
+                    await managed_job_state.set_cancelled_async(
+                        job_id=self._job_id,
+                        callback_func=callback_func,
+                        fence=self._fence)
 
     async def _update_failed_task_state(
             self, task_id: int,
@@ -1870,7 +1955,8 @@ class JobController:
             callback_func=managed_job_utils.event_callback_func(
                 job_id=self._job_id,
                 task_id=task_id,
-                task=self._dag.tasks[task_id]))
+                task=self._dag.tasks[task_id]),
+            fence=self._fence)
 
 
 class ControllerManager:
@@ -1883,6 +1969,9 @@ class ControllerManager:
         self._controller_uuid = controller_uuid
         # Global state for active jobs
         self.job_tasks: Dict[int, asyncio.Task] = {}
+        # Fencing token per locally-running job, registered/removed together
+        # with job_tasks (under _job_tasks_lock).
+        self._tokens: Dict[int, fencing.FencingToken] = {}
         self.starting: Set[int] = set()
 
         # Lock for synchronizing access to global state dictionary
@@ -2128,7 +2217,8 @@ class ControllerManager:
     async def run_job_loop(self,
                            job_id: int,
                            log_file: str,
-                           pool: Optional[str] = None):
+                           pool: Optional[str] = None,
+                           claim_id: Optional[str] = None):
         """Background task that runs the job loop."""
         ctx = context.get()
         assert ctx is not None, 'Context is not initialized'
@@ -2198,25 +2288,61 @@ class ControllerManager:
         # coroutine's contextvars Context.
         usage_lib.install_fresh_messages_for_current_context()
 
+        # The fencing token shared by everything driving this job: the
+        # JobController coroutine, its strategy executor, and (for batch
+        # jobs) the coordinator worker threads. Any of them flips
+        # fence.lost when ownership loss is verified.
+        fence: Optional[fencing.FencingToken] = None
+        if claim_id is not None:
+            fence = fencing.FencingToken(job_id=job_id, claim_id=claim_id)
+
+        async with self._job_tasks_lock:
+            if job_id in self.job_tasks:
+                # A duplicate invocation while the first is still
+                # registered: the job's row was reset out from under the
+                # live local coroutine and re-claimed in this process. The
+                # claim-side exclusion in monitor_loop prevents this;
+                # belt-and-suspenders here. Exit WITHOUT cleanup, terminal
+                # writes, job_done, or registry deletion -- all of those
+                # would fire against the live run.
+                logger.error(f'Job {job_id} is already running in this '
+                             'process; refusing the duplicate invocation.')
+                return
+
         cancelling = False
+        cancel_task_id: Optional[int] = None
+        cancel_dag: Optional['sky.Dag'] = None
         graceful, graceful_timeout = False, None
         try:
-            controller = JobController(job_id, self.starting,
+            controller = JobController(job_id,
+                                       self.starting,
                                        self._job_tasks_lock,
-                                       self._starting_signal, pool, job_rank)
+                                       self._starting_signal,
+                                       pool,
+                                       job_rank,
+                                       fence=fence)
 
             async with self._job_tasks_lock:
-                if job_id in self.job_tasks:
-                    logger.error(f'Job {job_id} already exists in job_tasks')
-                    raise ValueError(f'Job {job_id} already exists')
-
-                # Create the task and store it
-                # This function should return instantly and run the job loop in
-                # the background.
+                # Create the task and store it. No duplicate re-check
+                # needed: monitor_loop is the sole spawner and runs
+                # serially, so nothing can have registered job_id since the
+                # check above.
+                # This function should return instantly and run the job loop
+                # in the background.
                 task = asyncio.create_task(controller.run())
                 self.job_tasks[job_id] = task
+                if fence is not None:
+                    self._tokens[job_id] = fence
             await task
         except asyncio.CancelledError:
+            if fence is not None and fence.lost:
+                # Ownership loss routed via cancellation: skip the cancel
+                # flow entirely -- its state writes and log downloads belong
+                # to whoever holds the claim now. The finally below runs the
+                # stand-down disposition.
+                logger.error(f'Job {job_id} cancelled after ownership loss; '
+                             'skipping the cancel flow.')
+                raise
             logger.info(f'Job {job_id} was cancelled')
 
             async with self._cancel_info_lock:
@@ -2226,7 +2352,7 @@ class ControllerManager:
                 logger.debug(f'Job {job_id} graceful cancel: '
                              f'graceful={graceful}, timeout={graceful_timeout}')
 
-            dag = _get_dag(job_id)
+            cancel_dag = _get_dag(job_id)
 
             # Query all task statuses BEFORE set_cancelling_async changes
             # them. At this point, statuses accurately reflect which tasks
@@ -2236,11 +2362,11 @@ class ControllerManager:
 
             # The "latest" non-terminal task - needed for
             # set_cancelling_async callback and set_cancelled_async later.
-            task_id, _ = (
+            cancel_task_id, _ = (
                 managed_job_state.get_latest_task_id_from_statuses(id_statuses))
-            assert task_id is not None, job_id
+            assert cancel_task_id is not None, job_id
             logger.info(f'Cancelling managed job, job_id: {job_id}, '
-                        f'task_id: {task_id}')
+                        f'task_id: {cancel_task_id}')
 
             # Tasks that were actually started (have clusters with logs to
             # download). PENDING tasks never had a cluster; terminal tasks
@@ -2255,10 +2381,16 @@ class ControllerManager:
                 status != managed_job_state.ManagedJobStatus.PENDING
             ]
 
+            # A fence trip here raises out of this handler (replacing the
+            # CancelledError); the finally below keys off fence.lost, not
+            # the exception type, so the stand-down disposition still runs.
             await managed_job_state.set_cancelling_async(
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(
-                    job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
+                    job_id=job_id,
+                    task_id=cancel_task_id,
+                    task=cancel_dag.tasks[cancel_task_id]),
+                fence=fence)
 
             # Download logs before cleanup so they remain accessible after
             # cancellation. This is best-effort - if the cluster is already
@@ -2266,7 +2398,7 @@ class ControllerManager:
             if active_task_ids:
                 try:
                     await self._download_logs_for_cancelled_job(
-                        controller, job_id, active_task_ids, dag, pool)
+                        controller, job_id, active_task_ids, cancel_dag, pool)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to download logs for cancelled job '
@@ -2274,83 +2406,265 @@ class ControllerManager:
 
             cancelling = True
             raise
+        except exceptions.JobOwnershipLostError:
+            # Graceful stand-down: the finally below decides, from the job's
+            # current DB row, what (if anything) to clean up. Deliberately
+            # not re-raised -- standing down is a clean exit for this
+            # background task.
+            logger.error(f'Ownership of job {job_id} was lost; '
+                         'standing down.')
         except Exception as e:
             logger.error(f'Unexpected error in job loop for {job_id}: '
                          f'{common_utils.format_exception(e)}')
             raise
         finally:
             try:
-                await self._cleanup(job_id,
-                                    pool=pool,
-                                    graceful=graceful,
-                                    graceful_timeout=graceful_timeout)
-                logger.info(
-                    f'Cluster of managed job {job_id} has been cleaned up.')
-            except Exception as e:  # pylint: disable=broad-except
-                failure_reason = ('Failed to clean up: '
-                                  f'{common_utils.format_exception(e)}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=failure_reason,
-                    override_terminal=True)
+                stood_down = False
+                if fence is not None and fence.lost:
+                    stood_down = await self._stand_down(job_id, pool, fence)
+                if not stood_down:
+                    await self._finalize_job_loop(job_id, pool, graceful,
+                                                  graceful_timeout, cancelling,
+                                                  cancel_task_id, cancel_dag,
+                                                  fence)
+            except exceptions.JobOwnershipLostError:
+                # Ownership was lost during the normal disposition above
+                # (its writes are fenced); switch to stand-down for the
+                # remainder. Never re-raised: the unconditional tail below
+                # must run -- a leftover job_tasks entry would block every
+                # future claim of this job in this process.
+                logger.error(f'Ownership of job {job_id} was lost during '
+                             'cleanup; standing down for the remainder.')
+                assert fence is not None
+                await self._stand_down(job_id, pool, fence)
+            finally:
+                # Unconditional tail: local-registry cleanup only, no DB
+                # writes. Always runs, whatever the disposition above did.
+                async with self._cancel_info_lock:
+                    # Normally popped by the cancel flow; a stale entry here
+                    # would suppress delivery of a later cancel for a
+                    # re-claimed job.
+                    self._cancel_info.pop(job_id, None)
+                async with self._job_tasks_lock:
+                    try:
+                        # just in case we were cancelled or some other error
+                        # occurred during launch
+                        self.starting.remove(job_id)
+                        # its fine if we notify again, better to wake someone
+                        # up and have them go to sleep again, then have some
+                        # stuck sleeping.
+                        self._starting_signal.notify()
+                    except KeyError:
+                        pass
 
-            if cancelling:
-                # Since it's set with cancelling
-                assert task_id is not None, job_id
-                await managed_job_state.set_cancelled_async(
+                # Remove the job from the job_tasks dictionary.
+                async with self._job_tasks_lock:
+                    if job_id in self.job_tasks:
+                        del self.job_tasks[job_id]
+                    self._tokens.pop(job_id, None)
+
+    async def _finalize_job_loop(self, job_id: int, pool: Optional[str],
+                                 graceful: bool,
+                                 graceful_timeout: Optional[int],
+                                 cancelling: bool,
+                                 cancel_task_id: Optional[int],
+                                 cancel_dag: Optional['sky.Dag'],
+                                 fence: Optional[fencing.FencingToken]) -> None:
+        """The job loop's normal exit disposition (extracted from the
+        finally of run_job_loop): clean up resources, settle the job's
+        terminal status, and retire it from the scheduler."""
+        try:
+            await self._cleanup(job_id,
+                                pool=pool,
+                                graceful=graceful,
+                                graceful_timeout=graceful_timeout)
+            logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
+        except Exception as e:  # pylint: disable=broad-except
+            failure_reason = ('Failed to clean up: '
+                              f'{common_utils.format_exception(e)}')
+            await managed_job_state.set_failed_async(
+                job_id,
+                task_id=None,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
+                failure_reason=failure_reason,
+                override_terminal=True,
+                fence=fence)
+
+        if cancelling:
+            # Since it's set with cancelling
+            assert cancel_task_id is not None, job_id
+            assert cancel_dag is not None, job_id
+            await managed_job_state.set_cancelled_async(
+                job_id=job_id,
+                callback_func=managed_job_utils.event_callback_func(
                     job_id=job_id,
-                    callback_func=managed_job_utils.event_callback_func(
-                        job_id=job_id, task_id=task_id,
-                        task=dag.tasks[task_id]))
+                    task_id=cancel_task_id,
+                    task=cancel_dag.tasks[cancel_task_id]),
+                fence=fence)
 
-            # We should check job status after 'set_cancelled', otherwise
-            # the job status is not terminal.
-            job_status = await managed_job_state.get_status_async(job_id)
-            assert job_status is not None
-            # The job can be non-terminal if the controller exited abnormally,
-            # e.g. failed to launch cluster after reaching the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous job status: {job_status.value}')
-                await managed_job_state.set_failed_async(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky jobs logs --controller {job_id}'))
+        # We should check job status after 'set_cancelled', otherwise
+        # the job status is not terminal.
+        job_status = await managed_job_state.get_status_async(job_id)
+        assert job_status is not None
+        # The job can be non-terminal if the controller exited abnormally,
+        # e.g. failed to launch cluster after reaching the MAX_RETRY.
+        if not job_status.is_terminal():
+            logger.info(f'Previous job status: {job_status.value}')
+            await managed_job_state.set_failed_async(
+                job_id,
+                task_id=None,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
+                failure_reason=('Unexpected error occurred. For details, '
+                                f'run: sky jobs logs --controller {job_id}'),
+                fence=fence)
 
-            await scheduler.job_done_async(job_id)
+        await scheduler.job_done_async(job_id, fence=fence)
 
-            async with self._job_tasks_lock:
-                try:
-                    # just in case we were cancelled or some other error
-                    # occurred during launch
-                    self.starting.remove(job_id)
-                    # its fine if we notify again, better to wake someone up
-                    # and have them go to sleep again, then have some stuck
-                    # sleeping.
-                    self._starting_signal.notify()
-                except KeyError:
-                    pass
+    async def _stand_down(self, job_id: int, pool: Optional[str],
+                          fence: fencing.FencingToken) -> bool:
+        """Graceful stand-down: the exit disposition after ownership loss.
 
-            # Remove the job from the job_tasks dictionary.
-            async with self._job_tasks_lock:
-                if job_id in self.job_tasks:
-                    del self.job_tasks[job_id]
+        Decides from the job's current ownership row what a controller that
+        lost its claim may still do. Writes no job state, ever; the only
+        action it can take is terminating clusters that provably have no
+        owner (nothing else cleans those up -- the janitor skips WAITING
+        jobs).
+
+        Returns False only for the claim-is-actually-ours case, where the
+        caller falls through to the normal disposition; True otherwise
+        (stand-down owned the exit).
+        """
+        try:
+            row = await managed_job_state.get_job_ownership_async(job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            # Cannot tell whether the job was re-claimed. Terminating a
+            # possibly-reclaimed cluster is the one unrecoverable mistake,
+            # so do nothing; the cluster may leak until the job is claimed
+            # again.
+            logger.error(f'Stand-down for job {job_id}: failed to read '
+                         f'ownership ({common_utils.format_exception(e)}); '
+                         'skipping cleanup entirely.')
+            return True
+        if row is None:
+            logger.error(f'Stand-down for job {job_id}: job row is gone; '
+                         'dropping local state only.')
+            return True
+        observed_claim_id, controller_pid, schedule_state = row
+        if observed_claim_id == fence.claim_id:
+            # "Impossible": the fence tripped, yet the claim is still ours.
+            # Exiting silently would orphan a live-claimed job that the
+            # janitor permanently skips (our pid is alive) -- a zombie.
+            # Ownership is verified, so the normal disposition's writes are
+            # safe; fall through and let the job self-heal to
+            # FAILED_CONTROLLER instead.
+            logger.critical(
+                f'Stand-down for job {job_id}: fence tripped but claim '
+                f'{fence.claim_id} is still ours -- fence-verification '
+                'anomaly. Falling through to normal failure handling.')
+            return False
+        if observed_claim_id is not None:
+            logger.error(f'Stand-down for job {job_id}: re-claimed (current '
+                         f'claim {observed_claim_id}); leaving all resources '
+                         'to the new claimant.')
+            return True
+        if (controller_pid is None and schedule_state
+                == managed_job_state.ManagedJobScheduleState.WAITING.value):
+            logger.error(f'Stand-down for job {job_id}: reset and unclaimed; '
+                         'terminating the job clusters so they do not leak. '
+                         'The job stays WAITING and relaunches when claimed.')
+            await self._stand_down_terminate_clusters(job_id, pool)
+            return True
+        # claim_id is NULL but the pid pair is set or the job is not
+        # WAITING: a mixed-version hazard. An old-version (pre-claim_id)
+        # controller may have legitimately re-claimed the job, stamping only
+        # the pid pair; terminating would destroy that live claimant's
+        # cluster.
+        logger.error(f'Stand-down for job {job_id}: ownership columns are '
+                     f'mixed (pid={controller_pid}, '
+                     f'schedule_state={schedule_state}); skipping cleanup.')
+        return True
+
+    # Bounds for the unclaimed-cluster termination: terminate_cluster owns a
+    # minutes-long internal retry loop, so stand-down drives single-attempt
+    # calls in its own short loop, re-checking for a new claim in between.
+    _STAND_DOWN_TERMINATE_ATTEMPTS = 3
+    _STAND_DOWN_TERMINATE_GAP_SECONDS = 5
+
+    async def _stand_down_terminate_clusters(self, job_id: int,
+                                             pool: Optional[str]) -> None:
+        """Terminate an unclaimed job's cluster(s) during stand-down."""
+        if pool is not None:
+            # Pool jobs have no dedicated cluster, and the work already
+            # submitted to the pool worker must not be cancelled either: the
+            # next claimant resumes it via get_pool_submit_info.
+            return
+        try:
+            dag = _get_dag(job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Stand-down for job {job_id}: cannot enumerate '
+                         f'clusters ({common_utils.format_exception(e)}); '
+                         'they may leak until the job is claimed again.')
+            return
+        for task in dag.tasks:
+            if task.metadata.get('batch_coordinator'):
+                # Runs inline on the controller -- no cluster. Mirrors the
+                # enumeration in ControllerManager._cleanup.
+                continue
+            assert task.name is not None, task
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task.name, job_id)
+            await self._stand_down_terminate_one(job_id, cluster_name)
+
+    async def _stand_down_terminate_one(self, job_id: int,
+                                        cluster_name: str) -> None:
+        for attempt in range(self._STAND_DOWN_TERMINATE_ATTEMPTS):
+            # Re-read before every attempt: a claim can appear at any
+            # moment, and from then on the cluster is (potentially) the
+            # claimant's to use.
+            try:
+                row = await managed_job_state.get_job_ownership_async(job_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Stand-down for job {job_id}: ownership '
+                             're-read failed '
+                             f'({common_utils.format_exception(e)}); '
+                             f'aborting termination of {cluster_name}.')
+                return
+            if row is None or row[0] is not None:
+                logger.error(f'Stand-down for job {job_id}: a claim appeared; '
+                             f'aborting termination of {cluster_name}.')
+                return
+            try:
+                await asyncio.to_thread(managed_job_utils.terminate_cluster,
+                                        cluster_name, 1)
+                logger.info(f'Stand-down for job {job_id}: terminated '
+                            f'{cluster_name}.')
+                return
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(
+                    f'Stand-down for job {job_id}: termination attempt '
+                    f'{attempt + 1}/{self._STAND_DOWN_TERMINATE_ATTEMPTS} '
+                    f'for {cluster_name} failed: '
+                    f'{common_utils.format_exception(e)}')
+                await asyncio.sleep(self._STAND_DOWN_TERMINATE_GAP_SECONDS)
+        logger.error(f'Stand-down for job {job_id}: giving up on terminating '
+                     f'{cluster_name}; it may leak until the job is claimed '
+                     'again.')
 
     async def start_job(
         self,
         job_id: int,
         pool: Optional[str] = None,
+        claim_id: Optional[str] = None,
     ):
         """Start a new job.
 
         Args:
             job_id: The ID of the job to start.
+            pool: The pool the job belongs to, if any.
+            claim_id: The claim identity returned by get_waiting_job_async
+                when this controller claimed the job.
         """
         # Create log file path for job output redirection
         log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -2361,7 +2675,8 @@ class ControllerManager:
 
         async with self._job_tasks_lock:
             self.starting.add(job_id)
-        await create_background_task(self.run_job_loop(job_id, log_file, pool))
+        await create_background_task(
+            self.run_job_loop(job_id, log_file, pool, claim_id))
 
         logger.info(f'Job {job_id} started successfully')
 
@@ -2457,10 +2772,22 @@ class ControllerManager:
                 await asyncio.sleep(60)
                 continue
 
+            # Never claim a job this process is already running. If such a
+            # job is WAITING, its row was reset out from under the live
+            # local coroutine; claiming it here would start a duplicate run
+            # in this process. Safe because monitor_loop is the sole claim
+            # site and runs in one coroutine: anything registered locally is
+            # either not WAITING or exactly such a stale entry. Other
+            # controllers remain free to claim it.
+            async with self._job_tasks_lock:
+                local_job_ids = set(self.job_tasks) | self.starting
+
             # Check if there are any jobs that are waiting to launch
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
-                    pid=self._pid, pid_started_at=self._pid_started_at)
+                    pid=self._pid,
+                    pid_started_at=self._pid_started_at,
+                    exclude_job_ids=local_job_ids)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to get waiting job: {e}')
                 await asyncio.sleep(5)
@@ -2474,6 +2801,7 @@ class ControllerManager:
             logger.info(f'Claiming job {waiting_job["job_id"]}')
             job_id = waiting_job['job_id']
             pool = waiting_job.get('pool', None)
+            claim_id = waiting_job['claim_id']
 
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             if str(job_id) in cancels:
@@ -2492,7 +2820,7 @@ class ControllerManager:
                             job_id=job_id, task_id=None, task=None))
                     continue
 
-            await self.start_job(job_id, pool)
+            await self.start_job(job_id, pool, claim_id)
 
 
 async def main(controller_uuid: str):

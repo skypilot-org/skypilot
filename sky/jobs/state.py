@@ -356,8 +356,12 @@ def _fence_lost(
     return exceptions.JobOwnershipLostError(fence.job_id)
 
 
-async def _raise_if_fence_lost_async(fence: fencing.FencingToken) -> None:
+async def raise_if_fence_lost_async(fence: fencing.FencingToken) -> None:
     """Raise JobOwnershipLostError iff the claim no longer matches.
+
+    Used by the write sites' 0-row verification, and standalone as a
+    pre-action ownership check before destructive operations (launch,
+    recovery teardown).
 
     Must run post-commit in a fresh transaction: under sqlite WAL a deferred
     transaction pins its snapshot at its first read, so verifying inside the
@@ -375,8 +379,12 @@ async def _raise_if_fence_lost_async(fence: fencing.FencingToken) -> None:
         raise _fence_lost(fence, observed)
 
 
-def _raise_if_fence_lost(fence: fencing.FencingToken) -> None:
-    """Sync variant of _raise_if_fence_lost_async (batch writers)."""
+def raise_if_fence_lost(fence: fencing.FencingToken) -> None:
+    """Sync variant of raise_if_fence_lost_async.
+
+    For the batch-coordinator writers (worker threads) and sync pre-action
+    checks running in to_thread (cluster teardown).
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row = session.execute(
@@ -385,6 +393,30 @@ def _raise_if_fence_lost(fence: fencing.FencingToken) -> None:
     observed = row[0] if row is not None else None
     if row is None or observed != fence.claim_id:
         raise _fence_lost(fence, observed)
+
+
+async def get_job_ownership_async(
+    job_id: int
+) -> Optional[Tuple[Optional[str], Optional[int], Optional[str]]]:
+    """Read a job's ownership columns: (claim_id, controller_pid,
+    schedule_state). Returns None if the job row is gone.
+
+    The single-read input to the stand-down verdict (see
+    controller.ControllerManager) and to the reclaim re-check between
+    stand-down termination attempts.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                job_info_table.c.claim_id,
+                job_info_table.c.controller_pid,
+                job_info_table.c.schedule_state,
+            ).where(job_info_table.c.spot_job_id == job_id))
+        row = result.fetchone()
+    if row is None:
+        return None
+    return (row[0], row[1], row[2])
 
 
 async def _describe_task_transition_failure(session: sql_async.AsyncSession,
@@ -436,7 +468,7 @@ async def _retry_task_status_update(
             # whose target status coincides with the current claimant's
             # would otherwise falsely conclude its write landed.
             if count == 0 and fence is not None:
-                await _raise_if_fence_lost_async(fence)
+                await raise_if_fence_lost_async(fence)
             if count == 0 and attempt > 0 and prior_update_matched:
                 current = await session.execute(
                     sqlalchemy.select(spot_table.c.status).where(
@@ -480,7 +512,7 @@ async def _retry_schedule_state_update(
             # an already-reached state. The commit-lost recheck is only
             # trustworthy while the claim is held.
             if count == 0 and fence is not None:
-                await _raise_if_fence_lost_async(fence)
+                await raise_if_fence_lost_async(fence)
             if idempotent:
                 return
             assert count == 0, (job_id, count)
@@ -1071,7 +1103,7 @@ async def set_restarting_async(job_id: int,
         logger.debug(f'back to {target_status}')
         if count != 1:
             if count == 0 and fence is not None:
-                await _raise_if_fence_lost_async(fence)
+                await raise_if_fence_lost_async(fence)
             details = await _describe_task_transition_failure(
                 session, job_id, task_id)
             message = (f'Failed to set the task back to {target_status}. '
@@ -2194,7 +2226,7 @@ def save_batch_states(job_id: int,
             its own.
     """
     if fence is not None:
-        _raise_if_fence_lost(fence)
+        raise_if_fence_lost(fence)
     engine = _db_manager.get_engine()
     now = time.time()
     rows = [{
@@ -2278,7 +2310,7 @@ def set_batch_status(job_id: int,
     if result.rowcount == 0 and fence is not None:
         # Raises on a verified ownership loss; a claim-held 0-row outcome
         # (unknown batch_idx) keeps today's silent behavior.
-        _raise_if_fence_lost(fence)
+        raise_if_fence_lost(fence)
 
 
 def reset_dispatched_batches(job_id: int,
@@ -2301,7 +2333,7 @@ def reset_dispatched_batches(job_id: int,
     if result.rowcount == 0 and fence is not None:
         # 0 rows is also the normal no-DISPATCHED-batches outcome; the
         # verify only raises if the claim is actually gone.
-        _raise_if_fence_lost(fence)
+        raise_if_fence_lost(fence)
 
 
 def update_job_full_resources(job_id: int,
@@ -2346,7 +2378,7 @@ async def set_job_id_on_pool_cluster_async(
             # A loser must not overwrite the current claimant's pool submit
             # info. Unfenced this write is unconditional, so a fenced 0-row
             # outcome means the claim (or the row) is gone.
-            await _raise_if_fence_lost_async(fence)
+            await raise_if_fence_lost_async(fence)
 
 
 @db_retries.retry
@@ -2435,7 +2467,7 @@ async def scheduler_set_launching_async(job_id: int,
             # Unfenced, this write is unconditional (the row always exists),
             # so a fenced 0-row outcome means the claim is gone (or the row
             # itself is -- also an ownership loss).
-            await _raise_if_fence_lost_async(fence)
+            await raise_if_fence_lost_async(fence)
 
 
 async def scheduler_set_alive_async(job_id: int,
@@ -2488,7 +2520,7 @@ def scheduler_set_done(job_id: int,
         # Skip semantics: a stale claimant must not retire the new claim's
         # job, but the loser is already on its way out -- log, don't raise.
         try:
-            _raise_if_fence_lost(fence)
+            raise_if_fence_lost(fence)
         except exceptions.JobOwnershipLostError:
             logger.error(f'Skipping job_done for job {job_id}: '
                          'ownership lost.')
@@ -2746,7 +2778,9 @@ def get_pool_worker_used_resources(
 
 @db_retries.retry_async
 async def get_waiting_job_async(
-        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
+        pid: int,
+        pid_started_at: float,
+        exclude_job_ids: Optional[Set[int]] = None) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
@@ -2754,6 +2788,13 @@ async def get_waiting_job_async(
 
     Returns the job information if a job was successfully transitioned to
     LAUNCHING, or None if no suitable job was found.
+
+    Args:
+        exclude_job_ids: Job ids this controller must not claim -- the ids
+            it is already running locally. If one of those jobs shows up as
+            WAITING, its row was reset out from under the live local
+            coroutine; claiming it would start a duplicate run of the job in
+            this process. Other controllers remain free to claim it.
 
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
@@ -2781,25 +2822,29 @@ async def get_waiting_job_async(
         # Select the highest priority waiting job for update (locks the row).
         # Batch jobs are skipped when their pool already has an active batch
         # job; non-batch jobs (including regular pool jobs) are always eligible.
+        conditions = [
+            job_info_table.c.schedule_state.in_([
+                ManagedJobScheduleState.WAITING.value,
+            ]),
+            sqlalchemy.or_(
+                # Non-batch jobs: always eligible.
+                job_info_table.c.is_batch.isnot(True),
+                # Batch jobs: only if pool has no active batch job.
+                ~job_info_table.c.pool.in_(busy_batch_pools_subq),
+            ),
+        ]
+        if exclude_job_ids:
+            # Bounded by the number of jobs running on this controller.
+            conditions.append(
+                job_info_table.c.spot_job_id.not_in(exclude_job_ids))
         select_query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
             job_info_table.c.pool,
-        ).where(
-            sqlalchemy.and_(
-                job_info_table.c.schedule_state.in_([
-                    ManagedJobScheduleState.WAITING.value,
-                ]),
-                sqlalchemy.or_(
-                    # Non-batch jobs: always eligible.
-                    job_info_table.c.is_batch.isnot(True),
-                    # Batch jobs: only if pool has no active batch job.
-                    ~job_info_table.c.pool.in_(busy_batch_pools_subq),
-                ),
-            )).order_by(
-                job_info_table.c.priority.desc(),
-                job_info_table.c.spot_job_id.asc(),
-            ).limit(1).with_for_update()
+        ).where(sqlalchemy.and_(*conditions)).order_by(
+            job_info_table.c.priority.desc(),
+            job_info_table.c.spot_job_id.asc(),
+        ).limit(1).with_for_update()
 
         # Execute the select with row locking
         result = await session.execute(select_query)
@@ -3155,7 +3200,7 @@ def set_winding_down(job_id: int,
             # (the verify sets fence.lost before raising) but don't unwind
             # the caller -- the coordinator's own checks act on fence.lost.
             try:
-                _raise_if_fence_lost(fence)
+                raise_if_fence_lost(fence)
             except exceptions.JobOwnershipLostError:
                 logger.error(f'Skipping winding-down for job {job_id}: '
                              'ownership lost.')
@@ -3264,7 +3309,7 @@ async def set_failed_async(
         if count == 0 and fence is not None:
             # Raises on a verified ownership loss; if the claim is held,
             # fall through to the pre-existing tolerant no-update path.
-            await _raise_if_fence_lost_async(fence)
+            await raise_if_fence_lost_async(fence)
         return count > 0
 
     updated = await _retry_session(_op)
@@ -3344,7 +3389,7 @@ async def set_cancelling_async(job_id: int,
             # Raises on a verified ownership loss; if the claim is held,
             # fall through to the pre-existing tolerant already-terminal
             # path.
-            await _raise_if_fence_lost_async(fence)
+            await raise_if_fence_lost_async(fence)
         return count > 0
 
     updated = await _retry_session(_op)
@@ -3380,7 +3425,7 @@ async def set_cancelled_async(job_id: int,
         if count == 0 and fence is not None:
             # Raises on a verified ownership loss; if the claim is held,
             # fall through to the pre-existing tolerant not-CANCELLING path.
-            await _raise_if_fence_lost_async(fence)
+            await raise_if_fence_lost_async(fence)
         return count > 0
 
     updated = await _retry_session(_op)
