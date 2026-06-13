@@ -2473,7 +2473,9 @@ def get_managed_job_queue(
                 end_at = time.time()
 
             job_submitted_at = job['last_recovered_at'] - job['job_duration']
-            if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
+            if job['status'] in (
+                    managed_job_state.ManagedJobStatus.RECOVERING,
+                    managed_job_state.ManagedJobStatus.EMERGENCY_RECOVERING):
                 # When job is recovering, the duration is exact
                 # job['job_duration']
                 job_duration = job['job_duration']
@@ -2525,8 +2527,9 @@ def get_managed_job_queue(
     recovery_reasons: Dict[int, str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
-            job['job_id'] for job in jobs if job['status'] ==
-            managed_job_state.ManagedJobStatus.RECOVERING.value
+            job['job_id'] for job in jobs if job['status'] in (
+                managed_job_state.ManagedJobStatus.RECOVERING.value,
+                managed_job_state.ManagedJobStatus.EMERGENCY_RECOVERING.value)
         ]
         recovery_reasons = managed_job_state.get_latest_recovery_reasons(
             recovering_job_ids)

@@ -107,6 +107,12 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('is_primary_in_job_group',
                       sqlalchemy.Boolean,
                       server_default=None),
+    # The task status at the moment it entered EMERGENCY_RECOVERING, so the
+    # resume logic can re-attach to a healthy RUNNING cluster instead of
+    # tearing it down. NULL when not in EMERGENCY_RECOVERING.
+    sqlalchemy.Column('status_before_emergency',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -180,6 +186,16 @@ job_info_table = sqlalchemy.Table(
     # by API server. This id is a reference to the blob.
     sqlalchemy.Column('file_mounts_blob_id',
                       sqlalchemy.Text,
+                      server_default=None),
+    # Emergency recovery attempts used in the current episode (bounded retry
+    # budget for unexpected controller errors). NULL means 0.
+    sqlalchemy.Column('emergency_recovery_count',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    # Timestamp of the most recent emergency recovery attempt; used for
+    # retry backoff and budget decay.
+    sqlalchemy.Column('last_emergency_recovery_at',
+                      sqlalchemy.Float,
                       server_default=None),
 )
 
@@ -519,6 +535,15 @@ class ManagedJobStatus(enum.Enum):
     # RECOVERING: The cluster is preempted, and the controller process is
     # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
+    # EMERGENCY_RECOVERING: The job controller hit an unexpected internal
+    # error (e.g. external mutation of the job state, or an unhandled
+    # exception in the controller), and SkyPilot is automatically restarting
+    # job management from scratch. Unlike RECOVERING (the *cluster* was
+    # preempted or failed), the cluster may be perfectly healthy; the task
+    # status prior to the emergency is saved in status_before_emergency so
+    # that the resume logic can re-attach to a healthy cluster without
+    # restarting the workload.
+    EMERGENCY_RECOVERING = 'EMERGENCY_RECOVERING'
     # CANCELLING: The job is requested to be cancelled by the user, and the
     # controller is cleaning up the cluster.
     CANCELLING = 'CANCELLING'
@@ -590,6 +615,7 @@ class ManagedJobStatus(enum.Enum):
             cls.RUNNING,
             cls.WINDING_DOWN,
             cls.RECOVERING,
+            cls.EMERGENCY_RECOVERING,
         ]
 
     @classmethod
@@ -619,6 +645,8 @@ class ManagedJobStatus(enum.Enum):
                 cls.FAILED_NO_RESOURCE,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN:
                 cls.WINDING_DOWN,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_EMERGENCY_RECOVERING:
+                cls.EMERGENCY_RECOVERING,
         }
 
         if protobuf_value not in protobuf_to_enum:
@@ -658,6 +686,8 @@ class ManagedJobStatus(enum.Enum):
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
             ManagedJobStatus.WINDING_DOWN:
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN,
+            ManagedJobStatus.EMERGENCY_RECOVERING:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_EMERGENCY_RECOVERING,
         }
 
         if self not in enum_to_protobuf:
@@ -672,6 +702,7 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
     ManagedJobStatus.WINDING_DOWN: colorama.Fore.CYAN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
+    ManagedJobStatus.EMERGENCY_RECOVERING: colorama.Fore.CYAN,
     ManagedJobStatus.SUCCEEDED: colorama.Fore.GREEN,
     ManagedJobStatus.FAILED: colorama.Fore.RED,
     ManagedJobStatus.FAILED_PRECHECKS: colorama.Fore.RED,
@@ -995,7 +1026,8 @@ def set_failed(
             sqlalchemy.select(spot_table.c.status).where(
                 spot_table.c.spot_job_id == job_id)).fetchone()[0]
         previous_status = ManagedJobStatus(previous_status)
-        if previous_status == ManagedJobStatus.RECOVERING:
+        if previous_status in (ManagedJobStatus.RECOVERING,
+                               ManagedJobStatus.EMERGENCY_RECOVERING):
             # If the job is recovering, we should set the last_recovered_at to
             # the end_time, so that the end_at - last_recovered_at will not be
             # affect the job duration calculation.
@@ -2881,6 +2913,229 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
     await callback_func('RECOVERED')
 
 
+async def set_emergency_recovering_async(
+        job_id: int, task_id: int, reason: str,
+        callback_func: AsyncCallbackType) -> bool:
+    """Set the task to EMERGENCY_RECOVERING, saving the prior status.
+
+    Used when the controller hits an unexpected internal error and will
+    retry managing the job in place. The prior status is saved into
+    status_before_emergency so the resume logic can re-attach to a healthy
+    RUNNING cluster instead of tearing it down.
+
+    Returns True if the task is now in EMERGENCY_RECOVERING; False if it
+    was left untouched because it is CANCELLING or terminal (those paths
+    own the task and must complete normally).
+    """
+    current_time = time.time()
+
+    async def _op(session: sql_async.AsyncSession) -> int:
+        # Same accumulation rule as set_recovering_async: RUNNING and
+        # WINDING_DOWN are the "still doing job work" states.
+        should_accumulate_duration = sqlalchemy.and_(
+            spot_table.c.status.in_([
+                ManagedJobStatus.RUNNING.value,
+                ManagedJobStatus.WINDING_DOWN.value,
+            ]),
+            spot_table.c.last_recovered_at >= 0,
+        )
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    # processing_statuses excludes CANCELLING and terminal
+                    # statuses, and includes EMERGENCY_RECOVERING so that
+                    # re-running this bookkeeping after a transient failure
+                    # is a no-op rather than an error.
+                    spot_table.c.status.in_([
+                        s.value for s in ManagedJobStatus.processing_statuses()
+                    ]),
+                    spot_table.c.end_at.is_(None),
+                )).
+            values({
+                spot_table.c.status:
+                    ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                # Save the prior status, but never overwrite it when the
+                # task is already EMERGENCY_RECOVERING: the emergency
+                # bookkeeping is retried as a whole on transient DB
+                # errors, and a re-run must not destroy the saved
+                # status (which would downgrade a later re-attach to a
+                # forced cluster teardown).
+                spot_table.c.status_before_emergency: sqlalchemy.case(
+                    (spot_table.c.status
+                     == ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                     spot_table.c.status_before_emergency),
+                    else_=spot_table.c.status),
+                spot_table.c.job_duration: sqlalchemy.case(
+                    (should_accumulate_duration, spot_table.c.job_duration +
+                     current_time - spot_table.c.last_recovered_at),
+                    else_=spot_table.c.job_duration),
+                spot_table.c.last_recovered_at: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at < 0, current_time),
+                    else_=spot_table.c.last_recovered_at),
+            }))
+        await session.commit()
+        return result.rowcount
+
+    count = await _retry_session(_op)
+    if count == 0:
+        # The task is CANCELLING or already terminal. Emit the event only
+        # for transitions that actually applied.
+        return False
+    await add_job_event_async(job_id, task_id,
+                              ManagedJobStatus.EMERGENCY_RECOVERING, reason)
+    logger.info('=== Emergency recovering... ===')
+    await callback_func('EMERGENCY_RECOVERING')
+    return True
+
+
+async def set_emergency_recovered_async(job_id: int, task_id: int,
+                                        restored_time: float,
+                                        callback_func: AsyncCallbackType):
+    """Restore a task from EMERGENCY_RECOVERING back to RUNNING.
+
+    Only used when the saved pre-emergency status was RUNNING and the
+    resume logic re-attached to the still-healthy cluster: the workload was
+    never interrupted, so recovery_count (which counts cluster recoveries)
+    is not incremented.
+    """
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
+                              'Re-attached after emergency recovery')
+
+    async def _op(session: sql_async.AsyncSession) -> int:
+        result = await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.status ==
+                    ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                    spot_table.c.end_at.is_(None),
+                )).
+            values({
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.status_before_emergency: None,
+                # Stamp last_recovered_at so job_duration accounting
+                # resumes from now; the transition into
+                # EMERGENCY_RECOVERING already accumulated the duration
+                # up to the emergency.
+                spot_table.c.last_recovered_at: restored_time,
+            }))
+        return result.rowcount
+
+    await _retry_task_status_update(
+        job_id, task_id, ManagedJobStatus.RUNNING, _op,
+        'Failed to restore the task after emergency recovery.')
+    logger.info('==== Re-attached after emergency recovery. ====')
+    await callback_func('EMERGENCY_RECOVERED')
+
+
+@db_retries.retry_async
+async def get_emergency_recovery_budget_async(
+        job_id: int) -> Tuple[int, Optional[float]]:
+    """Return (attempts used, timestamp of the most recent attempt)."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(
+                job_info_table.c.emergency_recovery_count,
+                job_info_table.c.last_emergency_recovery_at).where(
+                    job_info_table.c.spot_job_id == job_id))
+        row = result.fetchone()
+        if row is None:
+            return 0, None
+        return (row[0] or 0), row[1]
+
+
+@db_retries.retry_async
+async def record_emergency_recovery_attempt_async(
+        job_id: int, attempt_count: int, attempt_time: float, pid: int,
+        pid_started_at: Optional[float]) -> bool:
+    """Record an emergency recovery attempt, fenced on controller ownership.
+
+    Writes absolute values rather than incrementing, so that re-running the
+    emergency bookkeeping after a transient failure cannot double-spend the
+    retry budget.
+
+    Returns False (writing nothing) if the fence did not match, i.e. this
+    controller no longer owns the job.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    # Fence on both pid and its start time: pids can be
+                    # reused across controller restarts on the same host.
+                    job_info_table.c.controller_pid == pid,
+                    job_info_table.c.controller_pid_started_at ==
+                    pid_started_at,
+                )).values({
+                    job_info_table.c.emergency_recovery_count: attempt_count,
+                    job_info_table.c.last_emergency_recovery_at: attempt_time,
+                }))
+        await session.commit()
+        return result.rowcount == 1
+
+
+@db_retries.retry_async
+async def normalize_schedule_state_for_emergency_retry_async(
+        job_id: int, pid: int,
+        pid_started_at: Optional[float]) -> Optional['ManagedJobScheduleState']:
+    """Release a stuck LAUNCHING schedule state before an emergency retry.
+
+    If the unexpected error escaped mid-launch, the job may still hold a
+    LAUNCHING slot, which counts against the scheduler's launch limits.
+    Move it back to ALIVE, fenced on controller ownership, so the retry's
+    scheduled_launch can acquire a slot cleanly.
+
+    Returns the schedule state after normalization (None if the job row is
+    missing). Callers treat anything other than ALIVE as loss of ownership
+    of the job.
+    """
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.LAUNCHING.value,
+                    job_info_table.c.controller_pid == pid,
+                    job_info_table.c.controller_pid_started_at ==
+                    pid_started_at,
+                )).values({
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.ALIVE.value,
+                }))
+        await session.commit()
+        result = await session.execute(
+            sqlalchemy.select(job_info_table.c.schedule_state).where(
+                job_info_table.c.spot_job_id == job_id))
+        row = result.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return ManagedJobScheduleState(row[0])
+
+
+@db_retries.retry_async
+async def get_status_before_emergency_async(
+        job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
+    """Return the task status saved when entering EMERGENCY_RECOVERING."""
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(spot_table.c.status_before_emergency).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
+        row = result.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return ManagedJobStatus(row[0])
+
+
 def set_winding_down(job_id: int, task_id: int) -> None:
     """Transition task from RUNNING to WINDING_DOWN (sync).
 
@@ -2960,7 +3215,8 @@ async def set_failed_async(
                 spot_table.c.status).where(spot_table.c.spot_job_id == job_id))
         previous_status_row = result.fetchone()
         previous_status = ManagedJobStatus(previous_status_row[0])
-        if previous_status == ManagedJobStatus.RECOVERING:
+        if previous_status in (ManagedJobStatus.RECOVERING,
+                               ManagedJobStatus.EMERGENCY_RECOVERING):
             fields_to_set[spot_table.c.last_recovered_at] = end_time
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
@@ -3479,11 +3735,13 @@ def get_job_events(job_id: int,
 
 
 def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
-    """Return {job_id: reason} for the most recent RECOVERING event per job.
+    """Return {job_id: reason} for the most recent recovery event per job.
 
-    Only jobs with a non-empty RECOVERING reason are included. Used to surface
-    why a job is currently recovering (e.g. an OOMKilled pod) in the
-    `details` column. A single batched query keeps this off the per-job path.
+    Covers both RECOVERING (cluster-level recovery) and EMERGENCY_RECOVERING
+    (controller-level recovery) events. Only jobs with a non-empty reason
+    are included. Used to surface why a job is currently recovering (e.g. an
+    OOMKilled pod) in the `details` column. A single batched query keeps
+    this off the per-job path.
     """
     if not job_ids:
         return {}
@@ -3496,8 +3754,10 @@ def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
             ).where(
                 sqlalchemy.and_(
                     job_events_table.c.spot_job_id.in_(job_ids),
-                    job_events_table.c.new_status ==
-                    ManagedJobStatus.RECOVERING.value,
+                    job_events_table.c.new_status.in_([
+                        ManagedJobStatus.RECOVERING.value,
+                        ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                    ]),
                 )).order_by(job_events_table.c.timestamp.desc())).fetchall()
     # rows are newest-first; keep the first (latest) non-empty reason per job.
     reasons: Dict[int, str] = {}

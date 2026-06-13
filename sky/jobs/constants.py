@@ -74,6 +74,27 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
 MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
 
+# Emergency recovery: when the job controller hits an unexpected internal
+# error (e.g. external mutation of the job state, or an unhandled exception
+# in the controller's job loop), it retries managing the job in place
+# instead of failing the job terminally. These constants bound that retry.
+#
+# Max attempts in one episode before giving up and marking the job
+# FAILED_CONTROLLER (with full resource cleanup).
+EMERGENCY_RECOVERY_MAX_ATTEMPTS = 5
+# Backoff before attempt N is
+# min(BASE * 2^(N-1), CAP) = 1m, 2m, 4m, 8m, 8m.
+# The cap is intentionally below the jobs-controller's 10-minute idle
+# autostop window so that a retry cycle always re-enters an alive schedule
+# state before the autostop idle timer can elapse.
+EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS = 60
+EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 480
+# If the previous emergency recovery attempt is older than this window, the
+# attempt counter restarts at 1: a long-running job that hits a rare
+# incident every few days should recover every time, while a tight crash
+# loop exhausts the budget in ~25 minutes.
+EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
+
 # Prefix used for service-account tokens issued to managed jobs that opt in
 # to api_server_access. The expired-token-cleanup daemon uses this prefix to
 # identify managed-job tokens that should be swept once their TTL passes.
