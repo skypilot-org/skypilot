@@ -395,6 +395,27 @@ def raise_if_fence_lost(fence: fencing.FencingToken) -> None:
         raise _fence_lost(fence, observed)
 
 
+async def get_waiting_job_ids_async(job_ids: List[int]) -> List[int]:
+    """Of the given job ids, which are currently in WAITING schedule state.
+
+    The collision-detection query (controller.monitor_loop): a controller
+    asks which of its locally-running jobs have been reset back to WAITING
+    out from under it. Bounded by jobs-per-controller.
+    """
+    if not job_ids:
+        return []
+    engine = await _db_manager.get_async_engine()
+    async with sql_async.AsyncSession(engine) as session:
+        result = await session.execute(
+            sqlalchemy.select(job_info_table.c.spot_job_id).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id.in_(job_ids),
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.WAITING.value,
+                )))
+        return [row[0] for row in result.fetchall()]
+
+
 async def get_job_ownership_async(
     job_id: int
 ) -> Optional[Tuple[Optional[str], Optional[int], Optional[str]]]:

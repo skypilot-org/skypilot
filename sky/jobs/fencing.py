@@ -31,3 +31,10 @@ class FencingToken:
     # switch their disposition. A plain bool store is atomic under the GIL,
     # so setting it from a worker thread is safe.
     lost: bool = False
+    # How the loss was first detected, for the ownership-lost metric:
+    # 'fence' (a fenced state write found 0 rows), 'preaction' (a
+    # launch/recovery ownership pre-check), 'tick' (the idle-monitor
+    # periodic check), or 'collision' (the controller saw its own job back
+    # in WAITING). The detecting site sets this before flagging `lost`;
+    # 'fence' is the default for write sites.
+    detection: str = 'fence'

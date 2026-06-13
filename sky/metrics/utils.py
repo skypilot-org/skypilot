@@ -214,6 +214,28 @@ SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+# Managed-job claim ownership loss (consolidation mode only).
+# A nonzero, sustained rate is the quiet signature of wrongful resets that
+# previously surfaced as FAILED_CONTROLLER storms -- alert on it.
+# `detection` labels how the loss was found: fence (a fenced state write),
+# preaction (a launch/recovery pre-check), tick (the idle-monitor periodic
+# check), or collision (the controller observed its own job back in WAITING).
+SKY_MANAGED_JOBS_OWNERSHIP_LOST_TOTAL = prom.Counter(
+    'sky_managed_jobs_ownership_lost_total',
+    'Number of times a controller detected it lost a managed job claim',
+    ['detection', 'pid'],
+)
+
+# Graceful stand-downs performed after an ownership loss, labeled by the
+# verdict reached over the job's ownership row (see
+# ControllerManager._stand_down): reclaimed, unclaimed, mixed_version,
+# claim_is_ours, row_gone, or read_failed.
+SKY_MANAGED_JOBS_STANDDOWN_TOTAL = prom.Counter(
+    'sky_managed_jobs_standdown_total',
+    'Number of managed-job controller stand-downs, by verdict',
+    ['verdict', 'pid'],
+)
+
 
 @contextlib.contextmanager
 def time_it(name: str, group: str = 'default'):

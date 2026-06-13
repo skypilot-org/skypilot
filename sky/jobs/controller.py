@@ -66,6 +66,12 @@ else:
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
+# How often the idle-monitor loop probes job-claim ownership, in units of
+# JOB_STATUS_CHECK_GAP_SECONDS ticks. At the default 15s gap this is ~60s --
+# one extra single-row read per job per minute, the detection-latency bound
+# for a steadily-RUNNING job that performs no state writes.
+OWNERSHIP_CHECK_EVERY_N_TICKS = 4
+
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
 
@@ -777,8 +783,27 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
+        tick_count = 0
 
         while True:
+            # Ownership tick check. A steadily-RUNNING job performs zero
+            # state writes (the rest of this loop only writes on a status
+            # change), so fence-only detection would be unbounded for the
+            # most common job state. Probe the claim every
+            # OWNERSHIP_CHECK_EVERY_N_TICKS ticks -- one single-row PK read
+            # per job per ~minute -- before the network-check /
+            # transient-error `continue` branches below so the probe is
+            # never skipped. The raise routes to run_job_loop's stand-down.
+            # Counted from 1 so the first probe is after N ticks (~60s), not
+            # on entry: the faster collision trigger owns the just-reset
+            # case; the tick is the steady-state backstop.
+            if self._fence is not None:
+                tick_count += 1
+                if tick_count % OWNERSHIP_CHECK_EVERY_N_TICKS == 0:
+                    self._fence.detection = 'tick'
+                    await managed_job_state.raise_if_fence_lost_async(
+                        self._fence)
+
             # Get job status (skip on first iteration if forcing recovery)
             job_status = None
             transient_job_check_error_reason = None
@@ -2421,6 +2446,7 @@ class ControllerManager:
             try:
                 stood_down = False
                 if fence is not None and fence.lost:
+                    self._emit_ownership_lost(fence)
                     stood_down = await self._stand_down(job_id, pool, fence)
                 if not stood_down:
                     await self._finalize_job_loop(job_id, pool, graceful,
@@ -2436,6 +2462,7 @@ class ControllerManager:
                 logger.error(f'Ownership of job {job_id} was lost during '
                              'cleanup; standing down for the remainder.')
                 assert fence is not None
+                self._emit_ownership_lost(fence)
                 await self._stand_down(job_id, pool, fence)
             finally:
                 # Unconditional tail: local-registry cleanup only, no DB
@@ -2462,6 +2489,16 @@ class ControllerManager:
                     if job_id in self.job_tasks:
                         del self.job_tasks[job_id]
                     self._tokens.pop(job_id, None)
+
+    def _emit_ownership_lost(self, fence: fencing.FencingToken) -> None:
+        if metrics_lib.METRICS_ENABLED:
+            metrics_lib.SKY_MANAGED_JOBS_OWNERSHIP_LOST_TOTAL.labels(
+                detection=fence.detection, pid=str(self._pid)).inc()
+
+    def _emit_standdown(self, verdict: str) -> None:
+        if metrics_lib.METRICS_ENABLED:
+            metrics_lib.SKY_MANAGED_JOBS_STANDDOWN_TOTAL.labels(
+                verdict=verdict, pid=str(self._pid)).inc()
 
     async def _finalize_job_loop(self, job_id: int, pool: Optional[str],
                                  graceful: bool,
@@ -2546,10 +2583,12 @@ class ControllerManager:
             logger.error(f'Stand-down for job {job_id}: failed to read '
                          f'ownership ({common_utils.format_exception(e)}); '
                          'skipping cleanup entirely.')
+            self._emit_standdown('read_failed')
             return True
         if row is None:
             logger.error(f'Stand-down for job {job_id}: job row is gone; '
                          'dropping local state only.')
+            self._emit_standdown('row_gone')
             return True
         observed_claim_id, controller_pid, schedule_state = row
         if observed_claim_id == fence.claim_id:
@@ -2563,17 +2602,20 @@ class ControllerManager:
                 f'Stand-down for job {job_id}: fence tripped but claim '
                 f'{fence.claim_id} is still ours -- fence-verification '
                 'anomaly. Falling through to normal failure handling.')
+            self._emit_standdown('claim_is_ours')
             return False
         if observed_claim_id is not None:
             logger.error(f'Stand-down for job {job_id}: re-claimed (current '
                          f'claim {observed_claim_id}); leaving all resources '
                          'to the new claimant.')
+            self._emit_standdown('reclaimed')
             return True
         if (controller_pid is None and schedule_state
                 == managed_job_state.ManagedJobScheduleState.WAITING.value):
             logger.error(f'Stand-down for job {job_id}: reset and unclaimed; '
                          'terminating the job clusters so they do not leak. '
                          'The job stays WAITING and relaunches when claimed.')
+            self._emit_standdown('unclaimed')
             await self._stand_down_terminate_clusters(job_id, pool)
             return True
         # claim_id is NULL but the pid pair is set or the job is not
@@ -2584,6 +2626,7 @@ class ControllerManager:
         logger.error(f'Stand-down for job {job_id}: ownership columns are '
                      f'mixed (pid={controller_pid}, '
                      f'schedule_state={schedule_state}); skipping cleanup.')
+        self._emit_standdown('mixed_version')
         return True
 
     # Bounds for the unclaimed-cluster termination: terminate_cluster owns a
@@ -2726,12 +2769,56 @@ class ControllerManager:
                         logger.info(f'Job {job_id} cancelled successfully')
             await asyncio.sleep(15)
 
+    async def _check_for_collisions(self) -> None:
+        """Step down any locally-running job whose row is back in WAITING.
+
+        The fastest ownership-loss signal: if a job this controller is
+        running shows up as WAITING, its claim was reset (and possibly
+        re-claimed) out from under the live coroutine. Mark the fence lost
+        and either cancel the task (so its CancelledError handler routes to
+        stand-down) or, if the task already finished and its finally is
+        still draining, just mark it (a cancel injected into a running
+        finally would abort cleanup awaits -- the finally switches
+        disposition on the flag itself).
+        """
+        async with self._job_tasks_lock:
+            local = {
+                job_id: (task, self._tokens.get(job_id))
+                for job_id, task in self.job_tasks.items()
+            }
+        if not local:
+            return
+        try:
+            waiting_ids = await managed_job_state.get_waiting_job_ids_async(
+                list(local))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Collision check failed to query WAITING jobs: '
+                         f'{common_utils.format_exception(e)}')
+            return
+        for job_id in waiting_ids:
+            task, token = local[job_id]
+            if token is None or token.lost:
+                continue
+            # Set the marker before cancelling: the run_job_loop finally
+            # emits the ownership-lost metric (keyed on this detection mode)
+            # and runs the stand-down disposition.
+            token.detection = 'collision'
+            token.lost = True
+            logger.error(f'Collision detected for job {job_id}: it is back in '
+                         'WAITING while still running locally; stepping down.')
+            if not task.done():
+                task.cancel()
+
     async def monitor_loop(self):
         """Monitor the job loop."""
         logger.info(f'Starting monitor loop for pid {self._pid}...')
         pid_str = str(self._pid)
 
         while True:
+            # Fastest ownership-loss signal: a locally-running job back in
+            # WAITING. Run every poll, before the claim/limit logic below.
+            await self._check_for_collisions()
+
             async with self._job_tasks_lock:
                 running_tasks = [
                     task for task in self.job_tasks.values() if not task.done()

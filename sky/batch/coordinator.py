@@ -811,15 +811,22 @@ class BatchCoordinator:
         # Monitor until all batches complete, periodically discovering
         # new workers and spawning threads for them.
         while not self._cancelled:
-            # Surface an ownership loss immediately -- without this, errors
-            # are only consulted after all batches settle, which can be
-            # hours away. The flag check covers losses detected without an
-            # exception reaching this thread.
+            # Ownership loss surfaces three ways here, all needing prompt
+            # action (otherwise the only check is after all batches settle,
+            # which can be hours away): (1) a worker thread collected the
+            # error; (2) the flag was set without an exception reaching a
+            # thread (e.g. the controller's collision trigger); (3) a fresh
+            # claim read -- the coordinator runs entirely in threads, so
+            # nothing else probes its claim. Raising here propagates out to
+            # run_job_loop's stand-down.
             for error in errors:
                 if isinstance(error, exceptions.JobOwnershipLostError):
                     raise error
             if self._fence_lost():
                 raise exceptions.JobOwnershipLostError(self._managed_job_id)
+            if self._fence is not None:
+                self._fence.detection = 'tick'
+                managed_job_state.raise_if_fence_lost(self._fence)
 
             if self.completed_count >= len(self.batches):
                 break
