@@ -10,6 +10,7 @@ import time
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
                     Union)
+import uuid
 
 import colorama
 import sqlalchemy
@@ -123,6 +124,14 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('controller_pid_started_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # Identity of the current claim on this job: a fresh UUID stamped by
+    # get_waiting_job_async when a controller claims the job, cleared by
+    # every path that resets the job for re-claiming. Unlike the
+    # controller_pid pair (liveness evidence), claim_id identifies the claim
+    # instance itself -- a re-claim by the same process gets a new claim_id.
+    # Internal-only: deliberately not exposed via the jobs-queue dict, API
+    # responses, or protos.
+    sqlalchemy.Column('claim_id', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
     sqlalchemy.Column('env_file_path', sqlalchemy.Text),
     sqlalchemy.Column('dag_yaml_content', sqlalchemy.Text, server_default=None),
@@ -1935,6 +1944,12 @@ def scheduler_set_waiting(job_ids: List[int],
         updates = {
             job_info_table.c.schedule_state:
                 ManagedJobScheduleState.WAITING.value,
+            # Re-queueing for claiming: clear any previous claim's ownership
+            # columns, otherwise a stale claim_id/pid survives into the new
+            # WAITING state and misleads readers that key on them.
+            job_info_table.c.controller_pid: None,
+            job_info_table.c.controller_pid_started_at: None,
+            job_info_table.c.claim_id: None,
             job_info_table.c.dag_yaml_content: dag_yaml_content,
             job_info_table.c.original_user_yaml_content:
                 (original_user_yaml_content),
@@ -2609,6 +2624,12 @@ async def get_waiting_job_async(
         current_state = ManagedJobScheduleState(waiting_job_row[1])
         pool = waiting_job_row[2]
 
+        # A fresh UUID identifying this claim instance. The pid pair below
+        # records *who* claimed (liveness evidence for the janitor and HA
+        # recovery); the claim id records *which claim* -- a later re-claim,
+        # even by the same process, gets a different id.
+        claim_id = str(uuid.uuid4())
+
         # Update the job state to LAUNCHING
         update_result = await session.execute(
             sqlalchemy.update(job_info_table).where(
@@ -2620,6 +2641,7 @@ async def get_waiting_job_async(
                         ManagedJobScheduleState.LAUNCHING.value,
                     job_info_table.c.controller_pid: pid,
                     job_info_table.c.controller_pid_started_at: pid_started_at,
+                    job_info_table.c.claim_id: claim_id,
                 }))
 
         if update_result.rowcount != 1:
@@ -2633,6 +2655,7 @@ async def get_waiting_job_async(
         return {
             'job_id': job_id,
             'pool': pool,
+            'claim_id': claim_id,
         }
 
 
@@ -3196,6 +3219,7 @@ def reset_jobs_for_recovery() -> None:
         ).update({
             job_info_table.c.controller_pid: None,
             job_info_table.c.controller_pid_started_at: None,
+            job_info_table.c.claim_id: None,
             job_info_table.c.schedule_state:
                 (ManagedJobScheduleState.WAITING.value)
         })
@@ -3210,6 +3234,7 @@ def reset_job_for_recovery(job_id: int) -> None:
             job_info_table.c.spot_job_id == job_id).update({
                 job_info_table.c.controller_pid: None,
                 job_info_table.c.controller_pid_started_at: None,
+                job_info_table.c.claim_id: None,
                 job_info_table.c.schedule_state:
                     ManagedJobScheduleState.WAITING.value,
             })
