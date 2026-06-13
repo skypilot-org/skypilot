@@ -25,6 +25,7 @@ each other.
 """
 import collections
 import concurrent.futures
+import datetime
 import fnmatch
 import io
 import json
@@ -5962,6 +5963,38 @@ def jobs_launch(
                     f'{ux_utils.RESET_BOLD}')
 
 
+# Accepted absolute date/time formats for --after / --before. ISO date and
+# date-time (space or 'T' separator) first; US m-d-Y for familiarity. Naive
+# values are interpreted in the local timezone.
+_SUBMITTED_AT_DATETIME_FORMATS = (
+    '%Y-%m-%d',
+    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%d %H:%M',
+    '%Y-%m-%dT%H:%M:%S',
+    '%Y-%m-%dT%H:%M',
+    '%m-%d-%Y',
+    '%m-%d-%Y %H:%M:%S',
+)
+
+
+def _parse_datetime_to_epoch(value: str) -> float:
+    """Parses an absolute date/time string into an epoch timestamp (seconds).
+
+    Naive datetimes are interpreted in the local timezone.
+
+    Raises:
+        ValueError: if the value matches none of the accepted formats.
+    """
+    for fmt in _SUBMITTED_AT_DATETIME_FORMATS:
+        try:
+            return datetime.datetime.strptime(value,
+                                              fmt).astimezone().timestamp()
+        except ValueError:
+            continue
+    raise ValueError(f'Invalid date/time {value!r}. Use e.g. "2026-01-13", '
+                     '"2026-01-13 15:30:00", or "2026-01-13T15:30:00".')
+
+
 @jobs.command('queue', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
@@ -5993,7 +6026,23 @@ def jobs_launch(
     type=str,
     required=False,
     help=('Show only jobs submitted within this time window, relative to now '
-          '(e.g. "30m", "48h", "7d", "2w"). A bare number is seconds.'))
+          '(e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. '
+          'Mutually exclusive with --after.'))
+@click.option(
+    '--after',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted at or after this absolute local time '
+          '(e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive '
+          'with --since.'))
+@click.option(
+    '--before',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted at or before this absolute local time '
+          '(e.g. "2026-01-13" or "2026-01-13 15:30:00").'))
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -6003,6 +6052,8 @@ def jobs_queue(verbose: bool,
                refresh: bool,
                skip_finished: bool,
                since: Optional[str],
+               after: Optional[str],
+               before: Optional[str],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6069,7 +6120,18 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue --since 7d
 
+    (Tip) To filter by an absolute submission window, use ``--after`` and/or
+    ``--before``:
+
+    .. code-block:: bash
+
+      sky jobs queue --after 2026-01-01 --before 2026-01-31
+
     """
+    if since is not None and after is not None:
+        raise click.UsageError(
+            '--since and --after are mutually exclusive: --since is a relative '
+            'window from now, --after is an absolute lower bound.')
     submitted_after = None
     if since is not None:
         try:
@@ -6077,6 +6139,17 @@ def jobs_queue(verbose: bool,
         except ValueError as e:
             raise click.BadParameter(str(e), param_hint='--since') from e
         submitted_after = time.time() - since_seconds
+    elif after is not None:
+        try:
+            submitted_after = _parse_datetime_to_epoch(after)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--after') from e
+    submitted_before = None
+    if before is not None:
+        try:
+            submitted_before = _parse_datetime_to_epoch(before)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--before') from e
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
@@ -6097,7 +6170,8 @@ def jobs_queue(verbose: bool,
                 all_users=all_users,
                 limit=max_num_jobs_to_show,
                 fields=fields,
-                submitted_after=submitted_after)
+                submitted_after=submitted_after,
+                submitted_before=submitted_before)
 
         def get_pool_status():
             try:
