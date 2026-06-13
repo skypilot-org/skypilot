@@ -2939,7 +2939,7 @@ class GcsStore(AbstractStore):
                 next(bucket.list_blobs())
                 return bucket, False
             except (gcp.not_found_exception(), ValueError) as e:
-                command = f'gsutil ls gs://{self.name}'
+                command = f'gcloud storage ls gs://{self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
