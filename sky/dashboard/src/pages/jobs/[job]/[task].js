@@ -399,7 +399,7 @@ function TaskLogsContent({
   isLoadingLogs,
 }) {
   const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
-  const RECOVERING_STATUSES = ['RECOVERING'];
+  const RECOVERING_STATUSES = ['RECOVERING', 'EMERGENCY_RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(taskData.status);
   const isRecovering = RECOVERING_STATUSES.includes(taskData.status);

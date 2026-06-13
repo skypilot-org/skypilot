@@ -63,6 +63,8 @@ state "All States" as AllStates {
 
     InnerLoop -\-> CANCELLING : user cancel request
     InnerLoop -[dotted]> RECOVERING : HA controller recovery
+    InnerLoop -[dotted]> EMERGENCY_RECOVERING : unexpected\ncontroller error
+    EMERGENCY_RECOVERING -[dotted]> InnerLoop : management restarted
     CANCELLING -> CANCELLED : cluster\ncleaned up
     CANCELLING -[dotted]-> Terminal: job could complete\nbefore we can cancel
 }
@@ -73,6 +75,8 @@ AllStates -\-> FAILED_CONTROLLER : controller failed or\nunexpected state
 -->
 
 Note that ANY status can legally transition to FAILED_CONTROLLER, even another terminal status. This is because we can have a controller failure or other problem after the job has already exited, e.g. when cleaning up the cluster.
+
+EMERGENCY_RECOVERING is entered from any non-terminal, non-CANCELLING status when the controller hits an unexpected error (e.g. external mutation of the job state). The controller retries managing the job in place, bounded by a per-job budget with exponential backoff (see EMERGENCY_RECOVERY_* in sky/jobs/constants.py); the status the task had when the emergency began is saved so that a RUNNING task re-attaches to its healthy cluster instead of restarting the workload. When the budget is exhausted, the job goes to FAILED_CONTROLLER with full cleanup.
 
 The schedule_state follows a simpler diagram:
 

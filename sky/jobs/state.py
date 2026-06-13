@@ -1026,7 +1026,8 @@ def set_failed(
             sqlalchemy.select(spot_table.c.status).where(
                 spot_table.c.spot_job_id == job_id)).fetchone()[0]
         previous_status = ManagedJobStatus(previous_status)
-        if previous_status == ManagedJobStatus.RECOVERING:
+        if previous_status in (ManagedJobStatus.RECOVERING,
+                               ManagedJobStatus.EMERGENCY_RECOVERING):
             # If the job is recovering, we should set the last_recovered_at to
             # the end_time, so that the end_at - last_recovered_at will not be
             # affect the job duration calculation.
@@ -3213,7 +3214,8 @@ async def set_failed_async(
                 spot_table.c.status).where(spot_table.c.spot_job_id == job_id))
         previous_status_row = result.fetchone()
         previous_status = ManagedJobStatus(previous_status_row[0])
-        if previous_status == ManagedJobStatus.RECOVERING:
+        if previous_status in (ManagedJobStatus.RECOVERING,
+                               ManagedJobStatus.EMERGENCY_RECOVERING):
             fields_to_set[spot_table.c.last_recovered_at] = end_time
         where_conditions = [spot_table.c.spot_job_id == job_id]
         if task_id is not None:
@@ -3732,11 +3734,13 @@ def get_job_events(job_id: int,
 
 
 def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
-    """Return {job_id: reason} for the most recent RECOVERING event per job.
+    """Return {job_id: reason} for the most recent recovery event per job.
 
-    Only jobs with a non-empty RECOVERING reason are included. Used to surface
-    why a job is currently recovering (e.g. an OOMKilled pod) in the
-    `details` column. A single batched query keeps this off the per-job path.
+    Covers both RECOVERING (cluster-level recovery) and EMERGENCY_RECOVERING
+    (controller-level recovery) events. Only jobs with a non-empty reason
+    are included. Used to surface why a job is currently recovering (e.g. an
+    OOMKilled pod) in the `details` column. A single batched query keeps
+    this off the per-job path.
     """
     if not job_ids:
         return {}
@@ -3749,8 +3753,10 @@ def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
             ).where(
                 sqlalchemy.and_(
                     job_events_table.c.spot_job_id.in_(job_ids),
-                    job_events_table.c.new_status ==
-                    ManagedJobStatus.RECOVERING.value,
+                    job_events_table.c.new_status.in_([
+                        ManagedJobStatus.RECOVERING.value,
+                        ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                    ]),
                 )).order_by(job_events_table.c.timestamp.desc())).fetchall()
     # rows are newest-first; keep the first (latest) non-empty reason per job.
     reasons: Dict[int, str] = {}

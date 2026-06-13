@@ -977,7 +977,7 @@ function JobDetailsContent({
 
   const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
   const PRE_START_STATUSES = ['PENDING', 'SUBMITTED'];
-  const RECOVERING_STATUSES = ['RECOVERING'];
+  const RECOVERING_STATUSES = ['RECOVERING', 'EMERGENCY_RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(jobData.status);
   // After priority-based scheduling (#5682), a job can be PENDING while its

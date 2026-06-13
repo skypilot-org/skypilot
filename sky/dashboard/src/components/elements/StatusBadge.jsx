@@ -38,6 +38,7 @@ export const getStatusStyle = (status) => {
     case 'CANCELLED':
       return 'bg-yellow-50 text-yellow-700';
     case 'RECOVERING':
+    case 'EMERGENCY_RECOVERING':
       return 'bg-orange-50 text-orange-700';
     case 'WINDING_DOWN':
       return 'bg-purple-50 text-purple-700';
@@ -117,6 +118,7 @@ export const getStatusIcon = (status) => {
       return <TickIcon className="w-3 h-3 mr-1" />;
     case 'PENDING':
     case 'RECOVERING':
+    case 'EMERGENCY_RECOVERING':
     case 'SUBMITTED':
     case 'CANCELLING':
     case 'FAILED_SETUP':
