@@ -1530,8 +1530,14 @@ class JobController:
                     strategy_executors.append(None)  # type: ignore[arg-type]
                     continue
 
-                # Get list of other job names (excluding current task)
-                other_job_names = [t.name for t in tasks if t.name != task.name]
+                # Get list of other job names (excluding current task).
+                # Job-group tasks are always named (filled by
+                # dag_utils.maybe_infer_and_fill_dag_and_task_names).
+                other_job_names = [
+                    t.name
+                    for t in tasks
+                    if t.name is not None and t.name != task.name
+                ]
                 name, executor = await self._prepare_job_group_task_for_launch(
                     task, task_id, job_group_name, other_job_names)
                 cluster_names.append(name)
@@ -1860,8 +1866,10 @@ class JobController:
         termination_coros = []
         for task_id, async_task in list(monitor_async_tasks.items()):
             if all_primary_succeeded:
-                delay_secs = self._dag.get_termination_delay_secs(
-                    tasks[task_id].name)
+                # Job-group tasks are always named.
+                task_name = tasks[task_id].name
+                assert task_name is not None, tasks[task_id]
+                delay_secs = self._dag.get_termination_delay_secs(task_name)
             else:
                 # Primary job failed - terminate immediately
                 delay_secs = 0
@@ -2570,6 +2578,18 @@ class ControllerManager:
             await task
         except asyncio.CancelledError:
             logger.info(f'Job {job_id} was cancelled')
+
+            if controller is not None and controller.usurped:
+                # A cancel landed while the controller was standing down
+                # because another controller took the job over. The new
+                # owner is responsible for all job state; touching it here
+                # (e.g. set_cancelling_async) would corrupt its management.
+                # Re-raise without touching anything; the finally is also
+                # gated on usurped.
+                logger.error(
+                    f'Job {job_id} was taken over by another controller; '
+                    'ignoring the cancel in this controller.')
+                raise
 
             async with self._cancel_info_lock:
                 cancel_info = self._cancel_info.pop(job_id, None)

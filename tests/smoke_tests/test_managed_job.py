@@ -3320,8 +3320,19 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
     # The conditional UPDATE consumes the LAUNCHING window atomically: it
     # only applies while schedule_state is LAUNCHING, so retrying it every
     # few seconds both waits for and triggers the failure with no race.
+    #
+    # There are two LAUNCHING windows. The claim-time one (set by the
+    # scheduler before the controller runs, while the task status is still
+    # PENDING) is self-healing: scheduler_set_launching_async unconditionally
+    # re-sets LAUNCHING when the controller actually launches, so mutating it
+    # there does nothing. The launch-time window (during the controller's
+    # launch(), after the task has moved to STARTING) is the one whose
+    # LAUNCHING->ALIVE transition 0-rows and raises the unexpected error we
+    # want. Gate on the task being STARTING so we only hit the second window.
     mutation_sql = ("UPDATE job_info SET schedule_state='ALIVE' "
-                    f"WHERE name='{name}' AND schedule_state='LAUNCHING'")
+                    f"WHERE name='{name}' AND schedule_state='LAUNCHING' "
+                    "AND spot_job_id IN (SELECT spot_job_id FROM spot "
+                    "WHERE status='STARTING')")
     count_sql = ('SELECT emergency_recovery_count FROM job_info '
                  f"WHERE name='{name}'")
 
