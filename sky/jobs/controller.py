@@ -332,6 +332,17 @@ class JobController:
     async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
         if cluster_name is None:
             return
+        # Gate on a fresh ownership re-read before terminating. The recovery
+        # path reaches here (on preemption/forced recovery) before any
+        # fenced write would have noticed an ownership loss, so without this
+        # a controller whose job was reset and re-claimed could terminate
+        # the new claimant's cluster (the deterministic cluster name is
+        # shared across claims). A raise routes to run_job_loop's
+        # stand-down. The success/cancel paths already run a fenced write
+        # first, so this is a no-op for them.
+        if self._fence is not None:
+            self._fence.detection = 'preaction'
+            await managed_job_state.raise_if_fence_lost_async(self._fence)
         if self._pool is None:
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
@@ -1813,6 +1824,11 @@ class JobController:
             if cluster_name is not None:
                 try:
                     await self._cleanup_cluster(cluster_name)
+                except exceptions.JobOwnershipLostError:
+                    # _cleanup_cluster re-reads ownership; never swallow a
+                    # loss into a cleanup warning -- it must unwind the group
+                    # to stand-down (the gather below re-raises it).
+                    raise
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to cleanup cluster for {task_name}: {e}')
@@ -1851,6 +1867,10 @@ class JobController:
             if cluster_name is not None:
                 try:
                     await self._cleanup_cluster(cluster_name)
+                except exceptions.JobOwnershipLostError:
+                    # Don't swallow a loss into a cleanup warning: it routes
+                    # to stand-down via the caller.
+                    raise
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to cleanup {cluster_name}: {e}')
 
@@ -2329,9 +2349,14 @@ class ControllerManager:
                 # claim-side exclusion in monitor_loop prevents this;
                 # belt-and-suspenders here. Exit WITHOUT cleanup, terminal
                 # writes, job_done, or registry deletion -- all of those
-                # would fire against the live run.
+                # would fire against the live run. start_job added this id to
+                # `starting` before spawning us; remove it (and wake any
+                # launch-throttled waiter) since this invocation does no
+                # work and the live run owns its own `starting` lifecycle.
                 logger.error(f'Job {job_id} is already running in this '
                              'process; refusing the duplicate invocation.')
+                self.starting.discard(job_id)
+                self._starting_signal.notify()
                 return
 
         cancelling = False

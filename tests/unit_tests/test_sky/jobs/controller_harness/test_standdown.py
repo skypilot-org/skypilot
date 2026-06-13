@@ -8,7 +8,11 @@ clobbering state or destroying the winner's resources.
 import pytest
 import sqlalchemy
 
+from sky import exceptions
+from sky.jobs import controller as controller_module
+from sky.jobs import fencing
 from sky.jobs import state as managed_job_state
+from sky.metrics import utils as metrics_lib
 
 ManagedJobStatus = managed_job_state.ManagedJobStatus
 ManagedJobScheduleState = managed_job_state.ManagedJobScheduleState
@@ -79,7 +83,7 @@ async def test_reset_and_reclaim_loser_stands_down(jobs_db, fake_cloud,
     # cluster B is using, and the job is not in any terminal/cancelled
     # state from A's writes.
     assert fake_cloud.terminate_calls == terminates_before
-    assert (managed_job_state.get_status(job_id) == ManagedJobStatus.RUNNING)
+    assert managed_job_state.get_status(job_id) == ManagedJobStatus.RUNNING
 
     fake_cloud.finish_job(cluster_name)
     await harness_b.wait_for_job_status(job_id, [ManagedJobStatus.SUCCEEDED])
@@ -114,7 +118,7 @@ async def test_reset_unclaimed_loser_terminates_cluster(jobs_db, fake_cloud,
     claim_id, _, schedule_state = _read_row(jobs_db, job_id)
     assert schedule_state == ManagedJobScheduleState.WAITING.value
     assert claim_id is None
-    assert (managed_job_state.get_status(job_id) == ManagedJobStatus.RUNNING)
+    assert managed_job_state.get_status(job_id) == ManagedJobStatus.RUNNING
 
 
 @pytest.mark.asyncio
@@ -172,7 +176,7 @@ async def test_duplicate_invocation_is_non_destructive(jobs_db, fake_cloud,
     # The original run is untouched: still registered, still RUNNING, no
     # cluster torn down.
     assert job_id in harness.manager.job_tasks
-    assert (managed_job_state.get_status(job_id) == ManagedJobStatus.RUNNING)
+    assert managed_job_state.get_status(job_id) == ManagedJobStatus.RUNNING
     assert fake_cloud.terminate_calls == terminates_before
 
     fake_cloud.finish_job(cluster_name)
@@ -186,9 +190,6 @@ async def test_collision_metric_and_verdict(jobs_db, fake_cloud,
     stand-down{verdict=unclaimed} for a reset-but-unclaimed job."""
     del jobs_db
     from unittest import mock  # pylint: disable=import-outside-toplevel
-
-    from sky.jobs import controller as controller_module
-    from sky.metrics import utils as metrics_lib
     monkeypatch.setattr(metrics_lib, 'METRICS_ENABLED', True)
     lost_metric = mock.MagicMock()
     standdown_metric = mock.MagicMock()
@@ -271,7 +272,6 @@ async def test_tick_detects_loss_for_reclaimed_running_job(
 
 
 def _token_for(job_id, claim_id='my-claim'):
-    from sky.jobs import fencing  # pylint: disable=import-outside-toplevel
     return fencing.FencingToken(job_id=job_id, claim_id=claim_id, lost=True)
 
 
@@ -387,3 +387,42 @@ async def test_unclaimed_terminate_aborts_if_claim_appears(
     await harness.manager._stand_down_terminate_clusters(  # pylint: disable=protected-access
         job_id, None)
     assert cluster_name not in fake_cloud.terminate_calls
+
+
+@pytest.mark.asyncio
+async def test_cleanup_cluster_refuses_when_claim_lost(jobs_db, fake_cloud,
+                                                       controller_harness):
+    """JobController._cleanup_cluster (the recovery-path teardown chokepoint)
+    must re-read ownership and refuse to terminate a cluster once the claim
+    is lost -- otherwise a preempted loser tears down the new claimant's
+    relaunched cluster before any fenced write notices."""
+    del jobs_db
+    harness = controller_harness
+    job_id = harness.submit_job(name='cleanup-fence')
+    claimed = await managed_job_state.get_waiting_job_async(
+        pid=harness.pid, pid_started_at=float(harness.pid))
+    assert claimed is not None
+    token = fencing.FencingToken(job_id=job_id, claim_id=claimed['claim_id'])
+
+    cluster_name = harness.cluster_name_for(job_id, 'cleanup-fence')
+    fake_cloud.launch(cluster_name)
+
+    jc = controller_module.JobController(
+        job_id,
+        set(),
+        harness.manager._job_tasks_lock,  # pylint: disable=protected-access
+        harness.manager._starting_signal,  # pylint: disable=protected-access
+        fence=token)
+
+    # Held claim: teardown proceeds.
+    await jc._cleanup_cluster(cluster_name)  # pylint: disable=protected-access
+    assert cluster_name in fake_cloud.terminate_calls
+
+    # Claim lost (reset out from under us): teardown refuses and raises.
+    fake_cloud.launch(cluster_name)
+    managed_job_state.reset_job_for_recovery(job_id)
+    terminates_before = list(fake_cloud.terminate_calls)
+    with pytest.raises(exceptions.JobOwnershipLostError):
+        await jc._cleanup_cluster(cluster_name)  # pylint: disable=protected-access
+    assert fake_cloud.terminate_calls == terminates_before
+    assert token.lost
