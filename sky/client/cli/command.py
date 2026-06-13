@@ -6086,11 +6086,11 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue --status FAILED,FAILED_SETUP
 
-    (Tip) To show only active (pending/running) jobs, use ``-s``:
+    (Tip) To show only active (pending/running) jobs, use ``--skip-finished``:
 
     .. code-block:: bash
 
-      sky jobs queue -s
+      sky jobs queue --skip-finished
 
     """
     if output_format != flags.OUTPUT_FORMAT_JSON:
