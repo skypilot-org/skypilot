@@ -6072,8 +6072,11 @@ def jobs_queue(verbose: bool,
     """
     submitted_after = None
     if since is not None:
-        submitted_after = time.time() - resources_utils.parse_time_seconds(
-            since)
+        try:
+            since_seconds = resources_utils.parse_time_seconds(since)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--since') from e
+        submitted_after = time.time() - since_seconds
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):

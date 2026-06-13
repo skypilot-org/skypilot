@@ -547,7 +547,8 @@ export function ManagedJobsTable({
   }, [selectedStatuses, showAllMode, activeTab]);
 
   // Convert the selected time range to an absolute submitted_after epoch
-  // (seconds), recomputed on each render so the window stays anchored to now.
+  // (seconds), anchored at selection time: re-selecting the range (or
+  // reloading) re-anchors it to the current moment.
   const submittedAfter = React.useMemo(() => {
     if (timeRangeSeconds === null) {
       return undefined;
