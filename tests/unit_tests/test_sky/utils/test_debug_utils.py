@@ -2056,9 +2056,8 @@ class TestGetClusterDumpData:
         }
 
     @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch(
-        'sky.utils.debug_dump_helpers.global_user_state.'
-        'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
     @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
                 'get_cluster_from_name')
     def test_live_cluster(self, mock_get_cluster, mock_get_history,
@@ -2085,13 +2084,44 @@ class TestGetClusterDumpData:
             'events_status_change.json'
         }
         mock_get_events.assert_called_once_with('live-hash')
-        mock_get_history.assert_called_once_with(
-            cluster_names=['test-cluster'])
+        mock_get_history.assert_called_once_with(cluster_names=['test-cluster'])
 
     @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch(
-        'sky.utils.debug_dump_helpers.global_user_state.'
-        'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_cluster_from_name')
+    def test_reused_name_with_live_cluster_dumps_all_events(
+            self, mock_get_cluster, mock_get_history, mock_get_events):
+        """A live cluster whose name was previously used by a terminated
+        cluster yields events for BOTH hashes — history is not just a
+        fallback for terminated clusters."""
+        mock_get_cluster.return_value = {
+            'name': 'test-cluster',
+            'cluster_hash': 'live-hash-11',
+            'status': 'UP',
+        }
+        mock_get_history.return_value = [
+            self._history_record('live-hash-11'),
+            self._history_record('old-hash-22'),
+        ]
+        mock_get_events.return_value = [{
+            'event_type': 'status_change',
+            'events': [{
+                'reason': 'UP'
+            }],
+        }]
+
+        data = dict(debug_dump_helpers.get_cluster_dump_data('test-cluster'))
+
+        assert 'cluster_info.json' in data
+        assert 'events_status_change.live-has.json' in data
+        assert 'events_status_change.old-hash.json' in data
+        assert mock_get_events.call_count == 2
+
+    @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
     @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
                 'get_cluster_from_name')
     def test_terminated_cluster_falls_back_to_history(self, mock_get_cluster,
@@ -2117,9 +2147,8 @@ class TestGetClusterDumpData:
         mock_get_events.assert_called_once_with('old-hash')
 
     @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch(
-        'sky.utils.debug_dump_helpers.global_user_state.'
-        'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
     @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
                 'get_cluster_from_name')
     def test_reused_name_suffixes_event_files(self, mock_get_cluster,
@@ -2146,14 +2175,12 @@ class TestGetClusterDumpData:
         assert mock_get_events.call_count == 2
 
     @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch(
-        'sky.utils.debug_dump_helpers.global_user_state.'
-        'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
     @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
                 'get_cluster_from_name')
     def test_unknown_cluster_yields_nothing(self, mock_get_cluster,
-                                            mock_get_history,
-                                            mock_get_events):
+                                            mock_get_history, mock_get_events):
         mock_get_cluster.return_value = None
         mock_get_history.return_value = []
 
@@ -2171,8 +2198,8 @@ class TestDumpClusterInfo:
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     @mock.patch('sky.utils.debug_utils.global_user_state.'
                 'get_cluster_history_provision_log_path')
-    @mock.patch(
-        'sky.utils.debug_utils.debug_dump_helpers.get_cluster_dump_data')
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers.get_cluster_dump_data'
+               )
     def test_writes_dump_data_and_provision_log(self, mock_dump_data,
                                                 mock_provision_path,
                                                 mock_get_tasks, tmp_path):
@@ -2198,18 +2225,17 @@ class TestDumpClusterInfo:
         cluster_dir = tmp_path / 'clusters' / 'gone-cluster'
         assert (cluster_dir / 'cluster_history.json').exists()
         assert (cluster_dir / 'events_status_change.json').exists()
-        assert (cluster_dir /
-                'provision.log').read_text() == 'provisioning...'
+        assert (cluster_dir / 'provision.log').read_text() == 'provisioning...'
         assert not errors
 
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     @mock.patch('sky.utils.debug_utils.global_user_state.'
                 'get_cluster_history_provision_log_path')
-    @mock.patch(
-        'sky.utils.debug_utils.debug_dump_helpers.get_cluster_dump_data')
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers.get_cluster_dump_data'
+               )
     def test_dump_data_failure_is_recorded(self, mock_dump_data,
-                                           mock_provision_path,
-                                           mock_get_tasks, tmp_path):
+                                           mock_provision_path, mock_get_tasks,
+                                           tmp_path):
         """A failure collecting cluster data is recorded, and the rest of
         the dump still proceeds."""
         mock_dump_data.side_effect = RuntimeError('db down')

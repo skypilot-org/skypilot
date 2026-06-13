@@ -174,16 +174,18 @@ def get_cluster_dump_data(cluster_name: str) -> List[Tuple[str, Any]]:
             for record in history_records
         ]))
 
-    # Events are keyed by cluster hash. Prefer the live cluster's hash;
-    # for terminated clusters, fall back to the hashes from history.
+    # Events are keyed by cluster hash. Collect from the live cluster's
+    # hash AND every history hash (deduplicated — the live cluster has a
+    # history record with the same hash): when a name has been reused, the
+    # current cluster and its terminated predecessors all have events
+    # worth dumping.
+    event_hashes = []
     if cluster_record is not None and cluster_record.get('cluster_hash'):
-        event_hashes = [cluster_record['cluster_hash']]
-    else:
-        event_hashes = [
-            record['cluster_hash']
-            for record in history_records
-            if record.get('cluster_hash')
-        ]
+        event_hashes.append(cluster_record['cluster_hash'])
+    for record in history_records:
+        record_hash = record.get('cluster_hash')
+        if record_hash and record_hash not in event_hashes:
+            event_hashes.append(record_hash)
     # Suffix event files with the hash only when the name maps to several
     # clusters, so the common single-cluster case keeps stable filenames.
     use_hash_suffix = len(event_hashes) > 1
