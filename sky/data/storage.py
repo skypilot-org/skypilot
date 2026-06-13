@@ -4954,14 +4954,43 @@ class S3Store(S3CompatibleStore):
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
 
+    def _get_bucket_region(self) -> Optional[str]:
+        """Returns the region the bucket actually resides in.
+
+        self.region cannot be used here: for existing buckets it defaults to
+        us-east-1 (see __init__), which may differ from the bucket's actual
+        region. We query S3 instead, which reports the bucket's region in the
+        x-amz-bucket-region header of HeadBucket responses.
+
+        Returns:
+            The bucket's region, or None if it could not be determined.
+        """
+        try:
+            response = self.client.head_bucket(Bucket=self.name)
+        except aws.botocore_exceptions().ClientError as e:
+            # The region header is present even on error responses
+            # (e.g., 301/403 for cross-region or restricted access).
+            response = e.response
+        region = response.get('ResponseMetadata',
+                              {}).get('HTTPHeaders',
+                                      {}).get('x-amz-bucket-region')
+        if region is None:
+            logger.debug('Failed to detect the region of S3 bucket '
+                         f'{self.name!r}.')
+        return region
+
     def mount_cached_command(self,
                              mount_path: str,
                              config: Optional[MountCachedConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        # Pass the bucket's actual region so rclone hits the correct
+        # region-specific endpoint, which is required for buckets in opt-in
+        # regions (e.g., eu-south-2). See #9540.
         rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
-            rclone_profile_name=rclone_profile_name)
+            rclone_profile_name=rclone_profile_name,
+            region=self._get_bucket_region())
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
             rclone_config, rclone_profile_name, self.bucket.name, mount_path,
             config)
