@@ -3,9 +3,10 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import { PaginationControls } from '@/components/elements/PaginationControls';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -475,14 +476,29 @@ export function ManagedJobsTable({
   preloadingComplete,
   lastFetchedTime,
 }) {
+  const router = useRouter();
   const [sortConfig, setSortConfig] = useState({
     key: 'id',
     direction: 'descending',
   });
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const p = parseInt(params.get('page'), 10);
+      return p > 0 ? p : 1;
+    }
+    return 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const ps = parseInt(params.get('pageSize'), 10);
+      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+    }
+    return 10;
+  });
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
   const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
@@ -515,6 +531,36 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Sync page/pageSize to URL query params
+  useEffect(() => {
+    if (!router.isReady) return;
+    const query = { ...router.query };
+    let changed = false;
+    if (currentPage > 1) {
+      if (query.page !== String(currentPage)) {
+        query.page = String(currentPage);
+        changed = true;
+      }
+    } else if (query.page) {
+      delete query.page;
+      changed = true;
+    }
+    if (pageSize !== 10) {
+      if (query.pageSize !== String(pageSize)) {
+        query.pageSize = String(pageSize);
+        changed = true;
+      }
+    } else if (query.pageSize) {
+      delete query.pageSize;
+      changed = true;
+    }
+    if (changed) {
+      router.replace({ pathname: router.pathname, query }, undefined, {
+        shallow: true,
+      });
+    }
+  }, [currentPage, pageSize, router.isReady]);
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
@@ -2503,100 +2549,29 @@ export function ManagedJobsTable({
         </div>
       </Card>
 
-      {/* Pagination controls - always show for visual separation */}
-      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center">
-            <span className="mr-2">Jobs per page:</span>
-            <div className="relative inline-block">
-              <select
-                value={pageSize}
-                onChange={handlePageSizeChange}
-                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                style={{ minWidth: '40px' }}
-              >
-                <option value={10}>10</option>
-                <option value={30}>30</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-                <option value={200}>200</option>
-              </select>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </div>
-          </div>
-          <div>
-            {totalCount > 0
-              ? `${startIndex + 1} – ${Math.min(startIndex + groupedJobs.size, totalCount)} of ${totalCount}`
-              : '0 – 0 of 0'}
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToPreviousPage}
-              disabled={
-                currentPage === 1 || !sortedData || sortedData.length === 0
-              }
-              className="text-gray-500 h-8 w-8 p-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="chevron-left"
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToNextPage}
-              disabled={
-                totalPages === 0 ||
-                currentPage >= totalPages ||
-                !sortedData ||
-                sortedData.length === 0
-              }
-              className="text-gray-500 h-8 w-8 p-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="chevron-right"
-              >
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </Button>
-          </div>
-        </div>
-      </div>
+      {/* Pagination controls */}
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        startIndex={startIndex}
+        endIndex={startIndex + groupedJobs.size}
+        onPageChange={setCurrentPage}
+        onPreviousPage={goToPreviousPage}
+        onNextPage={goToNextPage}
+        isPrevDisabled={
+          currentPage === 1 || !sortedData || sortedData.length === 0
+        }
+        isNextDisabled={
+          totalPages === 0 ||
+          currentPage >= totalPages ||
+          !sortedData ||
+          sortedData.length === 0
+        }
+        pageSize={pageSize}
+        onPageSizeChange={handlePageSizeChange}
+        itemLabel="Jobs"
+      />
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -2956,90 +2931,21 @@ export function ClusterJobs({
       </Card>
 
       {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
-            </div>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={sortedData.length}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setCurrentPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={currentPage === 1}
+          isNextDisabled={currentPage === totalPages || totalPages === 0}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={[5, 10, 20, 50]}
+        />
       )}
     </div>
   );
@@ -3322,41 +3228,21 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
 
       {/* Pagination */}
       {paginatedData.length > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">Rows per page:</span>
-            <select
-              value={pageSize}
-              onChange={handlePageSizeChange}
-              className="border border-gray-300 rounded px-2 py-1 text-sm"
-            >
-              <option value={5}>5</option>
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">
-              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </span>
-            <button
-              onClick={goToPreviousPage}
-              disabled={currentPage === 1}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <button
-              onClick={goToNextPage}
-              disabled={currentPage === totalPages}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={sortedData.length}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setCurrentPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={currentPage === 1}
+          isNextDisabled={currentPage === totalPages}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={[5, 10, 25, 50]}
+        />
       )}
     </Card>
   );
