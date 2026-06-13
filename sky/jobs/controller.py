@@ -13,7 +13,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import dotenv
 import filelock
@@ -168,10 +168,9 @@ def _cleanup_with_retries(operation: typing.Callable[[], Any],
         except Exception as e:  # pylint: disable=broad-except
             if attempt == max_attempts - 1:
                 raise
-            logger.warning(
-                f'Failed to {description} (attempt {attempt + 1}/'
-                f'{max_attempts}), retrying: '
-                f'{common_utils.format_exception(e)}')
+            logger.warning(f'Failed to {description} (attempt {attempt + 1}/'
+                           f'{max_attempts}), retrying: '
+                           f'{common_utils.format_exception(e)}')
             time.sleep(backoff.current_backoff())
 
 
@@ -653,9 +652,8 @@ class JobController:
                 saved_status = await (
                     managed_job_state.get_status_before_emergency_async(
                         job_id=self._job_id, task_id=task_id))
-                logger.info(
-                    f'Task {task_id} is in emergency recovery; status '
-                    f'before the emergency: {saved_status}')
+                logger.info(f'Task {task_id} is in emergency recovery; status '
+                            f'before the emergency: {saved_status}')
                 if saved_status == managed_job_state.ManagedJobStatus.RUNNING:
                     await managed_job_state.set_emergency_recovered_async(
                         self._job_id,
@@ -1441,9 +1439,8 @@ class JobController:
                 saved_status = await (
                     managed_job_state.get_status_before_emergency_async(
                         job_id=self._job_id, task_id=task_id))
-                logger.info(
-                    f'Task {task_id} is in emergency recovery; status '
-                    f'before the emergency: {saved_status}')
+                logger.info(f'Task {task_id} is in emergency recovery; status '
+                            f'before the emergency: {saved_status}')
                 if saved_status == managed_job_state.ManagedJobStatus.RUNNING:
                     await managed_job_state.set_emergency_recovered_async(
                         self._job_id,
@@ -1889,9 +1886,8 @@ class JobController:
                     if self._emergency_backoff_seconds is not None:
                         backoff = self._emergency_backoff_seconds
                         self._emergency_backoff_seconds = None
-                        logger.info(
-                            f'Sleeping {backoff:.0f}s before emergency '
-                            f'recovery attempt for job {self._job_id}')
+                        logger.info(f'Sleeping {backoff:.0f}s before emergency '
+                                    f'recovery attempt for job {self._job_id}')
                         await asyncio.sleep(backoff)
 
                     succeeded = True
@@ -2019,8 +2015,8 @@ class JobController:
                         job_id=self._job_id, callback_func=callback_func)
 
     async def _handle_unexpected_error(
-            self,
-            error: BaseException) -> Tuple[_EmergencyDecision, Optional[str]]:
+        self, error: Union[Exception, SystemExit]
+    ) -> Tuple[_EmergencyDecision, Optional[str]]:
         """Decide how to handle an unexpected error in the job loop.
 
         Runs the emergency-recovery bookkeeping with an outer retry layer
@@ -2036,8 +2032,7 @@ class JobController:
         """
         if self._controller_pid_record is None:
             return (_EmergencyDecision.FAIL, None)
-        backoff = common_utils.Backoff(initial_backoff=10,
-                                       max_backoff_factor=5)
+        backoff = common_utils.Backoff(initial_backoff=10, max_backoff_factor=5)
         for round_idx in range(_EMERGENCY_BOOKKEEPING_ROUNDS):
             try:
                 return await self._attempt_emergency_recovery(error)
@@ -2054,8 +2049,8 @@ class JobController:
                 'bookkeeping failed repeatedly.)')
 
     async def _attempt_emergency_recovery(
-            self,
-            error: BaseException) -> Tuple[_EmergencyDecision, Optional[str]]:
+        self, error: Union[Exception, SystemExit]
+    ) -> Tuple[_EmergencyDecision, Optional[str]]:
         """One round of the emergency-recovery bookkeeping.
 
         Sequence: verify we still own the job, spend one unit of the
@@ -2091,12 +2086,11 @@ class JobController:
         # absolute value so re-running this round cannot double-spend, and
         # the write is fenced on ownership so a just-usurped controller
         # cannot burn the new owner's budget.
-        count, last_at = (
-            await managed_job_state.get_emergency_recovery_budget_async(
-                self._job_id))
+        count, last_at = (await
+                          managed_job_state.get_emergency_recovery_budget_async(
+                              self._job_id))
         now = time.time()
-        if (last_at is not None and
-                now - last_at >
+        if (last_at is not None and now - last_at >
                 jobs_constants.EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS):
             # The previous emergency was long ago; start a new episode.
             count = 0
@@ -2109,10 +2103,10 @@ class JobController:
             return (_EmergencyDecision.FAIL,
                     f'(Emergency recovery was attempted {count} times; '
                     'giving up.)')
-        recorded = (
-            await managed_job_state.record_emergency_recovery_attempt_async(
-                self._job_id, attempt, now, pid_record.pid,
-                pid_record.started_at))
+        recorded = (await
+                    managed_job_state.record_emergency_recovery_attempt_async(
+                        self._job_id, attempt, now, pid_record.pid,
+                        pid_record.started_at))
         if not recorded:
             logger.error(f'Lost ownership of job {self._job_id} while '
                          'recording the emergency recovery attempt. '
@@ -2126,9 +2120,8 @@ class JobController:
         # the only one that can be mid-flight in a chain DAG; for job
         # groups the resume classification handles the other tasks from
         # their raw statuses).
-        task_id, _ = (
-            await managed_job_state.get_latest_task_id_status_async(
-                self._job_id))
+        task_id, _ = (await managed_job_state.get_latest_task_id_status_async(
+            self._job_id))
         if task_id is None:
             task_id = 0
         reason = (f'Unexpected controller error (emergency recovery attempt '
@@ -2147,9 +2140,8 @@ class JobController:
             # the task now. Retry the job loop immediately (no backoff): the
             # resume logic completes the cancellation (re-raising
             # CancelledError) or finishes the terminal task cleanly.
-            logger.info(
-                f'Job {self._job_id} task {task_id} is cancelling or '
-                'terminal; retrying the job loop to let it complete.')
+            logger.info(f'Job {self._job_id} task {task_id} is cancelling or '
+                        'terminal; retrying the job loop to let it complete.')
             return (_EmergencyDecision.RETRY, None)
 
         # 4. If the error escaped mid-launch, the job may still hold a
@@ -2157,13 +2149,13 @@ class JobController:
         # acquire a slot cleanly. Any schedule state other than ALIVE
         # afterwards means something else mutated the row: stand down.
         schedule_state = await (
-            managed_job_state.normalize_schedule_state_for_emergency_retry_async(
+            managed_job_state.
+            normalize_schedule_state_for_emergency_retry_async(
                 self._job_id, pid_record.pid, pid_record.started_at))
         if schedule_state != managed_job_state.ManagedJobScheduleState.ALIVE:
-            logger.error(
-                f'Job {self._job_id} has unexpected schedule state '
-                f'{schedule_state} during emergency recovery; another '
-                'process must have mutated it. Standing down.')
+            logger.error(f'Job {self._job_id} has unexpected schedule state '
+                         f'{schedule_state} during emergency recovery; another '
+                         'process must have mutated it. Standing down.')
             self._usurped = True
             return (_EmergencyDecision.USURPED, None)
 
@@ -2600,6 +2592,9 @@ class ControllerManager:
             # down, we skip gracefully.
             if active_task_ids:
                 try:
+                    # A cancel can only land at an await point, all of which
+                    # are after the controller is constructed.
+                    assert controller is not None
                     await self._download_logs_for_cancelled_job(
                         controller, job_id, active_task_ids, dag, pool)
                 except Exception as e:  # pylint: disable=broad-except
@@ -2649,7 +2644,8 @@ class ControllerManager:
                     await managed_job_state.set_cancelled_async(
                         job_id=job_id,
                         callback_func=managed_job_utils.event_callback_func(
-                            job_id=job_id, task_id=task_id,
+                            job_id=job_id,
+                            task_id=task_id,
                             task=dag.tasks[task_id]))
 
                 # We should check job status after 'set_cancelled', otherwise

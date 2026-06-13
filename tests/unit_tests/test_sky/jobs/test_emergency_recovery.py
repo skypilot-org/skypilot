@@ -93,8 +93,7 @@ def _get_job_info_row(engine, job_id: int = 1):
     with engine.connect() as conn:
         row = conn.execute(
             sqlalchemy.select(state.job_info_table).where(
-                state.job_info_table.c.spot_job_id ==
-                job_id)).mappings().one()
+                state.job_info_table.c.spot_job_id == job_id)).mappings().one()
     return dict(row)
 
 
@@ -220,12 +219,13 @@ class TestEmergencyRecoveryState:
         callback, _ = _make_callback()
 
         with pytest.raises(exceptions.ManagedJobStatusError):
-            await state.set_emergency_recovered_async(
-                1, 0, restored_time=time.time(), callback_func=callback)
+            await state.set_emergency_recovered_async(1,
+                                                      0,
+                                                      restored_time=time.time(),
+                                                      callback_func=callback)
 
     @pytest.mark.asyncio
-    async def test_budget_roundtrip_and_fence(self,
-                                              _mock_managed_jobs_db_conn):
+    async def test_budget_roundtrip_and_fence(self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine)
 
@@ -334,8 +334,7 @@ class _RetryLoopHarness:
         monkeypatch.setattr(
             f'{mjs}.normalize_schedule_state_for_emergency_retry_async',
             self.normalize)
-        monkeypatch.setattr(f'{mjs}.set_cancelling_async',
-                            self.set_cancelling)
+        monkeypatch.setattr(f'{mjs}.set_cancelling_async', self.set_cancelling)
         monkeypatch.setattr(f'{mjs}.set_cancelled_async', self.set_cancelled)
         monkeypatch.setattr(
             'sky.jobs.controller.managed_job_utils.event_callback_func',
@@ -348,8 +347,7 @@ class TestEmergencyRetryLoop:
 
     @pytest.mark.asyncio
     async def test_unexpected_error_retries_and_succeeds(self, monkeypatch):
-        h = _RetryLoopHarness(monkeypatch,
-                              [RuntimeError('boom'), True])
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
 
         await h.jc.run()
 
@@ -374,8 +372,8 @@ class TestEmergencyRetryLoop:
         (exceptions.ClusterSetUpError('oom'),
          state.ManagedJobStatus.FAILED_SETUP),
     ])
-    async def test_known_terminal_exceptions_unchanged(
-            self, monkeypatch, error, expected_status):
+    async def test_known_terminal_exceptions_unchanged(self, monkeypatch, error,
+                                                       expected_status):
         h = _RetryLoopHarness(monkeypatch, [error])
 
         await h.jc.run()
@@ -447,8 +445,7 @@ class TestEmergencyRetryLoop:
         h.set_cancelling.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_usurped_at_schedule_state_normalization(
-            self, monkeypatch):
+    async def test_usurped_at_schedule_state_normalization(self, monkeypatch):
         h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
         h.normalize.return_value = state.ManagedJobScheduleState.WAITING
 
@@ -458,15 +455,13 @@ class TestEmergencyRetryLoop:
         h.set_cancelling.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_cancelling_task_retries_without_backoff(
-            self, monkeypatch):
+    async def test_cancelling_task_retries_without_backoff(self, monkeypatch):
         # set_emergency_recovering refuses (task is CANCELLING); the body is
         # retried immediately and re-raises the cancellation via the resume
         # path.
-        h = _RetryLoopHarness(
-            monkeypatch,
-            [RuntimeError('boom'),
-             asyncio.CancelledError()])
+        h = _RetryLoopHarness(monkeypatch,
+                              [RuntimeError('boom'),
+                               asyncio.CancelledError()])
         h.set_emergency.return_value = False
 
         with pytest.raises(asyncio.CancelledError):

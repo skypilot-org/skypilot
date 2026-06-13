@@ -2949,32 +2949,32 @@ async def set_emergency_recovering_async(
                     # re-running this bookkeeping after a transient failure
                     # is a no-op rather than an error.
                     spot_table.c.status.in_([
-                        s.value
-                        for s in ManagedJobStatus.processing_statuses()
+                        s.value for s in ManagedJobStatus.processing_statuses()
                     ]),
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status:
-                        ManagedJobStatus.EMERGENCY_RECOVERING.value,
-                    # Save the prior status, but never overwrite it when the
-                    # task is already EMERGENCY_RECOVERING: the emergency
-                    # bookkeeping is retried as a whole on transient DB
-                    # errors, and a re-run must not destroy the saved
-                    # status (which would downgrade a later re-attach to a
-                    # forced cluster teardown).
-                    spot_table.c.status_before_emergency: sqlalchemy.case(
-                        (spot_table.c.status ==
-                         ManagedJobStatus.EMERGENCY_RECOVERING.value,
-                         spot_table.c.status_before_emergency),
-                        else_=spot_table.c.status),
-                    spot_table.c.job_duration: sqlalchemy.case(
-                        (should_accumulate_duration, spot_table.c.job_duration +
-                         current_time - spot_table.c.last_recovered_at),
-                        else_=spot_table.c.job_duration),
-                    spot_table.c.last_recovered_at: sqlalchemy.case(
-                        (spot_table.c.last_recovered_at < 0, current_time),
-                        else_=spot_table.c.last_recovered_at),
-                }))
+                )).
+            values({
+                spot_table.c.status:
+                    ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                # Save the prior status, but never overwrite it when the
+                # task is already EMERGENCY_RECOVERING: the emergency
+                # bookkeeping is retried as a whole on transient DB
+                # errors, and a re-run must not destroy the saved
+                # status (which would downgrade a later re-attach to a
+                # forced cluster teardown).
+                spot_table.c.status_before_emergency: sqlalchemy.case(
+                    (spot_table.c.status
+                     == ManagedJobStatus.EMERGENCY_RECOVERING.value,
+                     spot_table.c.status_before_emergency),
+                    else_=spot_table.c.status),
+                spot_table.c.job_duration: sqlalchemy.case(
+                    (should_accumulate_duration, spot_table.c.job_duration +
+                     current_time - spot_table.c.last_recovered_at),
+                    else_=spot_table.c.job_duration),
+                spot_table.c.last_recovered_at: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at < 0, current_time),
+                    else_=spot_table.c.last_recovered_at),
+            }))
         await session.commit()
         return result.rowcount
 
@@ -3012,15 +3012,16 @@ async def set_emergency_recovered_async(job_id: int, task_id: int,
                     spot_table.c.status ==
                     ManagedJobStatus.EMERGENCY_RECOVERING.value,
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                    spot_table.c.status_before_emergency: None,
-                    # Stamp last_recovered_at so job_duration accounting
-                    # resumes from now; the transition into
-                    # EMERGENCY_RECOVERING already accumulated the duration
-                    # up to the emergency.
-                    spot_table.c.last_recovered_at: restored_time,
-                }))
+                )).
+            values({
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.status_before_emergency: None,
+                # Stamp last_recovered_at so job_duration accounting
+                # resumes from now; the transition into
+                # EMERGENCY_RECOVERING already accumulated the duration
+                # up to the emergency.
+                spot_table.c.last_recovered_at: restored_time,
+            }))
         return result.rowcount
 
     await _retry_task_status_update(

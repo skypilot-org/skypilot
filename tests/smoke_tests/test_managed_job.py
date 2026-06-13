@@ -3333,7 +3333,7 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
         """
         import sqlalchemy  # pylint: disable=import-outside-toplevel
 
-        from sky.jobs import state as managed_job_state  # pylint: disable=import-outside-toplevel
+        from sky.jobs import state as managed_job_state
         engine = managed_job_state._db_manager.get_engine()  # pylint: disable=protected-access
         with engine.connect() as conn:
             result = conn.execute(sqlalchemy.text(sql))
@@ -3424,9 +3424,9 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
             if status == sky.ManagedJobStatus.EMERGENCY_RECOVERING:
                 observed = True
                 break
-            assert status not in (sky.ManagedJobStatus.FAILED_CONTROLLER,
-                                  None), (
-                f'Job failed instead of emergency-recovering: {status}')
+            assert status not in (
+                sky.ManagedJobStatus.FAILED_CONTROLLER,
+                None), (f'Job failed instead of emergency-recovering: {status}')
             time.sleep(5)
         assert observed, ('Job never entered EMERGENCY_RECOVERING after the '
                           'schedule-state mutation.')
