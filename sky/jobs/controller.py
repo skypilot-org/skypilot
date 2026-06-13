@@ -88,8 +88,8 @@ async def create_background_task(coro: typing.Coroutine) -> None:
 
 
 # Make sure to limit the size as we don't want to cache too many DAGs in memory.
-@annotations.lru_cache(scope='global', maxsize=50)
-def _get_dag(job_id: int) -> 'sky.Dag':
+def _load_dag_from_db(job_id: int) -> 'sky.Dag':
+    """Parse a fresh Dag from the job's stored YAML, bypassing the cache."""
     dag_content = file_content_utils.get_job_dag_content(job_id)
     if dag_content is None:
         raise RuntimeError('Managed job DAG YAML content is unavailable for '
@@ -102,6 +102,11 @@ def _get_dag(job_id: int) -> 'sky.Dag':
     dag = dag_utils.load_dag_from_yaml_str(dag_content)
     assert dag.name is not None, dag
     return dag
+
+
+@annotations.lru_cache(scope='global', maxsize=50)
+def _get_dag(job_id: int) -> 'sky.Dag':
+    return _load_dag_from_db(job_id)
 
 
 def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
@@ -282,16 +287,20 @@ class JobController:
 
         self._load_dag()
 
-    def _load_dag(self) -> None:
+    def _load_dag(self, fresh: bool = False) -> None:
         """(Re)load the job's DAG and set up per-task environment variables.
 
-        Called at init and again before each emergency-recovery retry: parts
-        of the job loop mutate the in-memory task objects (e.g.
-        StrategyExecutor.make strips job_recovery from the task's
-        resources), so a retry must start from a freshly loaded DAG rather
-        than the state the failed attempt left behind.
+        Called at init and again (with fresh=True) before each
+        emergency-recovery retry: parts of the job loop mutate the in-memory
+        task objects (e.g. StrategyExecutor.make strips job_recovery from
+        the task's resources), so a retry must start from a freshly parsed
+        DAG — not the state the failed attempt left behind, and not the
+        same mutated object that _get_dag's cache would return.
         """
-        self._dag = _get_dag(self._job_id)
+        if fresh:
+            self._dag = _load_dag_from_db(self._job_id)
+        else:
+            self._dag = _get_dag(self._job_id)
         self._dag_name = self._dag.name
         logger.info(f'Loaded DAG: {self._dag}')
 
@@ -2153,7 +2162,7 @@ class JobController:
             # CancelledError) or finishes the terminal task cleanly.
             logger.info(f'Job {self._job_id} task {task_id} is cancelling or '
                         'terminal; retrying the job loop to let it complete.')
-            await asyncio.to_thread(self._load_dag)
+            await asyncio.to_thread(self._load_dag, fresh=True)
             return (_EmergencyDecision.RETRY, None)
 
         # 4. If the error escaped mid-launch, the job may still hold a
@@ -2173,7 +2182,7 @@ class JobController:
 
         # The retry must start from a freshly loaded DAG: the failed attempt
         # may have left the in-memory task objects mutated (see _load_dag).
-        await asyncio.to_thread(self._load_dag)
+        await asyncio.to_thread(self._load_dag, fresh=True)
 
         self._emergency_backoff_seconds = min(
             jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS *
