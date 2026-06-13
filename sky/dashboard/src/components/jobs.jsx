@@ -918,20 +918,16 @@ export function ManagedJobsTable({
     };
   }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
-  // Reset to first page when activeTab changes
+  // Reset to first page when activeTab, filters, pageSize, or sort changes.
+  // Skip on initial mount to preserve the page from the URL.
+  const skipPageResetRef = useRef(true);
   useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setCurrentPage(1);
-  }, [activeTab]);
-
-  // Reset to first page when filters or page size changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filters, pageSize]);
-
-  // Reset to first page when sort config changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [sortConfig]);
+  }, [activeTab, filters, pageSize, sortConfig]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {

@@ -1,28 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-
-function getPageNumbers(currentPage, totalPages) {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
-  const pages = new Set([1, totalPages]);
-  for (
-    let i = Math.max(2, currentPage - 1);
-    i <= Math.min(totalPages - 1, currentPage + 1);
-    i++
-  ) {
-    pages.add(i);
-  }
-  const sorted = Array.from(pages).sort((a, b) => a - b);
-  const result = [];
-  for (let i = 0; i < sorted.length; i++) {
-    if (i > 0 && sorted[i] - sorted[i - 1] > 1) {
-      result.push('...');
-    }
-    result.push(sorted[i]);
-  }
-  return result;
-}
 
 export function PaginationControls({
   currentPage,
@@ -42,6 +19,7 @@ export function PaginationControls({
 }) {
   const [pageInputValue, setPageInputValue] = useState('');
   const [showPageInput, setShowPageInput] = useState(false);
+  const formRef = useRef(null);
 
   const handlePageInputSubmit = (e) => {
     e.preventDefault();
@@ -53,7 +31,10 @@ export function PaginationControls({
     setPageInputValue('');
   };
 
-  const pageNumbers = getPageNumbers(currentPage, totalPages);
+  const rangeText =
+    totalCount > 0
+      ? `${startIndex + 1} – ${Math.min(endIndex, totalCount)} of ${totalCount}`
+      : '0 – 0 of 0';
 
   return (
     <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
@@ -89,35 +70,23 @@ export function PaginationControls({
             </svg>
           </div>
         </div>
-        <div
-          className="cursor-pointer select-none"
-          onClick={() => {
-            if (totalPages > 1) {
-              setShowPageInput(true);
-              setPageInputValue(String(currentPage));
-            }
-          }}
-          title={totalPages > 1 ? 'Click to jump to a page' : undefined}
-        >
-          {totalCount > 0
-            ? `${startIndex + 1} – ${Math.min(endIndex, totalCount)} of ${totalCount}`
-            : '0 – 0 of 0'}
-        </div>
-        {showPageInput && (
+        {showPageInput ? (
           <form
+            ref={formRef}
             onSubmit={handlePageInputSubmit}
             className="flex items-center space-x-1"
           >
-            <span className="text-gray-500">Go to</span>
             <input
               type="number"
               min={1}
               max={totalPages}
               value={pageInputValue}
               onChange={(e) => setPageInputValue(e.target.value)}
-              onBlur={() => {
-                setShowPageInput(false);
-                setPageInputValue('');
+              onBlur={(e) => {
+                if (!formRef.current?.contains(e.relatedTarget)) {
+                  setShowPageInput(false);
+                  setPageInputValue('');
+                }
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
@@ -127,10 +96,25 @@ export function PaginationControls({
               }}
               autoFocus
               className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
+              placeholder={`1-${totalPages}`}
             />
+            <span className="text-gray-400">of {totalPages}</span>
           </form>
+        ) : (
+          <div
+            className="cursor-pointer select-none hover:text-blue-600"
+            onClick={() => {
+              if (totalPages > 1) {
+                setShowPageInput(true);
+                setPageInputValue(String(currentPage));
+              }
+            }}
+            title={totalPages > 1 ? 'Click to jump to a page' : undefined}
+          >
+            {rangeText}
+          </div>
         )}
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-2">
           <Button
             variant="ghost"
             size="icon"
@@ -152,31 +136,6 @@ export function PaginationControls({
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </Button>
-          {totalPages > 1 &&
-            pageNumbers.map((p, i) =>
-              p === '...' ? (
-                <span
-                  key={`ellipsis-${i}`}
-                  className="px-1 text-gray-400 select-none"
-                >
-                  ...
-                </span>
-              ) : (
-                <Button
-                  key={p}
-                  variant={p === currentPage ? 'default' : 'ghost'}
-                  size="icon"
-                  onClick={() => onPageChange(p)}
-                  className={`h-8 w-8 p-0 text-sm ${
-                    p === currentPage
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  {p}
-                </Button>
-              )
-            )}
           <Button
             variant="ghost"
             size="icon"
