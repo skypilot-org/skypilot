@@ -2111,8 +2111,7 @@ export function ManagedJobsTable({
                   or whose Mine view was empty — they had no easy way
                   back. The toggle is harmless when the table is empty
                   and indispensable as soon as anything else changes. */}
-              {!isInitialLoad &&
-                (() => {
+              {(() => {
                   const selectTab = (tab) => {
                     React.startTransition(() => {
                       setActiveTab(tab);
@@ -2158,7 +2157,6 @@ export function ManagedJobsTable({
                 })()}
               {(() => {
                 if (!currentUser) return null;
-                if (isInitialLoad) return null;
                 const explicitUserFilter = (filters || []).find(
                   (f) => (f.property || '').toLowerCase() === 'user' && f.value
                 );
