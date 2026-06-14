@@ -250,6 +250,15 @@ def queue_v2(
             if remote_api_version is None or remote_api_version < min_version:
                 fields = [f for f in fields if f not in new_fields]
 
+    remote_api_version = versions.get_remote_api_version()
+    if ((submitted_after is not None or submitted_before is not None) and
+            remote_api_version is not None and remote_api_version <
+            server_constants.MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION):
+        logger.warning(
+            'Filtering managed jobs by submission time is not supported in '
+            'your API server; the server will ignore it and show all jobs. '
+            'Please upgrade the API server to enable it.')
+
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
