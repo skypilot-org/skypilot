@@ -397,6 +397,12 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
+        {/* Extension point for a small summary badge next to the page
+            title. Renders nothing when no plugin fills it. */}
+        <PluginSlot
+          name="jobs.header.badge"
+          wrapperClassName="flex items-center"
+        />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
