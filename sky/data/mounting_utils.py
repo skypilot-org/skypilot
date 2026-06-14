@@ -791,7 +791,8 @@ def get_rclone_version_check_cmd() -> str:
 
 
 def get_mount_write_verification_cmd(mount_path: str,
-                                     expected_min_bytes: int = 1) -> str:
+                                     expected_min_bytes: int = 1,
+                                     max_depth: Optional[int] = 1) -> str:
     """Returns a shell command that verifies writes to ``mount_path`` produced
     non-empty files.
 
@@ -818,22 +819,36 @@ def get_mount_write_verification_cmd(mount_path: str,
         expected_min_bytes: Minimum acceptable file size in bytes. Defaults to
             ``1`` to flag zero-byte files, the most common silent-failure mode
             reported in https://github.com/skypilot-org/skypilot/issues/1901.
+            Note: ``find -size -Nc`` matches files strictly less than ``N``
+            bytes, so the snippet passes ``expected_min_bytes`` (not
+            ``expected_min_bytes - 1``) to the find command.
+        max_depth: Maximum directory depth to descend into. ``1`` (the default)
+            only checks files at the mount root. ``None`` recurses without
+            limit, which catches partitioned writes
+            (``/mount/dataset/partition=*/part-*.parquet``) at the cost of
+            walking a potentially huge bucket. The runtime caps this in
+            ``_get_mount_verification_paths`` to keep the cost bounded for
+            typical workloads.
 
     Returns:
         A bash snippet suitable for `command_runner.run_with_timeout`. Always
         exits 0 on a healthy mount and exits 1 if a zero-byte file is found.
     """
     # -mindepth 1 to skip the mount root itself.
-    # -maxdepth 1 to avoid recursing; the user knows what subdirs they care
-    # about and we don't want to crawl huge buckets.
+    # -maxdepth N caps recursion; pass `find ... -maxdepth 0` to recurse
+    # without bound (find interprets 0 as "no limit").
     # ! -name '.*' skips dotfiles.
     # -type f l handles regular files and symlinks-to-files (rclone often
     # serves the bucket as symlinks).
+    if max_depth is None:
+        max_depth_arg = ''
+    else:
+        max_depth_arg = f'-maxdepth {max(0, max_depth)} '
     return (
         f'ZERO_BYTE_FILES=$(find {shlex.quote(mount_path)} '
-        f'-mindepth 1 -maxdepth 1 '
+        f'-mindepth 1 {max_depth_arg}'
         f'! -name ".*" \\( -type f -o -type l \\) '
-        f'-size -{max(0, expected_min_bytes - 1)}c 2>/dev/null); '
+        f'-size -{max(0, expected_min_bytes)}c 2>/dev/null); '
         f'if [ -n "$ZERO_BYTE_FILES" ]; then '
         f'echo "SkyPilot mount write verification failed: '
         f'the following file(s) in {mount_path} are unexpectedly small '

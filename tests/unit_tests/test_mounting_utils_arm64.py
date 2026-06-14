@@ -259,29 +259,34 @@ class TestGetMountWriteVerificationCmd(unittest.TestCase):
 
     def test_default_threshold_is_one_byte(self):
         # The default is "less than 1 byte" = "zero bytes". The find size arg
-        # uses -0c, which excludes files of size 0.
+        # uses -1c, which matches files strictly less than 1 byte (i.e. only
+        # 0-byte files). -size -0c would match nothing, since file size cannot
+        # be strictly less than zero.
         cmd = mounting_utils.get_mount_write_verification_cmd('/mnt')
-        self.assertIn('-size -0c', cmd)
+        self.assertIn('-size -1c', cmd)
+        self.assertNotIn('-size -0c', cmd)
         # Reference to the issue number should be in the error message so
         # users hitting the failure can self-diagnose.
         self.assertIn('issues/1901', cmd)
 
     def test_custom_threshold(self):
-        # expected_min_bytes=1024 -> find with -size -1023c
+        # expected_min_bytes=1024 -> find with -size -1024c (matches files
+        # strictly less than 1024 bytes).
         cmd = mounting_utils.get_mount_write_verification_cmd(
             '/mnt', expected_min_bytes=1024)
-        self.assertIn('-size -1023c', cmd)
+        self.assertIn('-size -1024c', cmd)
 
     def test_threshold_zero_is_clamps_to_zero(self):
-        # expected_min_bytes=0 means "any file is acceptable", which is the
-        # same as no verification. The snippet should still be a valid no-op:
-        # the find size becomes -size -0c which is the same as the default
-        # (it would still flag zero-byte files, which is the desired
-        # behavior). We just verify the snippet is well-formed.
+        # expected_min_bytes=0 means "files of any size are acceptable", which
+        # is the same as no verification. The snippet should still be
+        # well-formed: max(0, 0) keeps the find argument well-formed, and the
+        # surrounding if-guarded exit 1 is still emitted for consistency.
         cmd = mounting_utils.get_mount_write_verification_cmd(
             '/mnt', expected_min_bytes=0)
         self.assertIn('find', cmd)
         self.assertIn('exit 1', cmd)
+        # max(0, 0) -> 0, so the find size arg is -size -0c.
+        self.assertIn('-size -0c', cmd)
 
     def test_exits_nonzero_on_zero_byte_file(self):
         cmd = mounting_utils.get_mount_write_verification_cmd('/mounted')
@@ -296,8 +301,30 @@ class TestGetMountWriteVerificationCmd(unittest.TestCase):
         self.assertIn('! -name ".*"', cmd)
         self.assertIn('-type f', cmd)
         self.assertIn('-type l', cmd)
-        # And we don't recurse into the bucket; the user knows their layout.
+        # And we don't recurse into the bucket by default; the user knows
+        # their layout.
         self.assertIn('-maxdepth 1', cmd)
+
+    def test_max_depth_explicit(self):
+        # Passing max_depth=3 should propagate to find as -maxdepth 3.
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mnt',
+                                                              max_depth=3)
+        self.assertIn('-maxdepth 3', cmd)
+
+    def test_max_depth_none_recurses_without_limit(self):
+        # Passing max_depth=None should omit -maxdepth entirely so find walks
+        # the whole subtree (catches partitioned writes).
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mnt',
+                                                              max_depth=None)
+        self.assertNotIn('-maxdepth', cmd)
+
+    def test_max_depth_zero_clamped(self):
+        # find -maxdepth 0 means "the starting point only", which is the same
+        # as -maxdepth 1 given -mindepth 1. We just verify the value flows
+        # through; we don't promise any particular semantics at the boundary.
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mnt',
+                                                              max_depth=0)
+        self.assertIn('-maxdepth 0', cmd)
 
 
 if __name__ == '__main__':
