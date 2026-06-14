@@ -138,6 +138,31 @@ its performance requirements and size of the data.
     operations may fail. Most notably, random writes and append operations are
     not supported.
 
+    .. warning::
+        Writers that use append or partial-flush semantics — e.g.
+        ``pandas.to_parquet``, ``pyarrow``, and ``tfrecord`` — may produce
+        **silent 0-byte files** when writing to a ``MOUNT``-mode bucket. The
+        kernel reports success even though no data was uploaded. To avoid data
+        loss, either switch to :code:`MOUNT_CACHED` mode for write-heavy
+        workloads, or write to local disk and then move the file into the
+        mount path:
+
+        .. code-block:: python
+
+            import shutil
+            import tempfile
+
+            def write_parquet_safely(df, dest_path):
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp_path = tmp.name
+                df.to_parquet(tmp_path, index=False)
+                shutil.move(tmp_path, dest_path)
+
+        SkyPilot automatically appends a post-run check to tasks that mount
+        storage in ``MOUNT`` mode that fails the task with a clear error when
+        a zero-byte file is detected. See
+        https://github.com/skypilot-org/skypilot/issues/1901 for context.
+
 .. [2] In ``MOUNT_CACHED`` mode, writes are not immediately consistent across multiple nodes. See :ref:`MOUNT_CACHED mode in detail <mount_cached_mode_in_detail>` for more details.
 
 .. [3] Disk size smaller than the object size may cause performance degradation

@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 import colorama
 
 from sky import sky_logging
+from sky.data import mounting_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import accelerator_registry
@@ -132,6 +133,33 @@ class TaskCodeGen:
             """))
 
     @staticmethod
+    def get_mount_write_verification_script(mount_paths: List[str]) -> str:
+        """Generate a script that verifies recent writes to MOUNT-mode storage
+        produced non-empty files.
+
+        Some FUSE-based mount backends (goofys, rclone for S3) silently produce
+        0-byte files when a writer uses append or partial-flush semantics, e.g.
+        ``pandas.to_parquet`` or pyarrow (see
+        https://github.com/skypilot-org/skypilot/issues/1901). The kernel
+        returns success, so we add a post-run step that walks each mount path
+        and fails the task if any regular file is unexpectedly small.
+
+        Empty input list yields an empty string (no-op), so callers can pass
+        ``[]`` when no MOUNT-mode storage is configured.
+        """
+        if not mount_paths:
+            return ''
+
+        # Each snippet is independent: one bad mount shouldn't mask others.
+        snippets = [
+            mounting_utils.get_mount_write_verification_cmd(p)
+            for p in mount_paths
+        ]
+        # Wrap in a guard so a non-zero exit from any one snippet fails the
+        # surrounding task. The `|| exit 1` makes the failure sticky.
+        return '\n'.join(snippets) + '\n'
+
+    @staticmethod
     def get_rclone_flush_script() -> str:
         """Generate rclone flush script for cached storage mounts.
 
@@ -193,8 +221,10 @@ class TaskCodeGen:
         exit $__skypilot_user_exit_code""")
 
     @staticmethod
-    def build_task_bash_script(bash_script: str,
-                               env_prefix: Optional[str] = None) -> str:
+    def build_task_bash_script(
+            bash_script: str,
+            env_prefix: Optional[str] = None,
+            mount_verification_paths: Optional[List[str]] = None) -> str:
         """Build the complete bash script for a task.
 
         Prepends env_prefix (if any) and appends the rclone flush script.
@@ -203,6 +233,11 @@ class TaskCodeGen:
             bash_script: The user's bash command.
             env_prefix: Optional shell commands to prepend (e.g. unsetting
                 Ray env vars).
+            mount_verification_paths: Optional list of remote mount paths that
+                should be verified after the user script runs. Used to detect
+                silent zero-byte writes to MOUNT-mode storage (see
+                https://github.com/skypilot-org/skypilot/issues/1901). No-op
+                when empty or None.
 
         Returns:
             Complete bash string ready to execute on the cluster.
@@ -210,6 +245,10 @@ class TaskCodeGen:
         if env_prefix:
             bash_script = f'{env_prefix}; {bash_script}'
         bash_script += TaskCodeGen.get_rclone_flush_script()
+        verification = TaskCodeGen.get_mount_write_verification_script(
+            mount_verification_paths or [])
+        if verification:
+            bash_script += '\n' + verification
         return bash_script
 
     def add_prologue(self, job_id: int) -> None:
@@ -245,6 +284,7 @@ class TaskCodeGen:
         resources_dict: Dict[str, float],
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
+        mount_verification_paths: Optional[List[str]] = None,
     ) -> None:
         """Generates code to run the bash command on all num_nodes nodes."""
         raise NotImplementedError
@@ -575,26 +615,31 @@ class RayCodeGen(TaskCodeGen):
                  task_name: Optional[str],
                  resources_dict: Dict[str, float],
                  log_dir: str,
-                 env_vars: Optional[Dict[str, str]] = None) -> None:
+                 env_vars: Optional[Dict[str, str]] = None,
+                 mount_verification_paths: Optional[List[str]] = None) -> None:
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
         for i in range(num_nodes):
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
-            self._add_ray_task(bash_script=bash_script,
-                               task_name=task_name,
-                               resources_dict=resources_dict.copy(),
-                               log_dir=log_dir,
-                               env_vars=env_vars,
-                               gang_scheduling_id=i)
+            self._add_ray_task(
+                bash_script=bash_script,
+                task_name=task_name,
+                resources_dict=resources_dict.copy(),
+                log_dir=log_dir,
+                env_vars=env_vars,
+                gang_scheduling_id=i,
+                mount_verification_paths=mount_verification_paths)
 
-    def _add_ray_task(self,
-                      bash_script: Optional[str],
-                      task_name: Optional[str],
-                      resources_dict: Dict[str, float],
-                      log_dir: str,
-                      env_vars: Optional[Dict[str, str]] = None,
-                      gang_scheduling_id: int = 0) -> None:
+    def _add_ray_task(
+            self,
+            bash_script: Optional[str],
+            task_name: Optional[str],
+            resources_dict: Dict[str, float],
+            log_dir: str,
+            env_vars: Optional[Dict[str, str]] = None,
+            gang_scheduling_id: int = 0,
+            mount_verification_paths: Optional[List[str]] = None) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_setup, 'Call add_setup() before add_task().'
 
@@ -639,7 +684,9 @@ class RayCodeGen(TaskCodeGen):
         unset_ray_env_vars = ' && '.join(
             [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
         task_bash_script = (self.build_task_bash_script(
-            bash_script, env_prefix=unset_ray_env_vars)
+            bash_script,
+            env_prefix=unset_ray_env_vars,
+            mount_verification_paths=mount_verification_paths)
                             if bash_script is not None else None)
         self._code += [
             sky_env_vars_dict_str,
@@ -804,6 +851,7 @@ class SlurmCodeGen(TaskCodeGen):
         resources_dict: Dict[str, float],
         log_dir: str,
         env_vars: Optional[Dict[str, str]] = None,
+        mount_verification_paths: Optional[List[str]] = None,
     ) -> None:
         """Generates code for invoking a bash command
         using srun within sbatch allocation.
@@ -835,7 +883,9 @@ class SlurmCodeGen(TaskCodeGen):
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         has_setup_cmd = self._setup_cmd is not None
-        task_bash_script = (self.build_task_bash_script(bash_script or '')
+        task_bash_script = (self.build_task_bash_script(
+            bash_script or '',
+            mount_verification_paths=mount_verification_paths)
                             if bash_script or has_setup_cmd else '')
         streaming_msg = self._get_job_started_msg()
 

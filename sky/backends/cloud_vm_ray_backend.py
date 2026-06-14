@@ -6607,6 +6607,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             return task_codegen.RayCodeGen()
 
+    def _get_mount_verification_paths(
+            self, task: 'task_lib.Task') -> Optional[List[str]]:
+        """Returns the list of remote mount paths that should be verified for
+        silent zero-byte writes after a task's ``run`` block completes.
+
+        Only ``MOUNT``-mode storage is included. ``MOUNT_CACHED`` already
+        buffers writes locally, and ``COPY`` mode is just a local directory
+        that gets uploaded at task end, so neither needs post-run verification.
+        See https://github.com/skypilot-org/skypilot/issues/1901.
+        """
+        paths: List[str] = []
+        storage_mounts = getattr(task, 'storage_mounts', None) or {}
+        for mount_path, storage_obj in storage_mounts.items():
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                paths.append(str(mount_path))
+        return paths or None
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
@@ -6637,7 +6654,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             env_vars=task_env_vars,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+            log_dir=log_dir,
+            mount_verification_paths=self._get_mount_verification_paths(task))
 
         codegen.add_epilogue()
 
@@ -6683,7 +6701,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             env_vars=task_env_vars,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir)
+            log_dir=log_dir,
+            mount_verification_paths=self._get_mount_verification_paths(task))
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

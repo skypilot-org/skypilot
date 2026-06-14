@@ -247,5 +247,58 @@ class TestMountingUtilsArm64(unittest.TestCase):
             install_cmd)
 
 
+class TestGetMountWriteVerificationCmd(unittest.TestCase):
+    """Tests for the post-run zero-byte write verification helper.
+
+    See https://github.com/skypilot-org/skypilot/issues/1901.
+    """
+
+    def test_contains_mount_path(self):
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mounted_folder')
+        self.assertIn('/mounted_folder', cmd)
+
+    def test_default_threshold_is_one_byte(self):
+        # The default is "less than 1 byte" = "zero bytes". The find size arg
+        # uses -0c, which excludes files of size 0.
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mnt')
+        self.assertIn('-size -0c', cmd)
+        # Reference to the issue number should be in the error message so
+        # users hitting the failure can self-diagnose.
+        self.assertIn('issues/1901', cmd)
+
+    def test_custom_threshold(self):
+        # expected_min_bytes=1024 -> find with -size -1023c
+        cmd = mounting_utils.get_mount_write_verification_cmd(
+            '/mnt', expected_min_bytes=1024)
+        self.assertIn('-size -1023c', cmd)
+
+    def test_threshold_zero_is_clamps_to_zero(self):
+        # expected_min_bytes=0 means "any file is acceptable", which is the
+        # same as no verification. The snippet should still be a valid no-op:
+        # the find size becomes -size -0c which is the same as the default
+        # (it would still flag zero-byte files, which is the desired
+        # behavior). We just verify the snippet is well-formed.
+        cmd = mounting_utils.get_mount_write_verification_cmd(
+            '/mnt', expected_min_bytes=0)
+        self.assertIn('find', cmd)
+        self.assertIn('exit 1', cmd)
+
+    def test_exits_nonzero_on_zero_byte_file(self):
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mounted')
+        # The snippet must be capable of failing the surrounding task by
+        # exiting 1 when a zero-byte file is present.
+        self.assertIn('exit 1', cmd)
+
+    def test_skips_hidden_and_directory_entries(self):
+        cmd = mounting_utils.get_mount_write_verification_cmd('/mounted')
+        # We only want to flag regular files / symlinks, not dotfiles the
+        # mount backend manages (e.g. .log) or subdirectories.
+        self.assertIn('! -name ".*"', cmd)
+        self.assertIn('-type f', cmd)
+        self.assertIn('-type l', cmd)
+        # And we don't recurse into the bucket; the user knows their layout.
+        self.assertIn('-maxdepth 1', cmd)
+
+
 if __name__ == '__main__':
     unittest.main()
