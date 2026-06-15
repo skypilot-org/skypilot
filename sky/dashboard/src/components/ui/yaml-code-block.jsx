@@ -6,41 +6,53 @@ import { EditorView } from '@codemirror/view';
 import { yaml } from '@codemirror/lang-yaml';
 import { getNonce } from '@/utils/csp';
 
-const gutterTheme = EditorView.theme({
-  '.cm-gutters': {
+const editorTheme = EditorView.theme({
+  '&': {
+    height: '100%',
     backgroundColor: '#f9fafb',
+  },
+  '.cm-scroller': {
+    minHeight: '100%',
+    overflow: 'auto',
+    backgroundColor: '#f9fafb',
+  },
+  '.cm-content': {
+    minHeight: '100%',
+    backgroundColor: '#f9fafb',
+    padding: '8px 0',
+  },
+  '.cm-gutters': {
+    backgroundColor: '#f3f4f6',
     borderRight: '1px solid #e5e7eb',
     color: '#9ca3af',
+    minHeight: '100%',
   },
   '.cm-lineNumbers .cm-gutterElement': {
     padding: '0 12px 0 8px',
     minWidth: '2.5em',
   },
+  '&.cm-focused': {
+    outline: 'none',
+  },
 });
 
-/**
- * YAML Editor component with syntax highlighting.
- * Drop-in replacement for Textarea when editing YAML content.
- */
-export function YamlEditor({
+export function YamlCodeBlock({
   value,
   onChange,
-  className,
   height,
   maxHeight = '400px',
-  minHeight,
-  disabled = false,
+  readOnly = false,
+  className,
 }) {
+  const fixed = !!height;
   return (
     <div
-      className={`rounded-md border border-gray-300 overflow-hidden flex flex-col ${className || ''}`}
+      className={`rounded-md border border-gray-200 overflow-hidden ${fixed ? 'flex flex-col' : ''} ${className || ''}`}
       style={{
+        height: fixed ? height : undefined,
+        maxHeight: fixed ? undefined : maxHeight,
         width: '100%',
-        maxWidth: '100%',
         minWidth: 0,
-        height,
-        minHeight,
-        maxHeight: height ? undefined : maxHeight,
       }}
     >
       <CodeMirror
@@ -48,14 +60,12 @@ export function YamlEditor({
         onChange={onChange}
         extensions={[
           yaml(),
-          gutterTheme,
-          // Pass CSP nonce so CodeMirror's injected <style> tags are allowed.
+          editorTheme,
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
-        editable={!disabled}
-        height={height ? '100%' : undefined}
-        minHeight={minHeight}
-        maxHeight={height ? undefined : maxHeight}
+        editable={!readOnly}
+        height={fixed ? '100%' : undefined}
+        maxHeight={fixed ? undefined : maxHeight}
         basicSetup={{
           lineNumbers: true,
           foldGutter: true,
@@ -65,11 +75,14 @@ export function YamlEditor({
           bracketMatching: true,
           autocompletion: false,
         }}
-        style={{ fontSize: '13px', flex: 1, minHeight: 0 }}
+        style={{
+          fontSize: '13px',
+          ...(fixed ? { flex: 1, minHeight: 0 } : {}),
+        }}
         theme="light"
       />
     </div>
   );
 }
 
-export default YamlEditor;
+export default YamlCodeBlock;
