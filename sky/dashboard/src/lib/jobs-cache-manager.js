@@ -49,7 +49,6 @@ class JobsCacheManager {
       workspaceMatch,
       poolMatch,
       statuses,
-      submittedAfter,
     } = options;
 
     // Create a normalized object for consistent JSON stringification
@@ -65,7 +64,6 @@ class JobsCacheManager {
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
-      submittedAfter: submittedAfter ?? null,
     };
 
     return JSON.stringify(keyObj);
@@ -84,7 +82,6 @@ class JobsCacheManager {
       workspaceMatch,
       poolMatch,
       statuses,
-      submittedAfter,
     } = options;
 
     const keyObj = {
@@ -95,7 +92,6 @@ class JobsCacheManager {
       workspaceMatch: workspaceMatch || null,
       poolMatch: poolMatch || null,
       statuses: statuses && statuses.length > 0 ? [...statuses].sort() : null,
-      submittedAfter: submittedAfter ?? null,
     };
 
     return JSON.stringify(keyObj);

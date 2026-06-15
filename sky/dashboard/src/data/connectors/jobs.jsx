@@ -132,7 +132,6 @@ export async function getManagedJobs(options = {}) {
       statuses,
       fields,
       jobIDs,
-      submittedAfter,
     } = options;
 
     const body = {
@@ -147,8 +146,6 @@ export async function getManagedJobs(options = {}) {
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
-    if (submittedAfter !== undefined && submittedAfter !== null)
-      body.submitted_after = submittedAfter;
     // Support both jobIdMatch (from filter UI) and jobIDs (direct usage)
     const resolvedJobIDs = jobIdMatch ? [jobIdMatch] : jobIDs;
     if (resolvedJobIDs !== undefined && resolvedJobIDs.length > 0)
