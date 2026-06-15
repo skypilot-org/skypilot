@@ -201,28 +201,16 @@ def run_with_log(
     if log_cmd:
         with open(log_path, 'a', encoding='utf-8') as f:
             print(f'Running command: {cmd}', file=f)
-    # Mark the spawned process as a child subreaper so that descendants
-    # orphaned mid-run (e.g. workers whose parent was SIGKILLed while the
-    # outer shell is still alive) reparent to it instead of to PID 1.
-    # subprocess_daemon below relies on this to find such orphans on its
-    # children-tree walk. preexec_fn runs in the child after fork() and
-    # before execve(); the PR_SET_CHILD_SUBREAPER attribute is preserved
-    # across execve, so the launched binary inherits it. set_child_subreaper
-    # is a no-op on non-Linux. If the caller supplied their own
-    # preexec_fn, chain ours before it.
+    # Mark the spawned process as a child subreaper (PR_SET_CHILD_SUBREAPER,
+    # preserved across execve) so descendants orphaned mid-run reparent to it
+    # instead of to PID 1, where subprocess_daemon can find and reap them.
     caller_preexec = kwargs.pop('preexec_fn', None)
 
     def preexec_chain():
-        # Defensive: this function's source is embedded verbatim into the
-        # task codegen (sky/backends/task_codegen.py uses inspect.getsource
-        # on run_with_log) and runs on the cluster, where the locally
-        # installed sky may be older than the version that generated the
-        # task code — clusters launched by an old sky and then receiving
-        # jobs from a new sky API server land in this state until they're
-        # restarted/relaunched. Older sky's subprocess_utils may not have
-        # set_child_subreaper. If the attribute isn't there, just skip:
-        # missing the subreaper attribute only degrades cleanup quality
-        # for orphaned descendants, it doesn't break job execution.
+        # getattr guard: this function's source is inlined into task codegen
+        # (task_codegen.py uses inspect.getsource on run_with_log) and may run
+        # on a cluster whose older sky lacks set_child_subreaper. Skipping it
+        # only degrades orphan cleanup; it doesn't break execution.
         set_subreaper = getattr(subprocess_utils, 'set_child_subreaper', None)
         if set_subreaper is not None:
             set_subreaper()
@@ -230,20 +218,10 @@ def run_with_log(
             caller_preexec()
 
     # pylint: disable=subprocess-popen-preexec-fn
-    # preexec_fn is the only way to set PR_SET_CHILD_SUBREAPER on the
-    # child between fork() and execve(). run_with_log IS reached from
-    # multi-threaded contexts (e.g. ThreadPoolExecutor workers in the
-    # API server path — empirically verified), so we cannot rely on
-    # "single-threaded fork" being safe. The reason this is still
-    # safe: subprocess_utils.set_child_subreaper() resolves the libc
-    # handle at module import (in the main thread, before any
-    # threading), and only performs an async-signal-safe prctl(2)
-    # syscall between fork() and execve(). It does NOT allocate memory,
-    # take any lock, or call any non-AS-safe library function in the
-    # forked child, so it cannot deadlock the way ctypes.util.find_library
-    # would. Caller-supplied preexec_fn is chained after ours; if that
-    # function is not AS-safe and the caller is multi-threaded, that
-    # is a pre-existing issue independent of this change.
+    # preexec_fn is the only way to set the subreaper between fork() and
+    # execve(). It is AS-safe even from the multi-threaded API server:
+    # set_child_subreaper() resolves libc at import time and does only a
+    # prctl(2) syscall in the child (no alloc/lock). See its docstring.
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,

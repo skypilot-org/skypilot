@@ -518,6 +518,26 @@ def set_child_subreaper() -> None:
         pass
 
 
+# Handles to the short-lived first-fork parents spawned by
+# kill_process_daemon (see there). We poll-reap them opportunistically on
+# the next kill_process_daemon call rather than blocking or spawning a
+# thread per call.
+_pending_daemon_procs: List[subprocess.Popen] = []
+_daemon_procs_lock = threading.Lock()
+
+
+def _reap_finished_daemon_procs() -> None:
+    """Reap any already-exited daemon first-fork intermediates (non-blocking).
+
+    poll() reaps a finished child and returns its code; a still-running one
+    returns None and is kept for the next pass.
+    """
+    with _daemon_procs_lock:
+        _pending_daemon_procs[:] = [
+            p for p in _pending_daemon_procs if p.poll() is None
+        ]
+
+
 def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     """Start a daemon as a safety net to kill the process.
 
@@ -566,6 +586,16 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     # daemon script will detach itself from the parent process with
     # fork to avoid being killed by parent process. See the reason we
     # daemonize the process in `sky/skylet/subprocess_daemon.py`.
+    # subprocess_daemon.py double-forks (daemonize()), so the process we
+    # spawn here is the first-fork parent: it sys.exit()s within a few
+    # hundred ms once the detached grandchild is running. We must reap it,
+    # or it lingers as a zombie under us until CPython GCs the Popen handle.
+    # On a long-lived caller (the jobs/serve/pool controller invokes
+    # run_with_log -> kill_process_daemon constantly) those zombies pile up.
+    # _reap_finished_daemon_procs() drains previously-finished intermediates
+    # without blocking (a fresh caller that exits soon reparents its
+    # intermediate to init, which reaps it).
+    _reap_finished_daemon_procs()
     daemon_proc = subprocess.Popen(
         daemon_cmd,
         # Suppress output
@@ -575,18 +605,8 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
         stdin=subprocess.DEVNULL,
         env=env,
     )
-    # subprocess_daemon.py double-forks (daemonize()) to detach: the process
-    # we just spawned is the first-fork parent, which sys.exit()s within a few
-    # hundred ms once the grandchild daemon is detached. Reap it in the
-    # background so it does not linger as a zombie under us. This matters for
-    # long-lived callers (e.g. the jobs/serve/pool controller, which invokes
-    # run_with_log -> kill_process_daemon many times and stays alive): without
-    # an explicit wait() the dead intermediate sits as a zombie until CPython
-    # happens to GC the Popen object, and on a busy host those accumulate.
-    # subprocess_daemon's zombie-wedge sweep would otherwise misread our own
-    # un-reaped intermediates as evidence of a wedged parent and kill it.
-    # The reap runs in a daemon thread so the hot path is never blocked.
-    threading.Thread(target=daemon_proc.wait, daemon=True).start()
+    with _daemon_procs_lock:
+        _pending_daemon_procs.append(daemon_proc)
 
 
 def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
