@@ -91,6 +91,11 @@ multiprocessing.set_start_method('spawn', force=True)
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
 
+# Max length of the retry reason embedded in a request's status message during
+# a retry backoff. The reason comes from the (potentially long) exception
+# message, so we truncate it to keep the status line readable.
+_RETRY_STATUS_MSG_REASON_MAX_LEN = 200
+
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
 # avoid:
@@ -297,10 +302,22 @@ class RequestWorker:
             # ValueError and crash this monitor thread, leaving the request
             # parked in PENDING without ever being re-enqueued below.
             retry_wait_seconds = max(0, e.retry_wait_seconds)
+            # Surface *why* we are retrying (e.g. 'Failed to provision ...'),
+            # not just the wait time, so a client attaching during the backoff
+            # sees the reason. The exception message can carry ANSI color and
+            # newlines; strip color and collapse whitespace since status_msg is
+            # a single-line field, then truncate to keep it readable.
+            reason = ' '.join(common_utils.remove_color(str(e)).split())
+            if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
+                reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
+                ) + '...'
+            retry_suffix = f'retrying in {retry_wait_seconds}s'
+            status_msg = (f'{reason} ({retry_suffix})'
+                          if reason else f'Retrying in {retry_wait_seconds}s')
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.PENDING
-                request_task.status_msg = (f'Retrying in {retry_wait_seconds}s')
+                request_task.status_msg = status_msg
             time.sleep(retry_wait_seconds)
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)

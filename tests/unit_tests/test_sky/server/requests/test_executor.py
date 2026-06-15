@@ -581,12 +581,15 @@ async def test_request_worker_retry_execution_retryable_error(
     # PENDING (not RUNNING) and not yet re-enqueued before we wait.
     sleep_calls = []
     status_at_sleep = []
+    status_msg_at_sleep = []
     queue_len_at_sleep = []
 
     def mock_sleep(seconds):
         sleep_calls.append(seconds)
-        observed = requests_lib.get_request(request_id, fields=['status'])
+        observed = requests_lib.get_request(request_id,
+                                            fields=['status', 'status_msg'])
         status_at_sleep.append(observed.status if observed else None)
+        status_msg_at_sleep.append(observed.status_msg if observed else None)
         queue_len_at_sleep.append(len(queue_items))
 
     monkeypatch.setattr('time.sleep', mock_sleep)
@@ -649,6 +652,16 @@ async def test_request_worker_retry_execution_retryable_error(
         0
     ], ('Expected request to be re-enqueued only after the wait, but it was '
         f'already on the queue at sleep time: {queue_len_at_sleep}')
+
+    # The status message during the backoff should surface both the retry
+    # reason (from the exception message) and the wait time.
+    assert len(status_msg_at_sleep) == 1
+    msg = status_msg_at_sleep[0]
+    assert msg is not None
+    assert 'Failed to provision all possible launchable resources' in msg, (
+        f'Expected retry reason in status_msg, got: {msg!r}')
+    assert 'retrying in 30s' in msg, (
+        f'Expected wait time in status_msg, got: {msg!r}')
 
     # Verify the request status was reset to PENDING
     updated_request = requests_lib.get_request(request_id, fields=['status'])
