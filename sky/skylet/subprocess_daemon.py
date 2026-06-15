@@ -46,6 +46,36 @@ _WEDGE_SIGTERM_GRACE_SECONDS = 5.0
 _LOG_PATH: Optional[str] = None
 
 
+def _same_pgid(child_pid: int, ref_pgid: Optional[int]) -> bool:
+    """Return True if `child_pid` shares process group `ref_pgid`.
+
+    Used to filter out intentionally-detached descendants from cleanup
+    sweeps. A process that calls setsid()/setpgid(0, 0) — the canonical
+    daemonize() pattern — moves itself into its own process group, even
+    if its PID is still inside the watched subreaper's process tree.
+    Such a process is meant to outlive the invocation that spawned it
+    (e.g. `ray start --head` double-forks its GCS server into a detached
+    session; `uvicorn` workers detach similarly), so we must NOT kill it
+    when the watched command exits or when the kernel reparents it to
+    our subreaper.
+
+    The PR_SET_CHILD_SUBREAPER attribute set by run_with_log's preexec_fn
+    pulls these detached descendants back into our tree (they would
+    otherwise reparent to PID 1). Without this pgid filter the cleanup
+    paths would kill them indiscriminately — see commit message for
+    the regression mode this prevents.
+
+    Returns False (i.e. treat as detached, skip) on any lookup error so
+    that ambiguity errs on the side of letting the descendant live.
+    """
+    if ref_pgid is None:
+        return True
+    try:
+        return os.getpgid(child_pid) == ref_pgid
+    except (OSError, ProcessLookupError):
+        return False
+
+
 def _log(message: str) -> None:
     """Append a single log line to the daemon's log file (if set).
 
@@ -173,7 +203,8 @@ def _term_then_kill(target: psutil.Process,
 def _zombie_wedge_sweep(descendants: List[psutil.Process],
                         zombie_first_seen: Dict[int,
                                                 float], grace_seconds: float,
-                        proc_pid: int, parent_pid: int) -> None:
+                        proc_pid: int, parent_pid: int,
+                        proc_pgid: Optional[int]) -> None:
     """Age each zombie descendant; force-kill the wedged parent of any
     that have outlived the grace period.
 
@@ -218,6 +249,16 @@ def _zombie_wedge_sweep(descendants: List[psutil.Process],
         if wedged_ppid in (0, 1, proc_pid, parent_pid):
             # Either kernel/init owns it, or it's a protected ancestor.
             continue
+        # A wedged ancestor in a different process group is an
+        # intentionally-detached background daemon (e.g. uvicorn worker
+        # supervisor, ray's GCS, sky api start daemon). It's meant to
+        # outlive the invocation that spawned it, so don't kill it just
+        # because one of its children is zombie. Detached daemons reap
+        # their own children; if they're not, that's their own problem
+        # to surface, not ours to interfere with.
+        if not _same_pgid(wedged_ppid, proc_pgid):
+            zombie_first_seen.pop(descendant.pid, None)
+            continue
         try:
             wedged = psutil.Process(wedged_ppid)
             wedged_name = wedged.name()
@@ -242,8 +283,24 @@ def _zombie_wedge_sweep(descendants: List[psutil.Process],
 
 def kill_process_tree(process: psutil.Process,
                       children: List[psutil.Process]) -> bool:
-    """Kill the process tree of the target process."""
+    """Kill the process tree of the target process.
+
+    Descendants in a different process group than `process` (i.e. that
+    have called setsid()/setpgid(0, 0) to detach) are excluded — these
+    are typically daemons spawned via double-fork that are *meant* to
+    outlive their invocation (ray's GCS server, uvicorn workers, sky
+    api start background services). With the subreaper attribute set
+    on the watched process by run_with_log's preexec_fn, such detached
+    descendants now reparent into our tree instead of to PID 1; without
+    this pgid filter we would unconditionally kill them and break the
+    very detachment pattern they rely on.
+    """
+    proc_pgid: Optional[int] = None
     if process is not None:
+        try:
+            proc_pgid = os.getpgid(process.pid)
+        except (OSError, ProcessLookupError):
+            proc_pgid = None
         # Kill the target process first to avoid having more children, or fail
         # the process due to the children being defunct.
         children = [process] + children
@@ -251,7 +308,14 @@ def kill_process_tree(process: psutil.Process,
     if not children:
         sys.exit()
 
-    for child in children:
+    # Filter out intentionally-detached descendants. `process` itself
+    # shares pgid with itself, so it's always included.
+    targets = [c for c in children if _same_pgid(c.pid, proc_pgid)]
+
+    if not targets:
+        sys.exit()
+
+    for child in targets:
         try:
             child.terminate()
         except psutil.NoSuchProcess:
@@ -261,7 +325,7 @@ def kill_process_tree(process: psutil.Process,
     time.sleep(30)
 
     # SIGKILL if they're still running.
-    for child in children:
+    for child in targets:
         try:
             child.kill()
         except psutil.NoSuchProcess:
@@ -357,6 +421,14 @@ def main():
         zombie_first_seen: Dict[int, float] = {}
         proc_pid = process.pid
         parent_pid = parent_process.pid
+        # Watched process's pgid — used to gate the PPID-transition reap
+        # below so we don't kill intentionally-detached descendants
+        # (setsid'd background daemons like ray's GCS server) that the
+        # subreaper attribute has pulled into our tree. See _same_pgid().
+        try:
+            proc_pgid: Optional[int] = os.getpgid(proc_pid)
+        except (OSError, ProcessLookupError):
+            proc_pgid = None
         reap_wedged_parents = (os.environ.get(REAP_WEDGED_PARENTS_ENV_VAR, '1')
                                != '0')
         try:
@@ -380,6 +452,13 @@ def main():
             # an orphan of a dead intermediate parent. Terminate it
             # immediately — escalation to SIGKILL happens in the final
             # sweep below if it doesn't honor SIGTERM.
+            #
+            # Exception: descendants in a different process group are
+            # intentionally detached (setsid'd background daemons like
+            # ray's GCS server, uvicorn workers, sky api start daemons).
+            # The subreaper attribute pulls them into our tree, but they
+            # are *meant* to outlive the invocation that spawned them, so
+            # we must not kill them. _same_pgid() filters them out.
             for child in tmp_children:
                 try:
                     new_ppid = child.ppid()
@@ -389,6 +468,8 @@ def main():
                 ppid_history[child.pid] = new_ppid
                 if (old_ppid is not None and old_ppid != new_ppid and
                         new_ppid == proc_pid):
+                    if not _same_pgid(child.pid, proc_pgid):
+                        continue
                     try:
                         child.terminate()
                     except psutil.NoSuchProcess:
@@ -417,7 +498,8 @@ def main():
             # above then cleans those up on the next tick.
             if reap_wedged_parents:
                 _zombie_wedge_sweep(tmp_children, zombie_first_seen,
-                                    zombie_grace_seconds, proc_pid, parent_pid)
+                                    zombie_grace_seconds, proc_pid, parent_pid,
+                                    proc_pgid)
                 zombie_first_seen = {
                     pid: ts
                     for pid, ts in zombie_first_seen.items()
