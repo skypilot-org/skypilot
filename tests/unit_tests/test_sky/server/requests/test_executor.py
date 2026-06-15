@@ -756,7 +756,7 @@ def pause_harness(isolated_database, monkeypatch):
 class _RecordingCondition(continue_condition_lib.ContinueCondition):
     """A ContinueCondition whose wait() returns a fixed verdict.
 
-    Records the OSS-provided wait() arguments so tests can assert the executor
+    Records the wait() arguments so tests can assert the executor
     drives the condition's interface correctly.
     """
 
@@ -821,7 +821,7 @@ def test_pause_base_condition_dropped_if_cancelled_during_wait(
         pause_harness, monkeypatch):
     """The base condition drops the request if it is cancelled while waiting.
 
-    Also exercises the OSS-provided is_cancelled check, which the base wait()
+    Also exercises the is_cancelled check, which the base wait()
     consults after the fallback sleep.
     """
 

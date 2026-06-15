@@ -78,7 +78,7 @@ def test_bulk_provision_tears_down_on_ordinary_failure(patched_bulk_provision,
     """Negative control: an ordinary failure still tears down.
 
     Proves the test harness actually reaches the teardown branch, so the
-    pause test above is meaningful rather than vacuous.
+    pause test above is meaningful rather than superfluous.
     """
     monkeypatch.setattr(
         provisioner, '_bulk_provision',
