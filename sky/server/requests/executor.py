@@ -91,6 +91,10 @@ multiprocessing.set_start_method('spawn', force=True)
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
 
+# Max length of the retry reason in a request's backoff status message; the
+# reason comes from the exception message, so truncate to keep it readable.
+_RETRY_STATUS_MSG_REASON_MAX_LEN = 200
+
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
 # avoid:
@@ -282,13 +286,28 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
-            time.sleep(e.retry_wait_seconds)
-            # Reset the request status to PENDING so it can be picked up again.
-            # Assume retryable since the error is ExecutionRetryableError.
+            # Set PENDING before the wait, not after: during the backoff the
+            # request is parked waiting to be rescheduled, so PENDING is its
+            # accurate state and lets a request-recovery mechanism re-enqueue
+            # it if the server is interrupted mid-wait. It is not put back on
+            # the queue until after the wait, so no worker picks it up early.
             request_id, _, _ = request_element
+            # Clamp to avoid ValueError from time.sleep() on a negative wait.
+            retry_wait_seconds = max(0, e.retry_wait_seconds)
+            # Surface why we are retrying, not just the wait time. status_msg
+            # is a single-line field, so strip color and collapse whitespace.
+            reason = ' '.join(common_utils.remove_color(str(e)).split())
+            if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
+                reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
+                ) + '...'
+            retry_suffix = f'retrying in {retry_wait_seconds}s'
+            status_msg = (f'{reason} ({retry_suffix})'
+                          if reason else f'Retrying in {retry_wait_seconds}s')
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.PENDING
+                request_task.status_msg = status_msg
+            time.sleep(retry_wait_seconds)
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
@@ -638,6 +657,8 @@ def _request_execution_wrapper(request_id: str,
             log_path = request_task.log_path
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
+            # Clear any leftover retry-backoff message now that we are running.
+            request_task.status_msg = None
             func = request_task.entrypoint
             request_body = request_task.request_body
             request_name = request_task.name
