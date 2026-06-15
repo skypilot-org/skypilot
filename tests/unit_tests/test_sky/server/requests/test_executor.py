@@ -16,6 +16,7 @@ from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
+from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import process
@@ -677,6 +678,163 @@ async def test_request_worker_retry_execution_retryable_error(
     assert len(submit_calls) == 1, (
         f'Expected submit_until_success to be called once, got {len(submit_calls)} calls'
     )
+
+
+class _PauseHarness:
+    """Bundles the worker, queue, and request id for pause/watch tests."""
+
+    def __init__(self, worker, request_id, queue_items, sleep_calls):
+        self.worker = worker
+        self.request_id = request_id
+        self.queue_items = queue_items
+        self.sleep_calls = sleep_calls
+
+    def run(self, condition, retry_wait_seconds=30):
+        """Drive handle_task_result with an ExecutionPausedError."""
+        paused_error = exceptions.ExecutionPausedError(
+            'Waiting on external admission.',
+            hint='Will resume when admitted',
+            retry_wait_seconds=retry_wait_seconds,
+            continue_condition=condition)
+        fut = concurrent.futures.Future()
+        fut.set_exception(paused_error)
+        request_element = (self.request_id, False, True)
+        self.worker.handle_task_result(fut, request_element)
+        return request_element
+
+
+@pytest.fixture()
+def pause_harness(isolated_database, monkeypatch):
+    """A RequestWorker wired to an in-memory queue, watching time.sleep."""
+    request_id = 'test-pause-request'
+    request = requests_lib.Request(
+        request_id=request_id,
+        name='test-request',
+        entrypoint=_dummy_entrypoint_for_retry_test,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.RUNNING,
+        created_at=time.time(),
+        user_id='test-user',
+    )
+    asyncio.run(requests_lib.create_if_not_exists_async(request))
+
+    queue_items = []
+    backing = queue_lib.Queue()
+
+    class MockRequestQueue:
+
+        def get(self):
+            try:
+                return backing.get(block=False)
+            except queue_lib.Empty:
+                return None
+
+        def put(self, item):
+            queue_items.append(item)
+            backing.put(item)
+
+    request_queue = MockRequestQueue()
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: request_queue)
+
+    # Capture (and skip) the fixed fallback sleep so the tests run instantly.
+    sleep_calls = []
+
+    def mock_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr('time.sleep', mock_sleep)
+
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.LONG,
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls)
+
+
+class _RecordingCondition(continue_condition_lib.ContinueCondition):
+    """A ContinueCondition whose wait() returns a fixed verdict.
+
+    Records the OSS-provided wait() arguments so tests can assert the executor
+    drives the condition's interface correctly.
+    """
+
+    def __init__(self, verdict: bool):
+        self._verdict = verdict
+        self.calls = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+        self.calls.append({
+            'is_cancelled': is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+        })
+        return self._verdict
+
+
+def test_pause_reschedules_when_wait_returns_true(pause_harness):
+    """The executor calls condition.wait() and reschedules when it returns True.
+
+    The wait policy (poll interval, backoff, deadline, fallback) lives in the
+    condition; the executor just acts on the boolean verdict.
+    """
+    condition = _RecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == [request_element]
+    # wait() was given the fallback and a working cancellation check.
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30
+    }]
+    # During the pause the request is PENDING with a "waiting to resume" msg.
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status', 'status_msg'])
+    assert updated.status == requests_lib.RequestStatus.PENDING
+    assert 'waiting to resume' in updated.status_msg
+
+
+def test_pause_dropped_when_wait_returns_false(pause_harness):
+    """A condition.wait() returning False drops the request (no reschedule)."""
+    condition = _RecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert pause_harness.queue_items == []
+
+
+def test_pause_base_condition_does_fixed_fallback_wait(pause_harness):
+    """The base ContinueCondition just waits the fallback, then reschedules."""
+    condition = continue_condition_lib.ContinueCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.sleep_calls == [30]
+    assert pause_harness.queue_items == [request_element]
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.PENDING
+
+
+def test_pause_base_condition_dropped_if_cancelled_during_wait(
+        pause_harness, monkeypatch):
+    """The base condition drops the request if it is cancelled while waiting.
+
+    Also exercises the OSS-provided is_cancelled check, which the base wait()
+    consults after the fallback sleep.
+    """
+
+    def cancel_on_sleep(seconds):
+        pause_harness.sleep_calls.append(seconds)
+        with requests_lib.update_request(pause_harness.request_id) as r:
+            r.status = requests_lib.RequestStatus.CANCELLED
+
+    monkeypatch.setattr('time.sleep', cancel_on_sleep)
+
+    pause_harness.run(continue_condition_lib.ContinueCondition())
+
+    assert pause_harness.queue_items == []
 
 
 def test_resolve_blob_valid(tmp_path, monkeypatch):

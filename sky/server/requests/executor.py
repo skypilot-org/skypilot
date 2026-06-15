@@ -176,6 +176,16 @@ def executor_initializer(proc_group: str):
                      daemon=True).start()
 
 
+def _request_is_gone_or_cancelled(request_id: str) -> bool:
+    """Cancellation check passed to ``ContinueCondition.wait()``.
+
+    A request cancelled (or gone) while paused must not be re-queued.
+    """
+    request = api_requests.get_request(request_id, fields=['status'])
+    return (request is None or
+            request.status == api_requests.RequestStatus.CANCELLED)
+
+
 class RequestWorker:
     """A worker that polls requests from the queue and runs them.
 
@@ -294,24 +304,45 @@ class RequestWorker:
             request_id, _, _ = request_element
             # Clamp to avoid ValueError from time.sleep() on a negative wait.
             retry_wait_seconds = max(0, e.retry_wait_seconds)
+            # A pause (ExecutionPausedError) may carry a continue condition that
+            # owns how to wait for the resume signal; without one, fall back to
+            # a fixed backoff. Either way the wait runs in this monitor thread,
+            # not an executor worker.
+            condition = getattr(e, 'continue_condition', None)
             # Surface why we are retrying, not just the wait time. status_msg
             # is a single-line field, so strip color and collapse whitespace.
             reason = ' '.join(common_utils.remove_color(str(e)).split())
             if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
                 reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
                 ) + '...'
-            retry_suffix = f'retrying in {retry_wait_seconds}s'
+            retry_suffix = ('waiting to resume' if condition is not None else
+                            f'retrying in {retry_wait_seconds}s')
             status_msg = (f'{reason} ({retry_suffix})'
-                          if reason else f'Retrying in {retry_wait_seconds}s')
+                          if reason else retry_suffix.capitalize())
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.PENDING
                 request_task.status_msg = status_msg
-            time.sleep(retry_wait_seconds)
-            # Reschedule the request.
-            queue = _get_queue(self.schedule_type)
-            queue.put(request_element)
-            logger.info(f'Rescheduled request {request_id} for retry')
+            try:
+                if condition is not None:
+                    should_reschedule = condition.wait(
+                        is_cancelled=lambda: _request_is_gone_or_cancelled(
+                            request_id),
+                        fallback_wait_seconds=retry_wait_seconds)
+                else:
+                    time.sleep(retry_wait_seconds)
+                    should_reschedule = True
+            except Exception as wait_err:  # pylint: disable=broad-except
+                logger.error(
+                    f'Continue-condition wait failed for {request_id}: '
+                    f'{common_utils.format_exception(wait_err)}')
+                time.sleep(retry_wait_seconds)
+                should_reschedule = True
+            if should_reschedule:
+                # Reschedule the request.
+                queue = _get_queue(self.schedule_type)
+                queue.put(request_element)
+                logger.info(f'Rescheduled request {request_id} for retry')
         finally:
             # Increment the free executor count when a request finishes
             if metrics_utils.METRICS_ENABLED:
