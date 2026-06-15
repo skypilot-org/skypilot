@@ -23,6 +23,7 @@ import {
   formatAutostop,
 } from '@/components/utils';
 import Link from 'next/link';
+import { PaginationControls } from '@/components/elements/PaginationControls';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
@@ -584,6 +585,24 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Read initial page/limit from URL
+  const getInitialPage = () => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const p = parseInt(params.get('page'), 10);
+      return p > 0 ? p : 1;
+    }
+    return 1;
+  };
+  const getInitialLimit = () => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const ps = parseInt(params.get('pageSize'), 10);
+      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+    }
+    return 10;
+  };
+
   // Use the cluster data hook (supports plugin override for server-side pagination)
   const {
     data: hookData,
@@ -605,7 +624,30 @@ export function ClusterTable({
     refreshInterval: preloadingComplete ? refreshInterval : null,
     sortConfig,
     filters,
+    initialPage: getInitialPage(),
+    initialLimit: getInitialLimit(),
   });
+
+  // Sync page/limit to URL query params.
+  // Use window.history.replaceState instead of router.replace to avoid
+  // triggering Next.js re-renders that cascade into filter resets.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (page > 1) {
+      url.searchParams.set('page', String(page));
+    } else {
+      url.searchParams.delete('page');
+    }
+    if (limit !== 10) {
+      url.searchParams.set('pageSize', String(limit));
+    } else {
+      url.searchParams.delete('pageSize');
+    }
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url.toString());
+    }
+  }, [page, limit]);
 
   // Track loading state for parent component
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -1158,94 +1200,24 @@ export function ClusterTable({
 
       {/* Pagination controls */}
       {displayTotal > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={limit}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={10}>10</option>
-                  <option value={30}>30</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {`${startIndex + 1} - ${Math.min(endIndex, displayTotal)} of ${displayTotal}`}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={isServerPagination ? !hasPrev : page === 1}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={
-                  isServerPagination
-                    ? !hasNext
-                    : page === totalPages || totalPages === 0
-                }
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
-            </div>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={page}
+          totalPages={totalPages}
+          totalCount={displayTotal}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={isServerPagination ? !hasPrev : page === 1}
+          isNextDisabled={
+            isServerPagination
+              ? !hasNext
+              : page === totalPages || totalPages === 0
+          }
+          pageSize={limit}
+          onPageSizeChange={handlePageSizeChange}
+        />
       )}
     </div>
   );
