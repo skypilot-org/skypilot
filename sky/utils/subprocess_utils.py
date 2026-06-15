@@ -566,7 +566,7 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     # daemon script will detach itself from the parent process with
     # fork to avoid being killed by parent process. See the reason we
     # daemonize the process in `sky/skylet/subprocess_daemon.py`.
-    subprocess.Popen(
+    daemon_proc = subprocess.Popen(
         daemon_cmd,
         # Suppress output
         stdout=subprocess.DEVNULL,
@@ -575,6 +575,18 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
         stdin=subprocess.DEVNULL,
         env=env,
     )
+    # subprocess_daemon.py double-forks (daemonize()) to detach: the process
+    # we just spawned is the first-fork parent, which sys.exit()s within a few
+    # hundred ms once the grandchild daemon is detached. Reap it in the
+    # background so it does not linger as a zombie under us. This matters for
+    # long-lived callers (e.g. the jobs/serve/pool controller, which invokes
+    # run_with_log -> kill_process_daemon many times and stays alive): without
+    # an explicit wait() the dead intermediate sits as a zombie until CPython
+    # happens to GC the Popen object, and on a busy host those accumulate.
+    # subprocess_daemon's zombie-wedge sweep would otherwise misread our own
+    # un-reaped intermediates as evidence of a wedged parent and kill it.
+    # The reap runs in a daemon thread so the hot path is never blocked.
+    threading.Thread(target=daemon_proc.wait, daemon=True).start()
 
 
 def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:

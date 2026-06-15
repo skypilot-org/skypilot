@@ -211,11 +211,12 @@ def _term_then_kill(target: psutil.Process,
 
 
 def _zombie_wedge_sweep(descendants: List[psutil.Process],
-                        zombie_first_seen: Dict[int, float],
-                        grace_seconds: float, proc_pid: int, parent_pid: int,
-                        proc_sid: Optional[int]) -> None:
+                        zombie_first_seen: Dict[int,
+                                                float], grace_seconds: float,
+                        proc_pid: int, parent_pid: int, proc_sid: Optional[int],
+                        last_reap_at: Dict[int, float]) -> None:
     """Age each zombie descendant; force-kill the wedged parent of any
-    that have outlived the grace period.
+    that have outlived the grace period AND have stopped reaping entirely.
 
     A wedged process — one whose SIGTERM handler raised an exception out
     of the wait path — accumulates zombie children that never get reaped.
@@ -230,12 +231,16 @@ def _zombie_wedge_sweep(descendants: List[psutil.Process],
     parent (the SkyPilot orchestrator) — killing any of those would bring
     the whole task down, defeating the daemon's purpose.
 
-    False-positive risk note: programs that use raw os.fork() without ever
-    calling wait() will leave indefinite zombies that this sweep will
-    treat as wedges. The default 60 s grace is conservative; most users
-    won't hit this. Set SKYPILOT_REAP_WEDGED_PARENTS=0 to disable, or
-    raise SKYPILOT_ZOMBIE_GRACE_SECONDS if the workload is known to leave
-    long-lived benign zombies.
+    Reaping-progress gate (last_reap_at): a long zombie age alone is not
+    sufficient evidence of a wedge — a healthy, busy event-driven daemon
+    (e.g. SkyPilot's own jobs/serve/pool controller and its executors) can
+    leave one child zombie past the grace period while it is actively
+    reaping *other* children. A genuinely wedged parent reaps nothing at
+    all. So we only treat a parent as wedged if, in addition to a
+    zombie older than grace_seconds, we have NOT observed it reap any child
+    within the last grace_seconds. last_reap_at[pid] is the monotonic time
+    the caller last saw `pid` reap a child; a parent with no recent reap is
+    stuck, one whose reap time keeps advancing is alive and working.
     """
     now = time.monotonic()
     for descendant in descendants:
@@ -267,6 +272,15 @@ def _zombie_wedge_sweep(descendants: List[psutil.Process],
         # to surface, not ours to interfere with.
         if not _same_session(wedged_ppid, proc_sid):
             zombie_first_seen.pop(descendant.pid, None)
+            continue
+        # Reaping-progress gate: spare a parent that is still actively
+        # reaping other children. A genuine wedge reaps nothing; a busy
+        # daemon keeps reaping, so its last_reap_at advances. We only
+        # proceed if the parent has not reaped anything within the grace
+        # window. (Absent any record, last_reap_at.get returns 0.0, i.e.
+        # "never reaped" — correct for a parent that has been stuck since
+        # before we started watching.)
+        if now - last_reap_at.get(wedged_ppid, 0.0) < grace_seconds:
             continue
         try:
             wedged = psutil.Process(wedged_ppid)
@@ -455,6 +469,19 @@ def main():
         # alive ancestors that never call wait() on their dead children
         # (see _zombie_wedge_sweep below).
         zombie_first_seen: Dict[int, float] = {}
+        # Reaping-progress tracking. last_reap_at maps a parent pid -> the
+        # most recent monotonic time we observed it reap a child (a child
+        # that was present last tick is gone this tick while the parent is
+        # still alive). prev_child_ppids is last tick's {pid: ppid} snapshot,
+        # used to detect those disappearances. The wedge sweep uses
+        # last_reap_at to distinguish a genuinely wedged parent (one that has
+        # stopped reaping entirely) from a healthy, busy daemon that merely
+        # left one child zombie for a while but is still reaping others — see
+        # _zombie_wedge_sweep. Without this, long-lived SkyPilot daemons
+        # (jobs/serve/pool controller and its executors) that legitimately
+        # carry a transient zombie past the grace period would be killed.
+        last_reap_at: Dict[int, float] = {}
+        prev_child_ppids: Dict[int, int] = {}
         proc_pid = process.pid
         parent_pid = parent_process.pid
         # proc_sid (captured above) gates the PPID-transition reap below so
@@ -479,6 +506,33 @@ def main():
                 # Refresh process tree for cleanup if process group is not
                 # available.
                 children = tmp_children
+            # Reaping-progress detection: a descendant that was present last
+            # tick but is gone this tick was reaped by its (still-alive)
+            # parent. Record the parent's reap time. A healthy event-driven
+            # daemon reaps children continuously, so its last_reap_at keeps
+            # advancing; a wedged parent reaps nothing, so its last_reap_at
+            # goes stale. The wedge sweep relies on this to avoid killing
+            # busy daemons. (cur_child_ppids is also reused below.)
+            now_tick = time.monotonic()
+            cur_child_ppids: Dict[int, int] = {}
+            for child in tmp_children:
+                try:
+                    cur_child_ppids[child.pid] = child.ppid()
+                except psutil.NoSuchProcess:
+                    continue
+            alive = set(cur_child_ppids)
+            alive.add(proc_pid)
+            alive.add(parent_pid)
+            for gone_pid, gone_ppid in prev_child_ppids.items():
+                if gone_pid not in cur_child_ppids and gone_ppid in alive:
+                    # gone_pid disappeared and its parent is still alive ->
+                    # the parent reaped it.
+                    last_reap_at[gone_ppid] = now_tick
+            prev_child_ppids = cur_child_ppids
+            # Prune last_reap_at to parents that are still alive.
+            last_reap_at = {
+                pid: ts for pid, ts in last_reap_at.items() if pid in alive
+            }
             # Reparent detection: any descendant whose ppid just transitioned
             # to our proc_pid was adopted via the subreaper attribute and is
             # an orphan of a dead intermediate parent. Terminate it
@@ -536,7 +590,7 @@ def main():
             if reap_wedged_parents:
                 _zombie_wedge_sweep(tmp_children, zombie_first_seen,
                                     zombie_grace_seconds, proc_pid, parent_pid,
-                                    proc_sid)
+                                    proc_sid, last_reap_at)
                 zombie_first_seen = {
                     pid: ts
                     for pid, ts in zombie_first_seen.items()
