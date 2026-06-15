@@ -282,13 +282,23 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
-            time.sleep(e.retry_wait_seconds)
-            # Reset the request status to PENDING so it can be picked up again.
+            # Reset the request status to PENDING *before* the backoff wait,
+            # not after. During the wait the request is no longer executing --
+            # it is parked waiting to be rescheduled -- so PENDING is its
+            # accurate state. Marking it PENDING up front also lets any
+            # request-recovery mechanism re-enqueue it if this server is
+            # interrupted mid-wait; if it stayed RUNNING, such a request would
+            # look like a crashed in-flight task and be failed instead of
+            # retried. The request is not put back on the queue until after the
+            # wait below, so no worker picks it up early.
             # Assume retryable since the error is ExecutionRetryableError.
             request_id, _, _ = request_element
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.PENDING
+                request_task.status_msg = (
+                    f'Retrying in {e.retry_wait_seconds}s')
+            time.sleep(e.retry_wait_seconds)
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)

@@ -575,11 +575,19 @@ async def test_request_worker_retry_execution_retryable_error(
 
     monkeypatch.setattr(executor, '_get_queue', mock_get_queue)
 
-    # Mock time.sleep to track calls (but still sleep for very short waits)
+    # Mock time.sleep to track calls (but still sleep for very short waits).
+    # Capture the request status and queue length observed *at the moment*
+    # the backoff sleep happens, to pin the ordering: the request must be
+    # PENDING (not RUNNING) and not yet re-enqueued before we wait.
     sleep_calls = []
+    status_at_sleep = []
+    queue_len_at_sleep = []
 
     def mock_sleep(seconds):
         sleep_calls.append(seconds)
+        observed = requests_lib.get_request(request_id, fields=['status'])
+        status_at_sleep.append(observed.status if observed else None)
+        queue_len_at_sleep.append(len(queue_items))
 
     monkeypatch.setattr('time.sleep', mock_sleep)
 
@@ -629,6 +637,18 @@ async def test_request_worker_retry_execution_retryable_error(
         30
     ], (f'Expected first time.sleep call to be 30 seconds, got {sleep_calls[0]}'
        )
+
+    # Verify the status was set to PENDING *before* the backoff wait, and that
+    # the request was not yet re-enqueued at that point. This guards the
+    # failover-safety ordering: a server interrupted mid-wait leaves the
+    # request in PENDING (recoverable) rather than a stuck RUNNING orphan.
+    assert status_at_sleep == [
+        requests_lib.RequestStatus.PENDING
+    ], (f'Expected status to be PENDING at sleep time, got {status_at_sleep}')
+    assert queue_len_at_sleep == [
+        0
+    ], ('Expected request to be re-enqueued only after the wait, but it was '
+        f'already on the queue at sleep time: {queue_len_at_sleep}')
 
     # Verify the request status was reset to PENDING
     updated_request = requests_lib.get_request(request_id, fields=['status'])
