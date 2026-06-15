@@ -60,10 +60,10 @@ _WEDGED_PID = 200
 _ZOMBIE_PID = 999
 
 
-def _run_sweep(monkeypatch, *, aged, wedged_parent, wedged_sid):
+def _run_sweep(monkeypatch, *, aged, wedged_sid, last_reap_at=None):
     """Drive one sweep tick; return the _term_then_kill mock."""
     zombie = _FakeProc(_ZOMBIE_PID, _WEDGED_PID, status=psutil.STATUS_ZOMBIE)
-    wedged = _FakeProc(_WEDGED_PID, wedged_parent)
+    wedged = _FakeProc(_WEDGED_PID, _PROC_PID)
 
     monkeypatch.setattr(sd.psutil, 'Process', lambda pid: wedged)
     monkeypatch.setattr(sd.os, 'getsid', lambda pid: wedged_sid)
@@ -75,44 +75,34 @@ def _run_sweep(monkeypatch, *, aged, wedged_parent, wedged_sid):
         # Pre-seed so the zombie is already older than the grace period.
         zombie_first_seen[_ZOMBIE_PID] = time.monotonic() - 10_000
     sd._zombie_wedge_sweep([zombie], zombie_first_seen, 60.0, _PROC_PID,
-                           _PARENT_PID, _PROC_SID)
+                           _PARENT_PID, _PROC_SID, last_reap_at or {})
     return killer
 
 
-def test_wedge_kills_direct_child_in_session(monkeypatch):
-    # Wedged parent is a direct child of proc_pid and in-session -> killed.
-    killer = _run_sweep(monkeypatch,
-                        aged=True,
-                        wedged_parent=_PROC_PID,
-                        wedged_sid=_PROC_SID)
+def test_wedge_kills_non_reaping_parent_in_session(monkeypatch):
+    # Aged zombie, in-session, parent never reaped (last_reap_at empty) -> kill.
+    killer = _run_sweep(monkeypatch, aged=True, wedged_sid=_PROC_SID)
     killer.assert_called_once()
 
 
-def test_wedge_spares_deep_descendant(monkeypatch):
-    # Zombie's parent is NOT a direct child of proc_pid (it's infrastructure,
-    # e.g. a controller executor) -> structural gate spares it.
+def test_wedge_spares_recently_reaping_parent(monkeypatch):
+    # Parent reaped a child within the grace window -> live daemon, spared.
     killer = _run_sweep(monkeypatch,
                         aged=True,
-                        wedged_parent=12345,
-                        wedged_sid=_PROC_SID)
+                        wedged_sid=_PROC_SID,
+                        last_reap_at={_WEDGED_PID: time.monotonic()})
     killer.assert_not_called()
 
 
 def test_wedge_spares_detached_session(monkeypatch):
-    # Direct child of proc_pid but setsid'd into its own session -> spared.
-    killer = _run_sweep(monkeypatch,
-                        aged=True,
-                        wedged_parent=_PROC_PID,
-                        wedged_sid=777)
+    # Parent setsid'd into its own session (detached daemon) -> spared.
+    killer = _run_sweep(monkeypatch, aged=True, wedged_sid=777)
     killer.assert_not_called()
 
 
 def test_wedge_spares_young_zombie(monkeypatch):
     # Zombie younger than the grace period -> no action yet.
-    killer = _run_sweep(monkeypatch,
-                        aged=False,
-                        wedged_parent=_PROC_PID,
-                        wedged_sid=_PROC_SID)
+    killer = _run_sweep(monkeypatch, aged=False, wedged_sid=_PROC_SID)
     killer.assert_not_called()
 
 
@@ -123,7 +113,7 @@ def test_wedge_spares_protected_ancestors(monkeypatch):
         killer = mock.Mock(return_value='kill')
         monkeypatch.setattr(sd, '_term_then_kill', killer)
         sd._zombie_wedge_sweep([zombie], {_ZOMBIE_PID: time.monotonic() - 1e4},
-                               60.0, _PROC_PID, _PARENT_PID, _PROC_SID)
+                               60.0, _PROC_PID, _PARENT_PID, _PROC_SID, {})
         killer.assert_not_called()
 
 
