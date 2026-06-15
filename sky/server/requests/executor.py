@@ -91,9 +91,8 @@ multiprocessing.set_start_method('spawn', force=True)
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
 
-# Max length of the retry reason embedded in a request's status message during
-# a retry backoff. The reason comes from the (potentially long) exception
-# message, so we truncate it to keep the status line readable.
+# Max length of the retry reason in a request's backoff status message; the
+# reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
@@ -287,26 +286,16 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
-            # Reset the request status to PENDING *before* the backoff wait,
-            # not after. During the wait the request is no longer executing --
-            # it is parked waiting to be rescheduled -- so PENDING is its
-            # accurate state. Marking it PENDING up front also lets any
-            # request-recovery mechanism re-enqueue it if this server is
-            # interrupted mid-wait; if it stayed RUNNING, such a request would
-            # look like a crashed in-flight task and be failed instead of
-            # retried. The request is not put back on the queue until after the
-            # wait below, so no worker picks it up early.
-            # Assume retryable since the error is ExecutionRetryableError.
+            # Set PENDING before the wait, not after: during the backoff the
+            # request is parked waiting to be rescheduled, so PENDING is its
+            # accurate state and lets a request-recovery mechanism re-enqueue
+            # it if the server is interrupted mid-wait. It is not put back on
+            # the queue until after the wait, so no worker picks it up early.
             request_id, _, _ = request_element
-            # Guard against a negative wait: time.sleep() would raise
-            # ValueError and crash this monitor thread, leaving the request
-            # parked in PENDING without ever being re-enqueued below.
+            # Clamp to avoid ValueError from time.sleep() on a negative wait.
             retry_wait_seconds = max(0, e.retry_wait_seconds)
-            # Surface *why* we are retrying (e.g. 'Failed to provision ...'),
-            # not just the wait time, so a client attaching during the backoff
-            # sees the reason. The exception message can carry ANSI color and
-            # newlines; strip color and collapse whitespace since status_msg is
-            # a single-line field, then truncate to keep it readable.
+            # Surface why we are retrying, not just the wait time. status_msg
+            # is a single-line field, so strip color and collapse whitespace.
             reason = ' '.join(common_utils.remove_color(str(e)).split())
             if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
                 reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
@@ -668,8 +657,7 @@ def _request_execution_wrapper(request_id: str,
             log_path = request_task.log_path
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
-            # Clear any status message left over from a prior retry backoff
-            # (e.g. 'Retrying in Ns') now that the request is running again.
+            # Clear any leftover retry-backoff message now that we are running.
             request_task.status_msg = None
             func = request_task.entrypoint
             request_body = request_task.request_body
