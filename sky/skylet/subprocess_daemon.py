@@ -201,9 +201,8 @@ def _term_then_kill(target: psutil.Process,
 
 
 def _zombie_wedge_sweep(descendants: List[psutil.Process],
-                        zombie_first_seen: Dict[int,
-                                                float], grace_seconds: float,
-                        proc_pid: int, parent_pid: int,
+                        zombie_first_seen: Dict[int, float],
+                        grace_seconds: float, proc_pid: int, parent_pid: int,
                         proc_pgid: Optional[int]) -> None:
     """Age each zombie descendant; force-kill the wedged parent of any
     that have outlived the grace period.
