@@ -1023,6 +1023,17 @@ def test_kubernetes_orphan_process_reaping():
         # subprocess_daemon polls every 1 s; allow generous margin for
         # SIGTERM to land on the workers and for them to exit.
         f'sleep 15 && '
+        # Diagnostic: dump the daemon log + child process state on
+        # failure so we can see exactly why the reap didn't fire.
+        # (Cheap on pass too: log files are small.)
+        f'ssh {name} '
+        f'"echo === subprocess_daemon logs ===; '
+        f'for f in /home/sky/.sky/subprocess_daemon-*.log; do '
+        f'  echo --- \\$f; cat \\$f 2>/dev/null; done; '
+        f'echo === child $C1 state ===; '
+        f'cat /proc/$C1/status 2>/dev/null | head -8; '
+        f'echo === child $C2 state ===; '
+        f'cat /proc/$C2/status 2>/dev/null | head -8" || true && '
         # Assert children are gone.
         f'if ssh {name} "kill -0 $C1 2>/dev/null"; then '
         f'  echo "FAIL: child $C1 still alive — orphan leak"; exit 1; fi && '

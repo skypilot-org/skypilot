@@ -467,6 +467,15 @@ def main():
                 ppid_history[child.pid] = new_ppid
                 if (old_ppid is not None and old_ppid != new_ppid and
                         new_ppid == proc_pid):
+                    try:
+                        child_pgid = os.getpgid(child.pid)
+                    except (OSError, ProcessLookupError):
+                        child_pgid = -1
+                    _log(f'PPID-transition: child pid={child.pid} '
+                         f'old_ppid={old_ppid} new_ppid={new_ppid} '
+                         f'proc_pid={proc_pid} proc_pgid={proc_pgid} '
+                         f'child_pgid={child_pgid} '
+                         f'will_kill={_same_pgid(child.pid, proc_pgid)}')
                     if not _same_pgid(child.pid, proc_pgid):
                         continue
                     try:
@@ -506,10 +515,22 @@ def main():
                 }
             time.sleep(1)
 
-    if pgid is not None:
-        kill_process_group(pgid)
-    else:
-        kill_process_tree(process, children)
+    # Only sweep the descendant tree when the *orchestrator* (parent_process)
+    # died — that's the case the daemon was originally designed for: the
+    # watched bash is now an orphan and needs to be torn down along with
+    # everything it spawned. When the watched process itself finished
+    # cleanly while the orchestrator is still alive, its descendants are
+    # either daemons it intentionally detached (ray's GCS, raylet,
+    # dashboard agent, uvicorn workers, sky api start background
+    # services) or processes it already reaped; cleaning them up here
+    # would break the very detachment pattern they rely on. The live
+    # PPID-transition reap and wedge sweep above already catch real
+    # orphans before this point.
+    if parent_process is None or not parent_process.is_running():
+        if pgid is not None:
+            kill_process_group(pgid)
+        else:
+            kill_process_tree(process, children)
 
 
 if __name__ == '__main__':
