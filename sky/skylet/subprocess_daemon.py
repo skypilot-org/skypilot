@@ -291,7 +291,8 @@ def _zombie_wedge_sweep(descendants: List[psutil.Process],
 
 
 def kill_process_tree(process: psutil.Process,
-                      children: List[psutil.Process]) -> bool:
+                      children: List[psutil.Process],
+                      proc_sid: Optional[int] = None) -> bool:
     """Kill the process tree of the target process.
 
     Descendants in a different session than `process` (i.e. that have
@@ -307,13 +308,23 @@ def kill_process_tree(process: psutil.Process,
     bash whose job control puts each backgrounded child in its own
     process group while keeping it in the same session — so a pgid filter
     would wrongly spare genuine orphaned workers. See _same_session().
+
+    `proc_sid` is the watched process's session id, captured by the caller
+    while the process was still alive. We must NOT recompute it here from
+    process.pid: this function runs after the watch loop has exited, which
+    includes the case where the watched process was killed. os.getsid() on
+    a dead pid raises, leaving proc_sid=None — which _same_session() treats
+    as "kill everything", defeating the detached-daemon protection. Passing
+    the live-captured sid keeps the filter correct even post-mortem.
     """
-    proc_sid: Optional[int] = None
-    if process is not None:
+    if proc_sid is None and process is not None:
+        # Fallback for callers that did not capture the sid (e.g. the
+        # process was already gone at daemon startup). Best-effort only.
         try:
             proc_sid = os.getsid(process.pid)
         except (OSError, ProcessLookupError):
             proc_sid = None
+    if process is not None:
         # Kill the target process first to avoid having more children, or fail
         # the process due to the children being defunct.
         children = [process] + children
@@ -388,6 +399,18 @@ def main():
     except psutil.NoSuchProcess:
         pass
 
+    # Capture the watched process's session id now, while it is (likely)
+    # still alive. We reuse this in the end-of-life kill_process_tree even
+    # if the watched process has since been killed — os.getsid() on a dead
+    # pid would fail and disable the detached-daemon filter. See
+    # kill_process_tree() and _same_session().
+    proc_sid: Optional[int] = None
+    if process is not None:
+        try:
+            proc_sid = os.getsid(args.proc_pid)
+        except (OSError, ProcessLookupError):
+            proc_sid = None
+
     # Initialize children list from arguments
     children = []
     if args.initial_children:
@@ -434,14 +457,10 @@ def main():
         zombie_first_seen: Dict[int, float] = {}
         proc_pid = process.pid
         parent_pid = parent_process.pid
-        # Watched process's session id — used to gate the PPID-transition
-        # reap below so we don't kill intentionally-detached descendants
-        # (setsid'd background daemons like ray's GCS server) that the
-        # subreaper attribute has pulled into our tree. See _same_session().
-        try:
-            proc_sid: Optional[int] = os.getsid(proc_pid)
-        except (OSError, ProcessLookupError):
-            proc_sid = None
+        # proc_sid (captured above) gates the PPID-transition reap below so
+        # we don't kill intentionally-detached descendants (setsid'd
+        # background daemons like ray's GCS server) that the subreaper
+        # attribute has pulled into our tree. See _same_session().
         reap_wedged_parents = (os.environ.get(REAP_WEDGED_PARENTS_ENV_VAR, '1')
                                != '0')
         try:
@@ -525,22 +544,39 @@ def main():
                 }
             time.sleep(1)
 
-    # Only sweep the descendant tree when the *orchestrator* (parent_process)
-    # died — that's the case the daemon was originally designed for: the
-    # watched bash is now an orphan and needs to be torn down along with
-    # everything it spawned. When the watched process itself finished
-    # cleanly while the orchestrator is still alive, its descendants are
-    # either daemons it intentionally detached (ray's GCS, raylet,
-    # dashboard agent, uvicorn workers, sky api start background
-    # services) or processes it already reaped; cleaning them up here
-    # would break the very detachment pattern they rely on. The live
-    # PPID-transition reap and wedge sweep above already catch real
-    # orphans before this point.
-    if parent_process is None or not parent_process.is_running():
-        if pgid is not None:
-            kill_process_group(pgid)
-        else:
-            kill_process_tree(process, children)
+    # The loop exited because the watched process and/or the orchestrator
+    # exited. How we clean up depends on which mechanism the caller chose.
+    if pgid is not None:
+        # kill-process-group mode (USE_KILL_PG_ENV_VAR — set by
+        # log_lib.run_with_log on the coroutine/streaming path, e.g.
+        # `sky logs` / `sky jobs logs`). The watched process is its own
+        # session+group leader (start_new_session=True) and every process
+        # in its group belongs to this one invocation — notably the
+        # `kubectl exec`/`ssh` proxy that streams the logs. When the
+        # request is cancelled the watched process is killed while the
+        # orchestrator (API server) keeps running, so we must NOT gate on
+        # the orchestrator's death: tear the whole group down whenever the
+        # loop exits, or the proxy leaks (it reparents to PID 1 and lingers).
+        # Intentionally-detached daemons setsid() into their own group and
+        # are therefore not in `pgid`, so killpg leaves them untouched.
+        # This restores the pre-subreaper cleanup behavior for this path.
+        kill_process_group(pgid)
+    elif parent_process is None or not parent_process.is_running():
+        # kill-process-tree mode (ray job execution path). Only sweep the
+        # descendant tree when the *orchestrator* (parent_process) died —
+        # the case the daemon was originally designed for: the watched bash
+        # is now an orphan and needs to be torn down along with everything
+        # it spawned. When the watched process itself finished cleanly while
+        # the orchestrator is still alive, its descendants are either
+        # daemons it intentionally detached (ray's GCS, raylet, dashboard
+        # agent, uvicorn workers, sky api start background services) or
+        # processes it already reaped; cleaning them up here would break the
+        # very detachment pattern they rely on. The live PPID-transition
+        # reap and wedge sweep above already catch real orphans before this
+        # point. (The session filter in kill_process_tree would also spare
+        # the detached daemons, but firing unconditionally still proved too
+        # aggressive for ray — keep the orchestrator-death gate here.)
+        kill_process_tree(process, children, proc_sid)
 
 
 if __name__ == '__main__':
