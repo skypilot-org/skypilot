@@ -1,4 +1,4 @@
-{{- if and .Values.grafana.enabled .Values.grafana.sidecar.dashboards.enabled }}
+{{- if and .Values.prometheus.scrapeEndpointMetrics .Values.grafana.enabled .Values.grafana.sidecar.dashboards.enabled }}
 {{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: ConfigMap
