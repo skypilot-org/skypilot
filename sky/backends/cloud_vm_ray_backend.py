@@ -1326,6 +1326,10 @@ class RetryingVmProvisioner(object):
                         # No teardown happens for this error.
                         with ux_utils.print_exception_no_traceback():
                             raise
+                    except exceptions.ExecutionPausedError:
+                        # Pausing to wait on an external condition: keep the
+                        # resources for resume, do not tear down or fail over.
+                        raise
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
