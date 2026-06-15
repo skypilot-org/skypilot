@@ -3,8 +3,25 @@
 import React from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
+import { Prec } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
 import { getNonce } from '@/utils/csp';
+
+// Palette sourced from tailwind.config.js — sky-blue/sky-blue-bright/gcpgreen
+// plus standard Tailwind grays. Keeps YAML highlighting on-brand.
+const yamlHighlightStyle = HighlightStyle.define([
+  { tag: t.propertyName, color: '#1E62CC' }, // keys → sky-blue-bright
+  { tag: t.string, color: '#188038' }, // quoted strings → gcpgreen
+  { tag: t.content, color: '#374151' }, // plain values → gray-700
+  { tag: t.lineComment, color: '#6b7280', fontStyle: 'italic' }, // comments → gray-500
+  { tag: t.keyword, color: '#188038' }, // directives → gcpgreen
+  { tag: t.meta, color: '#9ca3af' }, // doc separators (---) → gray-400
+  { tag: t.brace, color: '#6b7280' }, // {} → gray-500
+  { tag: t.squareBracket, color: '#6b7280' }, // [] → gray-500
+  { tag: t.punctuation, color: '#6b7280' }, // : , → gray-500
+]);
 
 const editorTheme = EditorView.theme({
   '&': {
@@ -61,6 +78,7 @@ export function YamlCodeBlock({
         extensions={[
           yaml(),
           editorTheme,
+          Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
         editable={!readOnly}

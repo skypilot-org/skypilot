@@ -3,8 +3,23 @@
 import React from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
+import { Prec } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
 import { getNonce } from '@/utils/csp';
+
+const yamlHighlightStyle = HighlightStyle.define([
+  { tag: t.propertyName, color: '#1E62CC' },
+  { tag: t.string, color: '#188038' },
+  { tag: t.content, color: '#374151' },
+  { tag: t.lineComment, color: '#6b7280', fontStyle: 'italic' },
+  { tag: t.keyword, color: '#188038' },
+  { tag: t.meta, color: '#9ca3af' },
+  { tag: t.brace, color: '#6b7280' },
+  { tag: t.squareBracket, color: '#6b7280' },
+  { tag: t.punctuation, color: '#6b7280' },
+]);
 
 const gutterTheme = EditorView.theme({
   '.cm-gutters': {
@@ -49,6 +64,7 @@ export function YamlEditor({
         extensions={[
           yaml(),
           gutterTheme,
+          Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           // Pass CSP nonce so CodeMirror's injected <style> tags are allowed.
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
