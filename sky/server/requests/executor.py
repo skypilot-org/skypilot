@@ -293,12 +293,15 @@ class RequestWorker:
             # wait below, so no worker picks it up early.
             # Assume retryable since the error is ExecutionRetryableError.
             request_id, _, _ = request_element
+            # Guard against a negative wait: time.sleep() would raise
+            # ValueError and crash this monitor thread, leaving the request
+            # parked in PENDING without ever being re-enqueued below.
+            retry_wait_seconds = max(0, e.retry_wait_seconds)
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = api_requests.RequestStatus.PENDING
-                request_task.status_msg = (
-                    f'Retrying in {e.retry_wait_seconds}s')
-            time.sleep(e.retry_wait_seconds)
+                request_task.status_msg = (f'Retrying in {retry_wait_seconds}s')
+            time.sleep(retry_wait_seconds)
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
@@ -648,6 +651,9 @@ def _request_execution_wrapper(request_id: str,
             log_path = request_task.log_path
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
+            # Clear any status message left over from a prior retry backoff
+            # (e.g. 'Retrying in Ns') now that the request is running again.
+            request_task.status_msg = None
             func = request_task.entrypoint
             request_body = request_task.request_body
             request_name = request_task.name
