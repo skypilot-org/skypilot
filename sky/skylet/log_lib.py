@@ -232,7 +232,19 @@ def run_with_log(
     caller_preexec = kwargs.pop('preexec_fn', None)
 
     def preexec_chain():
-        subprocess_utils.set_child_subreaper()
+        # Defensive: this function's source is embedded verbatim into the
+        # task codegen (sky/backends/task_codegen.py uses inspect.getsource
+        # on run_with_log) and runs on the cluster, where the locally
+        # installed sky may be older than the version that generated the
+        # task code — clusters launched by an old sky and then receiving
+        # jobs from a new sky API server land in this state until they're
+        # restarted/relaunched. Older sky's subprocess_utils may not have
+        # set_child_subreaper. If the attribute isn't there, just skip:
+        # missing the subreaper attribute only degrades cleanup quality
+        # for orphaned descendants, it doesn't break job execution.
+        set_subreaper = getattr(subprocess_utils, 'set_child_subreaper', None)
+        if set_subreaper is not None:
+            set_subreaper()
         if caller_preexec is not None:
             caller_preexec()
 
