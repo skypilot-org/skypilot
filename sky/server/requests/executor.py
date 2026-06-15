@@ -276,10 +276,32 @@ class RequestWorker:
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    def _mark_executor_free(self) -> None:
+        """Increment the free-executor gauge for this worker's schedule type.
+
+        Called the instant the worker process is released (i.e. the future
+        completes), so the gauge stays accurate even while a retry/pause wait
+        is still running in this monitor thread.
+        """
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if self.schedule_type == api_requests.ScheduleType.LONG:
+            metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
+        elif self.schedule_type == api_requests.ScheduleType.SHORT:
+            metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
+
     def handle_task_result(self, fut: concurrent.futures.Future,
                            request_element: Tuple[str, bool, bool]) -> None:
         try:
-            fut.result()
+            try:
+                fut.result()
+            finally:
+                # The worker process is released the instant the future
+                # completes, before any retry/pause wait below. Account for it
+                # here so the free-executor gauge reflects the idle process
+                # during the wait, instead of staying decremented until the
+                # request finishes or reschedules.
+                self._mark_executor_free()
         except concurrent.futures.process.BrokenProcessPool as e:
             # Happens when the worker process dies unexpectedly, e.g. OOM
             # killed.
@@ -343,13 +365,6 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
                 logger.info(f'Rescheduled request {request_id} for retry')
-        finally:
-            # Increment the free executor count when a request finishes
-            if metrics_utils.METRICS_ENABLED:
-                if self.schedule_type == api_requests.ScheduleType.LONG:
-                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
-                elif self.schedule_type == api_requests.ScheduleType.SHORT:
-                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.

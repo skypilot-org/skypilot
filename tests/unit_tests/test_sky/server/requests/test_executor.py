@@ -837,6 +837,43 @@ def test_pause_base_condition_dropped_if_cancelled_during_wait(
     assert pause_harness.queue_items == []
 
 
+def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
+    """The freed worker process is accounted for before the pause wait runs.
+
+    The worker process is released the instant the future completes (it raised
+    ExecutionPausedError), so the free-executor gauge must be incremented
+    before the - potentially long-lived - pause wait, not after the request
+    reschedules. Otherwise the gauge under-reports idle executors for the whole
+    duration of the pause.
+
+    This snapshots the gauge's inc() count at the moment condition.wait() is
+    entered; on the old code (increment in a post-wait finally) it would be 0.
+    """
+    gauge = mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(executor.metrics_utils, 'SKY_APISERVER_LONG_EXECUTORS',
+                        gauge)
+
+    inc_count_at_wait = []
+
+    class _GaugeWatchingCondition(continue_condition_lib.ContinueCondition):
+
+        def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+            del is_cancelled, fallback_wait_seconds
+            inc_count_at_wait.append(gauge.inc.call_count)
+            return True
+
+    request_element = pause_harness.run(_GaugeWatchingCondition(),
+                                        retry_wait_seconds=30)
+
+    # The slot was marked free (inc()'d) before the wait began ...
+    assert inc_count_at_wait == [1]
+    # ... and exactly once overall: no lingering post-wait finally double-counts.
+    assert gauge.inc.call_count == 1
+    # Sanity: the request still rescheduled as before.
+    assert pause_harness.queue_items == [request_element]
+
+
 def test_resolve_blob_valid(tmp_path, monkeypatch):
     """Test that resolve_blob_dir returns the shared extraction dir."""
     blob_id = 'a' * 64
