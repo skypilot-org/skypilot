@@ -192,8 +192,6 @@ export function Clusters() {
     return 1; // Default to 1 day
   };
 
-  // Initialize ownership scope from URL parameter immediately.
-  // Defaults to showing only the current user's clusters.
   const getInitialUserScope = () => {
     if (typeof window !== 'undefined' && router.isReady) {
       return router.query.owner === 'all' ? 'all' : 'mine';
@@ -205,17 +203,9 @@ export function Clusters() {
   const [historyDays, setHistoryDays] = useState(getInitialHistoryDays);
   const [userScope, setUserScope] = useState(getInitialUserScope);
   const [currentUser, setCurrentUser] = useState(null);
-  // Whether the current-user lookup has finished. Used to distinguish
-  // "auth not resolved yet" from "resolved and anonymous" so the URL sync
-  // below doesn't reset an anonymous user's scope back to 'mine'.
   const [authResolved, setAuthResolved] = useState(false);
   const isMobile = useMobile();
 
-  // Resolve the logged-in user for the "My clusters" scope. Mirrors the
-  // jobs page: the 'local' sentinel id means the caller is anonymous
-  // (no auth / basic-auth without per-user identity, e.g. no Okta/SSO).
-  // There's no meaningful "Mine" view in that case, so flip to All and
-  // hide the My/All toggle entirely.
   useEffect(() => {
     let cancelled = false;
     getCurrentUserInfo()
@@ -277,9 +267,6 @@ export function Clusters() {
         }
       }
 
-      // Sync ownership scope with URL if it has changed. An anonymous
-      // caller has no "Mine" view, so it stays on 'all' regardless of the
-      // (absent) owner param.
       const isAnonymous = authResolved && !currentUser;
       const expectedScope =
         router.query.owner === 'all' ? 'all' : isAnonymous ? 'all' : 'mine';
@@ -470,8 +457,6 @@ export function Clusters() {
     setFilters(filters);
   };
 
-  // Switch ownership scope (My clusters vs All clusters), keeping it in the
-  // URL so the view is shareable/bookmarkable.
   const selectScope = (scope) => {
     setUserScope(scope);
     const query = { ...router.query };
@@ -490,16 +475,11 @@ export function Clusters() {
     );
   };
 
-  // Activity toggle: Active shows live clusters only; All also includes
-  // terminated clusters from history (same data as the old "Show history"
-  // checkbox, presented like the jobs page).
   const selectHistoryTab = (showHistoryValue) => {
     setShowHistory(showHistoryValue);
     updateShowHistoryURL(showHistoryValue);
   };
 
-  // An explicit User filter from the filter dropdown overrides the
-  // ownership scope toggle; reflect that in the highlighted tab.
   const explicitUserFilter = useMemo(
     () =>
       (filters || []).find(
@@ -554,9 +534,6 @@ export function Clusters() {
             Sky Clusters
           </Link>
         </div>
-        {/* Activity toggle: Active shows live clusters only; All also
-            includes terminated clusters from history (same data as the
-            old "Show history" checkbox, presented like the jobs page). */}
         <div
           role="tablist"
           aria-label="Filter clusters by activity"
@@ -587,11 +564,6 @@ export function Clusters() {
             All
           </button>
         </div>
-        {/* Ownership scope toggle. Only shown when the caller has a real
-            identity (e.g. Okta/SSO); with basic auth or no auth there is
-            no per-user view, so the toggle is hidden (same as the jobs
-            page). An explicit User filter overrides the toggle, so the
-            highlighted tab reflects that. */}
         {currentUser && (
           <div
             role="tablist"
@@ -898,8 +870,6 @@ export function ClusterTable({
     // For client-side pagination, we filter/sort the full data then paginate
     let dataToProcess = isServerPagination ? hookData : allData;
 
-    // Ownership scope: default to showing only the current user's clusters.
-    // An explicit User filter from the filter dropdown overrides the scope.
     const hasExplicitUserFilter = (filters || []).some(
       (f) => (f.property || '').toLowerCase() === 'user' && f.value
     );
