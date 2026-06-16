@@ -98,9 +98,9 @@ class Modal(clouds.Cloud):
             return []
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'modal')
-        if region is not None:
-            regions = [r for r in regions if r.name == region]
-        return regions
+        if region is None:
+            region = _AUTO_REGION
+        return [r for r in regions if r.name == region]
 
     @classmethod
     def zones_provision_loop(

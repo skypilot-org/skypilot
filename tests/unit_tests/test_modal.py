@@ -59,6 +59,22 @@ def test_modal_infra_schema():
     assert resource.accelerators == {'H100': 1}
 
 
+def test_modal_default_region_does_not_expand_to_region_failover():
+    implicit_regions = clouds.Modal.regions_with_offering('modal-h100-1x',
+                                                          accelerators=None,
+                                                          use_spot=False,
+                                                          region=None,
+                                                          zone=None)
+    explicit_regions = clouds.Modal.regions_with_offering('modal-h100-1x',
+                                                          accelerators=None,
+                                                          use_spot=False,
+                                                          region='af',
+                                                          zone=None)
+
+    assert [region.name for region in implicit_regions] == ['auto']
+    assert [region.name for region in explicit_regions] == ['af']
+
+
 def test_modal_label_validation():
     assert clouds.Modal.is_label_valid('plaintext',
                                        'plainvalue') == (True, None)
