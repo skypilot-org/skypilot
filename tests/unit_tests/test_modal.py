@@ -7,6 +7,7 @@ import pytest
 from sky import clouds
 from sky import resources as resources_lib
 from sky.catalog import modal_catalog
+from sky.clouds import modal as modal_cloud
 from sky.provision import common
 from sky.provision.modal import instance as modal_instance
 from sky.provision.modal import modal_utils
@@ -23,6 +24,16 @@ def _provision_config(node_config):
                                   tags={},
                                   resume_stopped_nodes=False,
                                   ports_to_open_on_launch=None)
+
+
+def _check_modal_compute_credentials():
+    # pylint: disable=protected-access
+    return clouds.Modal._check_compute_credentials()
+
+
+def _set_modal_config(monkeypatch, config):
+    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
+                        SimpleNamespace(config=SimpleNamespace(config=config)))
 
 
 def test_modal_catalog_regions_and_prices():
@@ -82,6 +93,97 @@ def test_modal_label_validation():
     valid, message = clouds.Modal.is_label_valid('domain/key', 'value')
     assert not valid
     assert 'Invalid label key' in message
+
+
+def test_modal_credentials_from_env(monkeypatch):
+    monkeypatch.setenv('MODAL_TOKEN_ID', 'token-id')
+    monkeypatch.setenv('MODAL_TOKEN_SECRET', 'token-secret')
+    _set_modal_config(monkeypatch, {})
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert ok
+    assert message is None
+
+
+def test_modal_credentials_require_modal_package(monkeypatch):
+
+    class MissingModal:
+
+        @property
+        def config(self):
+            raise ImportError('missing modal')
+
+    monkeypatch.setenv('MODAL_TOKEN_ID', 'token-id')
+    monkeypatch.setenv('MODAL_TOKEN_SECRET', 'token-secret')
+    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal', MissingModal())
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert not ok
+    assert 'Failed to access Modal credentials' in message
+
+
+@pytest.mark.parametrize('env_var', ['MODAL_TOKEN_ID', 'MODAL_TOKEN_SECRET'])
+def test_modal_credentials_reject_partial_env(monkeypatch, env_var):
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    monkeypatch.setenv(env_var, 'token')
+    _set_modal_config(monkeypatch, {})
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert not ok
+    assert 'Set both MODAL_TOKEN_ID and MODAL_TOKEN_SECRET' in message
+
+
+def test_modal_credentials_from_config(monkeypatch):
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    _set_modal_config(monkeypatch, {
+        'token_id': 'token-id',
+        'token_secret': 'token-secret',
+    })
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert ok
+    assert message is None
+
+
+def test_modal_credentials_missing(monkeypatch):
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    _set_modal_config(monkeypatch, {})
+
+    ok, message = _check_modal_compute_credentials()
+
+    assert not ok
+    assert 'Modal credentials were not found' in message
+
+
+def test_modal_credential_file_mounts_from_env(monkeypatch, tmp_path):
+    credential_file = tmp_path / 'modal.toml'
+    credential_file.write_text('[default]\ntoken_id = "token-id"\n')
+    monkeypatch.setenv('MODAL_TOKEN_ID', 'token-id')
+    monkeypatch.setenv('MODAL_TOKEN_SECRET', 'token-secret')
+    monkeypatch.setattr(modal_cloud.os.path, 'expanduser',
+                        lambda path: str(credential_file))
+
+    assert not clouds.Modal().get_credential_file_mounts()
+
+
+def test_modal_credential_file_mounts_from_file(monkeypatch, tmp_path):
+    credential_file = tmp_path / 'modal.toml'
+    credential_file.write_text('[default]\ntoken_id = "token-id"\n')
+    monkeypatch.delenv('MODAL_TOKEN_ID', raising=False)
+    monkeypatch.delenv('MODAL_TOKEN_SECRET', raising=False)
+    monkeypatch.setattr(modal_cloud.os.path, 'expanduser',
+                        lambda path: str(credential_file))
+
+    assert clouds.Modal().get_credential_file_mounts() == {
+        '~/.modal.toml': '~/.modal.toml',
+    }
 
 
 def test_modal_deploy_variables_auto_region():
