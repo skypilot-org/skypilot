@@ -39,14 +39,10 @@ exec /usr/sbin/sshd -D -e -p {SSH_PORT}
 
 def get_active_sandboxes_by_name(name: str) -> Dict[str, Any]:
     try:
-        app = get_app(create_if_missing=False)
+        sandbox = modal_adaptor.modal.Sandbox.from_name(APP_NAME, name)
     except Exception:  # pylint: disable=broad-except
         return {}
-    sandboxes = {}
-    for sandbox in modal_adaptor.modal.Sandbox.list(app_id=app.app_id):
-        if getattr(sandbox, 'name', None) == name:
-            sandboxes[sandbox.object_id] = sandbox
-    return sandboxes
+    return {sandbox.object_id: sandbox}
 
 
 def get_head_sandbox(cluster_name_on_cloud: str):
