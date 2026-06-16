@@ -665,6 +665,7 @@ export function Clusters() {
         filters={filters}
         userScope={userScope}
         currentUser={currentUser}
+        onViewAllClusters={() => selectScope('all')}
         showHistory={showHistory}
         historyDays={historyDays}
         onOpenSSHModal={(cluster) => {
@@ -702,6 +703,7 @@ export function ClusterTable({
   filters,
   userScope,
   currentUser,
+  onViewAllClusters,
   showHistory,
   historyDays,
   onOpenSSHModal,
@@ -911,6 +913,11 @@ export function ClusterTable({
     userScope,
     currentUser,
   ]);
+
+  const everyoneTotal = useMemo(() => {
+    const source = isServerPagination ? hookData : allData;
+    return (source || []).length;
+  }, [hookData, allData, isServerPagination]);
 
   // Expose refresh to parent component
   React.useEffect(() => {
@@ -1339,18 +1346,44 @@ export function ClusterTable({
                   );
                 })
               ) : (
-                <EmptyTableState
-                  colSpan={totalColSpan}
-                  icon={<ServerIcon className="w-5 h-5" />}
-                  title={
-                    showHistory ? 'No clusters found' : 'No active clusters'
-                  }
-                  description={
-                    showHistory
-                      ? 'No clusters in the selected time range'
-                      : 'Launch a cluster to run your workloads'
-                  }
-                />
+                userScope === 'mine' &&
+                currentUser &&
+                !(filters || []).some(
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
+                ) &&
+                everyoneTotal > 0 ? (
+                  <EmptyTableState
+                    colSpan={totalColSpan}
+                    icon={<ServerIcon className="w-5 h-5" />}
+                    title={`You don't have any${showHistory ? '' : ' active'} clusters${showHistory ? ' yet' : ''}`}
+                    description={`${everyoneTotal.toLocaleString()} cluster${
+                      everyoneTotal === 1 ? '' : 's'
+                    } in total — switch to All Clusters to see them.`}
+                    action={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onViewAllClusters}
+                        className="text-sky-blue hover:text-sky-blue-bright"
+                      >
+                        View all clusters
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <EmptyTableState
+                    colSpan={totalColSpan}
+                    icon={<ServerIcon className="w-5 h-5" />}
+                    title={
+                      showHistory ? 'No clusters found' : 'No active clusters'
+                    }
+                    description={
+                      showHistory
+                        ? 'No clusters in the selected time range'
+                        : 'Launch a cluster to run your workloads'
+                    }
+                  />
+                )
               )}
             </TableBody>
           </Table>
