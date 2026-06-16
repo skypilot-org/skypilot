@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 54  # managed jobs queue submission-time filter (--since/--after/--before)
+API_VERSION = 55  # WAITING request status
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -72,6 +72,12 @@ MIN_PREFERRED_WORKSPACE_API_VERSION = 53
 # --since / --after / --before flags). Older servers silently ignore these
 # fields, so the client warns and shows all jobs.
 MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION = 54
+
+# Servers >= this version may report the WAITING request status (a request
+# parked off its worker while waiting for a retry/resume condition). Older
+# clients don't know the value and would crash parsing it, so the server
+# downgrades WAITING to RUNNING on the wire for clients below this version.
+MIN_WAITING_STATUS_API_VERSION = 55
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
