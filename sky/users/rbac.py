@@ -348,12 +348,13 @@ def get_role_rank(role: str) -> int:
 
 def caller_can_grant_role(caller_roles: List[str], granted_role: str) -> bool:
     """Return whether caller_roles may assign granted_role to another user."""
-    if granted_role not in get_supported_roles():
+    granted_rank = get_role_rank(granted_role)
+    if granted_rank == -1:
         return False
     if not caller_roles:
         return False
     caller_rank = max(get_role_rank(role) for role in caller_roles)
-    return get_role_rank(granted_role) <= caller_rank
+    return granted_rank <= caller_rank
 
 
 def get_default_role() -> str:

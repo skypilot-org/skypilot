@@ -166,3 +166,6 @@ class TestCallerCanGrantRole:
 
     def test_empty_caller_roles_cannot_grant(self):
         assert not rbac.caller_can_grant_role([], 'user')
+
+    def test_invalid_granted_role_returns_false(self):
+        assert not rbac.caller_can_grant_role(['admin'], 'superadmin')

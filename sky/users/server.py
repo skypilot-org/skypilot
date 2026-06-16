@@ -69,8 +69,7 @@ def get_user_type(user: models.User) -> str:
 
 def _assert_caller_can_grant_role(caller_id: str, role: str) -> None:
     """Ensure the caller may assign role to another identity."""
-    supported_roles = rbac.get_supported_roles()
-    if role not in supported_roles:
+    if rbac.get_role_rank(role) == -1:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
     caller_roles = permission.permission_service.get_user_roles(caller_id)
