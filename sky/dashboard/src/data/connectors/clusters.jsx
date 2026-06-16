@@ -637,7 +637,6 @@ export function useClusterData(options = {}) {
 
     let allClusters;
     if (showHistory) {
-      // "All" view: live clusters plus terminated ones from history.
       const activeClusters = await dashboardCache.get(getClusters);
       let historyClusters = [];
       try {
@@ -649,11 +648,6 @@ export function useClusterData(options = {}) {
         console.error('Error fetching cluster history:', historyError);
       }
 
-      // cost_report also returns active clusters, so only keep truly
-      // terminated rows from history (status === TERMINATED); the live
-      // rows come from cluster_table above and carry fresher data. Drop
-      // any history row that's still present in the active set (matched by
-      // cluster_hash) to avoid duplicate rows.
       const activeHashes = new Set(
         activeClusters.map((c) => c.cluster_hash).filter(Boolean)
       );
