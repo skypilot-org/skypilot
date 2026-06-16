@@ -218,6 +218,10 @@ class Request:
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
+        # encode() may downgrade WAITING -> RUNNING for clients on an older API
+        # version; that is a wire-only concern. to_row() feeds the database, so
+        # always persist the true status regardless of the request context.
+        payload.status = self.status.value
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -483,12 +487,12 @@ def create_table(cursor, conn):
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'WAITING', 'RUNNING');
     """)
     # Add an index on cluster_name to speed up queries
     # that filter on this column.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'WAITING', 'RUNNING');
     """)
     # Add an index on created_at to speed up queries that sort on this column.
     cursor.execute(f"""\

@@ -1912,3 +1912,19 @@ def test_encode_downgrades_waiting_for_old_clients(remote_api_version,
         assert requests.encode_requests([request])[0].status == expected
         assert request.readable_encode().status == expected
         assert request.encode().status == expected
+
+
+def test_to_row_keeps_true_status_for_old_clients(remote_api_version):
+    """to_row() (the DB path) must never persist the wire-downgraded status.
+
+    encode() downgrades WAITING -> RUNNING for old clients; to_row() feeds the
+    database, so it must store the true WAITING status regardless of the
+    request context, or the WAITING state would be silently lost.
+    """
+    remote_api_version(server_constants.MIN_WAITING_STATUS_API_VERSION - 1)
+    request = _waiting_request()
+    status_idx = requests.REQUEST_COLUMNS.index('status')
+
+    # Same context: the wire encoding downgrades, the DB row does not.
+    assert request.encode().status == 'RUNNING'
+    assert request.to_row()[status_idx] == 'WAITING'
