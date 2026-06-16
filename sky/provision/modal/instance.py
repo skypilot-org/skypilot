@@ -7,6 +7,7 @@ from sky.adaptors import modal as modal_adaptor
 from sky.provision import common
 from sky.provision.modal import modal_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -75,6 +76,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     modal_memory = config.node_config.get('Memory')
     modal_timeout = config.node_config.get('Timeout')
     modal_idle_timeout = config.node_config.get('IdleTimeout')
+    modal_docker_image = config.node_config.get('DockerImage')
+    user_ports = sorted(
+        set(config.ports_to_open_on_launch or []) - {modal_utils.SSH_PORT})
     sandbox = modal_adaptor.modal.Sandbox.create(
         'bash',
         '-lc',
@@ -84,7 +88,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         tags={
             'skypilot-cluster': cluster_name_on_cloud,
         },
-        image=modal_utils.get_image(),
+        image=modal_utils.get_image(modal_docker_image),
+        encrypted_ports=user_ports,
         unencrypted_ports=[modal_utils.SSH_PORT],
         timeout=modal_timeout,
         idle_timeout=modal_idle_timeout,
@@ -200,7 +205,8 @@ def open_ports(cluster_name_on_cloud: str,
                ports: List[str],
                provider_config: Optional[Dict[str, Any]] = None) -> None:
     del cluster_name_on_cloud, ports, provider_config  # unused
-    raise NotImplementedError('Opening ports is not supported for Modal yet.')
+    # Modal Sandbox tunnels are immutable after Sandbox.create().
+    # SkyPilot passes launch-time ports through ProvisionConfig.
 
 
 def cleanup_ports(cluster_name_on_cloud: str,
@@ -215,5 +221,20 @@ def query_ports(
     head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
-    del cluster_name_on_cloud, provider_config  # unused
-    return common.query_ports_passthrough(ports, head_ip)
+    del head_ip, provider_config  # unused
+    sandbox = modal_utils.get_head_sandbox(cluster_name_on_cloud)
+    if sandbox is None:
+        return {}
+
+    ports_to_query = resources_utils.port_ranges_to_set(ports)
+    result: Dict[int, List[common.Endpoint]] = {}
+    user_ports = sorted(ports_to_query - {modal_utils.SSH_PORT})
+    for port, endpoint in modal_utils.get_port_tunnels(sandbox,
+                                                       user_ports).items():
+        result[port] = [endpoint]
+    if modal_utils.SSH_PORT in ports_to_query:
+        host, port = modal_utils.get_ssh_tunnel(sandbox)
+        result[modal_utils.SSH_PORT] = [
+            common.SocketEndpoint(host=host, port=port)
+        ]
+    return result
