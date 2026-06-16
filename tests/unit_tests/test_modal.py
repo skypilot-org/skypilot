@@ -9,6 +9,7 @@ from sky import resources as resources_lib
 from sky.catalog import modal_catalog
 from sky.provision import common
 from sky.provision.modal import instance as modal_instance
+from sky.provision.modal import modal_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 
@@ -182,6 +183,25 @@ def test_modal_run_instances_reuses_existing_sandbox(monkeypatch):
     assert record.head_instance_id == 'sb-existing'
     assert not record.created_instance_ids
     assert not record.resumed_instance_ids
+
+
+def test_modal_get_active_sandboxes_by_name(monkeypatch):
+    sandbox = SimpleNamespace(object_id='sb-existing')
+
+    class FakeSandbox:
+
+        @staticmethod
+        def from_name(app_name, name):
+            assert app_name == modal_utils.APP_NAME
+            assert name == 'test-on-cloud'
+            return sandbox
+
+    monkeypatch.setattr(modal_utils.modal_adaptor, 'modal',
+                        SimpleNamespace(Sandbox=FakeSandbox))
+
+    assert modal_utils.get_active_sandboxes_by_name('test-on-cloud') == {
+        'sb-existing': sandbox
+    }
 
 
 def test_modal_query_instances_filters_terminated(monkeypatch):
