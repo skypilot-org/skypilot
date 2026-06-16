@@ -519,23 +519,46 @@ def set_child_subreaper() -> None:
 
 
 # Handles to the short-lived first-fork parents spawned by
-# kill_process_daemon (see there). We poll-reap them opportunistically on
-# the next kill_process_daemon call rather than blocking or spawning a
-# thread per call.
+# kill_process_daemon (see there). A single, lazily-started background
+# thread reaps them as they exit. We use one persistent thread rather than
+# reaping on the next kill_process_daemon call: a caller that spawns a
+# daemon and then goes idle (e.g. the jobs/serve/pool controller after it
+# scales a pool down to zero) would otherwise leave its last intermediate
+# as a lingering zombie, which subprocess_daemon's wedge sweep then misreads
+# as a wedged parent. One thread per process, polling a small list, is cheap.
 _pending_daemon_procs: List[subprocess.Popen] = []
 _daemon_procs_lock = threading.Lock()
+_daemon_reaper_started = False
 
 
 def _reap_finished_daemon_procs() -> None:
     """Reap any already-exited daemon first-fork intermediates (non-blocking).
 
-    poll() reaps a finished child and returns its code; a still-running one
+    poll() reaps an exited child (returns its code); a still-running one
     returns None and is kept for the next pass.
     """
     with _daemon_procs_lock:
         _pending_daemon_procs[:] = [
             p for p in _pending_daemon_procs if p.poll() is None
         ]
+
+
+def _daemon_reaper_loop() -> None:
+    while True:
+        time.sleep(1)
+        _reap_finished_daemon_procs()
+
+
+def _ensure_daemon_reaper() -> None:
+    """Start the background reaper thread once per process."""
+    global _daemon_reaper_started
+    with _daemon_procs_lock:
+        if _daemon_reaper_started:
+            return
+        _daemon_reaper_started = True
+    threading.Thread(target=_daemon_reaper_loop,
+                     daemon=True,
+                     name='sky-daemon-reaper').start()
 
 
 def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
@@ -590,12 +613,12 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     # spawn here is the first-fork parent: it sys.exit()s within a few
     # hundred ms once the detached grandchild is running. We must reap it,
     # or it lingers as a zombie under us until CPython GCs the Popen handle.
-    # On a long-lived caller (the jobs/serve/pool controller invokes
-    # run_with_log -> kill_process_daemon constantly) those zombies pile up.
-    # _reap_finished_daemon_procs() drains previously-finished intermediates
-    # without blocking (a fresh caller that exits soon reparents its
-    # intermediate to init, which reaps it).
-    _reap_finished_daemon_procs()
+    # The background reaper (started here, once) drains exited intermediates
+    # promptly even if this caller never calls again — important for a
+    # long-lived caller that goes idle (e.g. the controller after scaling a
+    # pool to zero), whose lingering intermediate would otherwise be misread
+    # as a wedge by subprocess_daemon.
+    _ensure_daemon_reaper()
     daemon_proc = subprocess.Popen(
         daemon_cmd,
         # Suppress output
