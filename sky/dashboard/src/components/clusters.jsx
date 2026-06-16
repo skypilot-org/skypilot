@@ -914,10 +914,17 @@ export function ClusterTable({
     currentUser,
   ]);
 
-  const everyoneTotal = useMemo(() => {
+  // Number of clusters in the current view owned by *other* users, i.e. how
+  // many rows switching to "All Clusters" would actually reveal. Used to gate
+  // the empty-state CTA so we don't nudge to All when there's nothing to show.
+  const othersTotal = useMemo(() => {
+    if (!currentUser) return 0;
     const source = isServerPagination ? hookData : allData;
-    return (source || []).length;
-  }, [hookData, allData, isServerPagination]);
+    return (source || []).filter(
+      (item) =>
+        item.user_hash !== currentUser.id && item.user !== currentUser.name
+    ).length;
+  }, [hookData, allData, isServerPagination, currentUser]);
 
   // Expose refresh to parent component
   React.useEffect(() => {
@@ -1351,14 +1358,14 @@ export function ClusterTable({
                 !(filters || []).some(
                   (f) => (f.property || '').toLowerCase() === 'user' && f.value
                 ) &&
-                everyoneTotal > 0 ? (
+                othersTotal > 0 ? (
                   <EmptyTableState
                     colSpan={totalColSpan}
                     icon={<ServerIcon className="w-5 h-5" />}
                     title={`You don't have any${showHistory ? '' : ' active'} clusters${showHistory ? ' yet' : ''}`}
-                    description={`${everyoneTotal.toLocaleString()} cluster${
-                      everyoneTotal === 1 ? '' : 's'
-                    } in total — switch to All Clusters to see them.`}
+                    description={`${othersTotal.toLocaleString()} cluster${
+                      othersTotal === 1 ? '' : 's'
+                    } owned by other users — switch to All Clusters to see them.`}
                     action={
                       <Button
                         variant="outline"
