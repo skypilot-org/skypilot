@@ -27,7 +27,7 @@ import {
 import { UI_CONFIG } from '@/lib/config';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { formatYaml } from '@/lib/yamlUtils';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import {
   Table,
   TableHeader,
@@ -551,11 +551,10 @@ export default function PoolDetailPage() {
                     </div>
 
                     {isPoolYamlExpanded && (
-                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                        <YamlHighlighter className="whitespace-pre-wrap">
-                          {formatYaml(poolData.pool_yaml)}
-                        </YamlHighlighter>
-                      </div>
+                      <YamlCodeBlock
+                        value={formatYaml(poolData.pool_yaml)}
+                        readOnly
+                      />
                     )}
                   </div>
                 )}

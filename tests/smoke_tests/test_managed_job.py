@@ -88,6 +88,24 @@ def test_managed_jobs_basic(generic_cloud: str):
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            # Filtering by --status keeps matching jobs and drops the rest:
+            # {name}-1 is CANCELLED, {name}-2 is RUNNING/SUCCEEDED. Use
+            # lowercase to exercise case-insensitive matching.
+            f's=$(sky jobs queue --status cancelled); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # Comma-separated values are also accepted.
+            f's=$(sky jobs queue --status running,succeeded); echo "$s"; '
+            f'echo "$s" | grep {name}-2 && ! echo "$s" | grep {name}-1',
+            # Time-range filtering: both jobs were just submitted, so --since
+            # keeps them, while an absolute upper bound in the distant past
+            # drops them.
+            f's=$(sky jobs queue --since 1h); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && echo "$s" | grep {name}-2',
+            f's=$(sky jobs queue --before 2020-01-01); echo "$s"; '
+            f'! echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # --since and --after are mutually exclusive (rejected client-side).
+            's=$(sky jobs queue --since 1h --after 2020-01-01 2>&1) || true; '
+            'echo "$s"; echo "$s" | grep -i "mutually exclusive"',
         ],
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.

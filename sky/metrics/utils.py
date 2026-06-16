@@ -214,6 +214,28 @@ SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+# Managed-job claim ownership loss (consolidation mode only).
+# A nonzero, sustained rate is the quiet signature of wrongful resets that
+# previously surfaced as FAILED_CONTROLLER storms -- alert on it.
+# `detection` labels how the loss was found: fence (a fenced state write),
+# preaction (a launch/recovery pre-check), tick (the idle-monitor periodic
+# check), or collision (the controller observed its own job back in WAITING).
+SKY_MANAGED_JOBS_OWNERSHIP_LOST_TOTAL = prom.Counter(
+    'sky_managed_jobs_ownership_lost_total',
+    'Number of times a controller detected it lost a managed job claim',
+    ['detection', 'pid'],
+)
+
+# Graceful stand-downs performed after an ownership loss, labeled by the
+# verdict reached over the job's ownership row (see
+# ControllerManager._stand_down): reclaimed, unclaimed, mixed_version,
+# claim_is_ours, row_gone, or read_failed.
+SKY_MANAGED_JOBS_STANDDOWN_TOTAL = prom.Counter(
+    'sky_managed_jobs_standdown_total',
+    'Number of managed-job controller stand-downs, by verdict',
+    ['verdict', 'pid'],
+)
+
 
 @contextlib.contextmanager
 def time_it(name: str, group: str = 'default'):
@@ -479,6 +501,28 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
     return '\n'.join(modified_lines)
 
 
+# Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
+# CPU/memory, kube_pod_labels, and cAdvisor container metrics (per-pod
+# CPU/Memory in the Telemetry section joins on (pod, namespace) with
+# kube_pod_labels — same join shape the GPU panels use to filter by SkyPilot
+# cluster name).
+GPU_METRICS_MATCH_PATTERNS = [
+    '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
+    'kube_pod_labels',
+    'node_cpu_seconds_total{mode="idle"}',
+    'container_cpu_usage_seconds_total{container!="",container!="POD"}',
+    'container_memory_working_set_bytes{container!="",container!="POD"}',
+    # GPU allocation metrics — pod requests + node capacity for nvidia/amd
+    # GPUs. Enables cluster-wide % allocated computations.
+    # NOTE: kube-state-metrics sanitizes resource names by replacing
+    # `.` and `/` with `_`, so the label value is `nvidia_com_gpu` (not
+    # `nvidia.com/gpu`). Getting this wrong causes the match to return 0
+    # series while the scrape still succeeds.
+    'kube_pod_container_resource_requests{resource=~"nvidia_com_gpu|amd_com_gpu"}',  # pylint: disable=line-too-long
+    'kube_node_status_allocatable{resource=~"nvidia_com_gpu|amd_com_gpu"}',
+]
+
+
 async def get_metrics_for_context(context: str) -> str:
     """Get GPU metrics for a single Kubernetes context.
     Args:
@@ -488,27 +532,52 @@ async def get_metrics_for_context(context: str) -> str:
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    # Query DCGM, host CPU/memory, kube_pod_labels, and cAdvisor container
-    # metrics. The container_* metrics enable per-pod CPU/Memory in the
-    # Telemetry section by joining on (pod, namespace) with kube_pod_labels —
-    # same join shape the GPU panels use to filter by SkyPilot cluster name.
-    match_patterns = [
-        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
-        'kube_pod_labels',
-        'node_cpu_seconds_total{mode="idle"}',
-        'container_cpu_usage_seconds_total{container!="",container!="POD"}',
-        'container_memory_working_set_bytes{container!="",container!="POD"}',
-        # GPU allocation metrics — pod requests + node capacity for nvidia/amd
-        # GPUs. Enables cluster-wide % allocated computations.
-        # NOTE: kube-state-metrics sanitizes resource names by replacing
-        # `.` and `/` with `_`, so the label value is `nvidia_com_gpu` (not
-        # `nvidia.com/gpu`). Getting this wrong causes the match to return 0
-        # series while the scrape still succeeds.
-        'kube_pod_container_resource_requests{resource=~"nvidia_com_gpu|amd_com_gpu"}',  # pylint: disable=line-too-long
-        'kube_node_status_allocatable{resource=~"nvidia_com_gpu|amd_com_gpu"}',
-    ]
+    match_patterns = GPU_METRICS_MATCH_PATTERNS
 
     # TODO(rohan): don't hardcode the namespace and service name
+    metrics_text = await send_metrics_request_with_port_forward(
+        context=context,
+        namespace='skypilot',
+        service='skypilot-prometheus-server',
+        service_port=80,
+        endpoint_path='/federate',
+        match_patterns=match_patterns)
+
+    # add cluster name as a label to each metric line
+    metrics_text = await add_cluster_name_label(metrics_text, context)
+
+    return metrics_text
+
+
+# Series federated from each context's Prometheus by /endpoints-metrics: the
+# serving engines' native metrics (vllm:* today; future engines append their
+# prefixes, e.g. sglang:*), plus the workload kube-state-metrics the
+# Autoscaling dashboard plots — Deployment replica counts and the
+# autoscaler-managed HPA target threshold. These ride the endpoints route
+# (not /gpu-metrics) because they exist solely for endpoint observability.
+ENDPOINT_METRICS_MATCH_PATTERNS = [
+    '{__name__=~"vllm:.*"}',
+    '{__name__=~"kube_deployment_.*|kube_horizontalpodautoscaler_spec_target_metric"}',  # pylint: disable=line-too-long
+]
+
+
+async def get_endpoint_metrics_for_context(context: str) -> str:
+    """Get Sky Endpoint serving-engine metrics for a single K8s context.
+
+    Mirrors get_metrics_for_context() but federates the serving engines'
+    native Prometheus series instead of DCGM/node metrics. vLLM exports
+    ``vllm:*``-prefixed names; future engines append their own prefixes
+    here (e.g. ``sglang:*``).
+
+    Args:
+        context: Kubernetes context name
+    Returns:
+        metrics_text: String containing the metrics
+    Raises:
+        Exception: If metrics collection fails for any reason
+    """
+    match_patterns = ENDPOINT_METRICS_MATCH_PATTERNS
+
     metrics_text = await send_metrics_request_with_port_forward(
         context=context,
         namespace='skypilot',

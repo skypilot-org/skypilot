@@ -178,6 +178,9 @@ def queue_v2(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    statuses: Optional[List[str]] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -193,6 +196,11 @@ def queue_v2(
         fields: Fields to get for the managed jobs.
         sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
         sort_order: Sort direction ('asc' or 'desc').
+        statuses: Only return jobs whose status is in this list.
+        submitted_after: Only show jobs submitted at or after this epoch time
+            (seconds).
+        submitted_before: Only show jobs submitted at or before this epoch
+            time (seconds).
 
     Returns:
         The request ID of the queue request.
@@ -242,6 +250,15 @@ def queue_v2(
             if remote_api_version is None or remote_api_version < min_version:
                 fields = [f for f in fields if f not in new_fields]
 
+    remote_api_version = versions.get_remote_api_version()
+    if ((submitted_after is not None or submitted_before is not None) and
+            remote_api_version is not None and remote_api_version <
+            server_constants.MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION):
+        logger.warning(
+            'Filtering managed jobs by submission time is not supported in '
+            'your API server; the server will ignore it and show all jobs. '
+            'Please upgrade the API server to enable it.')
+
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
@@ -251,6 +268,9 @@ def queue_v2(
         fields=fields,
         sort_by=sort_by,
         sort_order=sort_order,
+        statuses=statuses,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(

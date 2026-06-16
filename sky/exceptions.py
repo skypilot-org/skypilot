@@ -257,6 +257,22 @@ class ManagedJobStatusError(Exception):
     pass
 
 
+class JobOwnershipLostError(Exception):
+    """Raised when a controller's claim on a managed job is no longer current.
+
+    A fenced state write or pre-action ownership check found that the job's
+    claim_id no longer matches the claim this controller holds: the job was
+    reset (e.g. by HA recovery) and possibly re-claimed by another
+    controller. The holder must stand down gracefully -- no further state
+    writes for the job, and no teardown of resources a new claimant may be
+    using.
+    """
+
+    def __init__(self, job_id: int):
+        super().__init__(f'Ownership of managed job {job_id} was lost')
+        self.job_id = job_id
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass
@@ -724,6 +740,33 @@ class ExecutionRetryableError(Exception):
     def __reduce__(self):
         # Make sure the exception is picklable
         return (self.__class__, (str(self), self.hint, self.retry_wait_seconds))
+
+
+class ExecutionPausedError(ExecutionRetryableError):
+    """Pause execution mid-attempt while keeping provisioned resources.
+
+    Raised from inside an in-progress attempt waiting on an external condition
+    (e.g. admission or quota). The partially provisioned resources are kept so
+    the request can resume, so teardown layers must not clean up the resources.
+
+    ``continue_condition`` optionally says how to wait for the resume signal
+    (see ``continue_condition.py``); it must be picklable, as the error crosses
+    the worker/scheduler process boundary. ``retry_wait_seconds`` is the
+    fallback wait when it is absent.
+    """
+
+    def __init__(self,
+                 message: str,
+                 hint: str,
+                 retry_wait_seconds: int,
+                 continue_condition: Optional[Any] = None) -> None:
+        super().__init__(message, hint, retry_wait_seconds)
+        self.continue_condition = continue_condition
+
+    def __reduce__(self):
+        # Make sure the exception is picklable
+        return (self.__class__, (str(self), self.hint, self.retry_wait_seconds,
+                                 self.continue_condition))
 
 
 class ExecutionPoolFullError(Exception):

@@ -3,10 +3,13 @@
 Tests for sky status -o json, sky jobs queue -o json, sky gpus list -o json,
 sky api status -o json, sky queue -o json, and sky cost-report -o json.
 """
+import datetime
 import json
+import time
 from unittest import mock
 
 from click import testing as cli_testing
+import pytest
 
 from sky.catalog import common as catalog_common
 from sky.client import sdk
@@ -187,6 +190,154 @@ class TestJobsQueueJsonOutput:
         parsed = json.loads(result.output)
         assert len(parsed) == 2
         assert parsed[1]['status'] == 'SUCCEEDED'
+
+    @pytest.mark.parametrize(
+        'args,expected',
+        [
+            # Repeated flag.
+            (['--status', 'FAILED', '--status', 'FAILED_SETUP'
+             ], ['FAILED', 'FAILED_SETUP']),
+            # Comma-separated single flag.
+            (['--status', 'FAILED,FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']),
+            # Mixed repeated + comma-separated, order preserved.
+            (['--status', 'RUNNING,FAILED', '--status', 'FAILED_SETUP'
+             ], ['RUNNING', 'FAILED', 'FAILED_SETUP']),
+            # Case-insensitive, with surrounding whitespace.
+            (['--status', 'failed, failed_setup'], ['FAILED', 'FAILED_SETUP']),
+            # The -s short flag works the same as --status.
+            (['-s', 'FAILED', '-s', 'FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']
+            ),
+            (['-s', 'FAILED,FAILED_SETUP'], ['FAILED', 'FAILED_SETUP']),
+        ])
+    def test_status_filter_forwarded(self, monkeypatch, args, expected):
+        """-s/--status accepts repeated and comma-separated values as a list."""
+        records = [self._make_job_record()]
+        mock_result = (records, 1, {'RUNNING': 1}, 0)
+        captured = {}
+
+        def fake_get_managed_job_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_get_managed_job_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *a, **kw: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.jobs_queue, ['-o', 'json'] + args)
+
+        assert result.exit_code == 0, result.output
+        assert captured['statuses'] == expected
+
+    def test_status_filter_rejects_invalid(self):
+        """An unknown status value is rejected with a non-zero exit code."""
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.jobs_queue,
+                               ['-o', 'json', '--status', 'FAILED,BOGUS'])
+        assert result.exit_code != 0
+        assert 'BOGUS' in result.output
+
+    def _run_capturing(self, monkeypatch, args):
+        """Invoke jobs_queue with args, returning (result, captured kwargs)."""
+        records = [self._make_job_record()]
+        mock_result = (records, 1, {'RUNNING': 1}, 0)
+        captured = {}
+
+        def fake_get_managed_job_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_get_managed_job_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *a, **kw: mock_result)
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.jobs_queue, ['-o', 'json'] + args)
+        return result, captured
+
+    def test_bare_s_is_deprecated_skip_finished_alias(self, monkeypatch):
+        """A bare -s (no value) maps to skip_finished and warns (TODO: 0.15.0).
+
+        statuses is not forwarded (the sentinel is stripped).
+        """
+        result, captured = self._run_capturing(monkeypatch, ['-s'])
+        assert result.exit_code == 0, result.output
+        assert captured['skip_finished'] is True
+        assert captured['statuses'] is None
+        assert 'deprecated' in result.output.lower()
+
+    def test_skip_finished_long_flag_does_not_warn(self, monkeypatch):
+        """--skip-finished keeps working and is not deprecated."""
+        result, captured = self._run_capturing(monkeypatch, ['--skip-finished'])
+        assert result.exit_code == 0, result.output
+        assert captured['skip_finished'] is True
+        assert captured['statuses'] is None
+        assert 'deprecated' not in result.output.lower()
+
+
+class TestJobsQueueTimeRangeFilter:
+    """Tests for --since / --after / --before on `sky jobs queue`."""
+
+    def _install(self, monkeypatch):
+        """Mock the queue call and capture the kwargs it receives."""
+        captured = {}
+
+        def fake_queue(**kw):
+            captured.update(kw)
+            return ('req-1', mock.MagicMock(v2=lambda: True))
+
+        monkeypatch.setattr('sky.client.cli.utils.get_managed_job_queue',
+                            fake_queue)
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get', lambda *a, **kw:
+                            ([], 0, {}, 0))
+        return captured
+
+    def test_since_sets_relative_submitted_after(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        lo = time.time() - 7 * 86400
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--since', '7d'])
+        hi = time.time() - 7 * 86400
+        assert result.exit_code == 0, result.output
+        assert lo <= captured['submitted_after'] <= hi
+        assert captured['submitted_before'] is None
+
+    def test_after_before_set_absolute_bounds(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(
+            command.jobs_queue,
+            ['--after', '2026-01-01', '--before', '2026-01-31'])
+        assert result.exit_code == 0, result.output
+        assert captured['submitted_after'] == datetime.datetime(
+            2026, 1, 1).astimezone().timestamp()
+        assert captured['submitted_before'] == datetime.datetime(
+            2026, 1, 31).astimezone().timestamp()
+
+    def test_after_accepts_datetime_with_time(self, monkeypatch):
+        captured = self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(
+            command.jobs_queue, ['--after', '2026-01-13 15:30:00'])
+        assert result.exit_code == 0, result.output
+        assert captured['submitted_after'] == datetime.datetime(
+            2026, 1, 13, 15, 30, 0).astimezone().timestamp()
+
+    def test_since_and_after_are_mutually_exclusive(self, monkeypatch):
+        self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(
+            command.jobs_queue, ['--since', '7d', '--after', '2026-01-01'])
+        assert result.exit_code != 0
+        assert 'mutually exclusive' in result.output
+
+    def test_invalid_after_is_rejected(self, monkeypatch):
+        self._install(monkeypatch)
+        result = cli_testing.CliRunner().invoke(command.jobs_queue,
+                                                ['--after', 'not-a-date'])
+        assert result.exit_code != 0
+        assert 'Invalid date/time' in result.output
 
 
 class TestGpusListJsonOutput:
