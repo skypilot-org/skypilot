@@ -416,13 +416,19 @@ def main():
         # (see _zombie_wedge_sweep below).
         zombie_first_seen: Dict[int, float] = {}
         # Reaping-progress tracking for the wedge sweep. last_reap_at maps a
-        # parent pid -> the most recent monotonic time we saw it reap a child
-        # (a child present last tick, gone this tick, parent still alive).
-        # prev_child_ppids is last tick's {pid: ppid} snapshot used to detect
-        # those disappearances. A live daemon reaps continuously so its
-        # last_reap_at keeps advancing; a wedged parent never reaps.
+        # parent pid -> the most recent monotonic time we observed it reap a
+        # child. A live daemon reaps continuously so its last_reap_at keeps
+        # advancing; a genuinely wedged parent reaps nothing. We detect a
+        # reap two ways (see the loop): a tracked child disappearing, and the
+        # parent's cumulative reaped-children CPU time advancing. The latter
+        # (children_user/system from cpu_times(), i.e. cutime/cstime) is
+        # bumped by the kernel on every wait() — including reaps that begin
+        # and finish within one poll interval, which the disappearance check
+        # cannot see. prev_child_ppids / prev_children_cpu hold last tick's
+        # snapshots used for those comparisons.
         last_reap_at: Dict[int, float] = {}
         prev_child_ppids: Dict[int, int] = {}
+        prev_children_cpu: Dict[int, float] = {}
         proc_pid = process.pid
         parent_pid = parent_process.pid
         # proc_sid (captured above) gates the PPID-transition reap below so
@@ -447,24 +453,37 @@ def main():
                 # Refresh process tree for cleanup if process group is not
                 # available.
                 children = tmp_children
-            # Reaping-progress detection (feeds the wedge sweep below): a
-            # descendant present last tick but gone this tick was reaped by
-            # its still-alive parent; record that parent's reap time.
+            # Reaping-progress detection (feeds the wedge sweep below).
             now_tick = time.monotonic()
             cur_child_ppids: Dict[int, int] = {}
+            cur_children_cpu: Dict[int, float] = {}
             for child in tmp_children:
                 try:
                     cur_child_ppids[child.pid] = child.ppid()
-                except psutil.NoSuchProcess:
+                    ct = child.cpu_times()
+                    cur_children_cpu[child.pid] = (
+                        getattr(ct, 'children_user', 0.0) +
+                        getattr(ct, 'children_system', 0.0))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
             reapers_alive = set(cur_child_ppids)
             reapers_alive.add(proc_pid)
             reapers_alive.add(parent_pid)
+            # (1) A tracked descendant disappeared while its parent is alive:
+            # the parent reaped it.
             for gone_pid, gone_ppid in prev_child_ppids.items():
                 if (gone_pid not in cur_child_ppids and
                         gone_ppid in reapers_alive):
                     last_reap_at[gone_ppid] = now_tick
+            # (2) A descendant's cumulative reaped-children CPU time advanced:
+            # it reaped at least one child since last tick (catches sub-poll
+            # reaps that (1) misses). First observation (no prior value) is
+            # not a reap.
+            for pid, cpu in cur_children_cpu.items():
+                if cpu > prev_children_cpu.get(pid, cpu):
+                    last_reap_at[pid] = now_tick
             prev_child_ppids = cur_child_ppids
+            prev_children_cpu = cur_children_cpu
             last_reap_at = {
                 pid: ts
                 for pid, ts in last_reap_at.items()

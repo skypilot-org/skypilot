@@ -1123,6 +1123,64 @@ def test_kubernetes_wedged_parent_zombie_reaping():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- A busy daemon with a long-lived zombie is NOT wedge-killed.
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_busy_daemon_not_wedge_killed():
+    """A healthy busy daemon with a lingering zombie survives the wedge sweep.
+
+    Regression guard for the zombie-wedge sweep in ``subprocess_daemon``.
+    SkyPilot's own jobs/serve/pool controller is a long-lived, event-driven
+    daemon that legitimately carries one child zombie past the grace period
+    while continuously fork+reaping other short-lived children. Those reaps
+    finish within a single daemon poll interval, so the daemon cannot observe
+    them as child disappearances — only the parent's cumulative
+    reaped-children CPU time (``cutime``/``cstime``) reveals the progress.
+    The sweep must distinguish "reaping, just not this zombie" (spare) from a
+    real wedge that reaps nothing (kill); an earlier version killed the
+    controller (``CONTROLLER_FAILED``). This launches that exact shape and
+    asserts the parent and its worker are still alive well after the grace
+    period — the complement of ``test_kubernetes_wedged_parent_zombie_reaping``.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg = 'tests/test_yamls/orphan_reap_busy_daemon.yaml'
+
+    repro_and_assert = (
+        # Wait for busy_daemon.py to record its pids.
+        f'for i in $(seq 1 30); do '
+        f'ssh -o StrictHostKeyChecking=no {name} '
+        f'"test -s /tmp/child_pids.txt && test -s /tmp/parent_pid.txt" '
+        f'&& break || sleep 2; done && '
+        f'P=$(ssh {name} "cat /tmp/parent_pid.txt") && '
+        f'W=$(ssh {name} "sed -n 1p /tmp/child_pids.txt") && '
+        f'H=$(ssh {name} "sed -n 2p /tmp/child_pids.txt") && '
+        f'echo "PARENT_PID=$P WORKER=$W HELPER=$H" && '
+        # Let the helper zombie age well past the 60 s wedge grace while the
+        # parent keeps reaping its CPU-burning loop children.
+        f'sleep 80 && '
+        # The helper should still be a zombie (parent intentionally never
+        # reaps it), proving the wedge-trigger condition is met...
+        f'ssh {name} "ps -o stat= -p $H | grep -q Z" && '
+        f'echo "helper is a long-lived zombie (wedge trigger present)" && '
+        # ...yet the busy parent and its worker must NOT have been killed.
+        f'if ! ssh {name} "kill -0 $P 2>/dev/null"; then '
+        f'  echo "FAIL: busy parent $P was wedge-killed"; exit 1; fi && '
+        f'if ! ssh {name} "kill -0 $W 2>/dev/null"; then '
+        f'  echo "FAIL: worker $W was killed with the busy parent"; exit 1; fi && '
+        f'echo "PASS: busy daemon with a zombie survived the wedge sweep"')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_busy_daemon_not_wedge_killed',
+        [
+            f'sky launch -y -c {name} -d {cfg}',
+            repro_and_assert,
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Web apps with custom ports on Kubernetes. ----------
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server

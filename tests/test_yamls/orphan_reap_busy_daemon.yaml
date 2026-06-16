@@ -1,0 +1,46 @@
+resources:
+  cloud: kubernetes
+  cpus: 1+
+  memory: 2+
+
+setup: |
+  cat > /tmp/busy_daemon.py <<'PY'
+  # Regression guard for subprocess_daemon's zombie-wedge sweep: a healthy,
+  # busy, event-driven daemon (like SkyPilot's own jobs/serve/pool
+  # controller) that legitimately carries ONE long-lived child zombie while
+  # continuously fork+reaping other short-lived children. The reaps complete
+  # within a single daemon poll interval, so disappearance-detection cannot
+  # see them — only the parent's cumulative reaped-children CPU time
+  # (cutime/cstime) reveals the progress. The wedge sweep must NOT kill this
+  # process: it is reaping, just not the one zombie. Contrast with
+  # orphan_reap_sigterm_wedge.yaml, whose parent reaps nothing and IS killed.
+  import os
+  import sys
+  import time
+
+  worker = os.fork()            # long-lived "resource holder"
+  if worker == 0:
+      time.sleep(86400)
+      sys.exit(0)
+  helper = os.fork()            # exits fast, never wait()ed -> permanent zombie
+  if helper == 0:
+      time.sleep(2)
+      sys.exit(0)
+  with open("/tmp/parent_pid.txt", "w") as f:
+      f.write(str(os.getpid()) + chr(10))
+  with open("/tmp/child_pids.txt", "w") as f:
+      f.write(str(worker) + chr(10) + str(helper) + chr(10))
+  while True:                   # busy reaper: fork a CPU-burning child, reap it
+      pid = os.fork()
+      if pid == 0:
+          x = 0
+          for _ in range(3000000):
+              x += 1
+          os._exit(0)
+      os.waitpid(pid, 0)        # reap -> bumps parent cutime/cstime
+      time.sleep(0.2)
+  PY
+
+run: |
+  python3 /tmp/busy_daemon.py > /tmp/busy_daemon.log 2>&1 &
+  sleep 86400
