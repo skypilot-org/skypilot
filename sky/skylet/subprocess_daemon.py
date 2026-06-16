@@ -42,14 +42,19 @@ _LOG_PATH: Optional[str] = None
 def _same_session(child_pid: int, ref_sid: Optional[int]) -> bool:
     """Return True if `child_pid` belongs to session `ref_sid`.
 
-    This is the boundary that separates an orphan we should reap from a
-    daemon we should leave alone. We filter by session, not process group,
-    because the watched command runs under an interactive bash (`bash -i`)
-    whose job control puts every `cmd &` into its own process group while
-    keeping it in the same session; only an explicit setsid() (the real
-    detach signal used by ray's GCS, uvicorn workers, `sky api start`, etc.)
-    leaves the session. A pgid filter would wrongly treat a `&`-backgrounded
-    orphan as detached and leak it.
+    The outer boundary that separates an orphan we might reap from a daemon
+    we leave alone. We filter by session, not process group, because the
+    watched command runs under an interactive bash (`bash -i`) whose job
+    control puts every `cmd &` into its own process group while keeping it
+    in the same session; only an explicit setsid() (e.g. `sky api start`
+    background services, uvicorn supervisors) leaves the session. A pgid
+    filter would wrongly treat a `&`-backgrounded orphan as detached and
+    leak it.
+
+    Same-session is necessary but NOT sufficient to reap: some daemons stay
+    in the watched session (ray's user-space `ray start` does not setsid its
+    GCS/raylet). Callers pair this with _process_group_orphaned() to spare
+    those. See that function.
 
     Errs on the side of letting the descendant live: returns False (skip)
     on any lookup error or when the reference session is unknown.
@@ -60,6 +65,44 @@ def _same_session(child_pid: int, ref_sid: Optional[int]) -> bool:
         return os.getsid(child_pid) == ref_sid
     except (OSError, ProcessLookupError):
         return False
+
+
+def _process_group_orphaned(pid: int) -> bool:
+    """Return True if `pid`'s process group has no living leader.
+
+    The second gate (after _same_session) for the live orphan reap. A
+    process that reparents to our subreaper in the watched session is not
+    necessarily a leftover: it may be a daemon that a still-running job
+    spawned. The deciding question is whether the job that owns it — its
+    process group leader — is still alive.
+
+    Under `bash -i` job control each command (foreground or `&`) becomes a
+    process-group leader and its children inherit the group. So:
+      - An orphaned worker's group is led by the workload that just died
+        (e.g. the killed `parent.py`): leader dead -> reap.
+      - Ray's user-space GCS/raylet do NOT setsid; they sit in the launcher
+        job's group (`start_cluster`) and reparent to us when the
+        intermediate `ray start` exits, while `start_cluster` keeps running
+        the health-check loop: leader alive -> spare. (We only evaluate a
+        process at the instant its ppid transitions to us, when the launcher
+        is still alive; an already-reparented process is never re-checked.)
+
+    A process that leads its own group (pgid == pid) counts as having a live
+    leader (itself) and is spared here — a self-detached job is left to the
+    end-of-life sweep, not the live reap. Errs toward sparing on any error.
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except (OSError, ProcessLookupError):
+        return False
+    try:
+        # Signal 0 probes existence of the group leader (pid == pgid).
+        os.kill(pgid, 0)
+    except ProcessLookupError:
+        return True  # leader gone -> orphaned group -> reap
+    except (PermissionError, OSError):
+        return False  # leader exists (or unknown) -> assume alive -> spare
+    return False  # leader alive -> spare
 
 
 def _log(message: str) -> None:
@@ -490,17 +533,21 @@ def main():
                 if pid in reapers_alive
             }
             # Reparent detection: any descendant whose ppid just transitioned
-            # to our proc_pid was adopted via the subreaper attribute and is
-            # an orphan of a dead intermediate parent. Terminate it
-            # immediately — escalation to SIGKILL happens in the final
-            # sweep below if it doesn't honor SIGTERM.
-            #
-            # Exception: descendants in a different session are
-            # intentionally detached (setsid'd background daemons like
-            # ray's GCS server, uvicorn workers, sky api start daemons).
-            # The subreaper attribute pulls them into our tree, but they
-            # are *meant* to outlive the invocation that spawned them, so
-            # we must not kill them. _same_session() filters them out.
+            # to our proc_pid was adopted via the subreaper attribute when its
+            # original parent died. Most are genuine orphans to terminate, but
+            # two kinds must be spared:
+            #   1. A different session — an explicit setsid() detach (uvicorn
+            #      supervisors, `sky api start`). _same_session() filters these.
+            #   2. A member of a process group whose leader is still alive — a
+            #      daemon spawned by a still-running job. Ray's user-space
+            #      `ray start` does NOT setsid its GCS/raylet: they stay in the
+            #      watched session, in the launcher's (`start_cluster`) process
+            #      group, and reparent to us when `ray start` exits while the
+            #      launcher keeps running. _process_group_orphaned() spares
+            #      them and reaps only members of a dead-leader (orphaned)
+            #      group — the leftover-worker shape this reap targets.
+            # Whatever survives both gets SIGTERM now; escalation to SIGKILL
+            # happens in the final sweep below if it ignores SIGTERM.
             for child in tmp_children:
                 try:
                     new_ppid = child.ppid()
@@ -511,6 +558,8 @@ def main():
                 if (old_ppid is not None and old_ppid != new_ppid and
                         new_ppid == proc_pid):
                     if not _same_session(child.pid, proc_sid):
+                        continue
+                    if not _process_group_orphaned(child.pid):
                         continue
                     _log(f'Reaping orphaned descendant pid={child.pid}: '
                          f'reparented from dead ppid={old_ppid} to the '
