@@ -333,6 +333,29 @@ def get_supported_roles() -> List[str]:
     return [role_name.value for role_name in RoleName]
 
 
+# Role privilege ordering for grant checks (viewer < user < admin).
+_ROLE_RANK: Dict[str, int] = {
+    RoleName.VIEWER.value: 0,
+    RoleName.USER.value: 1,
+    RoleName.ADMIN.value: 2,
+}
+
+
+def get_role_rank(role: str) -> int:
+    """Return the privilege rank of a role, or -1 if unknown."""
+    return _ROLE_RANK.get(role, -1)
+
+
+def caller_can_grant_role(caller_roles: List[str], granted_role: str) -> bool:
+    """Return whether caller_roles may assign granted_role to another user."""
+    if granted_role not in get_supported_roles():
+        return False
+    if not caller_roles:
+        return False
+    caller_rank = max(get_role_rank(role) for role in caller_roles)
+    return get_role_rank(granted_role) <= caller_rank
+
+
 def get_default_role() -> str:
     return skypilot_config.get_nested(('rbac', 'default_role'),
                                       default_value=RoleName.ADMIN.value)

@@ -67,6 +67,24 @@ def get_user_type(user: models.User) -> str:
     return models.UserType.LEGACY.value
 
 
+def _assert_caller_can_grant_role(caller_id: str, role: str) -> None:
+    """Ensure the caller may assign role to another identity."""
+    supported_roles = rbac.get_supported_roles()
+    if role not in supported_roles:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid role: {role}')
+    caller_roles = permission.permission_service.get_user_roles(caller_id)
+    if not caller_roles:
+        raise fastapi.HTTPException(status_code=403, detail='Invalid user')
+    if rbac.caller_can_grant_role(caller_roles, role):
+        return
+    if role == rbac.RoleName.ADMIN.value:
+        raise fastapi.HTTPException(
+            status_code=403, detail='Only admin can grant the admin role')
+    raise fastapi.HTTPException(
+        status_code=403, detail='Cannot grant a role higher than your own')
+
+
 # All handlers in user handler are sync to get fastAPI run it in a
 # ThreadPoolExecutor to avoid blocking the async event loop.
 # TODO(aylei): make these async once we have the global_user_state async
@@ -960,6 +978,8 @@ def update_service_account_role(
             detail='You can only update roles for your own service accounts. '
             'Only admins can update roles for service accounts owned by other '
             'users.')
+
+    _assert_caller_can_grant_role(auth_user.id, role_body.role)
 
     try:
         # Update service account role

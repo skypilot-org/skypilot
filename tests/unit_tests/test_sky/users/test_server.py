@@ -1175,3 +1175,88 @@ class TestUserContextIsolation:
 
         assert captured['inside'] == 'u-alice'  # set inside the context
         assert after == before  # no leak after the handler returns
+
+
+class TestUpdateServiceAccountRole:
+    """Tests for POST /users/service-account-tokens/update-role."""
+
+    @mock.patch('sky.global_user_state.get_service_account_token')
+    @mock.patch('sky.users.permission.permission_service'
+                '.check_service_account_token_permission')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    def test_non_admin_cannot_grant_admin_to_own_service_account(
+            self, mock_update_role, mock_get_user_roles,
+            mock_check_sa_permission, mock_get_token, mock_request):
+        """Regression: users must not escalate via their own SA token."""
+        mock_request.state.auth_user = models.User(id='regular-user',
+                                                   name='Regular')
+        mock_get_token.return_value = {
+            'creator_user_hash': 'regular-user',
+            'service_account_user_id': 'sa-abc123',
+        }
+        mock_check_sa_permission.return_value = True
+        mock_get_user_roles.return_value = ['user']
+
+        role_body = payloads.ServiceAccountTokenUpdateRoleBody(
+            token_id='token-1', role='admin')
+
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            server.update_service_account_role(mock_request, role_body)
+
+        assert exc_info.value.status_code == 403
+        assert 'Only admin can grant the admin role' in str(
+            exc_info.value.detail)
+        mock_update_role.assert_not_called()
+
+    @mock.patch('sky.global_user_state.get_service_account_token')
+    @mock.patch('sky.users.permission.permission_service'
+                '.check_service_account_token_permission')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    def test_admin_can_grant_admin_to_service_account(self, mock_update_role,
+                                                      mock_get_user_roles,
+                                                      mock_check_sa_permission,
+                                                      mock_get_token,
+                                                      mock_request):
+        mock_request.state.auth_user = models.User(id='admin-user',
+                                                   name='Admin')
+        mock_get_token.return_value = {
+            'creator_user_hash': 'admin-user',
+            'service_account_user_id': 'sa-abc123',
+        }
+        mock_check_sa_permission.return_value = True
+        mock_get_user_roles.return_value = ['admin']
+
+        role_body = payloads.ServiceAccountTokenUpdateRoleBody(
+            token_id='token-1', role='admin')
+
+        result = server.update_service_account_role(mock_request, role_body)
+
+        assert result['new_role'] == 'admin'
+        mock_update_role.assert_called_once_with('sa-abc123', 'admin')
+
+    @mock.patch('sky.global_user_state.get_service_account_token')
+    @mock.patch('sky.users.permission.permission_service'
+                '.check_service_account_token_permission')
+    @mock.patch('sky.users.permission.permission_service.get_user_roles')
+    @mock.patch('sky.users.permission.permission_service.update_role')
+    def test_user_can_grant_user_to_own_service_account(
+            self, mock_update_role, mock_get_user_roles,
+            mock_check_sa_permission, mock_get_token, mock_request):
+        mock_request.state.auth_user = models.User(id='regular-user',
+                                                   name='Regular')
+        mock_get_token.return_value = {
+            'creator_user_hash': 'regular-user',
+            'service_account_user_id': 'sa-abc123',
+        }
+        mock_check_sa_permission.return_value = True
+        mock_get_user_roles.return_value = ['user']
+
+        role_body = payloads.ServiceAccountTokenUpdateRoleBody(
+            token_id='token-1', role='user')
+
+        result = server.update_service_account_role(mock_request, role_body)
+
+        assert result['new_role'] == 'user'
+        mock_update_role.assert_called_once_with('sa-abc123', 'user')
