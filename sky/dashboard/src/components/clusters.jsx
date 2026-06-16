@@ -662,6 +662,7 @@ export function Clusters() {
         filters={filters}
         userScope={userScope}
         currentUser={currentUser}
+        onViewAllClusters={() => selectScope('all')}
         showHistory={showHistory}
         historyDays={historyDays}
         onOpenSSHModal={(cluster) => {
@@ -699,6 +700,7 @@ export function ClusterTable({
   filters,
   userScope,
   currentUser,
+  onViewAllClusters,
   showHistory,
   historyDays,
   onOpenSSHModal,
@@ -908,6 +910,11 @@ export function ClusterTable({
     userScope,
     currentUser,
   ]);
+
+  const everyoneTotal = useMemo(() => {
+    const source = isServerPagination ? hookData : allData;
+    return (source || []).length;
+  }, [hookData, allData, isServerPagination]);
 
   // Expose refresh to parent component
   React.useEffect(() => {
@@ -1333,7 +1340,38 @@ export function ClusterTable({
                     colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
-                    {showHistory ? 'No clusters found' : 'No active clusters'}
+                    {userScope === 'mine' &&
+                    currentUser &&
+                    !(filters || []).some(
+                      (f) =>
+                        (f.property || '').toLowerCase() === 'user' && f.value
+                    ) &&
+                    everyoneTotal > 0 ? (
+                      <div className="flex flex-col items-center space-y-2 max-w-md mx-auto">
+                        <p className="text-gray-700">
+                          You don&apos;t have any
+                          {showHistory ? '' : ' active'} clusters
+                          {showHistory ? ' yet' : ''}.
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {everyoneTotal.toLocaleString()} cluster
+                          {everyoneTotal === 1 ? '' : 's'} in total — switch to
+                          All Clusters to see them.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={onViewAllClusters}
+                          className="text-sky-blue hover:text-sky-blue-bright"
+                        >
+                          View all clusters
+                        </Button>
+                      </div>
+                    ) : showHistory ? (
+                      'No clusters found'
+                    ) : (
+                      'No active clusters'
+                    )}
                   </TableCell>
                 </TableRow>
               )}
