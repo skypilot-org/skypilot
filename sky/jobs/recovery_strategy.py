@@ -485,16 +485,19 @@ class StrategyExecutor:
         new_priority_class = fresh_resources[0].priority_class
         task = self.dag.tasks[0]
         changed = False
-        new_list = []
+        new_resources = []
         for r in task.resources:
             if (r.priority != new_priority or
                     r.priority_class != new_priority_class):
                 r = r.copy(priority=new_priority,
                            priority_class=new_priority_class)
                 changed = True
-            new_list.append(r)
+            new_resources.append(r)
         if changed:
-            task.set_resources(type(task.resources)(new_list))
+            # task.resources may be a list or a set; rebuild with the original
+            # container type so the semantics are preserved (mirrors
+            # Task.set_resources_override).
+            task.set_resources(type(task.resources)(new_resources))
             logger.info(
                 f'Refreshed priority for job {self.job_id} to {new_priority} '
                 f'(priority_class={new_priority_class}) from persisted DAG.')
