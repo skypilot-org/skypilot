@@ -57,7 +57,7 @@ import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
@@ -1662,9 +1662,10 @@ function JobDetailsContent({
                       } else if (yamlDocs.length === 1) {
                         // Single document - show directly
                         return (
-                          <YamlHighlighter className="whitespace-pre-wrap">
-                            {jobGroupHeader + yamlDocs[0].content}
-                          </YamlHighlighter>
+                          <YamlCodeBlock
+                            value={jobGroupHeader + yamlDocs[0].content}
+                            readOnly
+                          />
                         );
                       } else {
                         // Multiple documents - show toggle and content
@@ -1688,12 +1689,15 @@ function JobDetailsContent({
 
                             {showFullYaml ? (
                               // Show full YAML with JobGroup header
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {jobGroupHeader +
+                              <YamlCodeBlock
+                                value={
+                                  jobGroupHeader +
                                   yamlDocs
                                     .map((doc) => doc.content)
-                                    .join('\n---\n')}
-                              </YamlHighlighter>
+                                    .join('\n---\n')
+                                }
+                                readOnly
+                              />
                             ) : (
                               // Show per-job YAMLs
                               yamlDocs.map((doc, index) => (
@@ -1718,9 +1722,10 @@ function JobDetailsContent({
                                   </button>
                                   {expandedYamlDocs[index] && (
                                     <div className="mt-3 ml-6">
-                                      <YamlHighlighter className="whitespace-pre-wrap">
-                                        {doc.content}
-                                      </YamlHighlighter>
+                                      <YamlCodeBlock
+                                        value={doc.content}
+                                        readOnly
+                                      />
                                     </div>
                                   )}
                                 </div>
