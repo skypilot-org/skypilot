@@ -48,8 +48,6 @@ class Modal(clouds.Cloud):
             'Custom disk tiers are not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             'Custom network tiers are not supported on Modal.',
-        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            'Storage mounting is not supported on Modal yet.',
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
             'Host controllers are not supported on Modal yet.',
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
@@ -57,9 +55,7 @@ class Modal(clouds.Cloud):
         clouds.CloudImplementationFeatures.AUTO_TERMINATE:
             'Auto-termination is not supported on Modal yet.',
         clouds.CloudImplementationFeatures.AUTOSTOP:
-            'Autostop is not supported on Modal yet.',
-        clouds.CloudImplementationFeatures.AUTODOWN:
-            'Autodown is not supported on Modal yet.',
+            'Autostop without down is not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Custom multiple network interfaces are not supported on Modal.',
         clouds.CloudImplementationFeatures.LOCAL_DISK:
@@ -221,7 +217,7 @@ class Modal(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun, volume_mounts  # unused
+        del cluster_name, dryrun  # unused
         if num_nodes != 1:
             raise ValueError('Modal only supports single-node clusters.')
         assert zones is None, 'Modal does not support zones.'
@@ -238,6 +234,24 @@ class Modal(clouds.Cloud):
         modal_region = None
         if region.name != _AUTO_REGION:
             modal_region = region.name
+        modal_volume_mounts = []
+        if volume_mounts is not None:
+            for volume_mount in volume_mounts:
+                if volume_mount.is_ephemeral:
+                    continue
+                volume_config = volume_mount.volume_config
+                if volume_config.type != 'modal-volume':
+                    raise ValueError('Modal clusters only support '
+                                     'modal-volume volume mounts. Got '
+                                     f'{volume_config.type!r} for volume '
+                                     f'{volume_mount.volume_name!r}.')
+                modal_volume_mounts.append({
+                    'Path': volume_mount.path,
+                    'VolumeNameOnCloud': volume_config.name_on_cloud,
+                    'EnvironmentName':
+                        volume_config.config.get('environment_name'),
+                    'SubPath': volume_mount.sub_path,
+                })
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -249,6 +263,7 @@ class Modal(clouds.Cloud):
             'modal_timeout': 24 * 60 * 60,
             'modal_idle_timeout': None,
             'modal_docker_image': resources.extract_docker_image(),
+            'modal_volume_mounts': modal_volume_mounts,
         }
 
     def _get_feasible_launchable_resources(

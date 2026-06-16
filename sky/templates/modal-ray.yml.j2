@@ -29,6 +29,32 @@ available_node_types:
       Timeout: {{modal_timeout}}
       IdleTimeout: {% if modal_idle_timeout is none %}null{% else %}{{modal_idle_timeout}}{% endif %}
       DockerImage: {% if modal_docker_image is none %}null{% else %}"{{modal_docker_image}}"{% endif %}
+      ModalVolumes:
+{%- if modal_volume_mounts %}
+{%- for volume_mount in modal_volume_mounts %}
+        - Path: "{{volume_mount.Path}}"
+          VolumeNameOnCloud: "{{volume_mount.VolumeNameOnCloud}}"
+          EnvironmentName: {% if volume_mount.EnvironmentName is none %}null{% else %}"{{volume_mount.EnvironmentName}}"{% endif %}
+          SubPath: {% if volume_mount.SubPath is none %}null{% else %}"{{volume_mount.SubPath}}"{% endif %}
+{%- endfor %}
+{%- else %}
+        []
+{%- endif %}
+      CloudBucketMounts:
+{%- if modal_cloud_bucket_mounts %}
+{%- for bucket_mount in modal_cloud_bucket_mounts %}
+        - Path: "{{bucket_mount.Path}}"
+          StoreType: "{{bucket_mount.StoreType}}"
+          BucketName: "{{bucket_mount.BucketName}}"
+          BucketEndpointUrl: {% if bucket_mount.BucketEndpointUrl is none %}null{% else %}"{{bucket_mount.BucketEndpointUrl}}"{% endif %}
+          KeyPrefix: {% if bucket_mount.KeyPrefix is none %}null{% else %}"{{bucket_mount.KeyPrefix}}"{% endif %}
+          Region: {% if bucket_mount.Region is none %}null{% else %}"{{bucket_mount.Region}}"{% endif %}
+          ReadOnly: {{bucket_mount.ReadOnly}}
+          ForcePathStyle: {{bucket_mount.ForcePathStyle}}
+{%- endfor %}
+{%- else %}
+        []
+{%- endif %}
 
 head_node_type: ray_head_default
 
