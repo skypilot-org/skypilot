@@ -660,6 +660,53 @@ async def gpu_metrics() -> fastapi.Response:
         media_type='text/plain; version=0.0.4; charset=utf-8')
 
 
+@metrics_app.get('/endpoints-metrics')
+async def endpoint_metrics() -> fastapi.Response:
+    """Gets Sky Endpoint serving metrics from multiple external k8s clusters.
+
+    Mirrors /gpu-metrics but federates the serving engines' native series
+    (vllm:* today; future engines append their prefixes) instead of
+    DCGM/node metrics. The cluster= label is injected so the Grafana
+    serving dashboards can filter by cluster.
+    """
+    # Same daemon-thread caveats as /gpu-metrics: reload config from the DB
+    # (allowed_contexts etc. are a startup snapshot) and clear request-scoped
+    # caches so new kubeconfigs are picked up.
+    skypilot_config.reload_config()
+    annotations.clear_request_level_cache()
+    contexts = core.get_all_contexts()
+    all_metrics: List[str] = []
+
+    remote_contexts = [
+        context for context in contexts if context != 'in-cluster'
+    ]
+    tasks = [
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_endpoint_metrics_for_context(context),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for context in remote_contexts
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f'Failed to get endpoint metrics for context '
+                         f'{remote_contexts[i]}: {result}')
+        elif isinstance(result, BaseException):
+            raise result
+        else:
+            metrics_text = result
+            all_metrics.append(metrics_text)
+
+    combined_metrics = '\n\n'.join(all_metrics)
+
+    return fastapi.Response(
+        content=combined_metrics,
+        media_type='text/plain; version=0.0.4; charset=utf-8')
+
+
 def build_metrics_server(host: str, port: int) -> uvicorn.Server:
     metrics_config = uvicorn.Config(
         'sky.server.metrics:metrics_app',

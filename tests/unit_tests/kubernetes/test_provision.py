@@ -8,14 +8,123 @@ import pytest
 from sky import clouds
 from sky import exceptions as sky_exceptions
 from sky import resources
+from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
+from sky.provision import common as provision_common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
+from sky.utils import subprocess_utils
 
 
 def _remove_colorama_escape_codes(error_output):
     return [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in error_output]
+
+
+def _make_provision_config(count):
+    """A minimal ProvisionConfig sufficient to drive _create_pods."""
+    return provision_common.ProvisionConfig(
+        provider_config={'timeout': 10},
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{}]
+            },
+        },
+        count=count,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+
+
+def _fake_pod(name):
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod.status.phase = 'Pending'
+    return pod
+
+
+def _patch_create_pods_k8s_boundary(monkeypatch, existing_pods, head_name):
+    """Stub the Kubernetes-touching calls _create_pods makes.
+
+    Leaves the to_start_count arithmetic and per-pod skip logic to run for
+    real, so the idempotency contract is what's actually exercised.
+    """
+
+    def fake_filter_pods(namespace, context, tags, phases):
+        # Only the Pending/Running query returns existing pods; the
+        # Terminating and Failed/Succeeded cleanup queries return nothing.
+        if 'Pending' in phases:
+            return dict(existing_pods)
+        return {}
+
+    monkeypatch.setattr(kubernetes_utils, 'get_namespace_from_config',
+                        lambda *a, **k: 'ns')
+    monkeypatch.setattr(kubernetes_utils, 'get_context_from_config',
+                        lambda *a, **k: 'ctx')
+    monkeypatch.setattr(kubernetes_utils, 'filter_pods', fake_filter_pods)
+    monkeypatch.setattr(instance, '_get_head_pod_name', lambda pods: head_name)
+    monkeypatch.setattr(kubernetes_utils, 'check_nvidia_runtime_class',
+                        lambda *a, **k: False)
+    monkeypatch.setattr(instance, '_wait_for_pods_to_schedule',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(instance, '_wait_for_pods_to_run', lambda *a, **k: None)
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+
+
+def test_create_pods_is_idempotent_when_all_pods_exist(monkeypatch):
+    """Relaunching with all pods already present must create nothing.
+
+    This pins the reattach-safety contract that lets a paused launch resume
+    onto the pods it already created: _create_pods computes to_start_count == 0
+    and issues no create_namespaced_pod calls, returning the existing head.
+    """
+    cluster_on_cloud = 'test-cluster-abc'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {
+        head_name: _fake_pod(head_name),
+        f'{cluster_on_cloud}-worker1': _fake_pod(f'{cluster_on_cloud}-worker1'),
+    }
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+
+    core_api = mock.MagicMock()
+    monkeypatch.setattr(kubernetes, 'core_api', lambda *a, **k: core_api)
+
+    # run_in_parallel drives the per-index create thread; run it inline so the
+    # head/worker skip logic actually executes.
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+
+    config = _make_provision_config(count=2)
+    record = instance._create_pods('us', cluster_on_cloud, cluster_on_cloud,
+                                   config)
+
+    core_api.create_namespaced_pod.assert_not_called()
+    assert record.created_instance_ids == []
+    assert record.head_instance_id == head_name
+
+
+def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
+    """More running+pending pods than requested trips the leak guard."""
+    cluster_on_cloud = 'test-cluster-xyz'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {
+        head_name: _fake_pod(head_name),
+        f'{cluster_on_cloud}-worker1': _fake_pod(f'{cluster_on_cloud}-worker1'),
+        f'{cluster_on_cloud}-worker2': _fake_pod(f'{cluster_on_cloud}-worker2'),
+    }
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+
+    config = _make_provision_config(count=2)
+    with pytest.raises(RuntimeError, match='resource leak'):
+        instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
 
 
 def test_out_of_cpus(monkeypatch):

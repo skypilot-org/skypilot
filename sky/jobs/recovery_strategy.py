@@ -21,6 +21,7 @@ from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
 from sky.jobs import fencing
+from sky.jobs import file_content_utils
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state
@@ -30,6 +31,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
@@ -481,6 +483,53 @@ class StrategyExecutor:
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
+    def _refresh_priority_from_persisted_dag(self) -> None:
+        """Re-read the persisted job DAG and apply any updated priority.
+
+        A managed job's priority can be changed out of band after submission
+        by rewriting the persisted DAG. The controller otherwise caches the
+        DAG in memory for its lifetime, so without this refresh a recovery
+        would relaunch at the original priority. Only the priority (and its
+        optional priority class) is re-read here; the rest of the in-memory
+        task — envs, file mounts, name — is preserved.
+        """
+        try:
+            content = file_content_utils.get_job_dag_content(self.job_id)
+            if content is None:
+                return
+            fresh_dag = dag_utils.load_dag_from_yaml_str(content)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to re-read persisted DAG for job {self.job_id}; '
+                f'keeping current priority: {e}')
+            return
+        if self.task_id >= len(fresh_dag.tasks) or not self.dag.tasks:
+            return
+        fresh_resources = list(fresh_dag.tasks[self.task_id].resources)
+        if not fresh_resources:
+            return
+        # Priority is uniform across a task's resources; take the first.
+        new_priority = fresh_resources[0].priority
+        new_priority_class = fresh_resources[0].priority_class
+        task = self.dag.tasks[0]
+        changed = False
+        new_resources = []
+        for r in task.resources:
+            if (r.priority != new_priority or
+                    r.priority_class != new_priority_class):
+                r = r.copy(priority=new_priority,
+                           priority_class=new_priority_class)
+                changed = True
+            new_resources.append(r)
+        if changed:
+            # task.resources may be a list or a set; rebuild with the original
+            # container type so the semantics are preserved (mirrors
+            # Task.set_resources_override).
+            task.set_resources(type(task.resources)(new_resources))
+            logger.info(
+                f'Refreshed priority for job {self.job_id} to {new_priority} '
+                f'(priority_class={new_priority_class}) from persisted DAG.')
+
     async def _launch(self,
                       max_retry: Optional[int] = 3,
                       raise_on_failure: bool = True,
@@ -519,6 +568,11 @@ class StrategyExecutor:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
+        # On recovery, re-read the persisted DAG so an out-of-band priority
+        # change takes effect on this relaunch (the controller caches the DAG
+        # in memory for its lifetime).
+        if recovery:
+            self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         # Ownership pre-check: the chokepoint shared by initial, recovery,
         # and JobGroup launches. Not redundant with the fenced writes below

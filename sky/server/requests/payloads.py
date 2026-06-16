@@ -642,6 +642,9 @@ class JobsQueueV2Body(RequestBody):
     # Sorting parameters, added in ManagedJobsService v14.
     sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
     sort_order: Optional[str] = None  # 'asc' or 'desc'
+    # Time-range filter on submitted_at (epoch seconds).
+    submitted_after: Optional[float] = None
+    submitted_before: Optional[float] = None
 
 
 class JobsCancelBody(RequestBody):

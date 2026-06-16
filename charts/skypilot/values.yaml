@@ -151,6 +151,8 @@ apiService:
     enabled: false
     # The port to expose the metrics on, default to 9090.
     port: 9090
+    # NOTE: model-serving (/endpoints-metrics) federation + dashboards are
+    # gated separately by prometheus.scrapeEndpointMetrics.
   # Custom annotations for the API server deployment
   # @schema type: [object, null]
   annotations: null
@@ -666,6 +668,12 @@ prometheus:
   # you do not want the API server to be discovered by other prometheus instances.
   # @schema type: [boolean, null]
   useDedicatedScrapeConfig: false
+  # Add a scrape job for the API server's /endpoints-metrics federation
+  # (model-serving engine metrics, e.g. vLLM, from every connected Kubernetes
+  # context) and provision the serving Grafana dashboards. Opt-in: leave false
+  # unless you run model-serving workloads.
+  # @schema type: [boolean, null]
+  scrapeEndpointMetrics: false
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -697,6 +705,21 @@ prometheus:
         regex: ;(.+)
         target_label: node
         replacement: $1
+    {{- if .Values.scrapeEndpointMetrics }}
+    # Static scrape target for SkyPilot API server endpoint serving
+    # metrics. The /endpoints-metrics endpoint federates the serving
+    # engines' native series (vllm:* today) from every remote Kubernetes
+    # context the API server can see, with a cluster=<context> label
+    # injected on each series so the serving Grafana dashboards can
+    # filter by cluster.
+    - job_name: 'skypilot-api-server-endpoints-metrics'
+      honor_labels: true
+      static_configs:
+        - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
+      metrics_path: '/endpoints-metrics'
+      scrape_interval: 30s
+      scrape_timeout: 25s
+    {{- end }}
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
       honor_labels: true

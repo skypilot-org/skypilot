@@ -28,7 +28,16 @@ resources:
 setup: |
   uv venv --python 3.10 --seed
   source .venv/bin/activate
-  uv pip install vllm==0.10.0
+  # fastapi 0.137.0 made app.routes a nested tree (it stops cloning included
+  # routers, leaving intermediate `_IncludedRouter` nodes in app.routes instead
+  # of a flat list of APIRoute). vLLM bundles prometheus-fastapi-instrumentator,
+  # whose middleware iterates app.routes and does `route.path`, which raises
+  # `AttributeError: '_IncludedRouter' object has no attribute 'path'` and 500s
+  # on every request -- including the /v1/models readiness probe, so the replica
+  # never becomes ready and hits FAILED_INITIAL_DELAY. vLLM 0.10.0 leaves fastapi
+  # unpinned, so the nightly picked up 0.137.0. Pin below it until the bundled
+  # instrumentator handles the new routing tree.
+  uv pip install vllm==0.10.0 'fastapi<0.137'
   # Have to use triton==3.2.0 to avoid https://github.com/triton-lang/triton/issues/6698
   uv pip install triton==3.2.0
   # Pin transformers to avoid https://github.com/verl-project/verl/issues/4337
