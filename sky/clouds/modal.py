@@ -17,6 +17,8 @@ if typing.TYPE_CHECKING:
     from sky.utils import volume as volume_lib
 
 _CREDENTIAL_FILE = '~/.modal.toml'
+_TOKEN_ID_ENV_VAR = 'MODAL_TOKEN_ID'
+_TOKEN_SECRET_ENV_VAR = 'MODAL_TOKEN_SECRET'
 _AUTO_REGION = 'auto'
 
 
@@ -321,6 +323,14 @@ class Modal(clouds.Cloud):
                 'Failed to access Modal credentials. Install Modal with '
                 '`pip install "skypilot[modal]"` and run `modal token new` '
                 f'or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET. {e}')
+        env_token_id = os.environ.get(_TOKEN_ID_ENV_VAR)
+        env_token_secret = os.environ.get(_TOKEN_SECRET_ENV_VAR)
+        if env_token_id or env_token_secret:
+            if env_token_id and env_token_secret:
+                return True, None
+            return False, (
+                'Incomplete Modal credentials. Set both MODAL_TOKEN_ID and '
+                'MODAL_TOKEN_SECRET, or run `modal token new`.')
         if not token_id or not token_secret:
             return False, (
                 'Modal credentials were not found. Run `modal token new` '
@@ -328,6 +338,9 @@ class Modal(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        if (os.environ.get(_TOKEN_ID_ENV_VAR) and
+                os.environ.get(_TOKEN_SECRET_ENV_VAR)):
+            return {}
         credential_file = os.path.expanduser(_CREDENTIAL_FILE)
         if os.path.exists(credential_file):
             return {_CREDENTIAL_FILE: _CREDENTIAL_FILE}
