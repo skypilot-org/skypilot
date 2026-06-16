@@ -1,0 +1,81 @@
+# Job Group: disaggregated RL training with cross-task NCCL weight sync.
+#
+# A small but *real* reinforcement-learning loop (GRPO -- the algorithm behind
+# DeepSeek-R1 and modern RL-for-LLM stacks) split into three *different*
+# components, each its own Job Group task -- not one program replicated across
+# nodes. This mirrors how production RL stacks disaggregate generation, reward,
+# and training so each scales and fails independently:
+#
+#   - trainer (GPU): owns the prompt distribution, drives the loop, holds the
+#     trainable policy + optimizer, and pushes updated weights to the actor.
+#   - actor   (GPU): inference server; generates completion groups on request
+#     and receives weight updates from the trainer.
+#   - reward  (CPU): verifier; scores completions. No GPU, no ML libraries.
+#
+# Two communication planes, each on the channel that fits it:
+#   - Data plane (prompts -> completions -> rewards): plain HTTP over Job Group
+#     service discovery (`actor-0.${SKYPILOT_JOBGROUP_NAME}`, `reward-0...`).
+#   - Weight sync (trainer -> actor): a torch.distributed (NCCL) broadcast over
+#     a 2-rank process group (trainer = rank 0 + rendezvous host, actor =
+#     rank 1). The trainer is reachable at `trainer-0.${SKYPILOT_JOBGROUP_NAME}`.
+#
+# The GPU tasks set `network_tier: best`, so the NCCL weight-sync collective
+# uses the cluster's high-performance fabric (RDMA/InfiniBand/EFA) when
+# available -- auto-detected per task, a no-op (TCP) otherwise. No group-level
+# network setting is needed.
+#
+# `primary_tasks: [trainer]` makes the run finish when training completes; the
+# long-running actor and reward servers are then terminated after a short grace
+# period.
+#
+# Requires a Kubernetes cluster with NVIDIA GPUs (Job Group service discovery
+# requires Kubernetes).
+#
+# Usage:
+#   sky jobs launch examples/job-group-sdk/job_group_nccl.yaml
+
+---
+name: disagg-rl
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: 30s
+
+---
+name: trainer
+resources:
+  accelerators: A100:1
+  infra: kubernetes
+  # NCCL weight-sync collective uses the high-performance fabric when present.
+  network_tier: best
+file_mounts:
+  /tmp/trainer.py: ./examples/job-group-sdk/trainer.py
+envs:
+  STEPS: "40"
+setup: |
+  pip install torch transformers
+run: |
+  python /tmp/trainer.py
+
+---
+name: actor
+resources:
+  accelerators: A100:1
+  infra: kubernetes
+  # NCCL weight-sync collective uses the high-performance fabric when present.
+  network_tier: best
+file_mounts:
+  /tmp/rollout_server.py: ./examples/job-group-sdk/rollout_server.py
+setup: |
+  pip install torch transformers
+run: |
+  python /tmp/rollout_server.py
+
+---
+name: reward
+resources:
+  cpus: 2
+  infra: kubernetes
+file_mounts:
+  /tmp/reward_server.py: ./examples/job-group-sdk/reward_server.py
+run: |
+  python /tmp/reward_server.py
