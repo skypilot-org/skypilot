@@ -1997,6 +1997,32 @@ def scheduler_set_waiting(job_ids: List[int],
         assert updated_count == len(job_ids), (job_ids, updated_count)
 
 
+@db_retries.retry
+def set_job_dag_yaml_content(job_id: int,
+                             dag_yaml_content: str,
+                             priority: Optional[int] = None,
+                             priority_class: Optional[str] = None) -> None:
+    """Overwrite a managed job's persisted DAG YAML (and optional priority).
+
+    Lets the persisted job spec be updated out of band after submission. A
+    running controller picks the new spec up on its next recovery (it
+    re-reads the DAG before each recovery attempt); a brand-new controller or
+    a fresh launch reads it directly.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        updates: Dict[Any, Any] = {
+            job_info_table.c.dag_yaml_content: dag_yaml_content,
+        }
+        if priority is not None:
+            updates[job_info_table.c.priority] = priority
+        if priority_class is not None:
+            updates[job_info_table.c.priority_class] = priority_class
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update(updates)
+        session.commit()
+
+
 def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
     """Return file information and stored contents for a managed job."""
     engine = _db_manager.get_engine()
