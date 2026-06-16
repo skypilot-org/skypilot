@@ -465,22 +465,33 @@ export function Clusters() {
           <Select
             value={showHistory ? historyDays.toString() : 'off'}
             onValueChange={(value) => {
+              // updateShowHistoryURL and updateHistoryDaysURL each snapshot
+              // router.query and call router.replace. Calling them back-to-
+              // back in the same tick races — the second call snapshots the
+              // pre-first-call query and overwrites it. Compose one query
+              // object and do a single router.replace here.
+              const query = { ...router.query };
               if (value === 'off') {
-                if (showHistory) {
-                  setShowHistory(false);
-                  updateShowHistoryURL(false);
+                if (!showHistory) return;
+                setShowHistory(false);
+                query.history = 'false';
+              } else {
+                const newDays = parseInt(value);
+                if (showHistory && newDays === historyDays) return;
+                if (!showHistory) {
+                  setShowHistory(true);
+                  query.history = 'true';
                 }
-                return;
+                if (newDays !== historyDays) {
+                  setHistoryDays(newDays);
+                  query.historyDays = newDays.toString();
+                }
               }
-              const newDays = parseInt(value);
-              if (!showHistory) {
-                setShowHistory(true);
-                updateShowHistoryURL(true);
-              }
-              if (newDays !== historyDays) {
-                setHistoryDays(newDays);
-                updateHistoryDaysURL(newDays);
-              }
+              router.replace(
+                { pathname: router.pathname, query },
+                undefined,
+                { shallow: true }
+              );
             }}
           >
             <SelectTrigger className="w-36 h-8 text-xs">
