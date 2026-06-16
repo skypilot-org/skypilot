@@ -77,6 +77,17 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     modal_timeout = config.node_config.get('Timeout')
     modal_idle_timeout = config.node_config.get('IdleTimeout')
     modal_docker_image = config.node_config.get('DockerImage')
+    modal_volume_mounts = config.node_config.get('ModalVolumes', [])
+    modal_bucket_mounts = config.node_config.get('CloudBucketMounts', [])
+    sandbox_volumes = {}
+    sandbox_volumes.update(
+        modal_utils.get_modal_volume_mounts(modal_volume_mounts))
+    sandbox_volumes.update(
+        modal_utils.get_cloud_bucket_mounts(modal_bucket_mounts))
+    sandbox_secrets = []
+    modal_env_secret = modal_utils.get_modal_env_secret()
+    if modal_env_secret is not None:
+        sandbox_secrets.append(modal_env_secret)
     user_ports = sorted(
         set(config.ports_to_open_on_launch or []) - {modal_utils.SSH_PORT})
     sandbox = modal_adaptor.modal.Sandbox.create(
@@ -89,6 +100,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'skypilot-cluster': cluster_name_on_cloud,
         },
         image=modal_utils.get_image(modal_docker_image),
+        secrets=sandbox_secrets,
         encrypted_ports=user_ports,
         unencrypted_ports=[modal_utils.SSH_PORT],
         timeout=modal_timeout,
@@ -97,6 +109,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         region=modal_region,
         cpu=modal_cpu,
         memory=modal_memory,
+        volumes=sandbox_volumes,
     )
     # Ensure the SSH tunnel exists before SkyPilot starts probing SSH.
     modal_utils.get_ssh_tunnel(sandbox)

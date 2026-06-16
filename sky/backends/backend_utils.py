@@ -711,6 +711,69 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
+def _get_modal_cloud_bucket_mounts(
+        storage_mounts: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Returns Modal CloudBucketMount specs from SkyPilot storage mounts."""
+    if not storage_mounts:
+        return []
+    supported_store_types = {'S3', 'R2', 'GCS'}
+    bucket_mounts = []
+    for dst, storage_obj in storage_mounts.items():
+        mode = getattr(storage_obj.mode, 'value', str(storage_obj.mode))
+        if mode == 'COPY':
+            continue
+        if mode == 'MOUNT_CACHED':
+            raise exceptions.NotSupportedError(
+                'Modal CloudBucketMounts support storage mode MOUNT, but not '
+                'MOUNT_CACHED.')
+        if mode != 'MOUNT':
+            continue
+        storage_obj.construct()
+        if not storage_obj.stores:
+            raise exceptions.StorageExternalDeletionError(
+                f'The bucket {storage_obj.name!r} could not be mounted on '
+                'Modal. Please verify that the bucket exists.')
+        store_type, store = next(iter(storage_obj.stores.items()))
+        store_type_value = getattr(store_type, 'value', str(store_type))
+        if store_type_value not in supported_store_types:
+            raise exceptions.NotSupportedError(
+                'Modal CloudBucketMounts currently support S3, R2, and GCS '
+                f'storage mounts. Got {store_type_value}.')
+        if store is None:
+            raise exceptions.StorageExternalDeletionError(
+                f'The bucket {storage_obj.name!r} could not be mounted on '
+                'Modal. Please verify that the bucket exists.')
+        bucket = getattr(store, 'bucket', None)
+        bucket_name = getattr(bucket, 'name', None) or storage_obj.name
+        if bucket_name is None:
+            raise exceptions.StorageSpecError(
+                'Failed to resolve bucket name for Modal CloudBucketMount.')
+        key_prefix = getattr(store, 'bucket_sub_path', None)
+        if key_prefix:
+            key_prefix = key_prefix.strip('/') + '/'
+        endpoint_url = None
+        if store_type_value == 'R2':
+            endpoint_factory = getattr(getattr(store, 'config', None),
+                                       'get_endpoint_url', None)
+            if endpoint_factory is not None:
+                endpoint_url = endpoint_factory()
+        elif store_type_value == 'GCS':
+            endpoint_url = 'https://storage.googleapis.com'
+        read_only = bool(storage_obj.mount_config and
+                         storage_obj.mount_config.read_only)
+        bucket_mounts.append({
+            'Path': dst,
+            'StoreType': store_type_value,
+            'BucketName': bucket_name,
+            'BucketEndpointUrl': endpoint_url,
+            'KeyPrefix': key_prefix,
+            'Region': getattr(store, 'region', None),
+            'ReadOnly': read_only,
+            'ForcePathStyle': False,
+        })
+    return bucket_mounts
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -725,6 +788,7 @@ def write_cluster_config(
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
+    storage_mounts: Optional[Dict[str, Any]] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
     extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
@@ -1115,6 +1179,11 @@ def write_cluster_config(
                         last_attached_at=now,
                         status=status_lib.VolumeStatus.IN_USE)
 
+    modal_cloud_bucket_mounts = []
+    if isinstance(cloud, clouds.Modal):
+        modal_cloud_bucket_mounts = _get_modal_cloud_bucket_mounts(
+            storage_mounts)
+
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
         region=to_provision.region,
@@ -1248,6 +1317,7 @@ def write_cluster_config(
             'volume_mounts': volume_mount_vars,
             'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
             'volume_mount_rw_paths': volume_mount_rw_paths,
+            'modal_cloud_bucket_mounts': modal_cloud_bucket_mounts,
 
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.

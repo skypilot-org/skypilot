@@ -13,12 +13,14 @@ VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.PVC: clouds.Kubernetes(),
     volume_lib.VolumeType.HOSTPATH: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
+    volume_lib.VolumeType.MODAL_VOLUME: clouds.Modal(),
 }
 CLOUD_TO_VOLUME_TYPE = {
     clouds.Kubernetes(): [
         volume_lib.VolumeType.PVC, volume_lib.VolumeType.HOSTPATH
     ],
     clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
+    clouds.Modal(): [volume_lib.VolumeType.MODAL_VOLUME],
 }
 
 
@@ -96,6 +98,14 @@ class Volume:
                                        labels=config.get('labels'),
                                        use_existing=config.get('use_existing'),
                                        config=config.get('config', {}))
+        if vt == volume_lib.VolumeType.MODAL_VOLUME:
+            return ModalVolume(name=config.get('name'),
+                               type=vol_type_val,
+                               infra=config.get('infra'),
+                               size=config.get('size'),
+                               labels=config.get('labels'),
+                               use_existing=config.get('use_existing'),
+                               config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
@@ -253,3 +263,19 @@ class RunpodNetworkVolume(Volume):
                              'volumes. Set the zone in the infra field.')
 
         return
+
+
+class ModalVolume(Volume):
+    """Modal Volume."""
+
+    def validate_size(self) -> None:
+        # Modal Volumes do not expose a user-configurable size.
+        pass
+
+    def _validate_config_extra(self) -> None:
+        if self.size is not None:
+            raise ValueError('Modal volumes do not support size. Omit the '
+                             'size field for modal-volume volumes.')
+        if self.region is not None or self.zone is not None:
+            raise ValueError('Modal volumes do not support region or zone. '
+                             'Use infra: modal.')

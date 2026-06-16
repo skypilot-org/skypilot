@@ -7,17 +7,23 @@ import pytest
 
 from sky import clouds
 from sky import exceptions
+from sky import models
 from sky import resources as resources_lib
+from sky.backends import backend_utils
 from sky.catalog import modal_catalog
 from sky.clouds import modal as modal_cloud
+from sky.data import storage as storage_lib
 from sky.provision import common
 from sky.provision.modal import instance as modal_instance
 from sky.provision.modal import modal_utils
+from sky.provision.modal import volume as modal_volume
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import volume as volume_utils
+from sky.volumes import volume as volume_lib
 
 
 def _provision_config(node_config, ports_to_open_on_launch=None):
@@ -137,12 +143,10 @@ def test_modal_unsupported_features():
         clouds.CloudImplementationFeatures.SPOT_INSTANCE,
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER,
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS,
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS,
         clouds.CloudImplementationFeatures.AUTO_TERMINATE,
         clouds.CloudImplementationFeatures.AUTOSTOP,
-        clouds.CloudImplementationFeatures.AUTODOWN,
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK,
         clouds.CloudImplementationFeatures.LOCAL_DISK,
     }
@@ -163,6 +167,10 @@ def test_modal_supports_docker_images_and_open_ports():
     assert resources.extract_docker_image() == 'ubuntu:22.04'
     assert clouds.CloudImplementationFeatures.DOCKER_IMAGE not in unsupported
     assert clouds.CloudImplementationFeatures.OPEN_PORTS not in unsupported
+    assert (clouds.CloudImplementationFeatures.STORAGE_MOUNTING
+            not in unsupported)
+    assert clouds.CloudImplementationFeatures.AUTODOWN not in unsupported
+    assert clouds.CloudImplementationFeatures.AUTOSTOP in unsupported
 
 
 def test_modal_rejects_cloud_image_ids():
@@ -325,9 +333,67 @@ def test_modal_deploy_variables_gpu_region():
     assert variables['modal_docker_image'] == 'ubuntu:22.04'
 
 
+def test_modal_deploy_variables_volume_mounts():
+    cloud = clouds.Modal()
+    resources = resources_lib.Resources(cloud=cloud,
+                                        instance_type='modal-cpu-4x-16gb')
+    volume_config = models.VolumeConfig(name='cache',
+                                        type='modal-volume',
+                                        cloud='modal',
+                                        region=None,
+                                        zone=None,
+                                        name_on_cloud='cache-on-cloud',
+                                        size=None,
+                                        config={'environment_name': 'dev'})
+    volume_mount = volume_utils.VolumeMount('/cache',
+                                            'cache',
+                                            volume_config,
+                                            sub_path='models')
+
+    variables = cloud.make_deploy_resources_variables(
+        resources=resources,
+        cluster_name=resources_utils.ClusterName('test', 'test'),
+        region=clouds.Region('auto'),
+        zones=None,
+        num_nodes=1,
+        volume_mounts=[volume_mount])
+
+    assert variables['modal_volume_mounts'] == [{
+        'Path': '/cache',
+        'VolumeNameOnCloud': 'cache-on-cloud',
+        'EnvironmentName': 'dev',
+        'SubPath': 'models',
+    }]
+
+
+def test_modal_volume_type_validation(monkeypatch):
+    mock_infra_info = SimpleNamespace(cloud='modal', region=None, zone=None)
+    monkeypatch.setattr('sky.utils.infra_utils.InfraInfo.from_str',
+                        lambda _: mock_infra_info)
+
+    volume = volume_lib.Volume.from_yaml_config({
+        'name': 'cache',
+        'type': 'modal-volume',
+        'infra': 'modal',
+    })
+    volume.validate()
+    assert volume.cloud == 'modal'
+
+    with pytest.raises(ValueError, match='do not support size'):
+        volume_lib.Volume.from_yaml_config({
+            'name': 'cache',
+            'type': 'modal-volume',
+            'infra': 'modal',
+            'size': '10Gi',
+        }).validate()
+
+
 def test_modal_run_instances_creates_sandbox(monkeypatch):
     created = {}
     image_calls = []
+    secret_calls = []
+    volume_calls = []
+    bucket_calls = []
 
     class FakeSandbox:
 
@@ -339,6 +405,29 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
             created['kwargs'] = kwargs
             return FakeSandbox()
 
+    class FakeVolume:
+
+        @staticmethod
+        def from_name(name, environment_name=None, create_if_missing=False):
+            volume_calls.append((name, environment_name, create_if_missing))
+            return FakeVolume()
+
+        def with_mount_options(self, sub_path=None):
+            volume_calls.append(('with_mount_options', sub_path))
+            return f'volume:{sub_path}'
+
+    class FakeCloudBucketMount:
+
+        def __init__(self, **kwargs):
+            bucket_calls.append(kwargs)
+
+    class FakeSecret:
+
+        @staticmethod
+        def from_dict(env_dict):
+            secret_calls.append(env_dict)
+            return f'secret:{len(secret_calls)}'
+
     monkeypatch.setattr(modal_instance.modal_utils,
                         'get_active_sandboxes_by_name', lambda name: {})
     monkeypatch.setattr(modal_instance.modal_utils, 'get_app',
@@ -349,8 +438,16 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
         lambda docker_image=None: image_calls.append(docker_image) or 'image')
     monkeypatch.setattr(modal_instance.modal_utils, 'get_ssh_tunnel',
                         lambda sandbox: ('host', 12345))
-    monkeypatch.setattr(modal_instance.modal_adaptor, 'modal',
-                        SimpleNamespace(Sandbox=FakeSandbox))
+    monkeypatch.setattr(modal_utils, '_get_s3_secret',
+                        lambda region: f's3-secret:{region}')
+    monkeypatch.setattr(
+        modal_instance.modal_adaptor, 'modal',
+        SimpleNamespace(Sandbox=FakeSandbox,
+                        Volume=FakeVolume,
+                        CloudBucketMount=FakeCloudBucketMount,
+                        Secret=FakeSecret))
+    monkeypatch.setenv('MODAL_TOKEN_ID', 'token-id')
+    monkeypatch.setenv('MODAL_TOKEN_SECRET', 'token-secret')
 
     record = modal_instance.run_instances(
         region='auto',
@@ -366,6 +463,22 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
                 'Timeout': 24 * 60 * 60,
                 'IdleTimeout': None,
                 'DockerImage': 'ubuntu:22.04',
+                'ModalVolumes': [{
+                    'Path': '/cache',
+                    'VolumeNameOnCloud': 'cache-on-cloud',
+                    'EnvironmentName': 'dev',
+                    'SubPath': 'models',
+                }],
+                'CloudBucketMounts': [{
+                    'Path': '/bucket',
+                    'StoreType': 'S3',
+                    'BucketName': 'bucket',
+                    'BucketEndpointUrl': None,
+                    'KeyPrefix': None,
+                    'Region': 'us-east-1',
+                    'ReadOnly': True,
+                    'ForcePathStyle': False,
+                }],
             }, [8080, 8081]))
 
     assert record.provider_name == 'modal'
@@ -377,7 +490,25 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
     assert created['kwargs']['encrypted_ports'] == [8080, 8081]
     assert created['kwargs']['region'] is None
     assert created['kwargs']['gpu'] == 'H100'
+    assert created['kwargs']['secrets'] == ['secret:1']
+    assert created['kwargs']['volumes']['/cache'] == 'volume:models'
+    assert isinstance(created['kwargs']['volumes']['/bucket'],
+                      FakeCloudBucketMount)
     assert image_calls == ['ubuntu:22.04']
+    assert secret_calls == [{
+        'MODAL_TOKEN_ID': 'token-id',
+        'MODAL_TOKEN_SECRET': 'token-secret',
+    }]
+    assert volume_calls == [('cache-on-cloud', 'dev', False),
+                            ('with_mount_options', 'models')]
+    assert bucket_calls == [{
+        'bucket_name': 'bucket',
+        'bucket_endpoint_url': None,
+        'key_prefix': None,
+        'secret': 's3-secret:us-east-1',
+        'read_only': True,
+        'force_path_style': False,
+    }]
 
 
 def test_modal_run_instances_reuses_existing_sandbox(monkeypatch):
@@ -398,6 +529,101 @@ def test_modal_run_instances_reuses_existing_sandbox(monkeypatch):
     assert record.head_instance_id == 'sb-existing'
     assert not record.created_instance_ids
     assert not record.resumed_instance_ids
+
+
+def test_modal_apply_and_delete_volume(monkeypatch):
+    calls = []
+
+    class FakeVolume:
+        """Fake Modal Volume."""
+
+        object_id = 'vo-123'
+        objects = None
+
+        @staticmethod
+        def from_name(name, environment_name=None, create_if_missing=False):
+            calls.append(
+                ('from_name', name, environment_name, create_if_missing))
+            return FakeVolume()
+
+        def hydrate(self):
+            calls.append(('hydrate',))
+
+    class FakeVolumeObjects:
+
+        @staticmethod
+        def delete(name, allow_missing=False, environment_name=None):
+            calls.append(('delete', name, allow_missing, environment_name))
+
+    FakeVolume.objects = FakeVolumeObjects
+    monkeypatch.setattr(modal_volume.modal_adaptor, 'modal',
+                        SimpleNamespace(Volume=FakeVolume))
+    config = models.VolumeConfig(name='cache',
+                                 type='modal-volume',
+                                 cloud='modal',
+                                 region=None,
+                                 zone=None,
+                                 name_on_cloud='cache-on-cloud',
+                                 size=None,
+                                 config={'environment_name': 'dev'})
+
+    applied = modal_volume.apply_volume(config)
+    deleted = modal_volume.delete_volume(applied)
+
+    assert applied.id_on_cloud == 'vo-123'
+    assert deleted is applied
+    assert calls == [
+        ('from_name', 'cache-on-cloud', 'dev', True),
+        ('hydrate',),
+        ('delete', 'cache-on-cloud', True, 'dev'),
+    ]
+
+
+def test_modal_cloud_bucket_mount_specs():
+    # pylint: disable=protected-access
+
+    class FakeStorage:
+        """Fake SkyPilot Storage."""
+
+        mode = storage_lib.StorageMode.MOUNT
+        name = 'bucket'
+        mount_config = storage_lib.MountConfig(read_only=True)
+
+        def __init__(self):
+            self.constructed = False
+            self.stores = {
+                storage_lib.StoreType.S3: SimpleNamespace(
+                    bucket=SimpleNamespace(name='bucket'),
+                    bucket_sub_path='prefix',
+                    region='us-east-1')
+            }
+
+        def construct(self):
+            self.constructed = True
+
+    storage = FakeStorage()
+    specs = backend_utils._get_modal_cloud_bucket_mounts({'/bucket': storage})
+
+    assert storage.constructed
+    assert specs == [{
+        'Path': '/bucket',
+        'StoreType': 'S3',
+        'BucketName': 'bucket',
+        'BucketEndpointUrl': None,
+        'KeyPrefix': 'prefix/',
+        'Region': 'us-east-1',
+        'ReadOnly': True,
+        'ForcePathStyle': False,
+    }]
+
+
+def test_modal_cloud_bucket_mount_rejects_mount_cached():
+    # pylint: disable=protected-access
+
+    storage = SimpleNamespace(mode=storage_lib.StorageMode.MOUNT_CACHED)
+
+    with pytest.raises(exceptions.NotSupportedError, match='MOUNT_CACHED'):
+        backend_utils._get_modal_cloud_bucket_mounts({'/bucket': storage})
 
 
 def test_modal_get_image_from_registry(monkeypatch):

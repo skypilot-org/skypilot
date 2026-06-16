@@ -1143,6 +1143,38 @@ GPU task:
 You can also run the examples in ``examples/modal/hello.yaml`` and
 ``examples/modal/gpu.yaml``.
 
+Modal Volumes can be created with SkyPilot volumes and mounted into a Modal
+cluster:
+
+.. code-block:: shell
+
+  sky volumes apply cache --infra modal --type modal-volume
+
+.. code-block:: yaml
+
+  resources:
+    cloud: modal
+
+  volumes:
+    /cache:
+      name: cache
+
+  run: |
+    echo "hello" > /cache/hello.txt
+    sync /cache
+
+SkyPilot ``secrets:`` work on Modal the same way as other VM clouds; they are
+exported for setup and run commands and redacted from display paths.
+Autodown is supported with ``--down``:
+
+.. code-block:: shell
+
+  sky launch -c modal-auto --infra modal --down --idle-minutes-to-autostop 10 task.yaml
+
+SkyPilot storage mounts in ``MOUNT`` mode are translated to Modal
+``CloudBucketMount`` at Sandbox creation time for S3, Cloudflare R2, and GCS
+buckets. ``MOUNT_CACHED`` is not supported on Modal.
+
 Current limitations:
 
 - Modal support is single-node only.
@@ -1152,7 +1184,10 @@ Current limitations:
 - ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
   ``sky down``.
 - Managed jobs and SkyServe controllers are not supported on Modal.
-- SkyPilot storage mounts are not supported on Modal yet.
+- Modal Volumes do not have a SkyPilot ``size`` setting. Persist writes with
+  ``sync <mount-path>`` before tearing down the Sandbox.
+- Modal GCS bucket mounts require HMAC credentials in
+  ``GOOGLE_ACCESS_KEY_ID`` and ``GOOGLE_ACCESS_KEY_SECRET``.
 - Docker images are supported through public registry image references such as
   ``image_id: docker:ubuntu:22.04``. Private registry credentials are not wired
   through Modal Secrets yet.
