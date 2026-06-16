@@ -867,7 +867,8 @@ def _reject_not_ready_volume(volume_name: str, record: Dict[str, Any],
 
 
 def _get_modal_cloud_bucket_mounts(
-        storage_mounts: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        storage_mounts: Optional[Dict[str, Any]],
+        dryrun: bool = False) -> List[Dict[str, Any]]:
     """Returns Modal CloudBucketMount specs from SkyPilot storage mounts."""
     if not storage_mounts:
         return []
@@ -882,6 +883,8 @@ def _get_modal_cloud_bucket_mounts(
                 'Modal CloudBucketMounts support storage mode MOUNT, but not '
                 'MOUNT_CACHED.')
         if mode != 'MOUNT':
+            continue
+        if dryrun:
             continue
         storage_obj.construct()
         if not storage_obj.stores:
@@ -1380,7 +1383,7 @@ def write_cluster_config(
     modal_cloud_bucket_mounts = []
     if isinstance(cloud, clouds.Modal):
         modal_cloud_bucket_mounts = _get_modal_cloud_bucket_mounts(
-            storage_mounts)
+            storage_mounts, dryrun=dryrun)
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),

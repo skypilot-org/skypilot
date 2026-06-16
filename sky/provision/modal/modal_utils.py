@@ -147,7 +147,15 @@ exec /usr/sbin/sshd -D -e -p {SSH_PORT}
 def get_active_sandboxes_by_name(name: str) -> Dict[str, Any]:
     try:
         sandbox = modal_adaptor.modal.Sandbox.from_name(APP_NAME, name)
-    except Exception:  # pylint: disable=broad-except
+    except Exception as exc:  # pylint: disable=broad-except
+        not_found_error = getattr(
+            getattr(modal_adaptor.modal, 'exception', None), 'NotFoundError',
+            None)
+        if not_found_error is not None and isinstance(exc, not_found_error):
+            return {}
+        raise RuntimeError(
+            f'Failed to query Modal Sandbox {name!r}: {exc}') from exc
+    if sandbox is None:
         return {}
     return {sandbox.object_id: sandbox}
 
