@@ -9,7 +9,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { getNonce } from '@/utils/csp';
 
-const yamlHighlightStyle = HighlightStyle.define([
+export const yamlHighlightStyle = HighlightStyle.define([
   { tag: t.propertyName, color: '#1E62CC' },
   { tag: t.string, color: '#188038' },
   { tag: t.content, color: '#374151' },

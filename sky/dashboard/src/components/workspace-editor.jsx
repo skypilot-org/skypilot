@@ -16,7 +16,7 @@ import Link from 'next/link';
 import Head from 'next/head';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
+import { YamlEditor } from '@/components/ui/yaml-editor';
 import { CircularProgress } from '@mui/material';
 import {
   SaveIcon,
@@ -843,7 +843,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </div>
                         </div>
 
-                        <YamlCodeBlock
+                        <YamlEditor
                           value={yamlValue}
                           onChange={(val) => handleYamlChange(val)}
                           height="400px"
