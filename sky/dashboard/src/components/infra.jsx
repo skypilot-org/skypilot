@@ -2849,8 +2849,10 @@ export function GPUs() {
     if (
       !cloudDataLoaded ||
       !kubeDataLoaded ||
+      !slurmDataLoaded ||
       kubeLoading ||
       cloudLoading ||
+      slurmLoading ||
       pluginInfraLoading
     ) {
       return false; // Still loading, don't show hint
