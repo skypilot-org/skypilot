@@ -486,7 +486,16 @@ export function Clusters() {
               </div>
               <span className="ml-2 text-sm text-gray-700">Show history</span>
             </label>
-            {showHistory && (
+            {/* Always render the day-range Select so the Show history toggle
+                keeps the same screen position whether history is on or off
+                (this row is ml-auto so any width change to the right of the
+                toggle shifts the toggle horizontally). */}
+            <div
+              className={
+                showHistory ? '' : 'invisible pointer-events-none'
+              }
+              aria-hidden={!showHistory}
+            >
               <Select
                 value={historyDays.toString()}
                 onValueChange={(value) => {
@@ -505,7 +514,7 @@ export function Clusters() {
                   <SelectItem value="30">30 days</SelectItem>
                 </SelectContent>
               </Select>
-            )}
+            </div>
           </div>
           {loading && (
             <div className="flex items-center">
