@@ -213,6 +213,14 @@ def get_accelerators_from_instance_type(
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
+def get_arch_from_instance_type(instance_type: str) -> Optional[str]:
+    return common.get_arch_from_instance_type_impl(_df, instance_type)
+
+
+def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
+    return common.get_local_disk_from_instance_type_impl(_df, instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
@@ -244,6 +252,56 @@ def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List[cloud.Region]:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
+
+
+def _get_accelerator(
+    accelerator: str,
+    count: int,
+    region: Optional[str],
+    zone: Optional[str] = None,
+):
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Modal does not support zones.')
+    idx = (_df['AcceleratorName'].str.fullmatch(
+        accelerator, case=False)) & (_df['AcceleratorCount'] == count)
+    if region is not None:
+        idx &= _df['Region'] == region
+    return _df[idx]
+
+
+def get_accelerator_hourly_cost(accelerator: str,
+                                count: int,
+                                use_spot: bool = False,
+                                region: Optional[str] = None,
+                                zone: Optional[str] = None) -> float:
+    if use_spot:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Modal does not support spot instances.')
+    df = _get_accelerator(accelerator, count, region, zone)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No accelerator {accelerator}:{count} found.')
+    return 0.0
+
+
+def get_region_zones_for_accelerators(
+        accelerator: str,
+        count: int,
+        use_spot: bool = False) -> List[cloud.Region]:
+    if use_spot:
+        return []
+    df = _get_accelerator(accelerator, count, region=None)
+    return common.get_region_zones(df, use_spot)
+
+
+def check_accelerator_attachable_to_host(instance_type: str,
+                                         accelerators: Optional[Dict[str, int]],
+                                         zone: Optional[str] = None) -> None:
+    del instance_type, accelerators  # unused
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Modal does not support zones.')
 
 
 def list_accelerators(

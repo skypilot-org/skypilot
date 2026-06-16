@@ -95,6 +95,21 @@ def test_modal_catalog_gpu_to_sandbox_args():
         'modal-a100-80gb-2x') == ('A100-80GB:2', 2.0, 16 * 1024)
 
 
+def test_modal_catalog_generic_contract_methods():
+    assert modal_catalog.get_arch_from_instance_type(
+        'modal-cpu-4x-16gb') is None
+    assert modal_catalog.get_local_disk_from_instance_type(
+        'modal-cpu-4x-16gb') is None
+    assert modal_catalog.get_accelerator_hourly_cost('H100', 1, False, 'auto',
+                                                     None) == 0.0
+    regions = modal_catalog.get_region_zones_for_accelerators('H100', 1, False)
+    region_names = [region.name for region in regions]
+    assert region_names[0] == 'auto'
+    assert {'af', 'au', 'us-west'} <= set(region_names)
+    modal_catalog.check_accelerator_attachable_to_host('modal-h100-1x',
+                                                       {'H100': 1})
+
+
 def test_modal_infra_schema():
     resources = resources_lib.Resources.from_yaml_config({
         'infra': 'modal',
@@ -617,6 +632,26 @@ def test_modal_cloud_bucket_mount_specs():
     }]
 
 
+def test_modal_cloud_bucket_mount_dryrun_does_not_construct():
+    # pylint: disable=protected-access
+
+    class FakeStorage:
+        """Fake SkyPilot Storage."""
+
+        mode = storage_lib.StorageMode.MOUNT
+        name = 'bucket'
+        stores = None
+        mount_config = storage_lib.MountConfig(read_only=True)
+
+        def construct(self):
+            raise AssertionError('dryrun should not construct storage')
+
+    specs = backend_utils._get_modal_cloud_bucket_mounts(
+        {'/bucket': FakeStorage()}, dryrun=True)
+
+    assert not specs
+
+
 def test_modal_cloud_bucket_mount_rejects_mount_cached():
     # pylint: disable=protected-access
 
@@ -674,6 +709,42 @@ def test_modal_get_active_sandboxes_by_name(monkeypatch):
     assert modal_utils.get_active_sandboxes_by_name('test-on-cloud') == {
         'sb-existing': sandbox
     }
+
+
+def test_modal_get_active_sandboxes_by_name_not_found(monkeypatch):
+
+    class NotFoundError(Exception):
+        pass
+
+    class FakeSandbox:
+
+        @staticmethod
+        def from_name(app_name, name):
+            del app_name, name  # unused
+            raise NotFoundError('missing')
+
+    monkeypatch.setattr(
+        modal_utils.modal_adaptor, 'modal',
+        SimpleNamespace(Sandbox=FakeSandbox,
+                        exception=SimpleNamespace(NotFoundError=NotFoundError)))
+
+    assert not modal_utils.get_active_sandboxes_by_name('test-on-cloud')
+
+
+def test_modal_get_active_sandboxes_by_name_propagates_api_errors(monkeypatch):
+
+    class FakeSandbox:
+
+        @staticmethod
+        def from_name(app_name, name):
+            del app_name, name  # unused
+            raise RuntimeError('rate limited')
+
+    monkeypatch.setattr(modal_utils.modal_adaptor, 'modal',
+                        SimpleNamespace(Sandbox=FakeSandbox))
+
+    with pytest.raises(RuntimeError, match='rate limited'):
+        modal_utils.get_active_sandboxes_by_name('test-on-cloud')
 
 
 def test_modal_query_ports(monkeypatch):
