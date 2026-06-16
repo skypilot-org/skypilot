@@ -2202,12 +2202,14 @@ def dump_managed_job_queue(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> str:
     return message_utils.encode_payload(
         get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
                               workspace_match, name_match, pool_match, page,
                               limit, user_hashes, statuses, fields, sort_by,
-                              sort_order))
+                              sort_order, submitted_after, submitted_before))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -2392,6 +2394,8 @@ def get_managed_job_queue(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -2409,6 +2413,10 @@ def get_managed_job_queue(
         fields: The fields to include in the response.
         sort_by: The field to sort by.
         sort_order: The sort order ('asc' or 'desc').
+        submitted_after: Only include jobs submitted at or after this epoch
+            time (seconds).
+        submitted_before: Only include jobs submitted at or before this epoch
+            time (seconds).
 
     Returns:
         A dictionary containing the managed job queue.
@@ -2434,6 +2442,8 @@ def get_managed_job_queue(
         pool_match=pool_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
     )
 
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
@@ -2446,6 +2456,8 @@ def get_managed_job_queue(
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         page=page,
         limit=limit,
         sort_by=sort_by,
@@ -3250,6 +3262,8 @@ class ManagedJobCodeGen:
         fields: Optional[List[str]] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        submitted_after: Optional[float] = None,
+        submitted_before: Optional[float] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
         # Filter out is_primary_in_job_group for older controllers (< 15)
@@ -3301,7 +3315,7 @@ class ManagedJobCodeGen:
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r},
                                 fields=_fields)
-        else:
+        elif managed_job_version < 22:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -3316,6 +3330,23 @@ class ManagedJobCodeGen:
                                 fields=_fields,
                                 sort_by={sort_by!r},
                                 sort_order={sort_order!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)

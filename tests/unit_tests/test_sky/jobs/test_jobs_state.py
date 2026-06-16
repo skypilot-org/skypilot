@@ -868,6 +868,160 @@ class TestGetLatestRecoveryReasons:
         assert state.get_latest_recovery_reasons([1]) == {}
 
 
+# Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
+# stored as epoch seconds (a sqlalchemy.Float column), matching time.time().
+_T100 = 100.0
+_T200 = 200.0
+_T300 = 300.0
+# Bounds far in the past (_T*, ~1970) and future (~year 2286) relative to the
+# current time, used to exercise NULL submitted_at (pending) handling.
+_FAR_FUTURE = 9_999_999_999.0
+
+
+@pytest.fixture
+def _seed_timed_jobs(_mock_managed_jobs_db_conn):
+    """Seed three RUNNING jobs with explicit, distinct submitted_at times."""
+
+    async def mock_callback(status: str):
+        pass
+
+    async def create_job_states():
+        ids = {}
+        for key, workspace, submit_time in (
+            ('early', 'ws1', _T100),
+            ('mid', 'ws1', _T200),
+            ('late', 'ws2', _T300),
+        ):
+            job_id = state.set_job_info_without_job_id(name=f'job-{key}',
+                                                       workspace=workspace,
+                                                       entrypoint='ep',
+                                                       pool=None,
+                                                       pool_hash=None,
+                                                       user_hash='user1')
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name='task0',
+                              resources_str='{}',
+                              metadata='{}')
+            state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
+                                        f'/tmp/user-{key}.yaml',
+                                        f'/tmp/env-{key}', None, 100)
+            # submitted_at is written here from the explicit submit_time.
+            await state.set_starting_async(job_id, 0, f'run-{key}', submit_time,
+                                           '{}', {}, mock_callback)
+            await state.set_started_async(job_id, 0, submit_time, mock_callback)
+            ids[key] = job_id
+        return ids
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
+
+
+@pytest.fixture
+def _seed_pending_job(_mock_managed_jobs_db_conn):
+    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    job_id = state.set_job_info_without_job_id(name='job-pending',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    return job_id
+
+
+class TestSubmittedAtRangeFilter:
+    """Time-range filter on submitted_at via get_managed_jobs_with_filters."""
+
+    def _submitted_ats(self, jobs):
+        return sorted(job['submitted_at'] for job in jobs)
+
+    def test_submitted_after_excludes_earlier(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T200)
+        # Inclusive lower bound: mid (_T200) and late (_T300) match.
+        assert total == 2
+        assert self._submitted_ats(jobs) == [_T200, _T300]
+
+    def test_submitted_after_boundary_is_inclusive(self, _seed_timed_jobs):
+        # A row exactly at submitted_after is included (>=).
+        jobs, _ = state.get_managed_jobs_with_filters(submitted_after=_T300)
+        assert self._submitted_ats(jobs) == [_T300]
+
+    def test_submitted_before_excludes_later(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T200)
+        # Inclusive upper bound: early (_T100) and mid (_T200) match.
+        assert total == 2
+        assert self._submitted_ats(jobs) == [_T100, _T200]
+
+    def test_submitted_before_boundary_is_inclusive(self, _seed_timed_jobs):
+        jobs, _ = state.get_managed_jobs_with_filters(submitted_before=_T100)
+        assert self._submitted_ats(jobs) == [_T100]
+
+    def test_window_combines_after_and_before(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_T200, submitted_before=_T200)
+        # Only the row exactly at _T200 falls inside [_T200, _T200].
+        assert total == 1
+        assert self._submitted_ats(jobs) == [_T200]
+
+    def test_empty_window_returns_nothing(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_T300 + 1)
+        assert jobs == []
+        assert total == 0
+
+    def test_no_window_returns_all(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 3
+        assert self._submitted_ats(jobs) == [_T100, _T200, _T300]
+
+    def test_window_with_other_filters(self, _seed_timed_jobs):
+        # Combine the window with an accessible_workspaces filter: only the
+        # ws1 rows within [_T100, _T200] should match (early, mid).
+        jobs, total = state.get_managed_jobs_with_filters(
+            accessible_workspaces=['ws1'], submitted_before=_T200)
+        assert total == 2
+        assert self._submitted_ats(jobs) == [_T100, _T200]
+
+    def test_status_count_respects_window(self, _seed_timed_jobs):
+        # All three jobs are RUNNING; the window must cut the status counts.
+        counts = state.get_status_count_with_filters(submitted_after=_T200)
+        assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
+
+    # A pending job (NULL submitted_at) is treated as submitted "now", so the
+    # window keeps or drops it the same way it would a job submitted right now.
+    def test_pending_kept_by_past_lower_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+
+    def test_pending_dropped_by_past_upper_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T300)
+        assert jobs == []
+        assert total == 0
+
+    def test_pending_kept_by_future_upper_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_FAR_FUTURE)
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+
+    def test_pending_dropped_by_future_lower_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_FAR_FUTURE)
+        assert jobs == []
+        assert total == 0
+
+
 class TestMultiTaskStatusFilterCharacterization:
     """Pin the CURRENT (row/task-level) behavior of the `statuses` filter on a
     multi-task (pipeline) job.
