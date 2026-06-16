@@ -726,6 +726,33 @@ class ExecutionRetryableError(Exception):
         return (self.__class__, (str(self), self.hint, self.retry_wait_seconds))
 
 
+class ExecutionPausedError(ExecutionRetryableError):
+    """Pause execution mid-attempt while keeping provisioned resources.
+
+    Raised from inside an in-progress attempt waiting on an external condition
+    (e.g. admission or quota). The partially provisioned resources are kept so
+    the request can resume, so teardown layers must not clean up the resources.
+
+    ``continue_condition`` optionally says how to wait for the resume signal
+    (see ``continue_condition.py``); it must be picklable, as the error crosses
+    the worker/scheduler process boundary. ``retry_wait_seconds`` is the
+    fallback wait when it is absent.
+    """
+
+    def __init__(self,
+                 message: str,
+                 hint: str,
+                 retry_wait_seconds: int,
+                 continue_condition: Optional[Any] = None) -> None:
+        super().__init__(message, hint, retry_wait_seconds)
+        self.continue_condition = continue_condition
+
+    def __reduce__(self):
+        # Make sure the exception is picklable
+        return (self.__class__, (str(self), self.hint, self.retry_wait_seconds,
+                                 self.continue_condition))
+
+
 class ExecutionPoolFullError(Exception):
     """Raised when the execution pool is full."""
 
