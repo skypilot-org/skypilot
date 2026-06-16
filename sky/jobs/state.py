@@ -1504,9 +1504,10 @@ def build_managed_jobs_with_filters_no_status_query(
 
     submitted_after / submitted_before are epoch seconds (matching the
     ``submitted_at`` column) and restrict the result to jobs submitted within
-    the inclusive window. A still-pending job (NULL ``submitted_at``) is
-    treated as submitted now, so it is kept or dropped by the window the same
-    way a job submitted at the current moment would be.
+    the inclusive window. A still-active job that hasn't been submitted yet
+    (NULL ``submitted_at``) is treated as submitted now, so it is kept or
+    dropped by the window like a job submitted at the current moment; a
+    terminal job that never got a ``submitted_at`` is excluded from the window.
     """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
@@ -1577,17 +1578,24 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
     if submitted_after is not None or submitted_before is not None:
         # submitted_at is NULL until a job leaves PENDING (it is set at
-        # STARTING), so a pending job has no submission time yet. Treat it as
-        # submitted "now" so it is filtered consistently regardless of whether
-        # the bound is in the past or the future: e.g. a pending job is kept by
-        # --since (now >= a past lower bound) and by a future --before
-        # (now <= it), but dropped by a past --before (now > it).
-        submitted_at = sqlalchemy.func.coalesce(spot_table.c.submitted_at,
-                                                time.time())
+        # STARTING). For a still-active job that just means "not submitted
+        # yet", so treat it as submitted "now". A terminal job with no
+        # submitted_at never started (cancelled/failed before STARTING) and
+        # has no submission time, so leave it NULL to exclude it from the
+        # window rather than letting it masquerade as "now".
+        terminal_values = [
+            s.value for s in ManagedJobStatus.terminal_statuses()
+        ]
+        effective_submitted_at = sqlalchemy.case(
+            (spot_table.c.submitted_at.is_not(None), spot_table.c.submitted_at),
+            (sqlalchemy.or_(
+                spot_table.c.status.is_(None),
+                ~spot_table.c.status.in_(terminal_values)), time.time()),
+        )
         if submitted_after is not None:
-            query = query.where(submitted_at >= submitted_after)
+            query = query.where(effective_submitted_at >= submitted_after)
         if submitted_before is not None:
-            query = query.where(submitted_at <= submitted_before)
+            query = query.where(effective_submitted_at <= submitted_before)
     return query
 
 
