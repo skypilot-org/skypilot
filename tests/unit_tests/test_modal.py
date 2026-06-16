@@ -1,5 +1,6 @@
 """Tests for Modal cloud provider."""
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,9 @@ from sky.clouds import modal as modal_cloud
 from sky.provision import common
 from sky.provision.modal import instance as modal_instance
 from sky.provision.modal import modal_utils
+from sky.setup_files import dependencies
+from sky.skylet import constants
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
 
@@ -31,9 +35,32 @@ def _check_modal_compute_credentials():
     return clouds.Modal._check_compute_credentials()
 
 
+def _modal_unsupported_features(resources):
+    # pylint: disable=protected-access
+    return clouds.Modal._unsupported_features_for_resources(resources)
+
+
 def _set_modal_config(monkeypatch, config):
     monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
                         SimpleNamespace(config=SimpleNamespace(config=config)))
+
+
+def test_modal_cloud_registration():
+    cloud = registry.CLOUD_REGISTRY.from_str('modal')
+
+    assert isinstance(cloud, clouds.Modal)
+    assert clouds.Modal.canonical_name() == 'modal'
+    assert 'modal' in constants.ALL_CLOUDS
+
+
+def test_modal_dependency_gating():
+    assert dependencies.cloud_dependencies['modal'] == [
+        'modal>=1.5.0; python_version>="3.10"',
+    ]
+    modal_in_all = any(
+        dep.startswith('modal>=1.5.0')
+        for dep in dependencies.extras_require['all'])
+    assert modal_in_all == (sys.version_info >= (3, 10))
 
 
 def test_modal_catalog_regions_and_prices():
@@ -93,6 +120,37 @@ def test_modal_label_validation():
     valid, message = clouds.Modal.is_label_valid('domain/key', 'value')
     assert not valid
     assert 'Invalid label key' in message
+
+
+def test_modal_unsupported_features():
+    resources = resources_lib.Resources(cloud=clouds.Modal(),
+                                        instance_type='modal-cpu-4x-16gb')
+    unsupported = _modal_unsupported_features(resources)
+
+    expected = {
+        clouds.CloudImplementationFeatures.STOP,
+        clouds.CloudImplementationFeatures.MULTI_NODE,
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER,
+        clouds.CloudImplementationFeatures.IMAGE_ID,
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER,
+        clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+        clouds.CloudImplementationFeatures.OPEN_PORTS,
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS,
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS,
+        clouds.CloudImplementationFeatures.AUTO_TERMINATE,
+        clouds.CloudImplementationFeatures.AUTOSTOP,
+        clouds.CloudImplementationFeatures.AUTODOWN,
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK,
+        clouds.CloudImplementationFeatures.LOCAL_DISK,
+    }
+
+    assert expected <= set(unsupported)
+    assert all(
+        isinstance(message, str) and message
+        for message in unsupported.values())
 
 
 def test_modal_credentials_from_env(monkeypatch):
@@ -321,3 +379,54 @@ def test_modal_query_instances_filters_terminated(monkeypatch):
     statuses = modal_instance.query_instances('test', 'test-on-cloud')
 
     assert statuses == {'sb-running': (status_lib.ClusterStatus.UP, None)}
+
+
+def test_modal_query_instances_can_include_terminated(monkeypatch):
+    running = SimpleNamespace(object_id='sb-running')
+    terminated = SimpleNamespace(object_id='sb-terminated')
+    monkeypatch.setattr(
+        modal_instance.modal_utils, 'get_active_sandboxes_by_name',
+        lambda name: {
+            'sb-running': running,
+            'sb-terminated': terminated,
+        })
+    monkeypatch.setattr(modal_instance.modal_utils, 'sandbox_status',
+                        lambda sandbox: None if sandbox is running else 137)
+
+    statuses = modal_instance.query_instances('test',
+                                              'test-on-cloud',
+                                              non_terminated_only=False)
+
+    assert statuses == {
+        'sb-running': (status_lib.ClusterStatus.UP, None),
+        'sb-terminated': (None, None),
+    }
+
+
+def test_modal_terminate_instances_idempotent(monkeypatch):
+    terminated = []
+
+    class FakeSandbox:
+
+        def terminate(self, wait):
+            terminated.append(wait)
+
+    sandboxes_by_call = [
+        {
+            'sb-existing': FakeSandbox()
+        },
+        {},
+    ]
+
+    def fake_get_active_sandboxes_by_name(name):
+        del name  # unused
+        return sandboxes_by_call.pop(0)
+
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_active_sandboxes_by_name',
+                        fake_get_active_sandboxes_by_name)
+
+    modal_instance.terminate_instances('test-on-cloud')
+    modal_instance.terminate_instances('test-on-cloud')
+
+    assert terminated == [True]
