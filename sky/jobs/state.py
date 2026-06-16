@@ -1504,7 +1504,9 @@ def build_managed_jobs_with_filters_no_status_query(
 
     submitted_after / submitted_before are epoch seconds (matching the
     ``submitted_at`` column) and restrict the result to jobs submitted within
-    the inclusive window.
+    the inclusive window. A still-pending job (NULL ``submitted_at``) is
+    treated as submitted now, so it is kept or dropped by the window the same
+    way a job submitted at the current moment would be.
     """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
@@ -1573,10 +1575,19 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.where(job_info_table.c.pool.like(f'%{pool_match}%'))
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
-    if submitted_after is not None:
-        query = query.where(spot_table.c.submitted_at >= submitted_after)
-    if submitted_before is not None:
-        query = query.where(spot_table.c.submitted_at <= submitted_before)
+    if submitted_after is not None or submitted_before is not None:
+        # submitted_at is NULL until a job leaves PENDING (it is set at
+        # STARTING), so a pending job has no submission time yet. Treat it as
+        # submitted "now" so it is filtered consistently regardless of whether
+        # the bound is in the past or the future: e.g. a pending job is kept by
+        # --since (now >= a past lower bound) and by a future --before
+        # (now <= it), but dropped by a past --before (now > it).
+        submitted_at = sqlalchemy.func.coalesce(spot_table.c.submitted_at,
+                                                time.time())
+        if submitted_after is not None:
+            query = query.where(submitted_at >= submitted_after)
+        if submitted_before is not None:
+            query = query.where(submitted_at <= submitted_before)
     return query
 
 

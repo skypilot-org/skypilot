@@ -873,6 +873,9 @@ class TestGetLatestRecoveryReasons:
 _T100 = 100.0
 _T200 = 200.0
 _T300 = 300.0
+# Bounds far in the past (_T*, ~1970) and future (~year 2286) relative to the
+# current time, used to exercise NULL submitted_at (pending) handling.
+_FAR_FUTURE = 9_999_999_999.0
 
 
 @pytest.fixture
@@ -915,6 +918,23 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
         return loop.run_until_complete(create_job_states())
     finally:
         loop.close()
+
+
+@pytest.fixture
+def _seed_pending_job(_mock_managed_jobs_db_conn):
+    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    job_id = state.set_job_info_without_job_id(name='job-pending',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    return job_id
 
 
 class TestSubmittedAtRangeFilter:
@@ -975,6 +995,31 @@ class TestSubmittedAtRangeFilter:
         # All three jobs are RUNNING; the window must cut the status counts.
         counts = state.get_status_count_with_filters(submitted_after=_T200)
         assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
+
+    # A pending job (NULL submitted_at) is treated as submitted "now", so the
+    # window keeps or drops it the same way it would a job submitted right now.
+    def test_pending_kept_by_past_lower_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+
+    def test_pending_dropped_by_past_upper_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T300)
+        assert jobs == []
+        assert total == 0
+
+    def test_pending_kept_by_future_upper_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_FAR_FUTURE)
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+
+    def test_pending_dropped_by_future_lower_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_FAR_FUTURE)
+        assert jobs == []
+        assert total == 0
 
 
 class TestMultiTaskStatusFilterCharacterization:
