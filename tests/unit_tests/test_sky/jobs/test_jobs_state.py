@@ -937,6 +937,27 @@ def _seed_pending_job(_mock_managed_jobs_db_conn):
     return job_id
 
 
+@pytest.fixture
+def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
+    """Seed a job cancelled while PENDING: terminal, with a NULL submitted_at
+    (it never reached STARTING)."""
+    job_id = state.set_job_info_without_job_id(name='job-cancelled',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.scheduler_set_waiting([job_id], '/tmp/dag-c.yaml', '/tmp/user-c.yaml',
+                                '/tmp/env-c', None, 100)
+    state.set_pending_cancelled(job_id)
+    return job_id
+
+
 class TestSubmittedAtRangeFilter:
     """Time-range filter on submitted_at via get_managed_jobs_with_filters."""
 
@@ -1018,6 +1039,29 @@ class TestSubmittedAtRangeFilter:
     def test_pending_dropped_by_future_lower_bound(self, _seed_pending_job):
         jobs, total = state.get_managed_jobs_with_filters(
             submitted_after=_FAR_FUTURE)
+        assert jobs == []
+        assert total == 0
+
+    # A terminal job that never got a submitted_at (cancelled/failed before
+    # STARTING) has no submission time, so it is excluded from any window —
+    # it must not be treated as submitted "now" like a still-pending job.
+    def test_terminal_no_submit_present_without_filter(
+            self, _seed_terminal_no_submit):
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+        assert jobs[0]['status'].is_terminal()
+
+    def test_terminal_no_submit_excluded_from_lower_bound(
+            self, _seed_terminal_no_submit):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert jobs == []
+        assert total == 0
+
+    def test_terminal_no_submit_excluded_from_future_upper_bound(
+            self, _seed_terminal_no_submit):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_FAR_FUTURE)
         assert jobs == []
         assert total == 0
 
