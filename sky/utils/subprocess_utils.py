@@ -524,8 +524,8 @@ def set_child_subreaper() -> None:
 # reaping on the next kill_process_daemon call: a caller that spawns a
 # daemon and then goes idle (e.g. the jobs/serve/pool controller after it
 # scales a pool down to zero) would otherwise leave its last intermediate
-# as a lingering zombie, which subprocess_daemon's wedge sweep then misreads
-# as a wedged parent. One thread per process, polling a small list, is cheap.
+# accumulating as a zombie until CPython GCs the Popen handle. One thread
+# per process, polling a small list, is cheap.
 _pending_daemon_procs: List[subprocess.Popen] = []
 _daemon_procs_lock = threading.Lock()
 _daemon_reaper_started = False
@@ -616,8 +616,8 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     # The background reaper (started here, once) drains exited intermediates
     # promptly even if this caller never calls again — important for a
     # long-lived caller that goes idle (e.g. the controller after scaling a
-    # pool to zero), whose lingering intermediate would otherwise be misread
-    # as a wedge by subprocess_daemon.
+    # pool to zero), whose intermediate would otherwise accumulate as a
+    # zombie.
     _ensure_daemon_reaper()
     daemon_proc = subprocess.Popen(
         daemon_cmd,

@@ -979,24 +979,23 @@ def test_azure_http_server_with_custom_ports():
 def test_kubernetes_orphan_process_reaping():
     """Background workload's children are cleaned up after parent SIGKILL.
 
-    Setup:
-      - A sky job's ``run:`` block backgrounds ``python /tmp/parent.py``
-        and then ``sleep``s, so the wrapper bash outlives the python
-        process — the failure pattern that orphans the workers to PID 1
-        on master.
-      - ``parent.py`` forks two ``multiprocessing.spawn`` workers, records
-        their PIDs, and sleeps. Workers also sleep.
+    Exercises BOTH shell topologies in one cluster (one launch), since each
+    hits a different branch of ``subprocess_daemon._process_group_orphaned``:
+      - job control ON (default ``bash -i``): ``python parent.py &`` gets its
+        OWN process group; a killed parent leaves an orphaned (dead-leader)
+        group — reaped via the dead-separate-leader branch.
+      - job control OFF (``set +m``, the non-interactive shell used on VMs):
+        the parent stays in the run-block shell's OWN group, whose leader
+        (the watched process) is still alive — reaped via the same-group
+        branch. An earlier fix spared these (the leader looked alive),
+        leaking the orphans on every VM launch; the pod-only path never
+        caught it.
 
-    Action:
-      - From outside, ``kill -9`` the parent python. Workers lose their
-        immediate parent.
-
-    Assertion:
-      - Both worker PIDs are gone within ~15 s of the kill. Without the
-        ``PR_SET_CHILD_SUBREAPER`` + PPID-transition-detection fix in
-        ``log_lib`` and ``subprocess_daemon`` they would survive as
-        orphans of PID 1 holding their CPU/RAM state until the pod is
-        torn down.
+    Each ``parent.py`` forks two ``multiprocessing.spawn`` workers and
+    records PIDs. We SIGKILL both parents and assert all four workers are
+    gone within ~15 s. Without the ``PR_SET_CHILD_SUBREAPER`` +
+    PPID-transition reap in ``log_lib``/``subprocess_daemon`` they would
+    survive as orphans of PID 1 holding CPU/RAM until the pod is torn down.
 
     No GPU required — the bug is process-lifecycle; GPU VRAM is just the
     most visible symptom.
@@ -1005,85 +1004,35 @@ def test_kubernetes_orphan_process_reaping():
     cfg = 'tests/test_yamls/orphan_reap_sigkill.yaml'
 
     repro_and_assert = (
-        # Wait for parent.py to actually run + record PIDs.
+        # Wait for both parents to run + record PIDs (on = job control, off =
+        # no job control).
         f'for i in $(seq 1 30); do '
         f'ssh -o StrictHostKeyChecking=no {name} '
-        f'"test -s /tmp/child_pids.txt && test -s /tmp/parent_pid.txt" '
+        f'"test -s /tmp/parent_on.txt && test -s /tmp/child_on.txt && '
+        f'test -s /tmp/parent_off.txt && test -s /tmp/child_off.txt" '
         f'&& break || sleep 2; done && '
-        f'P=$(ssh {name} "cat /tmp/parent_pid.txt") && '
-        f'C1=$(ssh {name} "sed -n 1p /tmp/child_pids.txt") && '
-        f'C2=$(ssh {name} "sed -n 2p /tmp/child_pids.txt") && '
-        f'echo "PARENT_PID=$P CHILD1=$C1 CHILD2=$C2" && '
-        # Pre-kill sanity.
-        f'ssh {name} "kill -0 $C1 && kill -0 $C2" && '
-        f'echo "pre-kill: both workers alive" && '
-        # SIGKILL the parent (simulates OOM / segfault / pkill).
-        f'ssh {name} "kill -9 $P" && '
-        f'echo "T-0: SIGKILLed parent $P" && '
+        f'PON=$(ssh {name} "cat /tmp/parent_on.txt") && '
+        f'POFF=$(ssh {name} "cat /tmp/parent_off.txt") && '
+        f'C=$(ssh {name} "cat /tmp/child_on.txt /tmp/child_off.txt") && '
+        f'echo "parents: on=$PON off=$POFF; workers: $C" && '
+        # Pre-kill sanity: all four workers alive.
+        f'for c in $C; do ssh {name} "kill -0 $c" || '
+        f'{{ echo "worker $c not alive pre-kill"; exit 1; }}; done && '
+        f'echo "pre-kill: all workers alive" && '
+        # SIGKILL both parents (simulates OOM / segfault / pkill).
+        f'ssh {name} "kill -9 $PON $POFF" && '
+        f'echo "T-0: SIGKILLed both parents" && '
         # subprocess_daemon polls every 1 s; allow generous margin for
         # SIGTERM to land on the workers and for them to exit.
         f'sleep 15 && '
-        # Assert children are gone.
-        f'if ssh {name} "kill -0 $C1 2>/dev/null"; then '
-        f'  echo "FAIL: child $C1 still alive — orphan leak"; exit 1; fi && '
-        f'if ssh {name} "kill -0 $C2 2>/dev/null"; then '
-        f'  echo "FAIL: child $C2 still alive — orphan leak"; exit 1; fi && '
-        f'echo "PASS: both worker PIDs cleaned up after parent SIGKILL"')
+        # Assert all four workers are gone (both topologies reaped).
+        f'for c in $C; do '
+        f'if ssh {name} "kill -0 $c 2>/dev/null"; then '
+        f'echo "FAIL: worker $c still alive — orphan leak"; exit 1; fi; done && '
+        f'echo "PASS: all workers cleaned up (job control on + off)"')
 
     test = smoke_tests_utils.Test(
         'kubernetes_orphan_process_reaping',
-        [
-            f'sky launch -y -c {name} -d {cfg}',
-            repro_and_assert,
-        ],
-        teardown=f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout('kubernetes'),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-# ---------- Orphans are reaped even with job control OFF (VM topology). ----
-@pytest.mark.kubernetes
-@pytest.mark.no_remote_server
-def test_kubernetes_orphan_reaping_no_job_control():
-    """Orphans are reaped when the workload shell has job control disabled.
-
-    Regression guard for the case the other reaper tests miss: those run
-    under ``bash -i`` (job control on), where a ``&``-backgrounded parent
-    gets its own process group, so a killed parent leaves an orphaned group
-    with a dead leader. On a non-interactive shell (job control off, as used
-    on VMs) the parent and its workers instead stay in the run-block shell's
-    OWN process group, whose leader (the watched process) is still alive.
-    The orphan-reap gate must reap these same-group descendants too — an
-    earlier version spared them (their group leader looked alive), leaking
-    the orphans on every non-Kubernetes (VM) launch. See
-    ``subprocess_daemon._process_group_orphaned``.
-    """
-    name = smoke_tests_utils.get_cluster_name()
-    cfg = 'tests/test_yamls/orphan_reap_no_job_control.yaml'
-
-    repro_and_assert = (
-        f'for i in $(seq 1 30); do '
-        f'ssh -o StrictHostKeyChecking=no {name} '
-        f'"test -s /tmp/child_pids.txt && test -s /tmp/parent_pid.txt" '
-        f'&& break || sleep 2; done && '
-        f'P=$(ssh {name} "cat /tmp/parent_pid.txt") && '
-        f'C1=$(ssh {name} "sed -n 1p /tmp/child_pids.txt") && '
-        f'C2=$(ssh {name} "sed -n 2p /tmp/child_pids.txt") && '
-        f'echo "PARENT_PID=$P CHILD1=$C1 CHILD2=$C2" && '
-        f'ssh {name} "kill -0 $C1 && kill -0 $C2" && '
-        f'echo "pre-kill: both workers alive" && '
-        f'ssh {name} "kill -9 $P" && '
-        f'echo "T-0: SIGKILLed parent $P" && '
-        f'sleep 15 && '
-        f'if ssh {name} "kill -0 $C1 2>/dev/null"; then '
-        f'  echo "FAIL: child $C1 still alive — orphan leak"; exit 1; fi && '
-        f'if ssh {name} "kill -0 $C2 2>/dev/null"; then '
-        f'  echo "FAIL: child $C2 still alive — orphan leak"; exit 1; fi && '
-        f'echo "PASS: same-group orphans cleaned up after parent SIGKILL"')
-
-    test = smoke_tests_utils.Test(
-        'kubernetes_orphan_reaping_no_job_control',
         [
             f'sky launch -y -c {name} -d {cfg}',
             repro_and_assert,
@@ -1125,8 +1074,8 @@ def test_kubernetes_wedged_parent_zombie_reaping():
 
     Assertion:
       - The wedge sweep ages the zombie helper; once it has been zombie
-        for the configured grace period (60 s default, see
-        ``subprocess_daemon._DEFAULT_ZOMBIE_GRACE_SECONDS``), the daemon
+        for the grace period (60 s, see
+        ``subprocess_daemon._ZOMBIE_GRACE_SECONDS``), the daemon
         sends SIGTERM to the wedged parent (signal-interruptible wedges
         exit here) and escalates to SIGKILL after a 5 s grace. The worker
         then reparents to the subreaper, and the existing PPID-transition

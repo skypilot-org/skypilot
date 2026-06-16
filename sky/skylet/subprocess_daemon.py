@@ -85,6 +85,10 @@ def _process_group_orphaned(pid: int, proc_pgid: Optional[int]) -> bool:
        the intermediate `ray start` exits, while the launcher keeps running
        — spare it.
 
+    Case 1 is safe because the watched process is started as a session/group
+    leader (log_lib.run_with_log uses start_new_session=True), so its own
+    group holds only direct workload, never a deliberately-detached daemon.
+
     We only evaluate a process at the instant its ppid transitions to us;
     an already-reparented process is never re-checked. Errs toward sparing
     on any lookup error.
@@ -535,21 +539,13 @@ def main():
                 for pid, ts in last_reap_at.items()
                 if pid in reapers_alive
             }
-            # Reparent detection: any descendant whose ppid just transitioned
-            # to our proc_pid was adopted via the subreaper attribute when its
-            # original parent died. Most are genuine orphans to terminate, but
-            # we must spare intentionally-detached daemons that the subreaper
-            # also pulls in. Two gates:
-            #   1. _same_session(): a different session is an explicit setsid()
-            #      detach (uvicorn supervisors, `sky api start`) — spare.
-            #   2. _process_group_orphaned(): among same-session descendants,
-            #      reap those in the watched process's own group (direct
-            #      workload processes — the job-control-off/VM case) or in a
-            #      separate dead-leader group (an orphaned job); spare those in
-            #      a separate group whose leader is still alive (a daemon of a
-            #      running job, e.g. ray's GCS under a live `start_cluster`).
-            # Whatever survives both gets SIGTERM now; escalation to SIGKILL
-            # happens in the final sweep below if it ignores SIGTERM.
+            # Reparent detection: a descendant whose ppid just transitioned to
+            # our proc_pid was adopted via the subreaper when its parent died.
+            # Two gates decide reap-vs-spare (see _same_session and
+            # _process_group_orphaned for the full rationale): skip a setsid'd
+            # daemon (different session), then skip a daemon of a still-running
+            # job (separate process group with a live leader). Survivors get
+            # SIGTERM now; the final sweep escalates to SIGKILL if ignored.
             for child in tmp_children:
                 try:
                     new_ppid = child.ppid()
