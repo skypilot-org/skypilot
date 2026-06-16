@@ -53,39 +53,52 @@ def test_same_session_lookup_error_spares():
 
 # ---------------- _process_group_orphaned ----------------
 
+# proc_pgid (the watched process's group) is 1000 in these tests.
+_PROC_PGID = 1000
+
+
+def test_pg_orphaned_same_group_as_watched_reaps():
+    # In the watched process's own group (pgid == proc_pgid): a direct
+    # workload process (job-control-off / VM case) -> reap (True). The group
+    # leader is the still-alive watched process, so the os.kill probe would
+    # WRONGLY spare it; the same-group check must short-circuit to reap.
+    with mock.patch.object(sd.os, 'getpgid', return_value=_PROC_PGID):
+        with mock.patch.object(sd.os, 'kill', return_value=None):
+            assert sd._process_group_orphaned(501, _PROC_PGID) is True
+
 
 def test_pg_orphaned_dead_leader_reaps():
-    # Group leader (pid == pgid) is gone -> orphaned group -> reap (True).
+    # Separate group whose leader is gone -> orphaned group -> reap (True).
     with mock.patch.object(sd.os, 'getpgid', return_value=500):
         with mock.patch.object(sd.os, 'kill', side_effect=ProcessLookupError):
-            assert sd._process_group_orphaned(501) is True
+            assert sd._process_group_orphaned(501, _PROC_PGID) is True
 
 
 def test_pg_orphaned_live_leader_spares():
-    # Group leader alive (os.kill(pgid, 0) succeeds) -> spare (False).
+    # Separate group, leader alive (os.kill(pgid, 0) succeeds) -> spare.
     # This is the ray-GCS-under-live-start_cluster case.
     with mock.patch.object(sd.os, 'getpgid', return_value=500):
         with mock.patch.object(sd.os, 'kill', return_value=None):
-            assert sd._process_group_orphaned(501) is False
-
-
-def test_pg_orphaned_self_leader_spares():
-    # A process leading its own group (pgid == pid) is its own live leader.
-    with mock.patch.object(sd.os, 'getpgid', return_value=501):
-        with mock.patch.object(sd.os, 'kill', return_value=None):
-            assert sd._process_group_orphaned(501) is False
+            assert sd._process_group_orphaned(501, _PROC_PGID) is False
 
 
 def test_pg_orphaned_getpgid_error_spares():
     with mock.patch.object(sd.os, 'getpgid', side_effect=ProcessLookupError):
-        assert sd._process_group_orphaned(501) is False
+        assert sd._process_group_orphaned(501, _PROC_PGID) is False
 
 
 def test_pg_orphaned_permission_error_spares():
-    # Leader exists but is owned by another uid -> alive -> spare (False).
+    # Separate group, leader owned by another uid -> alive -> spare (False).
     with mock.patch.object(sd.os, 'getpgid', return_value=500):
         with mock.patch.object(sd.os, 'kill', side_effect=PermissionError):
-            assert sd._process_group_orphaned(501) is False
+            assert sd._process_group_orphaned(501, _PROC_PGID) is False
+
+
+def test_pg_orphaned_none_proc_pgid_falls_back_to_leader_check():
+    # If the watched group is unknown, fall back to leader-liveness only.
+    with mock.patch.object(sd.os, 'getpgid', return_value=500):
+        with mock.patch.object(sd.os, 'kill', side_effect=ProcessLookupError):
+            assert sd._process_group_orphaned(501, None) is True
 
 
 # ---------------- _zombie_wedge_sweep ----------------

@@ -1042,6 +1042,58 @@ def test_kubernetes_orphan_process_reaping():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Orphans are reaped even with job control OFF (VM topology). ----
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+def test_kubernetes_orphan_reaping_no_job_control():
+    """Orphans are reaped when the workload shell has job control disabled.
+
+    Regression guard for the case the other reaper tests miss: those run
+    under ``bash -i`` (job control on), where a ``&``-backgrounded parent
+    gets its own process group, so a killed parent leaves an orphaned group
+    with a dead leader. On a non-interactive shell (job control off, as used
+    on VMs) the parent and its workers instead stay in the run-block shell's
+    OWN process group, whose leader (the watched process) is still alive.
+    The orphan-reap gate must reap these same-group descendants too — an
+    earlier version spared them (their group leader looked alive), leaking
+    the orphans on every non-Kubernetes (VM) launch. See
+    ``subprocess_daemon._process_group_orphaned``.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    cfg = 'tests/test_yamls/orphan_reap_no_job_control.yaml'
+
+    repro_and_assert = (
+        f'for i in $(seq 1 30); do '
+        f'ssh -o StrictHostKeyChecking=no {name} '
+        f'"test -s /tmp/child_pids.txt && test -s /tmp/parent_pid.txt" '
+        f'&& break || sleep 2; done && '
+        f'P=$(ssh {name} "cat /tmp/parent_pid.txt") && '
+        f'C1=$(ssh {name} "sed -n 1p /tmp/child_pids.txt") && '
+        f'C2=$(ssh {name} "sed -n 2p /tmp/child_pids.txt") && '
+        f'echo "PARENT_PID=$P CHILD1=$C1 CHILD2=$C2" && '
+        f'ssh {name} "kill -0 $C1 && kill -0 $C2" && '
+        f'echo "pre-kill: both workers alive" && '
+        f'ssh {name} "kill -9 $P" && '
+        f'echo "T-0: SIGKILLed parent $P" && '
+        f'sleep 15 && '
+        f'if ssh {name} "kill -0 $C1 2>/dev/null"; then '
+        f'  echo "FAIL: child $C1 still alive — orphan leak"; exit 1; fi && '
+        f'if ssh {name} "kill -0 $C2 2>/dev/null"; then '
+        f'  echo "FAIL: child $C2 still alive — orphan leak"; exit 1; fi && '
+        f'echo "PASS: same-group orphans cleaned up after parent SIGKILL"')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_orphan_reaping_no_job_control',
+        [
+            f'sky launch -y -c {name} -d {cfg}',
+            repro_and_assert,
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Wedged parent's zombie+alive descendants are reaped on Kubernetes.
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server

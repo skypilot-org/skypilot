@@ -15,15 +15,11 @@ import psutil
 # Environment variable to enable kill_pg in subprocess daemon.
 USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
 
-# Whether the daemon force-kills an alive-but-wedged descendant of the
-# watched process (see _zombie_wedge_sweep). Default enabled; '0' disables.
-REAP_WEDGED_PARENTS_ENV_VAR = 'SKYPILOT_REAP_WEDGED_PARENTS'
-
 # How long a zombie descendant must persist before its parent counts as
 # wedged. 60 s is far above any well-behaved program's wait() latency, so
-# crossing it is an unambiguous signal the parent has stopped reaping.
-ZOMBIE_GRACE_ENV_VAR = 'SKYPILOT_ZOMBIE_GRACE_SECONDS'
-_DEFAULT_ZOMBIE_GRACE_SECONDS = 60.0
+# crossing it is an unambiguous signal the parent has stopped reaping. This
+# is a fixed invariant of the wedge heuristic, not a user-facing knob.
+_ZOMBIE_GRACE_SECONDS = 60.0
 
 # How long to wait for a SIGTERM to take effect before escalating to
 # SIGKILL on a wedged ancestor. Some wedge shapes are signal-interruptible
@@ -67,42 +63,46 @@ def _same_session(child_pid: int, ref_sid: Optional[int]) -> bool:
         return False
 
 
-def _process_group_orphaned(pid: int) -> bool:
-    """Return True if `pid`'s process group has no living leader.
+def _process_group_orphaned(pid: int, proc_pgid: Optional[int]) -> bool:
+    """Return True if reparented `pid` is a leftover worth reaping.
 
     The second gate (after _same_session) for the live orphan reap. A
-    process that reparents to our subreaper in the watched session is not
-    necessarily a leftover: it may be a daemon that a still-running job
-    spawned. The deciding question is whether the job that owns it — its
-    process group leader — is still alive.
+    same-session process that reparents to our subreaper is not necessarily
+    a leftover: it may be a daemon a still-running job spawned. We decide by
+    its process group:
 
-    Under `bash -i` job control each command (foreground or `&`) becomes a
-    process-group leader and its children inherit the group. So:
-      - An orphaned worker's group is led by the workload that just died
-        (e.g. the killed `parent.py`): leader dead -> reap.
-      - Ray's user-space GCS/raylet do NOT setsid; they sit in the launcher
-        job's group (`start_cluster`) and reparent to us when the
-        intermediate `ray start` exits, while `start_cluster` keeps running
-        the health-check loop: leader alive -> spare. (We only evaluate a
-        process at the instant its ppid transitions to us, when the launcher
-        is still alive; an already-reparented process is never re-checked.)
+    1. Same group as the watched process (`pgid == proc_pgid`): a direct
+       workload process. When job control is off (the non-interactive shell
+       used on VMs) a `&`-backgrounded worker stays in the run-block shell's
+       own group, so a killed-parent orphan lands here — reap it. (This is
+       the case the pod-only smoke tests don't cover.)
+    2. A different group whose leader is DEAD: an orphaned job (e.g. under
+       `bash -i` job control the killed `parent.py` led its own group) —
+       reap it.
+    3. A different group whose leader is ALIVE: a daemon belonging to a
+       still-running job. Ray's user-space GCS/raylet do NOT setsid; they
+       sit in the launcher's (`start_cluster`) group and reparent to us when
+       the intermediate `ray start` exits, while the launcher keeps running
+       — spare it.
 
-    A process that leads its own group (pgid == pid) counts as having a live
-    leader (itself) and is spared here — a self-detached job is left to the
-    end-of-life sweep, not the live reap. Errs toward sparing on any error.
+    We only evaluate a process at the instant its ppid transitions to us;
+    an already-reparented process is never re-checked. Errs toward sparing
+    on any lookup error.
     """
     try:
         pgid = os.getpgid(pid)
     except (OSError, ProcessLookupError):
         return False
+    if proc_pgid is not None and pgid == proc_pgid:
+        return True  # in the watched process's own group -> workload -> reap
     try:
         # Signal 0 probes existence of the group leader (pid == pgid).
         os.kill(pgid, 0)
     except ProcessLookupError:
-        return True  # leader gone -> orphaned group -> reap
+        return True  # distinct group, leader gone -> orphaned -> reap
     except (PermissionError, OSError):
         return False  # leader exists (or unknown) -> assume alive -> spare
-    return False  # leader alive -> spare
+    return False  # distinct group, leader alive -> daemon -> spare
 
 
 def _log(message: str) -> None:
@@ -414,6 +414,17 @@ def main():
         except (OSError, ProcessLookupError):
             proc_sid = None
 
+    # Capture the watched process's process-group id too. The live orphan
+    # reap reaps descendants that share this group (direct workload processes,
+    # the job-control-off / VM case) while sparing daemons in a separate
+    # live-leader group. See _process_group_orphaned().
+    proc_pgid: Optional[int] = None
+    if process is not None:
+        try:
+            proc_pgid = os.getpgid(args.proc_pid)
+        except (OSError, ProcessLookupError):
+            proc_pgid = None
+
     # Initialize children list from arguments
     children = []
     if args.initial_children:
@@ -476,16 +487,8 @@ def main():
         parent_pid = parent_process.pid
         # proc_sid (captured above) gates the PPID-transition reap below so
         # we don't kill intentionally-detached descendants (setsid'd
-        # background daemons like ray's GCS server) that the subreaper
-        # attribute has pulled into our tree. See _same_session().
-        reap_wedged_parents = (os.environ.get(REAP_WEDGED_PARENTS_ENV_VAR, '1')
-                               != '0')
-        try:
-            zombie_grace_seconds = float(
-                os.environ.get(ZOMBIE_GRACE_ENV_VAR,
-                               _DEFAULT_ZOMBIE_GRACE_SECONDS))
-        except ValueError:
-            zombie_grace_seconds = _DEFAULT_ZOMBIE_GRACE_SECONDS
+        # background daemons) that the subreaper attribute has pulled into
+        # our tree. See _same_session().
         # Wait for either parent or target process to exit
         while process.is_running() and parent_process.is_running():
             try:
@@ -535,17 +538,16 @@ def main():
             # Reparent detection: any descendant whose ppid just transitioned
             # to our proc_pid was adopted via the subreaper attribute when its
             # original parent died. Most are genuine orphans to terminate, but
-            # two kinds must be spared:
-            #   1. A different session — an explicit setsid() detach (uvicorn
-            #      supervisors, `sky api start`). _same_session() filters these.
-            #   2. A member of a process group whose leader is still alive — a
-            #      daemon spawned by a still-running job. Ray's user-space
-            #      `ray start` does NOT setsid its GCS/raylet: they stay in the
-            #      watched session, in the launcher's (`start_cluster`) process
-            #      group, and reparent to us when `ray start` exits while the
-            #      launcher keeps running. _process_group_orphaned() spares
-            #      them and reaps only members of a dead-leader (orphaned)
-            #      group — the leftover-worker shape this reap targets.
+            # we must spare intentionally-detached daemons that the subreaper
+            # also pulls in. Two gates:
+            #   1. _same_session(): a different session is an explicit setsid()
+            #      detach (uvicorn supervisors, `sky api start`) — spare.
+            #   2. _process_group_orphaned(): among same-session descendants,
+            #      reap those in the watched process's own group (direct
+            #      workload processes — the job-control-off/VM case) or in a
+            #      separate dead-leader group (an orphaned job); spare those in
+            #      a separate group whose leader is still alive (a daemon of a
+            #      running job, e.g. ray's GCS under a live `start_cluster`).
             # Whatever survives both gets SIGTERM now; escalation to SIGKILL
             # happens in the final sweep below if it ignores SIGTERM.
             for child in tmp_children:
@@ -559,7 +561,7 @@ def main():
                         new_ppid == proc_pid):
                     if not _same_session(child.pid, proc_sid):
                         continue
-                    if not _process_group_orphaned(child.pid):
+                    if not _process_group_orphaned(child.pid, proc_pgid):
                         continue
                     _log(f'Reaping orphaned descendant pid={child.pid}: '
                          f'reparented from dead ppid={old_ppid} to the '
@@ -588,19 +590,18 @@ def main():
             # children. The PPID-transition machinery above can't see this
             # case: the children never reparent (their parent is still
             # alive, just stuck). Detect by aging each zombie; once one has
-            # been zombie for > zombie_grace_seconds, treat its parent as
+            # been zombie for > _ZOMBIE_GRACE_SECONDS, treat its parent as
             # wedged and SIGKILL it. The kernel reparents the (still-alive)
             # siblings to our proc_pid subreaper, the PPID-transition logic
             # above then cleans those up on the next tick.
-            if reap_wedged_parents:
-                _zombie_wedge_sweep(tmp_children, zombie_first_seen,
-                                    zombie_grace_seconds, proc_pid, parent_pid,
-                                    proc_sid, last_reap_at)
-                zombie_first_seen = {
-                    pid: ts
-                    for pid, ts in zombie_first_seen.items()
-                    if pid in active_pids
-                }
+            _zombie_wedge_sweep(tmp_children, zombie_first_seen,
+                                _ZOMBIE_GRACE_SECONDS, proc_pid, parent_pid,
+                                proc_sid, last_reap_at)
+            zombie_first_seen = {
+                pid: ts
+                for pid, ts in zombie_first_seen.items()
+                if pid in active_pids
+            }
             time.sleep(1)
 
     # The loop exited; clean up via the mechanism the caller chose.
