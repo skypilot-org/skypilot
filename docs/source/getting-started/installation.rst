@@ -225,6 +225,7 @@ This will produce a summary like:
     Azure: enabled
     OCI: enabled
     Lambda: enabled
+    Modal: enabled
     Nebius: enabled
     RunPod: enabled
     Paperspace: enabled
@@ -1104,6 +1105,162 @@ Go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambd
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+Modal
+~~~~~
+
+`Modal <https://modal.com/>`__ runs workloads in Modal Sandboxes. SkyPilot's
+Modal support uses a single Sandbox as the SkyPilot cluster head node.
+
+Install the necessary dependencies for Modal.
+
+.. note::
+
+  Modal support requires Python >= 3.10.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # From stable release
+      uv pip install "skypilot[modal]"
+      # From nightly build
+      uv pip install "skypilot-nightly[modal]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # From stable release
+      uv tool install --with pip "skypilot[modal]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[modal]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # From stable release
+      pip install "skypilot[modal]"
+      # From nightly build
+      pip install "skypilot-nightly[modal]"
+      # From source
+      pip install -e ".[modal]"
+
+Configure Modal credentials with the Modal CLI:
+
+.. code-block:: shell
+
+  modal token new
+
+Alternatively, set token credentials in the environment:
+
+.. code-block:: shell
+
+  export MODAL_TOKEN_ID=<your_token_id>
+  export MODAL_TOKEN_SECRET=<your_token_secret>
+
+Verify the setup:
+
+.. code-block:: shell
+
+  sky check modal
+
+Minimal CPU task:
+
+.. code-block:: yaml
+
+  resources:
+    cloud: modal
+
+  run: |
+    echo "Hello from Modal on SkyPilot"
+    python -V
+
+GPU task:
+
+.. code-block:: yaml
+
+  resources:
+    cloud: modal
+    accelerators: H100:1
+
+  run: |
+    nvidia-smi
+
+You can also run the examples in ``examples/modal/hello.yaml`` and
+``examples/modal/gpu.yaml``.
+
+Current limitations:
+
+- Modal support is single-node only.
+- SkyPilot launches a Modal Sandbox with a 24-hour maximum lifetime. If the
+  Sandbox exits, times out, or is terminated from Modal, launch a new SkyPilot
+  cluster.
+- ``sky stop`` / ``sky start`` and stop/resume semantics are not supported; use
+  ``sky down``.
+- Managed jobs and SkyServe controllers are not supported on Modal.
+- SkyPilot storage mounts are not supported on Modal yet.
+- Docker images are supported through public registry image references such as
+  ``image_id: docker:ubuntu:22.04``. Private registry credentials are not wired
+  through Modal Secrets yet.
+
+Together AI |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+
+1. Install the necessary dependencies for Kubernetes.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[kubernetes]"
+      # From nightly build
+      uv pip install "skypilot-nightly[kubernetes]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[kubernetes]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[kubernetes]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[kubernetes]"
+      # From nightly build
+      pip install "skypilot-nightly[kubernetes]"
+      # From source
+      pip install -e ".[kubernetes]"
+
+2. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
+3. Get the Kubernetes config for the cluster
+4. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
+5. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
+
+.. code-block:: shell
+
+  KUBECONFIG=./together-kubeconfig:~/.kube/config kubectl config view --flatten > /tmp/merged_kubeconfig && mv /tmp/merged_kubeconfig ~/.kube/config
+
 
 Paperspace |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

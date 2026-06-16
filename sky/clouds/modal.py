@@ -7,10 +7,14 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import exceptions
 from sky.adaptors import modal as modal_adaptor
+from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -38,16 +42,12 @@ class Modal(clouds.Cloud):
             'Disk cloning is not supported on Modal.',
         clouds.CloudImplementationFeatures.IMAGE_ID:
             'Custom image IDs are not supported on Modal.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            'Docker images are not supported on Modal yet.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances are not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers are not supported on Modal.',
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             'Custom network tiers are not supported on Modal.',
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            'Opening arbitrary ports is not supported on Modal yet.',
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             'Storage mounting is not supported on Modal yet.',
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
@@ -248,6 +248,7 @@ class Modal(clouds.Cloud):
             'modal_memory': modal_memory,
             'modal_timeout': 24 * 60 * 60,
             'modal_idle_timeout': None,
+            'modal_docker_image': resources.extract_docker_image(),
         }
 
     def _get_feasible_launchable_resources(
@@ -365,3 +366,23 @@ class Modal(clouds.Cloud):
         from sky.provision.modal import instance as modal_instance
         statuses = modal_instance.query_instances('Modal', name, None)
         return [status for status, _ in statuses.values() if status is not None]
+
+    @classmethod
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        try:
+            workspace = modal_adaptor.modal.Workspace.from_context()
+            workspace.hydrate()
+            workspace_name = workspace.name
+            workspace_uuid = getattr(workspace, 'local_uuid', None)
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get Modal workspace identity.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
+        identity = workspace_name or workspace_uuid
+        if identity is None:
+            return None
+        return [[f'Modal workspace {identity}']]
