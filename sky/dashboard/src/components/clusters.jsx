@@ -487,11 +487,9 @@ export function Clusters() {
                   query.historyDays = newDays.toString();
                 }
               }
-              router.replace(
-                { pathname: router.pathname, query },
-                undefined,
-                { shallow: true }
-              );
+              router.replace({ pathname: router.pathname, query }, undefined, {
+                shallow: true,
+              });
             }}
           >
             <SelectTrigger className="w-36 h-8 text-xs">
