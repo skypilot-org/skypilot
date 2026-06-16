@@ -458,81 +458,64 @@ export function Clusters() {
           />
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <div className="flex items-center gap-2">
-            <label
-              className="flex items-center cursor-pointer"
-              title="Toggle cluster history"
-            >
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => {
-                  const newValue = e.target.checked;
-                  setShowHistory(newValue);
-                  updateShowHistoryURL(newValue);
-                }}
-                className="sr-only"
-              />
-              <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
-                    showHistory ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </div>
-              <span className="ml-2 text-sm text-gray-700">Show history</span>
-            </label>
-            {/* Always render the day-range Select so the Show history toggle
-                keeps the same screen position whether history is on or off
-                (this row is ml-auto so any width change to the right of the
-                toggle shifts the toggle horizontally). */}
-            <div
-              className={
-                showHistory ? '' : 'invisible pointer-events-none'
+          {/* Single History dropdown — "Off" means no history, any time-range
+              picks the time-window and enables history. Fixed width, so the
+              right-aligned cluster doesn't shift when the value changes. */}
+          <span className="text-sm text-gray-700">History:</span>
+          <Select
+            value={showHistory ? historyDays.toString() : 'off'}
+            onValueChange={(value) => {
+              if (value === 'off') {
+                if (showHistory) {
+                  setShowHistory(false);
+                  updateShowHistoryURL(false);
+                }
+                return;
               }
-              aria-hidden={!showHistory}
-            >
-              <Select
-                value={historyDays.toString()}
-                onValueChange={(value) => {
-                  const newDays = parseInt(value);
-                  setHistoryDays(newDays);
-                  updateHistoryDaysURL(newDays);
-                }}
-              >
-                <SelectTrigger className="w-24 h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 day</SelectItem>
-                  <SelectItem value="5">5 days</SelectItem>
-                  <SelectItem value="10">10 days</SelectItem>
-                  <SelectItem value="30">30 days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+              const newDays = parseInt(value);
+              if (!showHistory) {
+                setShowHistory(true);
+                updateShowHistoryURL(true);
+              }
+              if (newDays !== historyDays) {
+                setHistoryDays(newDays);
+                updateHistoryDaysURL(newDays);
+              }
+            }}
+          >
+            <SelectTrigger className="w-36 h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">Off</SelectItem>
+              <SelectItem value="1">Last 1 day</SelectItem>
+              <SelectItem value="5">Last 5 days</SelectItem>
+              <SelectItem value="10">Last 10 days</SelectItem>
+              <SelectItem value="30">Last 30 days</SelectItem>
+            </SelectContent>
+          </Select>
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
-          {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-          >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+          {/* Refresh button with "Updated X ago" stacked directly underneath
+              (right-aligned). ml-6 gives breathing room from the History
+              select so the toolbar doesn't feel cramped. */}
+          <div className="flex flex-col items-end leading-tight ml-6">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+            {!loading && lastFetchedTime && (
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            )}
+          </div>
         </div>
       </div>
 
