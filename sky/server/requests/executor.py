@@ -318,11 +318,6 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
-            # Set PENDING before the wait, not after: during the backoff the
-            # request is parked waiting to be rescheduled, so PENDING is its
-            # accurate state and lets a request-recovery mechanism re-enqueue
-            # it if the server is interrupted mid-wait. It is not put back on
-            # the queue until after the wait, so no worker picks it up early.
             request_id, _, _ = request_element
             # Clamp to avoid ValueError from time.sleep() on a negative wait.
             retry_wait_seconds = max(0, e.retry_wait_seconds)
@@ -341,9 +336,10 @@ class RequestWorker:
                             f'retrying in {retry_wait_seconds}s')
             status_msg = (f'{reason} ({retry_suffix})'
                           if reason else retry_suffix.capitalize())
+            # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.PENDING
+                request_task.status = api_requests.RequestStatus.WAITING
                 request_task.status_msg = status_msg
             try:
                 if condition is not None:

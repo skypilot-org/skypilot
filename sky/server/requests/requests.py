@@ -30,6 +30,7 @@ from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
@@ -68,6 +69,7 @@ class RequestStatus(enum.Enum):
     """The status of a request."""
 
     PENDING = 'PENDING'
+    WAITING = 'WAITING'
     RUNNING = 'RUNNING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
@@ -85,14 +87,36 @@ class RequestStatus(enum.Enum):
     def finished_status(cls) -> List['RequestStatus']:
         return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
 
+    @classmethod
+    def active_statuses(cls) -> List['RequestStatus']:
+        """Statuses of requests that are not finished yet."""
+        return [cls.PENDING, cls.WAITING, cls.RUNNING]
+
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,
+    RequestStatus.WAITING: colorama.Fore.YELLOW,
     RequestStatus.RUNNING: colorama.Fore.GREEN,
     RequestStatus.SUCCEEDED: colorama.Fore.GREEN,
     RequestStatus.FAILED: colorama.Fore.RED,
     RequestStatus.CANCELLED: colorama.Fore.WHITE,
 }
+
+
+def _status_value_for_client(status_value: str) -> str:
+    """Map WAITING to RUNNING for clients that predate the WAITING status.
+
+    Older clients parse the status string straight into the RequestStatus enum
+    and crash on an unknown value, so downgrade it to the closest status they
+    understand on the wire.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    if (status_value == RequestStatus.WAITING.value and
+            remote_api_version is not None and remote_api_version <
+            server_constants.MIN_WAITING_STATUS_API_VERSION):
+        return RequestStatus.RUNNING.value
+    return status_value
+
 
 REQUEST_COLUMNS = [
     'request_id',
@@ -222,7 +246,7 @@ class Request:
             name=self.name,
             entrypoint=self.entrypoint.__name__,
             request_body=self.request_body.model_dump_json(),
-            status=self.status.value,
+            status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
@@ -250,7 +274,7 @@ class Request:
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
-                status=self.status.value,
+                status=_status_value_for_client(self.status.value),
                 return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
@@ -346,7 +370,7 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             request_body=request.request_body.model_dump_json()
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
-            status=request.status.value,
+            status=_status_value_for_client(request.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
@@ -564,7 +588,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in storage.query_requests(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            status=RequestStatus.active_statuses(),
             exclude_request_names=[exclude_request_name],
             cluster_names=[cluster_name],
             fields=['request_id']))
@@ -1368,7 +1392,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_ids = [
                 r.request_id
                 for r in self.query_requests(req_filter=RequestTaskFilter(
-                    status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                    status=RequestStatus.active_statuses(),
                     exclude_request_names=['sky.api_cancel'],
                     user_id=user_id,
                     fields=['request_id']))
@@ -1497,12 +1521,13 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         assert _DB is not None
         with _DB.conn:
             cursor = _DB.conn.cursor()
+            active_values = [s.value for s in RequestStatus.active_statuses()]
+            placeholders = ', '.join('?' * len(active_values))
             cursor.execute(
                 f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
                 f'FROM {REQUEST_TABLE} '
-                f'WHERE status IN (?, ?) '
-                f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
-                (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
+                f'WHERE status IN ({placeholders}) '
+                f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL', active_values)
             return {row[0] for row in cursor.fetchall()}
 
     def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:

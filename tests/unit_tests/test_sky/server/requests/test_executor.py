@@ -642,13 +642,13 @@ async def test_request_worker_retry_execution_retryable_error(
     ], (f'Expected first time.sleep call to be 30 seconds, got {sleep_calls[0]}'
        )
 
-    # Verify the status was set to PENDING *before* the backoff wait, and that
+    # Verify the status was set to WAITING *before* the backoff wait, and that
     # the request was not yet re-enqueued at that point. This guards the
     # failover-safety ordering: a server interrupted mid-wait leaves the
-    # request in PENDING (recoverable) rather than a stuck RUNNING orphan.
+    # request in WAITING (recoverable) rather than a stuck RUNNING orphan.
     assert status_at_sleep == [
-        requests_lib.RequestStatus.PENDING
-    ], (f'Expected status to be PENDING at sleep time, got {status_at_sleep}')
+        requests_lib.RequestStatus.WAITING
+    ], (f'Expected status to be WAITING at sleep time, got {status_at_sleep}')
     assert queue_len_at_sleep == [
         0
     ], ('Expected request to be re-enqueued only after the wait, but it was '
@@ -664,11 +664,12 @@ async def test_request_worker_retry_execution_retryable_error(
     assert 'retrying in 30s' in msg, (
         f'Expected wait time in status_msg, got: {msg!r}')
 
-    # Verify the request status was reset to PENDING
+    # The request stays WAITING through the backoff and re-enqueue; a worker
+    # flips it to RUNNING only when it picks the request back up.
     updated_request = requests_lib.get_request(request_id, fields=['status'])
     assert updated_request is not None
-    assert updated_request.status == requests_lib.RequestStatus.PENDING, (
-        f'Expected request status to be PENDING, got {updated_request.status}')
+    assert updated_request.status == requests_lib.RequestStatus.WAITING, (
+        f'Expected request status to be WAITING, got {updated_request.status}')
 
     # Call process_request - it should pick up the request from the queue
     # and call submit_until_success
@@ -788,10 +789,10 @@ def test_pause_reschedules_when_wait_returns_true(pause_harness):
         'is_cancelled': False,
         'fallback_wait_seconds': 30
     }]
-    # During the pause the request is PENDING with a "waiting to resume" msg.
+    # During the pause the request is WAITING with a "waiting to resume" msg.
     updated = requests_lib.get_request(pause_harness.request_id,
                                        fields=['status', 'status_msg'])
-    assert updated.status == requests_lib.RequestStatus.PENDING
+    assert updated.status == requests_lib.RequestStatus.WAITING
     assert 'waiting to resume' in updated.status_msg
 
 
@@ -814,7 +815,7 @@ def test_pause_base_condition_does_fixed_fallback_wait(pause_harness):
     assert pause_harness.queue_items == [request_element]
     updated = requests_lib.get_request(pause_harness.request_id,
                                        fields=['status'])
-    assert updated.status == requests_lib.RequestStatus.PENDING
+    assert updated.status == requests_lib.RequestStatus.WAITING
 
 
 def test_pause_base_condition_dropped_if_cancelled_during_wait(
