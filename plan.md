@@ -15,6 +15,7 @@ References:
 - Modal Sandboxes: https://modal.com/docs/reference/modal.Sandbox
 - Modal tunnels: https://modal.com/docs/guide/tunnels
 - Modal GPU resources: https://modal.com/docs/guide/gpu
+- Modal region selection: https://modal.com/docs/guide/region-selection
 - Modal pricing: https://modal.com/pricing
 
 ## Public Interface
@@ -45,8 +46,19 @@ References:
    - Add `sky/catalog/modal_catalog.py` plus a small static catalog covering a
      CPU default and documented Modal GPU types/counts, with per-second prices
      converted to hourly prices.
-   - Use a synthetic `auto` region for Modal-managed placement; translate `auto`
-     to `region=None` when calling Modal.
+   - Use a synthetic `auto` region as the default SkyPilot catalog region for
+     Modal-managed placement; translate `auto` to `region=None` when calling
+     Modal.
+   - Also accept Modal's documented Sandbox container regions immediately:
+     broad regions `us`, `eu`, `ap`, `uk`, `ca`, `me`, `sa`, `af`, `mx`; and
+     narrow regions `us-east`, `us-central`, `us-south`, `us-west`, `eu-west`,
+     `eu-north`, `eu-south`, `ap-northeast`, `ap-southeast`, `ap-south`,
+     `ap-melbourne`, `jp`, `au`.
+   - Price `auto` at base Modal pricing, explicit broad regions at Modal's
+     documented 1.5x multiplier, and explicit narrow regions at Modal's
+     documented 1.75x multiplier.
+   - Only model Sandbox container `region`; do not add `routing_region`, which
+     Modal documents as not applying to Sandboxes.
    - Add `sky/provision/modal/{__init__.py,config.py,instance.py,modal_utils.py}`
      implementing `bootstrap_instances`, `run_instances`,
      `terminate_instances`, `get_cluster_info`, `query_instances`, and
@@ -87,7 +99,8 @@ References:
      store mounting, and no stop/resume.
 
 6. P5: low-risk v1 follow-ups.
-   - Add documented Modal regions with any pricing/placement modifiers.
+   - Expand region handling if Modal exposes more granular region definitions
+     or provider-specific placement controls.
    - Add Docker image support through Modal image construction.
    - Add `open_ports` / `query_ports` through Modal Sandbox tunnels.
    - Add better identity strings from Modal workspace/profile information.
