@@ -659,11 +659,19 @@ export function useClusterData(options = {}) {
 
       // cost_report also returns active clusters, so only keep truly
       // terminated rows from history (status === TERMINATED); the live
-      // rows come from cluster_table above and carry fresher data.
+      // rows come from cluster_table above and carry fresher data. Drop
+      // any history row that's still present in the active set (matched by
+      // cluster_hash) to avoid duplicate rows.
+      const activeHashes = new Set(
+        activeClusters.map((c) => c.cluster_hash).filter(Boolean)
+      );
       allClusters = [
         ...activeClusters.map((c) => ({ ...c, isHistorical: false })),
         ...historyClusters
-          .filter((c) => c.status === 'TERMINATED')
+          .filter(
+            (c) =>
+              c.status === 'TERMINATED' && !activeHashes.has(c.cluster_hash)
+          )
           .map((c) => ({ ...c, isHistorical: true })),
       ];
     } else {

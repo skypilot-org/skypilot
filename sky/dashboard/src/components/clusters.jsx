@@ -205,6 +205,10 @@ export function Clusters() {
   const [historyDays, setHistoryDays] = useState(getInitialHistoryDays);
   const [userScope, setUserScope] = useState(getInitialUserScope);
   const [currentUser, setCurrentUser] = useState(null);
+  // Whether the current-user lookup has finished. Used to distinguish
+  // "auth not resolved yet" from "resolved and anonymous" so the URL sync
+  // below doesn't reset an anonymous user's scope back to 'mine'.
+  const [authResolved, setAuthResolved] = useState(false);
   const isMobile = useMobile();
 
   // Resolve the logged-in user for the "My clusters" scope. Mirrors the
@@ -217,6 +221,7 @@ export function Clusters() {
     getCurrentUserInfo()
       .then((info) => {
         if (cancelled) return;
+        setAuthResolved(true);
         if (info && info.id && info.id !== 'local') {
           setCurrentUser({ id: info.id, name: info.name || info.id });
         } else {
@@ -224,7 +229,10 @@ export function Clusters() {
         }
       })
       .catch(() => {
-        if (!cancelled) setUserScope('all');
+        if (!cancelled) {
+          setAuthResolved(true);
+          setUserScope('all');
+        }
       });
     return () => {
       cancelled = true;
@@ -269,8 +277,12 @@ export function Clusters() {
         }
       }
 
-      // Sync ownership scope with URL if it has changed
-      const expectedScope = router.query.owner === 'all' ? 'all' : 'mine';
+      // Sync ownership scope with URL if it has changed. An anonymous
+      // caller has no "Mine" view, so it stays on 'all' regardless of the
+      // (absent) owner param.
+      const isAnonymous = authResolved && !currentUser;
+      const expectedScope =
+        router.query.owner === 'all' ? 'all' : isAnonymous ? 'all' : 'mine';
       if (userScope !== expectedScope) {
         setUserScope(expectedScope);
       }
@@ -281,6 +293,8 @@ export function Clusters() {
     router.query.history,
     router.query.historyDays,
     router.query.owner,
+    authResolved,
+    currentUser,
   ]);
 
   useEffect(() => {
@@ -476,6 +490,36 @@ export function Clusters() {
     );
   };
 
+  // Activity toggle: Active shows live clusters only; All also includes
+  // terminated clusters from history (same data as the old "Show history"
+  // checkbox, presented like the jobs page).
+  const selectHistoryTab = (showHistoryValue) => {
+    setShowHistory(showHistoryValue);
+    updateShowHistoryURL(showHistoryValue);
+  };
+
+  // An explicit User filter from the filter dropdown overrides the
+  // ownership scope toggle; reflect that in the highlighted tab.
+  const explicitUserFilter = useMemo(
+    () =>
+      (filters || []).find(
+        (f) => (f.property || '').toLowerCase() === 'user' && f.value
+      ),
+    [filters]
+  );
+
+  const isMine = useMemo(
+    () =>
+      explicitUserFilter
+        ? currentUser &&
+          (String(explicitUserFilter.value) === currentUser.id ||
+            String(explicitUserFilter.value) === currentUser.name)
+        : userScope === 'mine',
+    [explicitUserFilter, currentUser, userScope]
+  );
+
+  const isEveryone = !explicitUserFilter && userScope === 'all';
+
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
@@ -510,96 +554,76 @@ export function Clusters() {
             Sky Clusters
           </Link>
         </div>
-        {(() => {
-          // Activity toggle: Active shows live clusters only; All also
-          // includes terminated clusters from history (same data as the
-          // old "Show history" checkbox, presented like the jobs page).
-          const selectHistoryTab = (showHistoryValue) => {
-            setShowHistory(showHistoryValue);
-            updateShowHistoryURL(showHistoryValue);
-          };
-          return (
-            <div
-              role="tablist"
-              aria-label="Filter clusters by activity"
-              className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+        {/* Activity toggle: Active shows live clusters only; All also
+            includes terminated clusters from history (same data as the
+            old "Show history" checkbox, presented like the jobs page). */}
+        <div
+          role="tablist"
+          aria-label="Filter clusters by activity"
+          className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+        >
+          <button
+            role="tab"
+            aria-selected={!showHistory}
+            onClick={() => selectHistoryTab(false)}
+            className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+              !showHistory
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Active
+          </button>
+          <button
+            role="tab"
+            aria-selected={showHistory}
+            onClick={() => selectHistoryTab(true)}
+            className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+              showHistory
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            All
+          </button>
+        </div>
+        {/* Ownership scope toggle. Only shown when the caller has a real
+            identity (e.g. Okta/SSO); with basic auth or no auth there is
+            no per-user view, so the toggle is hidden (same as the jobs
+            page). An explicit User filter overrides the toggle, so the
+            highlighted tab reflects that. */}
+        {currentUser && (
+          <div
+            role="tablist"
+            aria-label="Filter clusters by owner"
+            className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+          >
+            <button
+              role="tab"
+              aria-selected={isMine}
+              onClick={() => selectScope('mine')}
+              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                isMine
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             >
-              <button
-                role="tab"
-                aria-selected={!showHistory}
-                onClick={() => selectHistoryTab(false)}
-                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                  !showHistory
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Active
-              </button>
-              <button
-                role="tab"
-                aria-selected={showHistory}
-                onClick={() => selectHistoryTab(true)}
-                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                  showHistory
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                All
-              </button>
-            </div>
-          );
-        })()}
-        {(() => {
-          // Ownership scope toggle. Only shown when the caller has a real
-          // identity (e.g. Okta/SSO); with basic auth or no auth there is
-          // no per-user view, so the toggle is hidden (same as the jobs
-          // page). An explicit User filter overrides the toggle, so
-          // reflect that in the highlighted tab.
-          if (!currentUser) return null;
-          const explicitUserFilter = (filters || []).find(
-            (f) => (f.property || '').toLowerCase() === 'user' && f.value
-          );
-          const isMine = explicitUserFilter
-            ? currentUser &&
-              (String(explicitUserFilter.value) === currentUser.id ||
-                String(explicitUserFilter.value) === currentUser.name)
-            : userScope === 'mine';
-          const isEveryone = !explicitUserFilter && userScope === 'all';
-          return (
-            <div
-              role="tablist"
-              aria-label="Filter clusters by owner"
-              className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+              My Clusters
+            </button>
+            <button
+              role="tab"
+              aria-selected={isEveryone}
+              onClick={() => selectScope('all')}
+              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                isEveryone
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             >
-              <button
-                role="tab"
-                aria-selected={isMine}
-                onClick={() => selectScope('mine')}
-                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                  isMine
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                My Clusters
-              </button>
-              <button
-                role="tab"
-                aria-selected={isEveryone}
-                onClick={() => selectScope('all')}
-                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                  isEveryone
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                All Clusters
-              </button>
-            </div>
-          );
-        })()}
+              All Clusters
+            </button>
+          </div>
+        )}
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
