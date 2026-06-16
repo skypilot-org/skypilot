@@ -46,15 +46,15 @@ References:
    - Add `sky/catalog/modal_catalog.py` plus a small static catalog covering a
      CPU default and documented Modal GPU types/counts, with per-second prices
      converted to hourly prices.
-   - Use a synthetic `auto` region as the default SkyPilot catalog region for
-     Modal-managed placement; translate `auto` to `region=None` when calling
-     Modal.
+   - Use a synthetic `default` region as the default SkyPilot catalog region
+     for Modal-managed placement, matching existing compute-cloud convention;
+     translate `default` to `region=None` when calling Modal.
    - Also accept Modal's documented Sandbox container regions immediately:
      broad regions `us`, `eu`, `ap`, `uk`, `ca`, `me`, `sa`, `af`, `mx`; and
      narrow regions `us-east`, `us-central`, `us-south`, `us-west`, `eu-west`,
      `eu-north`, `eu-south`, `ap-northeast`, `ap-southeast`, `ap-south`,
      `ap-melbourne`, `jp`, `au`.
-   - Price `auto` at base Modal pricing, explicit broad regions at Modal's
+   - Price `default` at base Modal pricing, explicit broad regions at Modal's
      documented 1.5x multiplier, and explicit narrow regions at Modal's
      documented 1.75x multiplier.
    - Only model Sandbox container `region`; do not add `routing_region`, which
