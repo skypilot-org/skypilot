@@ -1152,31 +1152,43 @@ def get_last_status_change_times(
     Returns a mapping from cluster_hash to the epoch-seconds at which that
     cluster most recently transitioned into ``ending_status``. Clusters
     with no matching STATUS_CHANGE row are omitted.
+
+    Chunks the ``cluster_hash IN (...)`` predicate by
+    ``_CLUSTER_IN_QUERY_CHUNK_SIZE`` to stay under SQLite's 999-parameter
+    cap (PostgreSQL has no such cap but the chunking is harmless there).
     """
     if not cluster_hashes:
         return {}
     engine = _db_manager.get_engine()
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, int] = {}
     with orm.Session(engine) as session:
-        row_number = sqlalchemy.func.row_number().over(
-            partition_by=cluster_event_table.c.cluster_hash,
-            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
 
-        ranked = session.query(
-            cluster_event_table.c.cluster_hash,
-            cluster_event_table.c.transitioned_at,
-            row_number,
-        ).filter(
-            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type == ClusterEventType.STATUS_CHANGE.value,
-            cluster_event_table.c.ending_status == ending_status.value,
-        ).subquery()
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.transitioned_at,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type ==
+                ClusterEventType.STATUS_CHANGE.value,
+                cluster_event_table.c.ending_status == ending_status.value,
+            ).subquery()
 
-        rows = session.query(
-            ranked.c.cluster_hash,
-            ranked.c.transitioned_at,
-        ).filter(ranked.c.rn == 1).all()
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.transitioned_at,
+            ).filter(ranked.c.rn == 1).all()
 
-    return {row.cluster_hash: int(row.transitioned_at) for row in rows}
+            for row in rows:
+                result[row.cluster_hash] = int(row.transitioned_at)
+    return result
 
 
 def cleanup_cluster_events_with_retention(retention_hours: float,

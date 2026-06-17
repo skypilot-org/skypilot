@@ -358,11 +358,14 @@ class WorkspaceUsageCollector:
       * ``sky_clusters_gpus_in_flight{workspace,user,cloud,gpu_type,kind}``
         — GPU count by accelerator model across ``UP`` clusters,
         summed over ``launched_nodes``.
-      * ``sky_cluster_time_in_state_seconds{workspace,status,cloud,kind}``
-        — Max time-in-state across clusters in each transient status
-        bucket (INIT / AUTOSTOPPING). Operators alert on this to catch
-        clusters stuck mid-transition. Source of truth is the
-        ``cluster_events`` STATUS_CHANGE log.
+      * ``sky_cluster_time_in_state_seconds{workspace,status,cloud,kind,
+        cluster_name}`` — Seconds in current state, per cluster, for
+        transient statuses (INIT / AUTOSTOPPING). Operators alert on
+        this to catch clusters stuck mid-transition; ``cluster_name``
+        on the label set means the alert series identifies exactly
+        which cluster is stuck. Source of truth is the
+        ``cluster_events`` STATUS_CHANGE log so the timer is not reset
+        by refresh paths that re-write ``cluster.status_updated_at``.
 
     All gauges share one cache to keep the cost of a scrape bounded to
     a single ``get_clusters()`` call (the same query
