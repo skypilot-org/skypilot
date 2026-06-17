@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import posixpath
 import time
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
@@ -2465,7 +2466,7 @@ class TestDumpClusterInfo:
         # cluster dump dir.
         runner.rsync.assert_called_once()
         _, kwargs = runner.rsync.call_args
-        assert kwargs['source'] == os.path.join(
+        assert kwargs['source'] == posixpath.join(
             '~', skylet_constants.SKYLET_LOG_FILE)
         assert kwargs['target'] == str(tmp_path / 'clusters' / 'live-cluster' /
                                        'skylet.log')
@@ -2517,7 +2518,7 @@ class TestCollectClusterSkyletLog:
         runner.rsync.assert_called_once()
         handle.get_command_runners.return_value[1].rsync.assert_not_called()
         _, kwargs = runner.rsync.call_args
-        assert kwargs['source'] == os.path.join(
+        assert kwargs['source'] == posixpath.join(
             '~', skylet_constants.SKYLET_LOG_FILE)
         assert kwargs['target'] == os.path.join(str(tmp_path), 'skylet.log')
         assert not errors
@@ -2534,7 +2535,7 @@ class TestCollectClusterSkyletLog:
                                                 errors)
 
         _, kwargs = runner.rsync.call_args
-        assert kwargs['source'] == os.path.join(
+        assert kwargs['source'] == posixpath.join(
             '/scratch/rt', skylet_constants.SKYLET_LOG_FILE)
         assert not errors
 

@@ -6,6 +6,7 @@ import logging
 import os
 import pathlib
 import platform
+import posixpath
 import shutil
 import time
 import traceback
@@ -795,12 +796,15 @@ def _collect_cluster_skylet_log(
     # exposes the location as skypilot_runtime_dir; every other runner keeps
     # it under $HOME. Resolve against that dir so the source path is correct
     # regardless of provider.
+    # posixpath (not os.path): this is a remote *nix path, built server-side
+    # but resolved on the cluster, so it must use forward slashes regardless
+    # of the server's OS.
     runtime_dir = getattr(runner, 'skypilot_runtime_dir', None)
     if runtime_dir:
-        remote_path = os.path.join(runtime_dir,
-                                   skylet_constants.SKYLET_LOG_FILE)
+        remote_path = posixpath.join(runtime_dir,
+                                     skylet_constants.SKYLET_LOG_FILE)
     else:
-        remote_path = os.path.join('~', skylet_constants.SKYLET_LOG_FILE)
+        remote_path = posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
     target = os.path.join(cluster_dir, 'skylet.log')
     try:
         runner.rsync(source=remote_path,
