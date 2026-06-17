@@ -182,6 +182,86 @@ def test_ray_basic(generic_cloud: str) -> None:
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test ray helper on externally-managed (PEP 668) Python ----------
+# Regression test for the Ray helper (~/sky_templates/ray/start_cluster)
+# crashing on bring-your-own images that use an externally-managed system
+# Python (PEP 668, e.g. Ubuntu 24.04+) with no virtualenv. There, the first
+# `uv pip install` fails (no venv) and the `--system` fallback used to fail
+# too because uv refuses to modify an externally-managed Python -- crashing
+# cluster startup even when the correct Ray was already installed. The fix
+# sets UV_BREAK_SYSTEM_PACKAGES on the `--system` fallback.
+#
+# We reproduce the failure deterministically (without needing a special
+# image) by shimming `uv` so that a non-system install fails and a `--system`
+# install only succeeds when UV_BREAK_SYSTEM_PACKAGES=true. This test FAILS
+# before the fix (the `--system` fallback exits non-zero, `set -e` aborts
+# start_cluster, the job ends as FAILED) and PASSES after it.
+@pytest.mark.no_hyperbolic  # Custom run command not relevant for this provider
+def test_ray_externally_managed_python(generic_cloud: str) -> None:
+    name = smoke_tests_utils.get_cluster_name()
+
+    yaml_content = """\
+resources:
+  cpus: 2+
+
+num_nodes: 1
+
+run: |
+  set -e
+  # Shim `uv` to emulate a BYO image with an externally-managed (PEP 668)
+  # system Python and no virtualenv:
+  #   - a non-system `uv pip install` fails (no virtualenv), and
+  #   - a `--system` install only succeeds when UV_BREAK_SYSTEM_PACKAGES=true.
+  FAKE_BIN=$(mktemp -d)
+  cat > "$FAKE_BIN/uv" <<'FAKE_UV_EOF'
+  #!/bin/bash
+  arg_str="$*"
+  if [[ "$arg_str" == "pip install"* ]]; then
+    if [[ "$arg_str" == *--system* ]]; then
+      if [[ "$UV_BREAK_SYSTEM_PACKAGES" == "true" ]]; then
+        echo "FAKE_UV_SYSTEM_INSTALL_OK"
+        exit 0
+      fi
+      echo "error: externally-managed-environment (PEP 668)" >&2
+      exit 2
+    fi
+    echo "error: no virtual environment found" >&2
+    exit 1
+  fi
+  exit 0
+  FAKE_UV_EOF
+  chmod +x "$FAKE_BIN/uv"
+  export PATH="$FAKE_BIN:$PATH"
+  echo "Using uv at: $(which uv)"
+  ~/sky_templates/ray/start_cluster
+  ~/sky_templates/ray/stop_cluster
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_file_path = f.name
+
+    test = smoke_tests_utils.Test(
+        'ray_externally_managed_python',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
+            f'sky logs {name} 1 --status',
+            # FAKE_UV_SYSTEM_INSTALL_OK only appears when the `--system`
+            # fallback runs AND succeeds, which only happens once the helper
+            # sets UV_BREAK_SYSTEM_PACKAGES (i.e. after the fix).
+            f'outputs=$(sky logs {name} 1); echo "$outputs" && '
+            f'echo "$outputs" | grep "FAKE_UV_SYSTEM_INSTALL_OK" && '
+            f'echo "$outputs" | grep "Head node started successfully" && '
+            f'echo "$outputs" | grep "SUCCEEDED"',
+        ],
+        f'sky down -y {name}; rm {yaml_file_path}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test NeMo RL ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
