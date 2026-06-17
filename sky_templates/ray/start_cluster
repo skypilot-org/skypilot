@@ -68,7 +68,16 @@ fi
 # See: https://github.com/ray-project/ray/issues/56747
 # TODO(kevin): Remove this once the issue is fixed in a future click release
 RAY_INSTALL_SPEC="ray[default]${VERSION_SPEC} click<8.3.0"
-uv pip install ${RAY_INSTALL_SPEC} || uv pip install --system ${RAY_INSTALL_SPEC}
+# The first attempt installs into an active virtualenv (if any). The --system
+# fallback targets the system Python, which on bring-your-own images may be an
+# externally-managed environment (PEP 668, e.g. Ubuntu 24.04). uv refuses to
+# modify such environments by default, which makes the fallback fail even when
+# the correct Ray version is already present in the image. Setting
+# UV_BREAK_SYSTEM_PACKAGES=true lets the --system install proceed; since we pin
+# to the existing Ray version above, this only ensures the [default] extras and
+# the click pin are present without upgrading Ray.
+uv pip install ${RAY_INSTALL_SPEC} || \
+    UV_BREAK_SYSTEM_PACKAGES=true uv pip install --system ${RAY_INSTALL_SPEC}
 
 # Verify Ray is working
 if ! run_ray --version > /dev/null; then
