@@ -3,12 +3,10 @@
 from io import StringIO
 import subprocess
 import tempfile
-import threading
 import unittest
 from unittest import mock
 
 from sky.skylet import log_lib
-from sky.utils import context
 
 
 class TestLogBuffer(unittest.TestCase):
@@ -188,23 +186,21 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
     gated to the ctx-is-None path.
     """
 
-    def _capture_command_preexec(self, server_path: bool, caller_preexec=None):
+    def _capture_command_preexec(self, ctx, caller_preexec=None):
         """Returns the preexec_fn run_with_log hands to the command's Popen.
 
-        Runs in a fresh thread so the contextvar state is isolated: ContextVars
-        are not inherited across threads, so the thread starts with ctx=None and
-        we opt into the server path by calling context.initialize() inside it.
-
-        The spy captures preexec_fn at the command's Popen call and raises a
-        sentinel to abort run_with_log right there, so the test never runs the
-        post-Popen streaming -- which on the coroutine path (ctx is not None)
-        drains a pipe through machinery that expects a running event loop. We
-        only care about the preexec_fn argument, which is fully decided by the
-        time Popen is called.
+        Drives the gating branch by patching log_lib._get_context to return
+        ``ctx`` (None = cluster/task path; a non-None sentinel = coroutine/
+        server path), so the test needs no real context, threads or event loop.
+        A spy captures preexec_fn at the command's Popen call and raises a
+        sentinel to abort run_with_log right there, so the post-Popen streaming
+        (which on the coroutine path drains a pipe through machinery that
+        expects a running event loop) is never executed. The preexec_fn is
+        fully decided by the time Popen is called, so this is deterministic and
+        environment-independent.
         """
         cmd = ['true']
         captured = {}
-        result = {}
         real_popen = subprocess.Popen
 
         class _Captured(Exception):
@@ -219,17 +215,12 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
             # abort above; fall back to the real Popen if it ever is.
             return real_popen(*args, **kwargs)
 
-        def run():
-            if server_path:
-                context.initialize()
-                assert context.get() is not None
-            else:
-                assert context.get() is None
-            with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
-                log_path = f.name
-            extra = {}
-            if caller_preexec is not None:
-                extra['preexec_fn'] = caller_preexec
+        with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+            log_path = f.name
+        extra = {}
+        if caller_preexec is not None:
+            extra['preexec_fn'] = caller_preexec
+        with mock.patch.object(log_lib, '_get_context', return_value=ctx):
             with mock.patch('subprocess.Popen', spy_popen):
                 try:
                     log_lib.run_with_log(cmd,
@@ -239,20 +230,12 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
                                          **extra)
                 except _Captured:
                     pass
-            result['preexec'] = captured.get('preexec_fn', 'NOT_CALLED')
-
-        t = threading.Thread(target=run)
-        t.start()
-        t.join(timeout=30)
-        self.assertFalse(t.is_alive(), 'run_with_log did not return in time')
-        self.assertIn('preexec', result, 'command Popen was never invoked')
-        self.assertNotEqual(result['preexec'], 'NOT_CALLED',
-                            'command Popen was never invoked')
-        return result['preexec']
+        self.assertIn('preexec_fn', captured, 'command Popen was never invoked')
+        return captured['preexec_fn']
 
     def test_no_preexec_on_server_path(self):
-        """On the coroutine/server path, preexec_fn must be None."""
-        preexec = self._capture_command_preexec(server_path=True)
+        """On the coroutine/server path (ctx is not None), preexec must be None."""
+        preexec = self._capture_command_preexec(ctx=object())
         self.assertIsNone(
             preexec,
             'run_with_log must not pass a preexec_fn on the coroutine path; a '
@@ -260,8 +243,8 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
             'deadlocks the concurrent API server.')
 
     def test_preexec_set_on_cluster_path(self):
-        """On the cluster/task path, the subreaper preexec must be set."""
-        preexec = self._capture_command_preexec(server_path=False)
+        """On the cluster/task path (ctx is None), the subreaper must be set."""
+        preexec = self._capture_command_preexec(ctx=None)
         self.assertTrue(
             callable(preexec),
             'run_with_log must set the subreaper preexec_fn on the cluster '
@@ -281,7 +264,7 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
         def caller_preexec():
             pass
 
-        preexec = self._capture_command_preexec(server_path=True,
+        preexec = self._capture_command_preexec(ctx=object(),
                                                 caller_preexec=caller_preexec)
         self.assertTrue(
             callable(preexec),
@@ -294,7 +277,7 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
         def caller_preexec():
             pass
 
-        preexec = self._capture_command_preexec(server_path=False,
+        preexec = self._capture_command_preexec(ctx=None,
                                                 caller_preexec=caller_preexec)
         self.assertTrue(callable(preexec))
 
