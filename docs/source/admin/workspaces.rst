@@ -340,9 +340,8 @@ Service accounts in private workspaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 :ref:`Service accounts <service-accounts>` can be added to ``allowed_users`` to
-let automation (CI, scripts, programmatic sandbox creation, etc.) launch into a
-private workspace. List the service account by its token name or its ``sa-...``
-ID, just like a human user:
+let automation (CI, scripts, etc.) launch into a private workspace. List the
+service account by its token name, just like a human user:
 
 .. code-block:: yaml
 
@@ -352,7 +351,6 @@ ID, just like a human user:
        allowed_users:
          - alice@example.com
          - my-service-account        # service account token name
-         - sa-0123456789abcdef       # or the service account ID
 
 .. important::
 
