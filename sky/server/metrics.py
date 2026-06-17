@@ -343,6 +343,14 @@ _TIME_IN_STATE_STATUSES: Tuple[status_lib.ClusterStatus, ...] = (
     status_lib.ClusterStatus.AUTOSTOPPING,
 )
 
+# Hard upper bound on rows emitted by sky_cluster_time_in_state_seconds.
+# A tenant launching/failing many clusters in tight succession (bug, retry
+# storm, or just heavy churn) can produce many simultaneously-transient
+# cluster_name series; capping defends Prometheus's series budget.
+# Sorting by age first means the clusters most likely to be stuck (and
+# therefore most likely to be alertable) survive the cap.
+_TIME_IN_STATE_MAX_SERIES = 100
+
 
 class WorkspaceUsageCollector:
     """Per-workspace / per-user cluster usage metrics.
@@ -496,6 +504,17 @@ class WorkspaceUsageCollector:
                     continue
                 time_in_state[label_key] = max(0.0, float(now_seconds - ts))
 
+        if len(time_in_state) > _TIME_IN_STATE_MAX_SERIES:
+            logger.warning(
+                'sky_cluster_time_in_state_seconds: %d transient clusters '
+                'observed; capping to top %d by age. Oldest clusters '
+                'survive the cap so any alertable case is preserved.',
+                len(time_in_state), _TIME_IN_STATE_MAX_SERIES)
+            time_in_state = dict(
+                sorted(time_in_state.items(),
+                       key=lambda kv: kv[1],
+                       reverse=True)[:_TIME_IN_STATE_MAX_SERIES])
+
         return {
             'counts': counts,
             'gpus': gpus,
@@ -518,7 +537,9 @@ class WorkspaceUsageCollector:
             'Seconds in current state, per cluster, for transient statuses '
             '(INIT, AUTOSTOPPING). Source is the cluster_events '
             'STATUS_CHANGE log; only transient statuses emit, so steady '
-            'cardinality is bounded by # in-flight transitions.',
+            'cardinality is bounded by # in-flight transitions. Capped at '
+            'the top 100 oldest clusters per scrape to defend Prometheus '
+            'series budget against pathological churn.',
             labels=['workspace', 'status', 'cloud', 'kind', 'cluster_name'])
 
     def collect(self):
@@ -556,7 +577,9 @@ class WorkspaceUsageCollector:
             'Seconds in current state, per cluster, for transient statuses '
             '(INIT, AUTOSTOPPING). Source is the cluster_events '
             'STATUS_CHANGE log; only transient statuses emit, so steady '
-            'cardinality is bounded by # in-flight transitions.',
+            'cardinality is bounded by # in-flight transitions. Capped at '
+            'the top 100 oldest clusters per scrape to defend Prometheus '
+            'series budget against pathological churn.',
             labels=['workspace', 'status', 'cloud', 'kind', 'cluster_name'])
         for key, v in data['time_in_state'].items():
             workspace, status, cloud, kind, cluster_name = key
