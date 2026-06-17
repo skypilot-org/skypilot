@@ -2,8 +2,8 @@
 
 import React from 'react';
 import CodeMirror from '@uiw/react-codemirror';
-import { EditorView } from '@codemirror/view';
-import { Prec } from '@codemirror/state';
+import { EditorView, GutterMarker, gutterLineClass } from '@codemirror/view';
+import { Prec, RangeSet } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -21,15 +21,48 @@ export const yamlHighlightStyle = HighlightStyle.define([
   { tag: t.punctuation, color: '#6b7280' },
 ]);
 
-const gutterTheme = EditorView.theme({
+class SelectedLineGutterMarker extends GutterMarker {}
+SelectedLineGutterMarker.prototype.elementClass = 'cm-selectedLineGutter';
+const selectedLineGutterMarker = new SelectedLineGutterMarker();
+
+export const selectionGutterHighlighter = gutterLineClass.compute(
+  ['selection'],
+  (state) => {
+    const marks = [];
+    let lastMarked = -1;
+    for (const range of state.selection.ranges) {
+      if (range.empty) continue;
+      const fromLine = state.doc.lineAt(range.from).number;
+      let toLine = state.doc.lineAt(range.to).number;
+      // Selection that ends at the very start of a line doesn't actually
+      // cover that line's content — exclude it.
+      if (toLine > fromLine && state.doc.line(toLine).from === range.to) {
+        toLine -= 1;
+      }
+      for (let n = Math.max(fromLine, lastMarked + 1); n <= toLine; n++) {
+        marks.push(selectedLineGutterMarker.range(state.doc.line(n).from));
+        lastMarked = n;
+      }
+    }
+    return RangeSet.of(marks);
+  }
+);
+
+export const yamlGutterTheme = EditorView.theme({
   '.cm-gutters': {
-    backgroundColor: '#f9fafb',
-    borderRight: '1px solid #e5e7eb',
-    color: '#9ca3af',
+    backgroundColor: '#ffffff',
+    border: 'none',
+    color: '#8c959f',
   },
   '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 12px 0 8px',
-    minWidth: '2.5em',
+    padding: '0 16px 0 16px',
+    minWidth: '3em',
+  },
+  '.cm-selectedLineGutter': {
+    backgroundColor: '#d7d4f0',
+  },
+  '&.cm-focused': {
+    outline: 'none',
   },
 });
 
@@ -48,7 +81,7 @@ export function YamlEditor({
 }) {
   return (
     <div
-      className={`rounded-md border border-gray-300 overflow-hidden flex flex-col ${className || ''}`}
+      className={`rounded-md border border-gray-200 overflow-hidden flex flex-col ${className || ''}`}
       style={{
         width: '100%',
         maxWidth: '100%',
@@ -63,7 +96,8 @@ export function YamlEditor({
         onChange={onChange}
         extensions={[
           yaml(),
-          gutterTheme,
+          yamlGutterTheme,
+          selectionGutterHighlighter,
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           // Pass CSP nonce so CodeMirror's injected <style> tags are allowed.
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
