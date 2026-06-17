@@ -1144,6 +1144,41 @@ def get_last_cluster_event_of_type_multiple(
     return {row.cluster_hash: row.reason for row in rows}
 
 
+def get_last_status_change_times(
+        cluster_hashes: Set[str],
+        ending_status: status_lib.ClusterStatus) -> Dict[str, int]:
+    """Latest STATUS_CHANGE.transitioned_at per cluster for an ending_status.
+
+    Returns a mapping from cluster_hash to the epoch-seconds at which that
+    cluster most recently transitioned into ``ending_status``. Clusters
+    with no matching STATUS_CHANGE row are omitted.
+    """
+    if not cluster_hashes:
+        return {}
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row_number = sqlalchemy.func.row_number().over(
+            partition_by=cluster_event_table.c.cluster_hash,
+            order_by=cluster_event_table.c.transitioned_at.desc()).label('rn')
+
+        ranked = session.query(
+            cluster_event_table.c.cluster_hash,
+            cluster_event_table.c.transitioned_at,
+            row_number,
+        ).filter(
+            cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+            cluster_event_table.c.type == ClusterEventType.STATUS_CHANGE.value,
+            cluster_event_table.c.ending_status == ending_status.value,
+        ).subquery()
+
+        rows = session.query(
+            ranked.c.cluster_hash,
+            ranked.c.transitioned_at,
+        ).filter(ranked.c.rn == 1).all()
+
+    return {row.cluster_hash: int(row.transitioned_at) for row in rows}
+
+
 def cleanup_cluster_events_with_retention(retention_hours: float,
                                           event_type: ClusterEventType) -> None:
     engine = _db_manager.get_engine()
