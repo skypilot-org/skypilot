@@ -336,6 +336,36 @@ users who cannot access the workspace, they cannot see/access/operate on the wor
    The ``allowed_users`` field can be a list of user names or IDs. Note, if you
    have multiple users with the same name, you need to specify the user IDs instead.
 
+Service accounts in private workspaces
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:ref:`Service accounts <service-accounts>` can be added to ``allowed_users`` to
+let automation (CI, scripts, programmatic sandbox creation, etc.) launch into a
+private workspace. List the service account by its token name or its ``sa-...``
+ID, just like a human user:
+
+.. code-block:: yaml
+
+   workspaces:
+     private-ws:
+       private: true
+       allowed_users:
+         - alice@example.com
+         - my-service-account        # service account token name
+         - sa-0123456789abcdef       # or the service account ID
+
+.. important::
+
+   A newly created service account is assigned the **default role**, which is
+   ``admin`` unless you set ``rbac.default_role: user``. **Admins can access
+   every workspace**, so adding an admin service account to ``allowed_users``
+   has no scoping effect.
+
+   To restrict a service account to specific workspaces, first assign it the
+   ``user`` role (in the dashboard's **Users** page under the service accounts
+   tab, or via the ``/service-account-tokens/update-role`` API), then add it to
+   the ``allowed_users`` of the workspaces it should reach.
+
 User management
 ----------------
 
