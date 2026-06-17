@@ -15,6 +15,67 @@ from sky.adaptors import vast
 logger = sky_logging.init_logger(__name__)
 
 
+def _build_offer_query(instance_type: str, region: str, disk_size: int,
+                       secure_only: bool) -> str:
+    """Builds the Vast ``search_offers`` query for a SkyPilot instance type.
+
+    ``instance_type`` is the SkyPilot-internal encoding produced by
+    ``catalog/data_fetchers/fetch_vast.py``::
+
+        {num_gpus}x-{gpu_name}-{cpu_cores}-{cpu_ram_mib}
+
+    e.g. ``1x-RTX_4090-32-65536``.
+
+    ``region`` is the catalog region string. With ``georegion=true`` it looks
+    like ``"Oregon, US, NA"`` (location, 2-letter country code, continent
+    code).
+
+    The grammar accepted by Vast's query parser is strict (see
+    ``vastai.utils.preprocess_search_query`` / ``vastai.api.query.parse_query``)
+    and getting it wrong silently drops filters rather than erroring, which is
+    how a request for an ``RTX4090`` ends up provisioning a different GPU:
+      * No quotes and no spaces in values. ``preprocess_search_query`` tokenizes
+        with ``Word(alphanums + '_')`` and ``parse_all=False``, so a quote or
+        space (e.g. ``gpu_name="RTX 4090"``) makes it stop parsing and discard
+        every remaining clause.
+      * No decimals. ``65536.0`` is truncated at the ``.``, dropping the rest of
+        the query, so all numeric values must be integers.
+      * GPU names use the underscore form (``RTX_4090``). ``parse_query`` turns
+        ``_`` back into a space, which is how Vast stores the name internally.
+      * ``geolocation`` matches the 2-letter country code (the second-to-last
+        comma-separated field). The catalog region ends in a continent code, so
+        ``region[-2:]`` would only constrain the continent (e.g. ``EU``) and
+        return a machine in the wrong country.
+      * ``cpu_ram`` is multiplied by 1000 by the parser and is therefore
+        expressed in GB, not MiB; the instance type encodes MiB, so divide.
+    """
+    parts = instance_type.split('-')
+    num_gpus = int(parts[0].replace('x', ''))
+    gpu_name = parts[1]
+    cpu_ram_gb = int(float(parts[-1]) / 1024)
+
+    # The 2-letter country code is the second-to-last comma-separated field
+    # (e.g. "US" in "Oregon, US, NA"); fall back to the trailing field if the
+    # region is not in the expected catalog format.
+    region_fields = [field.strip() for field in region.split(',')]
+    country_code = (region_fields[-2]
+                    if len(region_fields) >= 2 else region_fields[-1])
+
+    query = [
+        'chunked=true',
+        'georegion=true',
+        f'geolocation={country_code}',
+        f'disk_space>={disk_size}',
+        f'num_gpus={num_gpus}',
+        f'gpu_name={gpu_name}',
+        f'cpu_ram>={cpu_ram_gb}',
+    ]
+    if secure_only:
+        query.append('datacenter=true')
+        query.append('hosting_type>=1')
+    return ' '.join(query)
+
+
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     instances = vast.vast().show_instances()
@@ -111,23 +172,8 @@ def launch(name: str,
     # `ports` is currently unused. Keep it in the signature for caller
     # compatibility and future use (port-forwarding is handled separately).
     del ports
-    cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
-    num_gpus = int(instance_type.split('-')[0].replace('x', ''))
-
-    query = [
-        'chunked=true',
-        'georegion=true',
-        f'geolocation="{region[-2:]}"',
-        f'disk_space>={disk_size}',
-        f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
-        f'cpu_ram>="{cpu_ram}"',
-    ]
-    if secure_only:
-        query.append('datacenter=true')
-        query.append('hosting_type>=1')
-    query_str = ' '.join(query)
+    query_str = _build_offer_query(instance_type, region, disk_size,
+                                   secure_only)
 
     instance_list = vast.vast().search_offers(query=query_str)
 
