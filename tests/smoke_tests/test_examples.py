@@ -213,8 +213,9 @@ resources:
   cpus: 4+
   # A real RL training image based on Ubuntu 24.04 (externally-managed,
   # PEP 668 system Python) with Ray preinstalled and no virtualenv -- the
-  # conditions that trigger the original failure.
-  image_id: docker:slimerl/slime:latest
+  # conditions that trigger the original failure. Pinned to a stable release
+  # tag (not `latest`) for reproducibility.
+  image_id: docker:slimerl/slime:v0.3.0
 
 num_nodes: 1
 
