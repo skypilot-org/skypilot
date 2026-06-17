@@ -10,28 +10,13 @@ import { getNonce } from '@/utils/csp';
 import { yamlHighlightStyle } from './yaml-editor';
 
 const editorTheme = EditorView.theme({
-  '&': {
-    height: '100%',
-    backgroundColor: '#f9fafb',
-  },
-  '.cm-scroller': {
-    minHeight: '100%',
-    overflow: 'auto',
-    backgroundColor: '#f9fafb',
-  },
-  '.cm-content': {
-    minHeight: '100%',
-    backgroundColor: '#f9fafb',
-    padding: '8px 0',
-  },
   '.cm-gutters': {
-    backgroundColor: '#f3f4f6',
-    borderRight: '1px solid #e5e7eb',
-    color: '#9ca3af',
-    minHeight: '100%',
+    backgroundColor: '#ffffff',
+    border: 'none',
+    color: '#6e7781',
   },
   '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 12px 0 8px',
+    padding: '0 16px 0 8px',
     minWidth: '2.5em',
   },
   '&.cm-focused': {
