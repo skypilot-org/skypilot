@@ -97,7 +97,10 @@ def test_build_offer_query_survives_real_vast_parser():
     query through the same `preprocess_search_query` + `parse_query` pipeline
     Vast uses server-side and assert each filter actually survives.
     """
-    pytest.importorskip('vastai')
+    try:
+        import vastai  # noqa: F401  # pylint: disable=import-outside-toplevel
+    except (ImportError, SyntaxError):
+        pytest.skip('vastai not available or requires Python 3.10+')
     # pylint: disable=import-outside-toplevel
     from vastai.api.query import offers_alias
     from vastai.api.query import offers_fields
