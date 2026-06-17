@@ -67,7 +67,7 @@ export function YamlCodeBlock({
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
-        editable={!readOnly}
+        readOnly={readOnly}
         height={fixed ? '100%' : undefined}
         maxHeight={fixed ? undefined : maxHeight}
         basicSetup={{
