@@ -9,7 +9,6 @@ from unittest import mock
 
 from sky.skylet import log_lib
 from sky.utils import context
-from sky.utils import subprocess_utils
 
 
 class TestLogBuffer(unittest.TestCase):
@@ -195,22 +194,30 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
         Runs in a fresh thread so the contextvar state is isolated: ContextVars
         are not inherited across threads, so the thread starts with ctx=None and
         we opt into the server path by calling context.initialize() inside it.
+
+        The spy captures preexec_fn at the command's Popen call and raises a
+        sentinel to abort run_with_log right there, so the test never runs the
+        post-Popen streaming -- which on the coroutine path (ctx is not None)
+        drains a pipe through machinery that expects a running event loop. We
+        only care about the preexec_fn argument, which is fully decided by the
+        time Popen is called.
         """
         cmd = ['true']
         captured = {}
         result = {}
         real_popen = subprocess.Popen
 
-        class _SpyPopen(real_popen):
+        class _Captured(Exception):
+            pass
 
-            def __init__(self, *args, **kwargs):
-                popen_cmd = args[0] if args else kwargs.get('args')
-                if popen_cmd == cmd:
-                    captured['preexec_fn'] = kwargs.get('preexec_fn')
-                # Neuter the subreaper preexec so this test process is never
-                # itself turned into a child subreaper.
-                kwargs['preexec_fn'] = None
-                super().__init__(*args, **kwargs)
+        def spy_popen(*args, **kwargs):
+            popen_cmd = args[0] if args else kwargs.get('args')
+            if popen_cmd == cmd:
+                captured['preexec_fn'] = kwargs.get('preexec_fn')
+                raise _Captured
+            # The daemon Popen (a different cmd) is never reached because we
+            # abort above; fall back to the real Popen if it ever is.
+            return real_popen(*args, **kwargs)
 
         def run():
             if server_path:
@@ -223,14 +230,15 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
             extra = {}
             if caller_preexec is not None:
                 extra['preexec_fn'] = caller_preexec
-            # Skip the real reaper daemon; only the command's Popen matters.
-            with mock.patch.object(subprocess_utils, 'kill_process_daemon'):
-                with mock.patch('subprocess.Popen', _SpyPopen):
+            with mock.patch('subprocess.Popen', spy_popen):
+                try:
                     log_lib.run_with_log(cmd,
                                          log_path,
                                          stream_logs=False,
                                          process_stream=False,
                                          **extra)
+                except _Captured:
+                    pass
             result['preexec'] = captured.get('preexec_fn', 'NOT_CALLED')
 
         t = threading.Thread(target=run)
@@ -238,7 +246,8 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
         t.join(timeout=30)
         self.assertFalse(t.is_alive(), 'run_with_log did not return in time')
         self.assertIn('preexec', result, 'command Popen was never invoked')
-        self.assertNotEqual(result['preexec'], 'NOT_CALLED')
+        self.assertNotEqual(result['preexec'], 'NOT_CALLED',
+                            'command Popen was never invoked')
         return result['preexec']
 
     def test_no_preexec_on_server_path(self):
