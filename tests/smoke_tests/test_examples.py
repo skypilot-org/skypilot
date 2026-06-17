@@ -184,55 +184,42 @@ def test_ray_basic(generic_cloud: str) -> None:
 
 # ---------- Test ray helper on externally-managed (PEP 668) Python ----------
 # Regression test for the Ray helper (~/sky_templates/ray/start_cluster)
-# crashing on bring-your-own images that use an externally-managed system
-# Python (PEP 668, e.g. Ubuntu 24.04+) with no virtualenv. There, the first
-# `uv pip install` fails (no venv) and the `--system` fallback used to fail
-# too because uv refuses to modify an externally-managed Python -- crashing
-# cluster startup even when the correct Ray was already installed. The fix
-# sets UV_BREAK_SYSTEM_PACKAGES on the `--system` fallback.
+# crashing on bring-your-own images whose system Python is externally managed
+# (PEP 668). We use a real public RL training image (slimerl/slime) which has
+# exactly the properties that trigger the original failure:
+#   - based on Ubuntu 24.04, so the system Python is externally managed
+#     (PEP 668) and uv refuses to modify it by default;
+#   - Ray is already installed into that system Python (no virtualenv).
+# In this environment the helper's first `uv pip install` fails (no venv) and
+# the `--system` fallback used to fail too, crashing cluster startup even
+# though the required Ray was already present. The fix sets
+# UV_BREAK_SYSTEM_PACKAGES on the `--system` fallback so it succeeds.
 #
-# We reproduce the failure deterministically (without needing a special
-# image) by shimming `uv` so that a non-system install fails and a `--system`
-# install only succeeds when UV_BREAK_SYSTEM_PACKAGES=true. This test FAILS
-# before the fix (the `--system` fallback exits non-zero, `set -e` aborts
-# start_cluster, the job ends as FAILED) and PASSES after it.
-@pytest.mark.no_hyperbolic  # Custom run command not relevant for this provider
+# This test FAILS before the fix (the `--system` fallback exits non-zero,
+# `set -e` aborts start_cluster, the job ends as FAILED) and PASSES after it.
+#
+# Note: this is a large CUDA image, hence resource_heavy and a generous
+# timeout. No GPU is requested -- the bug is purely in the install step.
+@pytest.mark.no_vast  # Custom docker image_id not supported
+@pytest.mark.no_fluidstack  # Custom docker image_id not supported
+@pytest.mark.no_hyperbolic  # Custom docker image_id not supported
+@pytest.mark.no_seeweb  # Custom docker image_id not supported
+@pytest.mark.resource_heavy
 def test_ray_externally_managed_python(generic_cloud: str) -> None:
     name = smoke_tests_utils.get_cluster_name()
 
     yaml_content = """\
 resources:
-  cpus: 2+
+  cpus: 4+
+  # A real RL training image based on Ubuntu 24.04 (externally-managed,
+  # PEP 668 system Python) with Ray preinstalled and no virtualenv -- the
+  # conditions that trigger the original failure.
+  image_id: docker:slimerl/slime:latest
 
 num_nodes: 1
 
 run: |
   set -e
-  # Shim `uv` to emulate a BYO image with an externally-managed (PEP 668)
-  # system Python and no virtualenv:
-  #   - a non-system `uv pip install` fails (no virtualenv), and
-  #   - a `--system` install only succeeds when UV_BREAK_SYSTEM_PACKAGES=true.
-  FAKE_BIN=$(mktemp -d)
-  cat > "$FAKE_BIN/uv" <<'FAKE_UV_EOF'
-  #!/bin/bash
-  arg_str="$*"
-  if [[ "$arg_str" == "pip install"* ]]; then
-    if [[ "$arg_str" == *--system* ]]; then
-      if [[ "$UV_BREAK_SYSTEM_PACKAGES" == "true" ]]; then
-        echo "FAKE_UV_SYSTEM_INSTALL_OK"
-        exit 0
-      fi
-      echo "error: externally-managed-environment (PEP 668)" >&2
-      exit 2
-    fi
-    echo "error: no virtual environment found" >&2
-    exit 1
-  fi
-  exit 0
-  FAKE_UV_EOF
-  chmod +x "$FAKE_BIN/uv"
-  export PATH="$FAKE_BIN:$PATH"
-  echo "Using uv at: $(which uv)"
   ~/sky_templates/ray/start_cluster
   ~/sky_templates/ray/stop_cluster
 """
@@ -248,16 +235,15 @@ run: |
         [
             f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
             f'sky logs {name} 1 --status',
-            # FAKE_UV_SYSTEM_INSTALL_OK only appears when the `--system`
-            # fallback runs AND succeeds, which only happens once the helper
-            # sets UV_BREAK_SYSTEM_PACKAGES (i.e. after the fix).
+            # Before the fix the `--system` fallback fails on this image's
+            # externally-managed Python and start_cluster aborts; these
+            # markers only appear once the helper succeeds (after the fix).
             f'outputs=$(sky logs {name} 1); echo "$outputs" && '
-            f'echo "$outputs" | grep "FAKE_UV_SYSTEM_INSTALL_OK" && '
             f'echo "$outputs" | grep "Head node started successfully" && '
             f'echo "$outputs" | grep "SUCCEEDED"',
         ],
         f'sky down -y {name}; rm {yaml_file_path}',
-        timeout=10 * 60,
+        timeout=40 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
