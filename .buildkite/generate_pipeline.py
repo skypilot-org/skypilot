@@ -236,6 +236,18 @@ def _extract_marked_tests(
     # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # pytest exit codes: 0 = tests collected, 5 = no tests collected (expected
+    # here for files that match no tests under the given filter). Any other code
+    # is a real collection failure (e.g. 4 = usage error from an unrecognized
+    # CLI flag, 2/3 = collection/internal error). Without this check a failed
+    # collection silently yields zero tests, so the generated pipeline drops the
+    # file's tests and the build "passes" having run nothing.
+    if output.returncode not in (0, 5):
+        raise RuntimeError(
+            f'Test collection failed (exit {output.returncode}) for command:\n'
+            f'  {cmd}\n'
+            f'--- stdout ---\n{output.stdout}\n'
+            f'--- stderr ---\n{output.stderr}')
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
 
