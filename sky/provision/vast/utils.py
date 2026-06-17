@@ -51,7 +51,7 @@ def _build_offer_query(instance_type: str, region: str, disk_size: int,
     """
     parts = instance_type.split('-')
     num_gpus = int(parts[0].replace('x', ''))
-    gpu_name = parts[1]
+    gpu_name = '-'.join(parts[1:-2])
     cpu_ram_gb = int(float(parts[-1]) / 1024)
 
     # The 2-letter country code is the second-to-last comma-separated field

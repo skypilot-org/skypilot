@@ -24,6 +24,9 @@ def test_build_offer_query_gpu_name_uses_underscore_form():
     assert 'gpu_name=RTX_4090' in terms
     assert 'gpu_name=RTX 4090' not in ' '.join(terms)
 
+    terms_ada = _query_terms('1x-RTX_6000-Ada-48-131072', 'Oregon, US, NA')
+    assert 'gpu_name=RTX_6000-Ada' in terms_ada
+
 
 def test_build_offer_query_geolocation_is_country_not_continent():
     """`geolocation` must match the country code, not the trailing continent."""
