@@ -91,8 +91,9 @@ def permission_service(tmp_path, monkeypatch):
     enforces instead of short-circuiting to ``True``) and isolates the
     DB-backed permission cache so results aren't cached across assertions.
     """
-    old_instance = permission._enforcer_instance
-    permission._enforcer_instance = None
+    # Reset the global enforcer singleton; monkeypatch restores the
+    # original value at teardown even if setup below raises.
+    monkeypatch.setattr(permission, '_enforcer_instance', None)
     # check_workspace_permission / get_accessible_workspace_names only
     # enforce when running on the API server.
     monkeypatch.setenv(constants.ENV_VAR_IS_SKYPILOT_SERVER, '1')
@@ -107,25 +108,22 @@ def permission_service(tmp_path, monkeypatch):
     monkeypatch.setattr(permission.kv_cache,
                         'delete_cache_entries_by_prefix_suffix',
                         lambda *a, **k: None)
-    try:
-        db_path = str(tmp_path / 'test_casbin.db')
-        engine = sqlalchemy.create_engine(
-            f'sqlite:///{db_path}',
-            connect_args={'check_same_thread': False},
-            poolclass=sqlalchemy.pool.StaticPool)
-        sqlalchemy_adapter.Base.metadata.create_all(engine)
-        adapter = sqlalchemy_adapter.Adapter(
-            engine, db_class=sqlalchemy_adapter.CasbinRule)
-        model_path = os.path.join(os.path.dirname(permission.__file__),
-                                  'model.conf')
-        enforcer = casbin.SyncedEnforcer(model_path, adapter)
 
-        service = permission.PermissionService()
-        service.enforcer = enforcer
-        permission._enforcer_instance = service
-        yield service
-    finally:
-        permission._enforcer_instance = old_instance
+    db_path = str(tmp_path / 'test_casbin.db')
+    engine = sqlalchemy.create_engine(f'sqlite:///{db_path}',
+                                      connect_args={'check_same_thread': False},
+                                      poolclass=sqlalchemy.pool.StaticPool)
+    sqlalchemy_adapter.Base.metadata.create_all(engine)
+    adapter = sqlalchemy_adapter.Adapter(engine,
+                                         db_class=sqlalchemy_adapter.CasbinRule)
+    model_path = os.path.join(os.path.dirname(permission.__file__),
+                              'model.conf')
+    enforcer = casbin.SyncedEnforcer(model_path, adapter)
+
+    service = permission.PermissionService()
+    service.enforcer = enforcer
+    monkeypatch.setattr(permission, '_enforcer_instance', service)
+    yield service
 
 
 class TestServiceAccountWorkspaceScoping:
