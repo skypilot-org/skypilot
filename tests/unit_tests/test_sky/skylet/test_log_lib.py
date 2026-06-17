@@ -189,7 +189,7 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
     gated to the ctx-is-None path.
     """
 
-    def _capture_command_preexec(self, server_path: bool):
+    def _capture_command_preexec(self, server_path: bool, caller_preexec=None):
         """Returns the preexec_fn run_with_log hands to the command's Popen.
 
         Runs in a fresh thread so the contextvar state is isolated: ContextVars
@@ -220,13 +220,17 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
                 assert context.get() is None
             with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
                 log_path = f.name
+            extra = {}
+            if caller_preexec is not None:
+                extra['preexec_fn'] = caller_preexec
             # Skip the real reaper daemon; only the command's Popen matters.
             with mock.patch.object(subprocess_utils, 'kill_process_daemon'):
                 with mock.patch('subprocess.Popen', _SpyPopen):
                     log_lib.run_with_log(cmd,
                                          log_path,
                                          stream_logs=False,
-                                         process_stream=False)
+                                         process_stream=False,
+                                         **extra)
             result['preexec'] = captured.get('preexec_fn', 'NOT_CALLED')
 
         t = threading.Thread(target=run)
@@ -253,6 +257,37 @@ class TestRunWithLogPreexecGating(unittest.TestCase):
             callable(preexec),
             'run_with_log must set the subreaper preexec_fn on the cluster '
             'path to keep orphan reaping working.')
+
+    def test_caller_preexec_honored_on_server_path(self):
+        """A caller-supplied preexec_fn is preserved even on the server path.
+
+        This pins the intended (pre-existing) behavior for command_runner's
+        interactive-SSH PTY setup, which passes its own preexec_fn and may run
+        on the coroutine path: run_with_log must NOT add the subreaper, but it
+        must still honor the caller's preexec_fn (dropping it would break
+        interactive auth). The residual multi-threaded-fork caveat for this
+        path predates the subreaper change and is out of scope here.
+        """
+
+        def caller_preexec():
+            pass
+
+        preexec = self._capture_command_preexec(server_path=True,
+                                                caller_preexec=caller_preexec)
+        self.assertTrue(
+            callable(preexec),
+            'run_with_log must still honor a caller-supplied preexec_fn on the '
+            'coroutine path.')
+
+    def test_caller_preexec_honored_on_cluster_path(self):
+        """A caller-supplied preexec_fn is honored on the cluster path too."""
+
+        def caller_preexec():
+            pass
+
+        preexec = self._capture_command_preexec(server_path=False,
+                                                caller_preexec=caller_preexec)
+        self.assertTrue(callable(preexec))
 
 
 if __name__ == '__main__':

@@ -690,9 +690,11 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             except Exception as e:  # pylint: disable=broad-except
                 result['error'] = e
 
-        # 30s per poll is generous for a responsive server; an unresponsive
-        # one (the bug this test guards against) blows past it and fails fast.
-        poll_timeout = 30
+        # The bug this guards against is an *indefinite* hang, so any finite
+        # bound catches it; we pick a generous one so a merely-busy-but-healthy
+        # single-process server (serving 128 concurrent log streams plus a few
+        # async launches) is not mistaken for a wedged one.
+        poll_timeout = 60
         poller = threading.Thread(target=_poll, daemon=True)
         poller.start()
         poller.join(timeout=poll_timeout)

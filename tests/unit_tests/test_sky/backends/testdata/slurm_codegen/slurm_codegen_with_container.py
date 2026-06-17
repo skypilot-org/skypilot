@@ -205,17 +205,25 @@ def run_with_log(
     # preserved across execve) so descendants orphaned mid-run reparent to it
     # instead of to PID 1, where subprocess_daemon can find and reap them.
     #
-    # Only do this on the non-coroutine path (ctx is None). Passing a Python
-    # preexec_fn forces CPython onto its unsafe multi-threaded fork path (it
-    # disables the vfork/posix_spawn fast paths), which deadlocks the highly
-    # concurrent API server: one worker thread can fork() while another holds a
-    # glibc allocator/arena lock, and the forked child then wedges before
-    # execve() while the parent blocks forever in Popen._execute_child. The
-    # coroutine path passes use_kill_pg=True to kill_process_daemon and reaps
-    # descendants via the process group, so it does not need the subreaper at
-    # all. Gating preexec to ctx is None therefore both removes the deadlock on
-    # the server and keeps orphan reaping on the cluster/task path (which always
-    # runs with ctx is None, including the codegen-inlined copy on clusters).
+    # Only set the subreaper on the non-coroutine path (ctx is None). Passing a
+    # Python preexec_fn forces CPython onto its unsafe multi-threaded fork path
+    # (it disables the vfork/posix_spawn fast paths), which can deadlock the
+    # highly concurrent API server: one worker thread can fork() while another
+    # holds a glibc allocator/arena lock, and the forked child then wedges
+    # before execve() while the parent blocks forever in Popen._execute_child.
+    # The coroutine path reaps descendants via the process group instead
+    # (kill_process_daemon(use_kill_pg=True)); this matches the pre-existing,
+    # non-subreaper behavior on that path and trades the subreaper's mid-run
+    # live reap (only needed for descendants that setsid/setpgid out of the
+    # group) for not forcing the dangerous fork. The cluster/task path always
+    # runs with ctx is None -- including the codegen-inlined copy on clusters --
+    # so it keeps the subreaper.
+    #
+    # A caller may still pass its own preexec_fn (e.g. command_runner's
+    # interactive-SSH PTY setup): that is honored unchanged on both paths to
+    # preserve pre-existing behavior. It carries the same multi-threaded-fork
+    # caveat, but predates this code and is serialized by an auth lock; closing
+    # that residual window is out of scope here.
     caller_preexec = kwargs.pop('preexec_fn', None)
     set_subreaper_in_child = ctx is None
 
