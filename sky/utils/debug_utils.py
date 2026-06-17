@@ -31,6 +31,7 @@ from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import message_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import ux_utils
@@ -756,6 +757,82 @@ def _dump_request_id_info(
     logger.debug('Exiting _dump_request_id_info')
 
 
+def _collect_cluster_skylet_log(
+        cluster_name: str,
+        cluster_dir: str,
+        handle: Any,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Rsync the head node's skylet log into the cluster dump dir.
+
+    Skylet runs only on the head node (see
+    instance_setup.start_skylet_on_head_node), writing ~/.sky/skylet.log, so
+    we pull it off the first command runner (runners[0] is always the head;
+    ClusterInfo.ip_tuples() guarantees head-first ordering). Best-effort: a
+    missing log or any failure is recorded in ``errors`` and never aborts the
+    dump.
+    """
+    try:
+        runners = handle.get_command_runners()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get command runners for cluster '
+                       f'{cluster_name}: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/skylet_log',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
+        return
+
+    if not runners:
+        logger.debug(f'No command runners for cluster {cluster_name!r}; '
+                     f'skipping skylet log')
+        return
+
+    runner = runners[0]  # Head node; skylet runs only there.
+    # Slurm relocates the SkyPilot runtime off the (often NFS) home dir and
+    # exposes the location as skypilot_runtime_dir; every other runner keeps
+    # it under $HOME. Resolve against that dir so the source path is correct
+    # regardless of provider.
+    runtime_dir = getattr(runner, 'skypilot_runtime_dir', None)
+    if runtime_dir:
+        remote_path = os.path.join(runtime_dir,
+                                   skylet_constants.SKYLET_LOG_FILE)
+    else:
+        remote_path = os.path.join('~', skylet_constants.SKYLET_LOG_FILE)
+    target = os.path.join(cluster_dir, 'skylet.log')
+    try:
+        runner.rsync(source=remote_path,
+                     target=target,
+                     up=False,
+                     stream_logs=False)
+        logger.debug(f'Collected skylet log for cluster {cluster_name!r}')
+    except exceptions.CommandError as e:
+        if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+            logger.debug(f'No skylet log found on cluster {cluster_name!r}')
+        else:
+            logger.warning(f'Failed to rsync skylet log for cluster '
+                           f'{cluster_name}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{cluster_name}/skylet_log',
+                    'error': str(e),
+                    'traceback': _full_traceback()
+                })
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to collect skylet log for cluster '
+                       f'{cluster_name}: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/skylet_log',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
+
+
 def _dump_cluster_info(cluster_names: Set[str],
                        dump_dir: str,
                        errors: Optional[List[Dict[str, str]]] = None) -> None:
@@ -853,6 +930,19 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'error': str(e),
                     'traceback': _full_traceback()
                 })
+
+        # Pull the skylet log from the head node for live clusters. Skylet
+        # only runs on UP clusters, and a stopped/terminated cluster has no
+        # reachable node, so we skip anything that isn't UP.
+        status = cluster_record.get('status') if cluster_record else None
+        handle = cluster_record.get('handle') if cluster_record else None
+
+        if status == status_lib.ClusterStatus.UP and handle is not None:
+            _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
+                                        errors)
+        else:
+            logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
+                         f'(status={status})')
 
     logger.debug('Exiting _dump_cluster_info')
 
