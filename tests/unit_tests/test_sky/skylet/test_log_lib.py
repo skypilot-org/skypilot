@@ -3,9 +3,13 @@
 from io import StringIO
 import subprocess
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 from sky.skylet import log_lib
+from sky.utils import context
+from sky.utils import subprocess_utils
 
 
 class TestLogBuffer(unittest.TestCase):
@@ -164,6 +168,91 @@ class TestRunWithLogTimeout(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(returncode, 0)
+
+
+class TestRunWithLogPreexecGating(unittest.TestCase):
+    """Tests that run_with_log gates the subreaper preexec_fn correctly.
+
+    Passing a Python preexec_fn to subprocess.Popen forces CPython onto its
+    unsafe multi-threaded fork path (it disables the vfork/posix_spawn fast
+    paths). On the highly concurrent API server (coroutine path, ctx is not
+    None) this deadlocks: one worker can fork() while another holds a glibc
+    allocator lock, and the forked child wedges before execve() while the
+    parent blocks forever in Popen._execute_child. The coroutine path reaps
+    descendants via the process group (kill_process_daemon(use_kill_pg=True))
+    and so must NOT set the subreaper preexec; the cluster/task path (ctx is
+    None) still needs it for orphan cleanup.
+
+    This is the regression guard for the API-server hang reproduced on CI
+    (test_high_logs_concurrency_not_blocking_operations): it fails on the
+    pre-fix code (preexec set unconditionally) and passes once preexec is
+    gated to the ctx-is-None path.
+    """
+
+    def _capture_command_preexec(self, server_path: bool):
+        """Returns the preexec_fn run_with_log hands to the command's Popen.
+
+        Runs in a fresh thread so the contextvar state is isolated: ContextVars
+        are not inherited across threads, so the thread starts with ctx=None and
+        we opt into the server path by calling context.initialize() inside it.
+        """
+        cmd = ['true']
+        captured = {}
+        result = {}
+        real_popen = subprocess.Popen
+
+        class _SpyPopen(real_popen):
+
+            def __init__(self, *args, **kwargs):
+                popen_cmd = args[0] if args else kwargs.get('args')
+                if popen_cmd == cmd:
+                    captured['preexec_fn'] = kwargs.get('preexec_fn')
+                # Neuter the subreaper preexec so this test process is never
+                # itself turned into a child subreaper.
+                kwargs['preexec_fn'] = None
+                super().__init__(*args, **kwargs)
+
+        def run():
+            if server_path:
+                context.initialize()
+                assert context.get() is not None
+            else:
+                assert context.get() is None
+            with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+                log_path = f.name
+            # Skip the real reaper daemon; only the command's Popen matters.
+            with mock.patch.object(subprocess_utils, 'kill_process_daemon'):
+                with mock.patch('subprocess.Popen', _SpyPopen):
+                    log_lib.run_with_log(cmd,
+                                         log_path,
+                                         stream_logs=False,
+                                         process_stream=False)
+            result['preexec'] = captured.get('preexec_fn', 'NOT_CALLED')
+
+        t = threading.Thread(target=run)
+        t.start()
+        t.join(timeout=30)
+        self.assertFalse(t.is_alive(), 'run_with_log did not return in time')
+        self.assertIn('preexec', result, 'command Popen was never invoked')
+        self.assertNotEqual(result['preexec'], 'NOT_CALLED')
+        return result['preexec']
+
+    def test_no_preexec_on_server_path(self):
+        """On the coroutine/server path, preexec_fn must be None."""
+        preexec = self._capture_command_preexec(server_path=True)
+        self.assertIsNone(
+            preexec,
+            'run_with_log must not pass a preexec_fn on the coroutine path; a '
+            'Python preexec_fn forces the unsafe multi-threaded fork and '
+            'deadlocks the concurrent API server.')
+
+    def test_preexec_set_on_cluster_path(self):
+        """On the cluster/task path, the subreaper preexec must be set."""
+        preexec = self._capture_command_preexec(server_path=False)
+        self.assertTrue(
+            callable(preexec),
+            'run_with_log must set the subreaper preexec_fn on the cluster '
+            'path to keep orphan reaping working.')
 
 
 if __name__ == '__main__':

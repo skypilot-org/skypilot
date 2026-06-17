@@ -668,6 +668,44 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             tail_log_threads.append(thread)
             thread.start()
 
+    def count_running_logs_requests() -> int:
+        """Counts RUNNING logs requests via a bounded api_status call.
+
+        api_status is run in a daemon thread with a hard timeout so that a
+        wedged server (e.g. all workers deadlocked in subprocess fork) turns
+        into a fast, explicit failure instead of an indefinite hang: the
+        client request to an unresponsive single-process server has no
+        request-level timeout and would otherwise block forever, never
+        re-checking the 120s deadline below.
+        """
+        result: dict = {}
+
+        def _poll():
+            try:
+                count = 0
+                for req in sky.api_status(limit=None):
+                    if 'logs' in req.name and req.status == 'RUNNING':
+                        count += 1
+                result['count'] = count
+            except Exception as e:  # pylint: disable=broad-except
+                result['error'] = e
+
+        # 30s per poll is generous for a responsive server; an unresponsive
+        # one (the bug this test guards against) blows past it and fails fast.
+        poll_timeout = 30
+        poller = threading.Thread(target=_poll, daemon=True)
+        poller.start()
+        poller.join(timeout=poll_timeout)
+        if poller.is_alive():
+            raise Exception(
+                'API server is unresponsive: api_status did not return within '
+                f'{poll_timeout}s while serving concurrent logs requests. The '
+                'server is likely wedged (e.g. workers deadlocked spawning '
+                'subprocesses).')
+        if 'error' in result:
+            raise result['error']
+        return result['count']
+
     def expect_enough_concurrent_logs() -> Generator[str, None, None]:
         start = time.time()
         # Expect the API server support enough concurrent logs requests
@@ -679,9 +717,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
             max_retries = 3
             for retry in range(max_retries):
                 try:
-                    for req in sky.api_status(limit=None):
-                        if 'logs' in req.name and req.status == 'RUNNING':
-                            count += 1
+                    count = count_running_logs_requests()
                     break  # Success, exit retry loop
                 except (requests.exceptions.ConnectionError,
                         requests.exceptions.RequestException) as e:
