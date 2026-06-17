@@ -503,16 +503,14 @@ export function Clusters() {
               <SelectItem value="30">Last 30 days</SelectItem>
             </SelectContent>
           </Select>
-          {loading && (
-            <div className="flex items-center">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          {/* Refresh button with "Updated X ago" stacked directly underneath
-              (right-aligned). ml-6 gives breathing room from the History
-              select so the toolbar doesn't feel cramped. */}
-          <div className="flex flex-col items-end leading-tight ml-6">
+          {/* Refresh button with "Loading..." / "Updated X ago" stacked
+              directly underneath (right-aligned). Loading and the timestamp
+              share the same slot so the column doesn't grow/shrink between
+              refreshes — otherwise the ml-auto cluster expands left and
+              yanks the History dropdown sideways. min-w-[96px] absorbs the
+              small text-width swings ("5s ago" vs "10m ago") for the same
+              reason. ml-6 gives breathing room from the History select. */}
+          <div className="flex flex-col items-end leading-tight ml-6 min-w-[96px]">
             <button
               onClick={handleRefresh}
               disabled={loading}
@@ -521,9 +519,14 @@ export function Clusters() {
               <RotateCwIcon className="h-4 w-4 mr-1.5" />
               {!isMobile && <span>Refresh</span>}
             </button>
-            {!loading && lastFetchedTime && (
+            {loading ? (
+              <span className="flex items-center text-xs text-gray-500">
+                <CircularProgress size={10} className="mr-1" />
+                Loading...
+              </span>
+            ) : lastFetchedTime ? (
               <LastUpdatedTimestamp timestamp={lastFetchedTime} />
-            )}
+            ) : null}
           </div>
         </div>
       </div>
