@@ -7,11 +7,7 @@ import { Prec } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
 import { syntaxHighlighting } from '@codemirror/language';
 import { getNonce } from '@/utils/csp';
-import {
-  yamlHighlightStyle,
-  yamlGutterTheme,
-  selectionGutterHighlighter,
-} from './yaml-editor';
+import { yamlHighlightStyle, yamlGutterTheme } from './yaml-editor';
 
 export function YamlCodeBlock({
   value,
@@ -38,7 +34,6 @@ export function YamlCodeBlock({
         extensions={[
           yaml(),
           yamlGutterTheme,
-          selectionGutterHighlighter,
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
