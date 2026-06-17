@@ -108,7 +108,7 @@ export function YamlEditor({
         maxHeight={height ? undefined : maxHeight}
         basicSetup={{
           lineNumbers: true,
-          foldGutter: true,
+          foldGutter: false,
           highlightActiveLineGutter: false,
           highlightActiveLine: false,
           indentOnInput: true,
