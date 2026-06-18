@@ -126,7 +126,7 @@ def _parse_args(args: Optional[str] = None):
     :return: (list_of_clouds, k_pattern)
     """
     if args:
-        args_list = args.split()
+        args_list = shlex.split(args)
     else:
         args_list = []
     parser = argparse.ArgumentParser(
