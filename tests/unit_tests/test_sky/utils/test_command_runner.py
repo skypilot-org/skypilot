@@ -4,6 +4,7 @@ from contextlib import suppress
 import os
 import select
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -12,6 +13,7 @@ from unittest import mock
 import paramiko
 import pytest
 
+from sky import exceptions
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -803,3 +805,138 @@ def test_kubernetes_runner_run_does_not_enrich_on_success() -> None:
 
     assert (returncode, stdout, stderr) == (0, 'ok', '')
     mock_diagnose.assert_not_called()
+
+
+class TestRsyncTimeout:
+    """Tests for the optional total timeout on CommandRunner.rsync."""
+
+    def test_timeout_passed_to_run_with_log_as_remaining_budget(self) -> None:
+        """The first attempt receives (nearly) the whole timeout budget."""
+        captured = {}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['timeout'] = kwargs.get('timeout')
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync('/tmp/src',
+                         '/tmp/dst',
+                         up=True,
+                         stream_logs=False,
+                         timeout=100)
+
+        # The per-attempt timeout is the remaining budget, so the first attempt
+        # should get close to the full 100s (minus negligible elapsed time).
+        assert isinstance(captured['timeout'], int)
+        assert 90 <= captured['timeout'] <= 100
+
+    def test_no_timeout_passes_none_to_run_with_log(self) -> None:
+        """Without a timeout, run_with_log is called with timeout=None."""
+        captured = {}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['timeout'] = kwargs.get('timeout', 'MISSING')
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
+
+        assert captured['timeout'] is None
+
+    def test_timeout_expiry_raises_command_error_without_retry(self) -> None:
+        """A timeout exhausts the budget: raise immediately, do not retry."""
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            raise subprocess.TimeoutExpired(command, kwargs.get('timeout'))
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep') as mock_sleep:
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=3,
+                             timeout=30)
+
+        assert 'timed out' in str(exc_info.value).lower()
+        # The single attempt consumed the whole budget; no retries.
+        assert len(calls) == 1
+        mock_sleep.assert_not_called()
+
+    def test_failures_retry_while_budget_remains(self) -> None:
+        """Plain failures retry up to max_retry while budget remains."""
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            return 1, '', 'boom'
+
+        # Mock sleep so no wall-clock is consumed by the backoff; with a large
+        # timeout the deadline never trips and all retries run.
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep'):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError):
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=2,
+                             timeout=600)
+
+        # max_retry=2 -> 3 attempts total.
+        assert len(calls) == 3
+        # Each attempt got a positive remaining budget.
+        assert all(t is not None and t > 0 for t in calls)
+
+    def test_deadline_stops_retries_even_with_budget_for_max_retry(
+            self) -> None:
+        """The deadline caps total time even if max_retry is not exhausted."""
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            return 1, '', 'boom'
+
+        # A monotonic clock that advances 10s on every read, so the 15s budget
+        # is exhausted after the first attempt despite max_retry=5.
+        clock = [1000.0]
+
+        def fake_monotonic():
+            value = clock[0]
+            clock[0] += 10.0
+            return value
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep'), \
+             mock.patch.object(command_runner.time,
+                               'monotonic',
+                               side_effect=fake_monotonic):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             max_retry=5,
+                             timeout=15)
+
+        assert 'timed out' in str(exc_info.value).lower()
+        # Deadline tripped before max_retry was exhausted.
+        assert len(calls) == 1
