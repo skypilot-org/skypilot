@@ -21,6 +21,15 @@ export const yamlHighlightStyle = HighlightStyle.define([
   { tag: t.punctuation, color: '#6b7280' },
 ]);
 
+// I-beam over the entire editor box (gutter + content + empty area)
+// so the whole surface reads as a single text region. CodeMirror's
+// default only puts the I-beam on `.cm-content` (the contenteditable
+// text), leaving the gutter on the default arrow — fine for IDEs,
+// but in a small embedded YAML viewer the box feels split otherwise.
+export const yamlTextCursorTheme = EditorView.theme({
+  '&': { cursor: 'text' },
+});
+
 export const yamlGutterTheme = EditorView.theme({
   '.cm-gutters': {
     backgroundColor: '#ffffff',
@@ -72,6 +81,7 @@ export function YamlEditor({
         extensions={[
           yaml(),
           yamlGutterTheme,
+          yamlTextCursorTheme,
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           // Pass CSP nonce so CodeMirror's injected <style> tags are allowed.
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
