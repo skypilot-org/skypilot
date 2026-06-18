@@ -236,6 +236,26 @@
                 },
                 "upgradeStrategy": {
                     "type": "string"
+                },
+                "rollingUpdate": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "maxSurge": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        },
+                        "maxUnavailable": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        }
+                    }
                 }
             }
         },

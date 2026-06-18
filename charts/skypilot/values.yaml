@@ -40,6 +40,16 @@ apiService:
   # If storage.enabled=false with RollingUpdate, file mounts and logs will be lost on pod restart; consider configuring
   # 'jobs.bucket' in the SkyPilot config to persist file mounts to cloud storage.
   upgradeStrategy: Recreate
+  # Rolling update tuning, only applied when upgradeStrategy is RollingUpdate.
+  # Defaults reproduce the previous hard-coded behavior: surge a new pod before
+  # removing an old one (zero-downtime). For deployments whose api-server pod
+  # requests most or all of a node's allocatable resources, a surge replica
+  # cannot be scheduled and the rollout stalls; set maxSurge: 0 and
+  # maxUnavailable: 1 to roll in place without surging. Values may be integers
+  # or percentage strings (e.g. "25%").
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
   # Deprecated: use other auth methods instead.
   # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
   # Enable basic auth and user management in the API server
