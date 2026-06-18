@@ -655,9 +655,9 @@ def metrics() -> fastapi.Response:
 # Without a per-context timeout, a single hanging port-forward (e.g. 30s
 # httpx timeout) would block the entire /gpu-metrics response.
 #
-# 20s accommodates large compute clusters where federate latency plus
+# 30s accommodates large compute clusters where federate latency plus
 # port-forward setup can run 5-10s warm and longer cold.
-_PER_CONTEXT_TIMEOUT_SECONDS = 20
+_PER_CONTEXT_TIMEOUT_SECONDS = 30
 
 _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
     '/var/skypilot/credentials/kubeconfig/kubeconfig')
