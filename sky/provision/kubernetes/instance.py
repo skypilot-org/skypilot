@@ -695,6 +695,17 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                             raise config_lib.KubernetesError(
                                 'Failed to create container while launching '
                                 f'the node. Error details: {msg}.')
+                    terminated = container_status.state.terminated
+                    if terminated is not None and terminated.exit_code != 0:
+                        reason_str = (terminated.reason
+                                      if terminated.reason else
+                                      f'exit({terminated.exit_code})')
+                        raise config_lib.KubernetesError(
+                            f'Container in pod {pod.metadata.name} '
+                            f'terminated with error while pod is still '
+                            f'pending: {reason_str}. Run '
+                            f'`sky logs --provision {cluster_name}` '
+                            'for more details.')
         return False, reason
 
     missing_pods_retry = 0

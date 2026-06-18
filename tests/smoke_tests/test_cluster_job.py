@@ -2787,7 +2787,7 @@ def test_remote_server_api_login():
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint
-            f'grep -q "endpoint: {endpoint}" {config_path}',
+            f'grep -q "endpoint: {endpoint.rstrip("/")}" {config_path}',
             # Verify the api_server section exists
             f'grep -q "api_server:" {config_path}',
         ],
