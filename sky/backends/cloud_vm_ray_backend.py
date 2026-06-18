@@ -6422,12 +6422,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 read_only = bool(storage_obj.mount_config and
                                  storage_obj.mount_config.read_only)
                 if isinstance(store, storage_lib.HuggingFaceStore):
-                    hf_mount_args = (storage_obj.mount_config.hf_mount_args
-                                     if storage_obj.mount_config else None)
-                    mount_cmd = store.mount_command(
-                        dst,
-                        read_only=read_only,
-                        hf_mount_args=hf_mount_args)
+                    # getattr guards against MountConfig instances serialized
+                    # before hf_mount_args existed (and against a None config).
+                    hf_mount_args = getattr(storage_obj.mount_config,
+                                            'hf_mount_args', None)
+                    mount_cmd = store.mount_command(dst,
+                                                    read_only=read_only,
+                                                    hf_mount_args=hf_mount_args)
                 else:
                     mount_cmd = store.mount_command(dst, read_only=read_only)
                 action_message = 'Mounting'
