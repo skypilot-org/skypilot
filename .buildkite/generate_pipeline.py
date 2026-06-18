@@ -453,10 +453,20 @@ def _dump_pipeline_to_file(yaml_file_path: str,
             word.capitalize() for word in re.split(r'[-_]', key))
 
         if not all_steps:
-            # Skip empty groups — Buildkite rejects pipelines with
-            # empty step groups.
-            print(f'No matching tests for {yaml_file_path}, skipping.')
-            return
+            # Zero steps means pytest --collect-only found no matching tests
+            # for any test file.  This is almost always a misconfiguration
+            # (wrong cloud filter, unrecognised ARGS flag, missing env file,
+            # etc.) rather than a legitimate "nothing to run" outcome.
+            # Failing loudly here prevents the empty YAML from being uploaded
+            # as a vacuous success — which would post a false "✅ passed" to
+            # any CI notifiers while running zero tests.
+            print(
+                f'ERROR: No pipeline steps generated for {yaml_file_path}. '
+                f'pytest --collect-only found 0 matching tests across all '
+                f'test files. Check that ARGS point to valid tests and that '
+                f'the env-file (if any) is reachable.',
+                file=sys.stderr)
+            sys.exit(1)
 
         grouped_steps = [{
             'group': group_name,
