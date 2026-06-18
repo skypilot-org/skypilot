@@ -9,6 +9,13 @@ import { syntaxHighlighting } from '@codemirror/language';
 import { getNonce } from '@/utils/csp';
 import { yamlHighlightStyle, yamlGutterTheme } from './yaml-editor';
 
+// In read-only mode, suppress CodeMirror's drawn caret so the viewer
+// doesn't look editable when focused. Selection backgrounds still render
+// (they're drawn by a separate layer).
+const hideCaretTheme = EditorView.theme({
+  '.cm-cursor, .cm-cursor-primary': { display: 'none' },
+});
+
 export function YamlCodeBlock({
   value,
   onChange,
@@ -34,6 +41,7 @@ export function YamlCodeBlock({
         extensions={[
           yaml(),
           yamlGutterTheme,
+          ...(readOnly ? [hideCaretTheme] : []),
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
