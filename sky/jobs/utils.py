@@ -959,17 +959,18 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     # Merge results and collect cluster info for unique clusters
     seen_cluster_names: Set[str] = set()
     seen_controller_uuids: Set[str] = set()
-    for job_id, (job_inline, job_files, job_errors, cluster_name,
+    for job_id, (job_inline, job_files, job_errors, cluster_names,
                  controller_uuids) in zip(job_ids, results):
         inline_data.extend(job_inline)
         file_paths.extend(job_files)
         errors.extend(job_errors)
         seen_controller_uuids.update(controller_uuids)
-        if cluster_name and cluster_name not in seen_cluster_names:
-            seen_cluster_names.add(cluster_name)
-            job_prefix = f'managed_jobs/{job_id}'
-            _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                            inline_data, errors)
+        for cluster_name in cluster_names:
+            if cluster_name not in seen_cluster_names:
+                seen_cluster_names.add(cluster_name)
+                job_prefix = f'managed_jobs/{job_id}'
+                _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                                inline_data, errors)
 
     # Collect controller system log paths (shared, not per-job). Scope to
     # the controllers that actually ran the requested jobs — globbing the
@@ -988,12 +989,14 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 def _collect_job_debug_manifest(
     job_id: int,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
-           Optional[str], Set[str]]:
+           List[str], Set[str]]:
     """Collect debug manifest entries for a single managed job.
 
     Returns:
-        (inline_data, file_paths, errors, cluster_name, controller_uuids)
-        for this job. ``controller_uuids`` is the set of parent controller
+        (inline_data, file_paths, errors, cluster_names, controller_uuids)
+        for this job. ``cluster_names`` are the underlying cluster name(s)
+        of the job's tasks (a multi-task pipeline launches one cluster per
+        task). ``controller_uuids`` is the set of parent controller
         UUIDs that ran this job (empty if no <jobid>.log exists yet or the
         log doesn't contain the marker — e.g., the job never started).
     """
@@ -1079,20 +1082,26 @@ def _collect_job_debug_manifest(
                     'relative_path': f'{job_prefix}/run{suffix}.log',
                 })
 
-    # 5. Resolve cluster name (cluster info collected in caller for dedup)
-    cluster_name = None
+    # 5. Resolve cluster name(s) (cluster info collected in caller for
+    # dedup). A pool job records its assigned worker; a non-pool job uses
+    # a deterministic per-task cluster name (a multi-task pipeline
+    # launches one cluster per task, so there can be several).
+    cluster_names: List[str] = []
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/cluster_info'):
-        cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
-        if cluster_name is None:
-            # Fall back to generated name
+        pool_cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
+        if pool_cluster_name is not None:
+            cluster_names.append(pool_cluster_name)
+        else:
+            # Fall back to the generated per-task names
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
-            if task_info:
-                _, task_name, _, _, _ = task_info[0]
-                cluster_name = generate_managed_job_cluster_name(
-                    task_name, job_id)
+            for _, task_name, _, _, _ in task_info:
+                cluster_names.append(
+                    generate_managed_job_cluster_name(task_name, job_id))
+            # De-duplicate while preserving order.
+            cluster_names = list(dict.fromkeys(cluster_names))
 
-    return inline_data, file_paths, errors, cluster_name, controller_uuids
+    return inline_data, file_paths, errors, cluster_names, controller_uuids
 
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
