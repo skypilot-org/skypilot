@@ -432,41 +432,39 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
 def _dump_pipeline_to_file(yaml_file_path: str,
                            pipelines: List[Dict[str, Any]],
                            trigger_command: str,
-                           extra_env: Optional[Dict[str, str]] = None):
+                           extra_env: Optional[Dict[str, str]] = None) -> int:
+    """Write the generated steps to a pipeline file; return the step count.
+
+    main() always generates more than one pipeline file (e.g. release and
+    quick-tests-core).  A `-k`/file filter often matches tests in only one of
+    them, so an individual file legitimately ending up with 0 steps is not an
+    error -- it is skipped here, and main() fails loudly only if *every* file
+    is empty (the genuine "matched nothing anywhere" misconfiguration).
+    """
     default_env = {
         'LOG_TO_STDOUT': '1',
         'SKYPILOT_DISABLE_USAGE_COLLECTION': '1'
     }
     if extra_env:
         default_env.update(extra_env)
+    all_steps = []
+    for pipeline in pipelines:
+        all_steps.extend(pipeline['steps'])
+
+    if not all_steps:
+        # Buildkite rejects pipelines with empty step groups, so skip writing
+        # this file. main() decides whether 0 steps overall is fatal.
+        print(f'No matching tests for {yaml_file_path}, skipping.')
+        return 0
+
     with open(yaml_file_path, 'w', encoding='utf-8') as file:
         file.write(GENERATED_FILE_HEAD)
-        all_steps = []
-        for pipeline in pipelines:
-            all_steps.extend(pipeline['steps'])
-
         # Extract key from trigger command, keeping only valid characters
         key = re.sub(r'[^a-zA-Z0-9_\-:]', '',
                      re.match(r'^[^ ]*', trigger_command).group(0))
         # Generate formatted group name from key
         group_name = ' '.join(
             word.capitalize() for word in re.split(r'[-_]', key))
-
-        if not all_steps:
-            # Zero steps means pytest --collect-only found no matching tests
-            # for any test file.  This is almost always a misconfiguration
-            # (wrong cloud filter, unrecognised ARGS flag, missing env file,
-            # etc.) rather than a legitimate "nothing to run" outcome.
-            # Failing loudly here prevents the empty YAML from being uploaded
-            # as a vacuous success — which would post a false "✅ passed" to
-            # any CI notifiers while running zero tests.
-            print(
-                f'ERROR: No pipeline steps generated for {yaml_file_path}. '
-                f'pytest --collect-only found 0 matching tests across all '
-                f'test files. Check that ARGS point to valid tests and that '
-                f'the env-file (if any) is reachable.',
-                file=sys.stderr)
-            sys.exit(1)
 
         grouped_steps = [{
             'group': group_name,
@@ -481,9 +479,11 @@ def _dump_pipeline_to_file(yaml_file_path: str,
 
         final_pipeline = {'steps': grouped_steps, 'env': default_env}
         yaml.dump(final_pipeline, file, default_flow_style=False)
+    return len(all_steps)
 
 
-def _convert_release(test_files: List[str], args: str, trigger_command: str):
+def _convert_release(test_files: List[str], args: str,
+                     trigger_command: str) -> int:
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -492,8 +492,8 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
-                           trigger_command)
+    return _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
+                                  trigger_command)
 
 
 def _rest_request(url: str,
@@ -538,7 +538,7 @@ def _get_latest_pypi_version():
 
 
 def _convert_quick_tests_core(test_files: List[str], args: str,
-                              trigger_command: str):
+                              trigger_command: str) -> int:
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     base_branch = '--base-branch' in args
     base_branches = []
@@ -565,10 +565,11 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
             pipeline = _generate_pipeline(test_file, args)
             output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
-    _dump_pipeline_to_file(yaml_file_path,
-                           output_file_pipelines,
-                           trigger_command,
-                           extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
+    return _dump_pipeline_to_file(
+        yaml_file_path,
+        output_file_pipelines,
+        trigger_command,
+        extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
 @click.command()
@@ -612,8 +613,25 @@ def main(args: str, file_pattern: str):
             release_files.append(test_file)
 
     print(f'trigger_command: {trigger_command}')
-    _convert_release(release_files, args, trigger_command)
-    _convert_quick_tests_core(quick_tests_core_files, args, trigger_command)
+    total_steps = 0
+    total_steps += _convert_release(release_files, args, trigger_command)
+    total_steps += _convert_quick_tests_core(quick_tests_core_files, args,
+                                             trigger_command)
+
+    if total_steps == 0:
+        # Every generated pipeline file was empty: pytest --collect-only matched
+        # no tests anywhere.  This is almost always a misconfiguration (wrong
+        # cloud filter, unrecognised ARGS flag, missing env file, a typo'd -k)
+        # rather than a legitimate "nothing to run".  Fail loudly so the empty
+        # pipeline is not uploaded as a vacuous success that posts a false
+        # "passed" status while running zero tests.
+        print(
+            'ERROR: No pipeline steps generated for any pipeline file. '
+            'pytest --collect-only matched 0 tests across all test files. '
+            'Check that ARGS point to valid tests and that the env-file (if '
+            'any) is reachable.',
+            file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':
