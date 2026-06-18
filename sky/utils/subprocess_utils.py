@@ -1,5 +1,7 @@
 """Utility functions for subprocesses."""
 import collections
+import ctypes
+import ctypes.util
 import multiprocessing
 from multiprocessing import pool
 import os
@@ -452,6 +454,113 @@ def run_with_retries(
     return returncode, stdout, stderr
 
 
+# prctl op number for PR_SET_CHILD_SUBREAPER, from <linux/prctl.h>.
+# Available on Linux 3.4+ (2012-05-20).
+_PR_SET_CHILD_SUBREAPER = 36
+
+
+def _load_libc() -> Optional[ctypes.CDLL]:
+    """Resolve libc once at module load.
+
+    set_child_subreaper() is called from a preexec_fn — i.e. between fork()
+    and execve() in the child. In that window only async-signal-safe code
+    is safe to run, because if the parent had multiple threads any locks
+    they held are now permanently locked in the child. ctypes.util.find_library
+    is NOT async-signal-safe: on glibc it shells out to /sbin/ldconfig via
+    subprocess.Popen, which itself can fork() / allocate / hold locks. We
+    must resolve and load libc in the parent process here, so the preexec_fn
+    only has to perform the prctl(2) syscall.
+    """
+    if sys.platform != 'linux':
+        return None
+    try:
+        libc_path = ctypes.util.find_library('c')
+        if not libc_path:
+            return None
+        return ctypes.CDLL(libc_path, use_errno=True)
+    except (OSError, TypeError):
+        return None
+
+
+_LIBC = _load_libc()
+
+
+def set_child_subreaper() -> None:
+    """Mark the calling process as a child subreaper.
+
+    When a descendant of a child subreaper becomes orphaned (its immediate
+    parent exits), the kernel reparents the orphan to the nearest living
+    ancestor subreaper instead of to PID 1. This keeps orphans inside the
+    descendant tree, so process-tree-based cleanup (e.g. the watcher in
+    subprocess_daemon) continues to find them after their original parent
+    dies.
+
+    Intended primarily as a preexec_fn for subprocess.Popen: runs in the
+    child after fork() and before execve(). The attribute is preserved
+    across execve, so the launched binary (e.g. bash) inherits subreaper
+    status. The libc handle is resolved at module import time (see
+    _load_libc) so this function only performs the prctl(2) syscall — the
+    only async-signal-safe step we can take between fork and exec.
+
+    Best-effort: silent no-op on non-Linux platforms and on Linux kernels
+    that predate PR_SET_CHILD_SUBREAPER (3.4). Never raises; the calling
+    subprocess launch must not fail just because we couldn't set the
+    attribute.
+    """
+    if _LIBC is None:
+        return
+    try:
+        _LIBC.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+    except Exception:  # pylint: disable=broad-except
+        # If prctl errors (EINVAL on an ancient kernel, etc.), fall back
+        # to the prior behavior — orphans will reparent to PID 1 and may
+        # leak resources, but the launch itself still succeeds.
+        pass
+
+
+# Handles to the short-lived first-fork parents spawned by
+# kill_process_daemon (see there). A single, lazily-started background
+# thread reaps them as they exit. We use one persistent thread rather than
+# reaping on the next kill_process_daemon call: a caller that spawns a
+# daemon and then goes idle (e.g. the jobs/serve/pool controller after it
+# scales a pool down to zero) would otherwise leave its last intermediate
+# accumulating as a zombie until CPython GCs the Popen handle. One thread
+# per process, polling a small list, is cheap.
+_pending_daemon_procs: List[subprocess.Popen] = []
+_daemon_procs_lock = threading.Lock()
+_daemon_reaper_started = False
+
+
+def _reap_finished_daemon_procs() -> None:
+    """Reap any already-exited daemon first-fork intermediates (non-blocking).
+
+    poll() reaps an exited child (returns its code); a still-running one
+    returns None and is kept for the next pass.
+    """
+    with _daemon_procs_lock:
+        _pending_daemon_procs[:] = [
+            p for p in _pending_daemon_procs if p.poll() is None
+        ]
+
+
+def _daemon_reaper_loop() -> None:
+    while True:
+        time.sleep(1)
+        _reap_finished_daemon_procs()
+
+
+def _ensure_daemon_reaper() -> None:
+    """Start the background reaper thread once per process."""
+    global _daemon_reaper_started
+    with _daemon_procs_lock:
+        if _daemon_reaper_started:
+            return
+        _daemon_reaper_started = True
+    threading.Thread(target=_daemon_reaper_loop,
+                     daemon=True,
+                     name='sky-daemon-reaper').start()
+
+
 def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     """Start a daemon as a safety net to kill the process.
 
@@ -500,7 +609,17 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     # daemon script will detach itself from the parent process with
     # fork to avoid being killed by parent process. See the reason we
     # daemonize the process in `sky/skylet/subprocess_daemon.py`.
-    subprocess.Popen(
+    # subprocess_daemon.py double-forks (daemonize()), so the process we
+    # spawn here is the first-fork parent: it sys.exit()s within a few
+    # hundred ms once the detached grandchild is running. We must reap it,
+    # or it lingers as a zombie under us until CPython GCs the Popen handle.
+    # The background reaper (started here, once) drains exited intermediates
+    # promptly even if this caller never calls again — important for a
+    # long-lived caller that goes idle (e.g. the controller after scaling a
+    # pool to zero), whose intermediate would otherwise accumulate as a
+    # zombie.
+    _ensure_daemon_reaper()
+    daemon_proc = subprocess.Popen(
         daemon_cmd,
         # Suppress output
         stdout=subprocess.DEVNULL,
@@ -509,6 +628,8 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
         stdin=subprocess.DEVNULL,
         env=env,
     )
+    with _daemon_procs_lock:
+        _pending_daemon_procs.append(daemon_proc)
 
 
 def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:

@@ -4,6 +4,7 @@ from io import StringIO
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from sky.skylet import log_lib
 
@@ -164,6 +165,121 @@ class TestRunWithLogTimeout(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(returncode, 0)
+
+
+class TestRunWithLogPreexecGating(unittest.TestCase):
+    """Tests that run_with_log gates the subreaper preexec_fn correctly.
+
+    Passing a Python preexec_fn to subprocess.Popen forces CPython onto its
+    unsafe multi-threaded fork path (it disables the vfork/posix_spawn fast
+    paths). On the highly concurrent API server (coroutine path, ctx is not
+    None) this deadlocks: one worker can fork() while another holds a glibc
+    allocator lock, and the forked child wedges before execve() while the
+    parent blocks forever in Popen._execute_child. The coroutine path reaps
+    descendants via the process group (kill_process_daemon(use_kill_pg=True))
+    and so must NOT set the subreaper preexec; the cluster/task path (ctx is
+    None) still needs it for orphan cleanup.
+
+    This is the regression guard for the API-server hang reproduced on CI
+    (test_high_logs_concurrency_not_blocking_operations): it fails on the
+    pre-fix code (preexec set unconditionally) and passes once preexec is
+    gated to the ctx-is-None path.
+    """
+
+    def _capture_command_preexec(self, ctx, caller_preexec=None):
+        """Returns the preexec_fn run_with_log hands to the command's Popen.
+
+        Drives the gating branch by patching log_lib._get_context to return
+        ``ctx`` (None = cluster/task path; a non-None sentinel = coroutine/
+        server path), so the test needs no real context, threads or event loop.
+        A spy captures preexec_fn at the command's Popen call and raises a
+        sentinel to abort run_with_log right there, so the post-Popen streaming
+        (which on the coroutine path drains a pipe through machinery that
+        expects a running event loop) is never executed. The preexec_fn is
+        fully decided by the time Popen is called, so this is deterministic and
+        environment-independent.
+        """
+        cmd = ['true']
+        captured = {}
+        real_popen = subprocess.Popen
+
+        class _Captured(Exception):
+            pass
+
+        def spy_popen(*args, **kwargs):
+            popen_cmd = args[0] if args else kwargs.get('args')
+            if popen_cmd == cmd:
+                captured['preexec_fn'] = kwargs.get('preexec_fn')
+                raise _Captured
+            # The daemon Popen (a different cmd) is never reached because we
+            # abort above; fall back to the real Popen if it ever is.
+            return real_popen(*args, **kwargs)
+
+        with tempfile.NamedTemporaryFile(suffix='.log', delete=False) as f:
+            log_path = f.name
+        extra = {}
+        if caller_preexec is not None:
+            extra['preexec_fn'] = caller_preexec
+        with mock.patch.object(log_lib, '_get_context', return_value=ctx):
+            with mock.patch('subprocess.Popen', spy_popen):
+                try:
+                    log_lib.run_with_log(cmd,
+                                         log_path,
+                                         stream_logs=False,
+                                         process_stream=False,
+                                         **extra)
+                except _Captured:
+                    pass
+        self.assertIn('preexec_fn', captured, 'command Popen was never invoked')
+        return captured['preexec_fn']
+
+    def test_no_preexec_on_server_path(self):
+        """On the coroutine/server path (ctx is not None), preexec must be None."""
+        preexec = self._capture_command_preexec(ctx=object())
+        self.assertIsNone(
+            preexec,
+            'run_with_log must not pass a preexec_fn on the coroutine path; a '
+            'Python preexec_fn forces the unsafe multi-threaded fork and '
+            'deadlocks the concurrent API server.')
+
+    def test_preexec_set_on_cluster_path(self):
+        """On the cluster/task path (ctx is None), the subreaper must be set."""
+        preexec = self._capture_command_preexec(ctx=None)
+        self.assertTrue(
+            callable(preexec),
+            'run_with_log must set the subreaper preexec_fn on the cluster '
+            'path to keep orphan reaping working.')
+
+    def test_caller_preexec_honored_on_server_path(self):
+        """A caller-supplied preexec_fn is preserved even on the server path.
+
+        This pins the intended (pre-existing) behavior for command_runner's
+        interactive-SSH PTY setup, which passes its own preexec_fn and may run
+        on the coroutine path: run_with_log must NOT add the subreaper, but it
+        must still honor the caller's preexec_fn (dropping it would break
+        interactive auth). The residual multi-threaded-fork caveat for this
+        path predates the subreaper change and is out of scope here.
+        """
+
+        def caller_preexec():
+            pass
+
+        preexec = self._capture_command_preexec(ctx=object(),
+                                                caller_preexec=caller_preexec)
+        self.assertTrue(
+            callable(preexec),
+            'run_with_log must still honor a caller-supplied preexec_fn on the '
+            'coroutine path.')
+
+    def test_caller_preexec_honored_on_cluster_path(self):
+        """A caller-supplied preexec_fn is honored on the cluster path too."""
+
+        def caller_preexec():
+            pass
+
+        preexec = self._capture_command_preexec(ctx=None,
+                                                caller_preexec=caller_preexec)
+        self.assertTrue(callable(preexec))
 
 
 if __name__ == '__main__':

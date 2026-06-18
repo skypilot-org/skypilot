@@ -15,7 +15,10 @@ repos:
     hooks:
     -   id: isort
         name: isort (general)
-        exclude: "(build/.*|sky/schemas/generated/.*)"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
+        # codegen snapshot files under tests/.../testdata/ must be byte-identical
+        # to the runtime output of inspect.getsource(...); reformatting them
+        # (isort or yapf) breaks the snapshot tests.
+        exclude: "(build/.*|sky/schemas/generated/.*|tests/unit_tests/test_sky/backends/testdata/.*)"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.19.1  # Match the version from requirements
@@ -46,7 +49,10 @@ repos:
     hooks:
     -   id: yapf
         name: yapf
-        exclude: sky/schemas/generated/.*  # Matches exclusions from the script
+        # codegen snapshot files under tests/.../testdata/ must be byte-identical
+        # to the runtime output of inspect.getsource(...); reformatting them
+        # breaks the snapshot tests.
+        exclude: "(sky/schemas/generated/.*|tests/unit_tests/test_sky/backends/testdata/.*)"  # Matches exclusions from the script
         args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
         additional_dependencies: [toml==0.10.2] # Match the version from requirements
 

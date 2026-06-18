@@ -201,12 +201,59 @@ def run_with_log(
     if log_cmd:
         with open(log_path, 'a', encoding='utf-8') as f:
             print(f'Running command: {cmd}', file=f)
+    # Mark the spawned process as a child subreaper (PR_SET_CHILD_SUBREAPER,
+    # preserved across execve) so descendants orphaned mid-run reparent to it
+    # instead of to PID 1, where subprocess_daemon can find and reap them.
+    #
+    # Only set the subreaper on the non-coroutine path (ctx is None). Passing a
+    # Python preexec_fn forces CPython onto its unsafe multi-threaded fork path
+    # (it disables the vfork/posix_spawn fast paths), which can deadlock the
+    # highly concurrent API server: one worker thread can fork() while another
+    # holds a glibc allocator/arena lock, and the forked child then wedges
+    # before execve() while the parent blocks forever in Popen._execute_child.
+    # The coroutine path reaps descendants via the process group instead
+    # (kill_process_daemon(use_kill_pg=True)); this matches the pre-existing,
+    # non-subreaper behavior on that path and trades the subreaper's mid-run
+    # live reap (only needed for descendants that setsid/setpgid out of the
+    # group) for not forcing the dangerous fork. The cluster/task path always
+    # runs with ctx is None -- including the codegen-inlined copy on clusters --
+    # so it keeps the subreaper.
+    #
+    # A caller may still pass its own preexec_fn (e.g. command_runner's
+    # interactive-SSH PTY setup): that is honored unchanged on both paths to
+    # preserve pre-existing behavior. It carries the same multi-threaded-fork
+    # caveat, but predates this code and is serialized by an auth lock; closing
+    # that residual window is out of scope here.
+    caller_preexec = kwargs.pop('preexec_fn', None)
+    set_subreaper_in_child = ctx is None
+
+    def preexec_chain():
+        # getattr guard: this function's source is inlined into task codegen
+        # (task_codegen.py uses inspect.getsource on run_with_log) and may run
+        # on a cluster whose older sky lacks set_child_subreaper. Skipping it
+        # only degrades orphan cleanup; it doesn't break execution.
+        if set_subreaper_in_child:
+            set_subreaper = getattr(subprocess_utils, 'set_child_subreaper',
+                                    None)
+            if set_subreaper is not None:
+                set_subreaper()
+        if caller_preexec is not None:
+            caller_preexec()
+
+    # pylint: disable=subprocess-popen-preexec-fn
+    # set_child_subreaper() resolves libc at import time and does only a
+    # prctl(2) syscall in the child, so preexec_chain itself is AS-safe; the
+    # hazard is forcing the multi-threaded fork path under server concurrency,
+    # which is why preexec is gated out on the coroutine path (see above).
+    preexec_fn = (preexec_chain if set_subreaper_in_child or
+                  caller_preexec is not None else None)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
                           stdin=stdin,
+                          preexec_fn=preexec_fn,
                           **kwargs) as proc:
         try:
             if ctx is not None:
