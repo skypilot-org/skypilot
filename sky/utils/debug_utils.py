@@ -758,6 +758,48 @@ def _dump_request_id_info(
     logger.debug('Exiting _dump_request_id_info')
 
 
+def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
+    """Resolve the absolute skylet log path on the head node.
+
+    Skylet writes its log to ``$SKY_RUNTIME_DIR/.sky/skylet.log``, where
+    SKY_RUNTIME_DIR defaults to ``$HOME`` (see runtime_utils.get_runtime_dir_path,
+    used by skylet/attempt_skylet.py to place the log). The runtime dir can be
+    relocated off ``$HOME`` -- Slurm moves it off the NFS home, and devspaces
+    override it via the pod env -- and not every command runner exposes that
+    location as a Python attribute. Rather than special-casing each provider, we
+    resolve the path on the remote node using the same env var, in the same
+    ``source_bashrc`` environment that instance_setup uses to start skylet (see
+    start_skylet_on_head_node), so it is correct for every runner.
+
+    Falls back to ``~/.sky/skylet.log`` if the resolution command fails; rsync
+    then handles a missing file best-effort. posixpath (not os.path) is used for
+    the fallback because this is a remote *nix path resolved on the cluster.
+    """
+    default_path = posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+    # Mirror the shell form of the runtime dir (constants.SKY_RUNTIME_DIR) so
+    # the remote shell expands the same env var skylet read.
+    cmd = (f'echo "${{{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}:-$HOME}}/'
+           f'{skylet_constants.SKYLET_LOG_FILE}"')
+    try:
+        returncode, stdout, _ = runner.run(cmd,
+                                           require_outputs=True,
+                                           stream_logs=False,
+                                           source_bashrc=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to resolve skylet log path on cluster '
+                     f'{cluster_name!r}, falling back to {default_path!r}: {e}')
+        return default_path
+    # sourcing bashrc can emit banner/warning lines before our echo; the path is
+    # the last non-empty line.
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if returncode != 0 or not lines:
+        logger.debug(f'Could not resolve skylet log path on cluster '
+                     f'{cluster_name!r} (rc={returncode}), falling back to '
+                     f'{default_path!r}')
+        return default_path
+    return lines[-1]
+
+
 def _collect_cluster_skylet_log(
         cluster_name: str,
         cluster_dir: str,
@@ -766,11 +808,12 @@ def _collect_cluster_skylet_log(
     """Rsync the head node's skylet log into the cluster dump dir.
 
     Skylet runs only on the head node (see
-    instance_setup.start_skylet_on_head_node), writing ~/.sky/skylet.log, so
-    we pull it off the first command runner (runners[0] is always the head;
-    ClusterInfo.ip_tuples() guarantees head-first ordering). Best-effort: a
-    missing log or any failure is recorded in ``errors`` and never aborts the
-    dump.
+    instance_setup.start_skylet_on_head_node), so we pull it off the first
+    command runner (runners[0] is always the head; ClusterInfo.ip_tuples()
+    guarantees head-first ordering). The log path is resolved on the remote node
+    (see _resolve_remote_skylet_log_path) to honor a relocated SKY_RUNTIME_DIR.
+    Best-effort: a missing log or any failure is recorded in ``errors`` and
+    never aborts the dump.
     """
     try:
         runners = handle.get_command_runners()
@@ -792,19 +835,7 @@ def _collect_cluster_skylet_log(
         return
 
     runner = runners[0]  # Head node; skylet runs only there.
-    # Slurm relocates the SkyPilot runtime off the (often NFS) home dir and
-    # exposes the location as skypilot_runtime_dir; every other runner keeps
-    # it under $HOME. Resolve against that dir so the source path is correct
-    # regardless of provider.
-    # posixpath (not os.path): this is a remote *nix path, built server-side
-    # but resolved on the cluster, so it must use forward slashes regardless
-    # of the server's OS.
-    runtime_dir = getattr(runner, 'skypilot_runtime_dir', None)
-    if runtime_dir:
-        remote_path = posixpath.join(runtime_dir,
-                                     skylet_constants.SKYLET_LOG_FILE)
-    else:
-        remote_path = posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+    remote_path = _resolve_remote_skylet_log_path(runner, cluster_name)
     target = os.path.join(cluster_dir, 'skylet.log')
     try:
         runner.rsync(source=remote_path,
@@ -935,13 +966,16 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'traceback': _full_traceback()
                 })
 
-        # Pull the skylet log from the head node for live clusters. Skylet
-        # only runs on UP clusters, and a stopped/terminated cluster has no
-        # reachable node, so we skip anything that isn't UP.
+        # Pull the skylet log from the head node. We attempt this for both UP
+        # and INIT clusters: an INIT cluster may be degraded (failed setup,
+        # partial provisioning) but still have a reachable node with a skylet
+        # log, which is exactly when the log is most useful. The only status we
+        # skip is STOPPED, which has no reachable node. A not-yet-provisioned
+        # cluster simply fails the rsync, which is handled best-effort.
         status = cluster_record.get('status') if cluster_record else None
         handle = cluster_record.get('handle') if cluster_record else None
 
-        if status == status_lib.ClusterStatus.UP and handle is not None:
+        if status != status_lib.ClusterStatus.STOPPED and handle is not None:
             _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
                                         errors)
         else:
