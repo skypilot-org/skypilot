@@ -696,8 +696,8 @@ prometheus:
         # Use the API service created by this Helm chart
         - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
-      scrape_interval: 15s
-      scrape_timeout: 10s
+      scrape_interval: 60s
+      scrape_timeout: 45s
       # Add labels to identify these metrics
       metric_relabel_configs:
       - action: replace
@@ -717,8 +717,8 @@ prometheus:
       static_configs:
         - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/endpoints-metrics'
-      scrape_interval: 30s
-      scrape_timeout: 25s
+      scrape_interval: 60s
+      scrape_timeout: 45s
     {{- end }}
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
