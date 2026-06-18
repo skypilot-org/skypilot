@@ -15,19 +15,6 @@ import psutil
 # Environment variable to enable kill_pg in subprocess daemon.
 USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
 
-# How long a zombie descendant must persist before its parent counts as
-# wedged. 60 s is far above any well-behaved program's wait() latency, so
-# crossing it is an unambiguous signal the parent has stopped reaping. This
-# is a fixed invariant of the wedge heuristic, not a user-facing knob.
-_ZOMBIE_GRACE_SECONDS = 60.0
-
-# How long to wait for a SIGTERM to take effect before escalating to
-# SIGKILL on a wedged ancestor. Some wedge shapes are signal-interruptible
-# (e.g. signal.pause(), mp.Event().wait()) — a second SIGTERM unwinds them.
-# Sending SIGTERM first, then SIGKILL on timeout, lets those processes
-# exit cleanly (running their atexit hooks) instead of being force-killed.
-_WEDGE_SIGTERM_GRACE_SECONDS = 5.0
-
 # Daemon log file (separate per task — sharing a path across daemons would
 # interleave concurrent writes). Set by main() so that helper functions
 # can log via _log(); when this is None we fall back to /dev/null-equivalent
@@ -115,7 +102,7 @@ def _log(message: str) -> None:
     Daemonize() detaches stdout/stderr from the parent (and
     kill_process_daemon spawns us with stdout=DEVNULL/stderr=DEVNULL),
     so plain print() goes nowhere. Route everything through this helper
-    so wedge-kill events and other diagnostics are recoverable from
+    so orphan-reap events and other diagnostics are recoverable from
     ~/.sky/subprocess_daemon-<pid>.log after the fact.
     """
     if _LOG_PATH is None:
@@ -192,132 +179,6 @@ def kill_process_group(pgid: int) -> bool:
     return True
 
 
-def _term_then_kill(target: psutil.Process,
-                    grace_seconds: float = _WEDGE_SIGTERM_GRACE_SECONDS) -> str:
-    """Send SIGTERM, wait up to grace_seconds for exit, then SIGKILL if alive.
-
-    Returns a short tag describing the outcome ('term' / 'kill' / 'gone' /
-    'denied') for logging.
-
-    Why TERM-first even for a "wedged" process: many wedge shapes are
-    signal-interruptible. Empirically, processes wedged in signal.pause(),
-    mp.Event().wait(), or other blocking-but-signal-aware calls unwind
-    cleanly on a second SIGTERM (the handler runs, the originating except
-    block has already executed, the exception propagates to top-level and
-    the process exits naturally). Force-killing those would skip atexit
-    handlers and child-cleanup that the program might still complete.
-    For wedges that truly ignore SIGTERM, SIGKILL still fires after
-    grace_seconds.
-    """
-    try:
-        target.terminate()
-    except psutil.NoSuchProcess:
-        return 'gone'
-    except psutil.AccessDenied:
-        return 'denied'
-    deadline = time.monotonic() + grace_seconds
-    while time.monotonic() < deadline:
-        try:
-            if not target.is_running() or target.status() == (
-                    psutil.STATUS_ZOMBIE):
-                return 'term'
-        except psutil.NoSuchProcess:
-            return 'term'
-        time.sleep(0.5)
-    try:
-        target.kill()
-        return 'kill'
-    except psutil.NoSuchProcess:
-        return 'term'
-    except psutil.AccessDenied:
-        return 'denied'
-
-
-def _zombie_wedge_sweep(descendants: List[psutil.Process],
-                        zombie_first_seen: Dict[int,
-                                                float], grace_seconds: float,
-                        proc_pid: int, parent_pid: int, proc_sid: Optional[int],
-                        last_reap_at: Dict[int, float]) -> None:
-    """Age each zombie descendant; force-kill the wedged parent of any that
-    have outlived the grace period AND have stopped reaping entirely.
-
-    A wedged process — one whose SIGTERM handler raised an exception out of
-    the wait path and is now stuck in signal.pause()/Event.wait() — never
-    reaps its children, so a child it forked sits as a zombie indefinitely.
-    Once that zombie has aged past grace_seconds we kill the parent: SIGTERM
-    first (signal-interruptible wedges exit cleanly on a 2nd SIGTERM), then
-    SIGKILL after a short grace. Its still-alive sibling workers then
-    reparent to the subreaper (proc_pid) and the PPID-transition reap in the
-    caller cleans them up next tick.
-
-    Reaping-progress gate: a long-lived zombie alone is not proof of a wedge.
-    SkyPilot's own busy daemons (the jobs/serve/pool controller and its
-    executors) are descendants of the watched process in the same session and
-    can briefly leave a child zombie past the grace period while still
-    actively reaping other children. Structure cannot tell them apart from
-    the wedged workload — both sit at the same depth under proc_pid. Behavior
-    can: a wedged parent reaps nothing, while a live daemon keeps reaping.
-    So we kill only a parent that has a zombie older than grace_seconds AND
-    has not been observed reaping any child within the last grace_seconds
-    (last_reap_at, maintained by the caller). Also excluded: PID 0/1, the
-    watched subreaper, the orchestrator, and anything that setsid()'d into
-    its own session (a deliberately-detached daemon; see _same_session).
-    """
-    now = time.monotonic()
-    for descendant in descendants:
-        try:
-            status = descendant.status()
-        except psutil.NoSuchProcess:
-            zombie_first_seen.pop(descendant.pid, None)
-            continue
-        if status != psutil.STATUS_ZOMBIE:
-            zombie_first_seen.pop(descendant.pid, None)
-            continue
-        first_seen = zombie_first_seen.setdefault(descendant.pid, now)
-        if now - first_seen < grace_seconds:
-            continue
-        try:
-            wedged_ppid = descendant.ppid()
-        except psutil.NoSuchProcess:
-            zombie_first_seen.pop(descendant.pid, None)
-            continue
-        if wedged_ppid in (0, 1, proc_pid, parent_pid):
-            # Either kernel/init owns it, or it's a protected ancestor.
-            continue
-        # A descendant that setsid()'d into its own session detached on
-        # purpose (a daemon meant to outlive the run block) — spare it.
-        if not _same_session(wedged_ppid, proc_sid):
-            zombie_first_seen.pop(descendant.pid, None)
-            continue
-        # Reaping-progress gate: spare a parent still actively reaping other
-        # children (a live, busy daemon). Only a parent that has reaped
-        # nothing within the grace window is treated as wedged. Absent any
-        # record, last_reap_at.get returns 0.0 ("never reaped"), correct for
-        # a parent stuck since before we started watching.
-        if now - last_reap_at.get(wedged_ppid, 0.0) < grace_seconds:
-            continue
-        try:
-            wedged = psutil.Process(wedged_ppid)
-            wedged_name = wedged.name()
-        except psutil.NoSuchProcess:
-            zombie_first_seen.pop(descendant.pid, None)
-            continue
-        _log(f'Wedge detected: descendant pid={descendant.pid} has been '
-             f'zombie for >{grace_seconds:.0f}s under ppid={wedged_ppid} '
-             f'({wedged_name}); the parent has stopped reaping its children. '
-             f'Sending SIGTERM, escalating to SIGKILL after '
-             f'{_WEDGE_SIGTERM_GRACE_SECONDS:.0f}s if still alive.')
-        outcome = _term_then_kill(wedged)
-        _log(f'Wedge cleanup for ppid={wedged_ppid}: outcome={outcome}. '
-             f'Any still-alive siblings will reparent to the subreaper '
-             f'(pid={proc_pid}) and be cleaned up by the PPID-transition '
-             f'sweep.')
-        # Either we killed the wedged parent (zombie will be reaped by
-        # the new init), or we hit AccessDenied (won't retry until the
-        # zombie pid is reused). Either way, drop the entry.
-        zombie_first_seen.pop(descendant.pid, None)
-
-
 def kill_process_tree(process: psutil.Process,
                       children: List[psutil.Process],
                       proc_sid: Optional[int] = None) -> bool:
@@ -384,7 +245,7 @@ def main():
 
     # Open a per-daemon log file in ~/.sky/. kill_process_daemon spawns
     # us with stdout/stderr both routed to /dev/null, so plain prints
-    # would be invisible — without this log, wedge-kill events would
+    # would be invisible — without this log, orphan-reap events would
     # leave no audit trail.
     global _LOG_PATH
     try:
@@ -468,27 +329,7 @@ def main():
         # context, RAM, open sockets, file locks) until the outer process
         # finally exits.
         ppid_history: Dict[int, int] = {}
-        # Zombie-first-seen timestamps: pid -> monotonic time we first
-        # observed the process in STATUS_ZOMBIE. Used to detect wedged
-        # alive ancestors that never call wait() on their dead children
-        # (see _zombie_wedge_sweep below).
-        zombie_first_seen: Dict[int, float] = {}
-        # Reaping-progress tracking for the wedge sweep. last_reap_at maps a
-        # parent pid -> the most recent monotonic time we observed it reap a
-        # child. A live daemon reaps continuously so its last_reap_at keeps
-        # advancing; a genuinely wedged parent reaps nothing. We detect a
-        # reap two ways (see the loop): a tracked child disappearing, and the
-        # parent's cumulative reaped-children CPU time advancing. The latter
-        # (children_user/system from cpu_times(), i.e. cutime/cstime) is
-        # bumped by the kernel on every wait() — including reaps that begin
-        # and finish within one poll interval, which the disappearance check
-        # cannot see. prev_child_ppids / prev_children_cpu hold last tick's
-        # snapshots used for those comparisons.
-        last_reap_at: Dict[int, float] = {}
-        prev_child_ppids: Dict[int, int] = {}
-        prev_children_cpu: Dict[int, float] = {}
         proc_pid = process.pid
-        parent_pid = parent_process.pid
         # proc_sid (captured above) gates the PPID-transition reap below so
         # we don't kill intentionally-detached descendants (setsid'd
         # background daemons) that the subreaper attribute has pulled into
@@ -503,42 +344,6 @@ def main():
                 # Refresh process tree for cleanup if process group is not
                 # available.
                 children = tmp_children
-            # Reaping-progress detection (feeds the wedge sweep below).
-            now_tick = time.monotonic()
-            cur_child_ppids: Dict[int, int] = {}
-            cur_children_cpu: Dict[int, float] = {}
-            for child in tmp_children:
-                try:
-                    cur_child_ppids[child.pid] = child.ppid()
-                    ct = child.cpu_times()
-                    cur_children_cpu[child.pid] = (
-                        getattr(ct, 'children_user', 0.0) +
-                        getattr(ct, 'children_system', 0.0))
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            reapers_alive = set(cur_child_ppids)
-            reapers_alive.add(proc_pid)
-            reapers_alive.add(parent_pid)
-            # (1) A tracked descendant disappeared while its parent is alive:
-            # the parent reaped it.
-            for gone_pid, gone_ppid in prev_child_ppids.items():
-                if (gone_pid not in cur_child_ppids and
-                        gone_ppid in reapers_alive):
-                    last_reap_at[gone_ppid] = now_tick
-            # (2) A descendant's cumulative reaped-children CPU time advanced:
-            # it reaped at least one child since last tick (catches sub-poll
-            # reaps that (1) misses). First observation (no prior value) is
-            # not a reap.
-            for pid, cpu in cur_children_cpu.items():
-                if cpu > prev_children_cpu.get(pid, cpu):
-                    last_reap_at[pid] = now_tick
-            prev_child_ppids = cur_child_ppids
-            prev_children_cpu = cur_children_cpu
-            last_reap_at = {
-                pid: ts
-                for pid, ts in last_reap_at.items()
-                if pid in reapers_alive
-            }
             # Reparent detection: a descendant whose ppid just transitioned to
             # our proc_pid was adopted via the subreaper when its parent died.
             # Two gates decide reap-vs-spare (see _same_session and
@@ -580,24 +385,6 @@ def main():
                 for pid, ppid in ppid_history.items()
                 if pid in active_pids
             }
-            # Wedge detection: an alive ancestor that has stopped calling
-            # wait() on its children — typically because a SIGTERM handler
-            # raised an exception out of the wait path — accumulates zombie
-            # children. The PPID-transition machinery above can't see this
-            # case: the children never reparent (their parent is still
-            # alive, just stuck). Detect by aging each zombie; once one has
-            # been zombie for > _ZOMBIE_GRACE_SECONDS, treat its parent as
-            # wedged and SIGKILL it. The kernel reparents the (still-alive)
-            # siblings to our proc_pid subreaper, the PPID-transition logic
-            # above then cleans those up on the next tick.
-            _zombie_wedge_sweep(tmp_children, zombie_first_seen,
-                                _ZOMBIE_GRACE_SECONDS, proc_pid, parent_pid,
-                                proc_sid, last_reap_at)
-            zombie_first_seen = {
-                pid: ts
-                for pid, ts in zombie_first_seen.items()
-                if pid in active_pids
-            }
             time.sleep(1)
 
     # The loop exited; clean up via the mechanism the caller chose.
@@ -614,8 +401,8 @@ def main():
     elif parent_process is None or not parent_process.is_running():
         # kill-tree mode (ray job path). Sweep only when the orchestrator
         # died — the original orphaned-bash teardown case. On a clean
-        # watched-process exit the live PPID-transition reap and wedge sweep
-        # above have already handled real orphans; the session filter in
+        # watched-process exit the live PPID-transition reap above has
+        # already handled real orphans; the session filter in
         # kill_process_tree spares detached daemons either way.
         kill_process_tree(process, children, proc_sid)
 
