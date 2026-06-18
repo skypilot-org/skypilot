@@ -3371,3 +3371,165 @@ class TestConfigureRuntimeClass:
                                           nvidia_runtime_exists=True,
                                           needs_gpus_nvidia=False)
         assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'
+
+
+# ---------- Pod creation 409 "object is being deleted" handling ----------
+
+
+class TestCreatePodFinalizerHandling:
+    """Recovery path for the 409 ``object is being deleted`` error:
+
+    ``_create_namespaced_pod_with_retries`` force-removes the terminating pod
+    (strip Kueue finalizer + force-delete grace=0), then recreates it.
+    """
+
+    _DELETING_MSG = ('object is being deleted: pods "t-reco-head" already '
+                     'exists')
+
+    def _conflict_exc(self):
+        import json
+        return _make_api_exception(409,
+                                   'Conflict',
+                                   body=json.dumps(
+                                       {'message': self._DELETING_MSG}))
+
+    def test_strips_kueue_finalizer_then_recreates(self, monkeypatch):
+        """Kueue case: strip the finalizer, force-delete (grace 0), recreate."""
+        conflict = self._conflict_exc()
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        stuck_pod = mock.MagicMock()
+        stuck_pod.metadata.finalizers = [
+            'kueue.x-k8s.io/managed', 'example.com/other'
+        ]
+
+        core_api_mock = mock.MagicMock()
+        # 1: initial create 409s; 2: create after force-removing the old pod
+        # succeeds.
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = stuck_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # JSON patch (list body), not strategic-merge (which no-ops on the
+        # finalizers list); keeps the unrelated finalizer, drops only Kueue's.
+        patch_call = core_api_mock.patch_namespaced_pod.call_args
+        assert patch_call.args[2] == [{
+            'op': 'replace',
+            'path': '/metadata/finalizers',
+            'value': ['example.com/other']
+        }]
+        # Removing the finalizer alone leaves the pod lingering for its grace
+        # period, so it must also be force-deleted (grace 0) before recreating.
+        assert any(
+            c.kwargs.get('grace_period_seconds') == 0
+            for c in core_api_mock.delete_namespaced_pod.call_args_list)
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_force_delete_without_finalizer_then_recreates(self, monkeypatch):
+        """Non-Kueue case: no finalizer to strip; force-delete (grace 0) then
+
+        recreate. The pod is read (to check finalizers) but never patched.
+        """
+        conflict = self._conflict_exc()
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        plain_pod = mock.MagicMock()
+        plain_pod.metadata.finalizers = None
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = plain_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # No Kueue finalizer, so no patch; still force-deleted (grace 0).
+        core_api_mock.patch_namespaced_pod.assert_not_called()
+        assert any(
+            c.kwargs.get('grace_period_seconds') == 0
+            for c in core_api_mock.delete_namespaced_pod.call_args_list)
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_pod_gc_d_between_read_and_patch(self, monkeypatch):
+        """If the pod is GC'd between read and finalizer-patch, the 404 on the
+
+        patch is the success state (pod gone) — return (skipping the redundant
+        force-delete) and let the caller recreate, rather than raising.
+        """
+        conflict = self._conflict_exc()
+        not_found = _make_api_exception(404, 'Not Found')
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        stuck_pod = mock.MagicMock()
+        stuck_pod.metadata.finalizers = ['kueue.x-k8s.io/managed']
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = stuck_pod
+        core_api_mock.patch_namespaced_pod.side_effect = not_found
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # 404 on patch => pod already gone => skip force-delete, just recreate.
+        core_api_mock.delete_namespaced_pod.assert_not_called()
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_asserts_pod_is_terminating(self, monkeypatch):
+        """The helper is only valid for a terminating pod; if the read returns a
+
+        live pod (no deletionTimestamp), the precondition assert fires rather
+        than force-deleting a healthy pod.
+        """
+        conflict = self._conflict_exc()
+        live_pod = mock.MagicMock()
+        live_pod.metadata.deletion_timestamp = None  # not terminating
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = conflict
+        core_api_mock.read_namespaced_pod.return_value = live_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        with pytest.raises(AssertionError):
+            instance._create_namespaced_pod_with_retries(
+                'default', pod_spec, None)
+        # Must not have touched the live pod.
+        core_api_mock.patch_namespaced_pod.assert_not_called()
+        core_api_mock.delete_namespaced_pod.assert_not_called()
