@@ -1494,11 +1494,21 @@ def build_managed_jobs_with_filters_no_status_query(
     pool_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
     count_only: bool = False,
     count_unique_jobs: bool = False,
     status_count: bool = False,
 ) -> sqlalchemy.Select:
-    """Build a query to get managed jobs from the database with filters."""
+    """Build a query to get managed jobs from the database with filters.
+
+    submitted_after / submitted_before are epoch seconds (matching the
+    ``submitted_at`` column) and restrict the result to jobs submitted within
+    the inclusive window. A still-active job that hasn't been submitted yet
+    (NULL ``submitted_at``) is treated as submitted now, so it is kept or
+    dropped by the window like a job submitted at the current moment; a
+    terminal job that never got a ``submitted_at`` is excluded from the window.
+    """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
     # existing controller before #1982, the job_info table may not exist,
@@ -1566,6 +1576,26 @@ def build_managed_jobs_with_filters_no_status_query(
         query = query.where(job_info_table.c.pool.like(f'%{pool_match}%'))
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
+    if submitted_after is not None or submitted_before is not None:
+        # submitted_at is NULL until a job leaves PENDING (it is set at
+        # STARTING). For a still-active job that just means "not submitted
+        # yet", so treat it as submitted "now". A terminal job with no
+        # submitted_at never started (cancelled/failed before STARTING) and
+        # has no submission time, so leave it NULL to exclude it from the
+        # window rather than letting it masquerade as "now".
+        terminal_values = [
+            s.value for s in ManagedJobStatus.terminal_statuses()
+        ]
+        effective_submitted_at = sqlalchemy.case(
+            (spot_table.c.submitted_at.is_not(None), spot_table.c.submitted_at),
+            (sqlalchemy.or_(
+                spot_table.c.status.is_(None),
+                ~spot_table.c.status.in_(terminal_values)), time.time()),
+        )
+        if submitted_after is not None:
+            query = query.where(effective_submitted_at >= submitted_after)
+        if submitted_before is not None:
+            query = query.where(effective_submitted_at <= submitted_before)
     return query
 
 
@@ -1579,6 +1609,8 @@ def build_managed_jobs_with_filters_query(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
     count_only: bool = False,
     count_unique_jobs: bool = False,
 ) -> sqlalchemy.Select:
@@ -1592,6 +1624,8 @@ def build_managed_jobs_with_filters_query(
         pool_match=pool_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         count_only=count_only,
         count_unique_jobs=count_unique_jobs,
     )
@@ -1609,6 +1643,8 @@ def get_status_count_with_filters(
     pool_match: Optional[str] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Dict[str, int]:
     """Get the status count of the managed jobs with filters."""
     query = build_managed_jobs_with_filters_no_status_query(
@@ -1620,6 +1656,8 @@ def get_status_count_with_filters(
         pool_match=pool_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         status_count=True,
     )
     query = query.group_by(spot_table.c.status)
@@ -1703,6 +1741,8 @@ def get_managed_jobs_with_filters(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
     page: Optional[int] = None,
     limit: Optional[int] = None,
     sort_by: Optional[str] = None,
@@ -1757,6 +1797,8 @@ def get_managed_jobs_with_filters(
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         count_unique_jobs=True,
     )
     with orm.Session(engine) as session:
@@ -1779,6 +1821,8 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
         ).with_only_columns(spot_table.c.spot_job_id).group_by(
             spot_table.c.spot_job_id)
 
@@ -1834,6 +1878,8 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before,
         )
 
     # Apply sorting
@@ -1949,6 +1995,32 @@ def scheduler_set_waiting(job_ids: List[int],
                 job_info_table.c.spot_job_id.in_(job_ids),)).update(updates)
         session.commit()
         assert updated_count == len(job_ids), (job_ids, updated_count)
+
+
+@db_retries.retry
+def set_job_dag_yaml_content(job_id: int,
+                             dag_yaml_content: str,
+                             priority: Optional[int] = None,
+                             priority_class: Optional[str] = None) -> None:
+    """Overwrite a managed job's persisted DAG YAML (and optional priority).
+
+    Lets the persisted job spec be updated out of band after submission. A
+    running controller picks the new spec up on its next recovery (it
+    re-reads the DAG before each recovery attempt); a brand-new controller or
+    a fresh launch reads it directly.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        updates: Dict[Any, Any] = {
+            job_info_table.c.dag_yaml_content: dag_yaml_content,
+        }
+        if priority is not None:
+            updates[job_info_table.c.priority] = priority
+        if priority_class is not None:
+            updates[job_info_table.c.priority_class] = priority_class
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update(updates)
+        session.commit()
 
 
 def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:

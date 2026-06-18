@@ -263,6 +263,8 @@ class _DefaultManagedJobRunner:
         fields: Optional[List[str]],
         sort_by: Optional[str],
         sort_order: Optional[str],
+        submitted_after: Optional[float],
+        submitted_before: Optional[float],
     ) -> Tuple[List[Dict[str, Any]], int,
                'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
                                                                         int]]:
@@ -283,7 +285,7 @@ class _DefaultManagedJobRunner:
             code = managed_job_utils.ManagedJobCodeGen.get_job_table(
                 skip_finished, accessible_workspaces, job_ids, workspace_match,
                 name_match, pool_match, page, limit, user_hashes, statuses,
-                fields, sort_by, sort_order)
+                fields, sort_by, sort_order, submitted_after, submitted_before)
         with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
             returncode, job_table_payload, stderr = backend.run_on_head(
                 handle,
@@ -1253,13 +1255,15 @@ def queue_v2_api(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
         name_match, pool_match, page, limit, statuses, fields, sort_by,
-        sort_order)
+        sort_order, submitted_after, submitted_before)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -1280,6 +1284,8 @@ def queue_v2(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1377,6 +1383,8 @@ def queue_v2(
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
                 sort_by=sort_by,
                 sort_order=sort_order,
+                submitted_after=submitted_after,
+                submitted_before=submitted_before,
             )
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
@@ -1404,6 +1412,8 @@ def queue_v2(
          fields=fields,
          sort_by=sort_by,
          sort_order=sort_order,
+         submitted_after=submitted_after,
+         submitted_before=submitted_before,
      )
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:

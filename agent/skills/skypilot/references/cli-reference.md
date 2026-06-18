@@ -463,6 +463,9 @@ Show statuses of managed jobs.
 - `--refresh`, `-r` — Query the latest statuses, restarting the jobs controller if stopped.
 - `--skip-finished` — Show only pending/running jobs' information.
 - `-s`, `--status` — Filter by status, comma-separated (e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a deprecated alias for --skip-finished.
+- `--since` — Show only jobs submitted within this time window, relative to now (e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. Mutually exclusive with --after.
+- `--after` — Show only jobs submitted at or after this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive with --since.
+- `--before` — Show only jobs submitted at or before this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00").
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
