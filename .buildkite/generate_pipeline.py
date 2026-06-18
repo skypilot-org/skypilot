@@ -25,6 +25,7 @@ import argparse
 import collections
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -181,19 +182,21 @@ def _parse_args(args: Optional[str] = None):
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
 
-    extra_args = []
+    # Each entry is a single shell token so that shlex.join() can safely
+    # quote the list when it is passed to pytest --collect-only.
+    extra_args: List[str] = []
     if parsed_args.remote_server:
         extra_args.append('--remote-server')
     if parsed_args.base_branch:
-        extra_args.append(f'--base-branch {parsed_args.base_branch}')
+        extra_args.extend(['--base-branch', parsed_args.base_branch])
     if parsed_args.controller_cloud:
-        extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
+        extra_args.extend(['--controller-cloud', parsed_args.controller_cloud])
     if parsed_args.postgres:
         extra_args.append('--postgres')
     if parsed_args.helm_version:
-        extra_args.append(f'--helm-version {parsed_args.helm_version}')
+        extra_args.extend(['--helm-version', parsed_args.helm_version])
     if parsed_args.helm_package:
-        extra_args.append(f'--helm-package {parsed_args.helm_package}')
+        extra_args.extend(['--helm-package', parsed_args.helm_package])
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
     if parsed_args.serve_consolidation:
@@ -201,15 +204,17 @@ def _parse_args(args: Optional[str] = None):
     if parsed_args.grpc:
         extra_args.append('--grpc')
     if parsed_args.env_file:
-        extra_args.append(f'--env-file {parsed_args.env_file}')
+        extra_args.extend(['--env-file', parsed_args.env_file])
     if parsed_args.plugin_yaml:
-        extra_args.append(f'--plugin-yaml {parsed_args.plugin_yaml}')
+        extra_args.extend(['--plugin-yaml', parsed_args.plugin_yaml])
     if parsed_args.submodule_base_branch:
-        extra_args.append(
-            f'--submodule-base-branch {parsed_args.submodule_base_branch}')
+        extra_args.extend(
+            ['--submodule-base-branch', parsed_args.submodule_base_branch])
     if parsed_args.dependency != 'all':
-        space = ' ' if parsed_args.dependency else ''
-        extra_args.append(f'--dependency{space}{parsed_args.dependency}')
+        if parsed_args.dependency:
+            extra_args.extend(['--dependency', parsed_args.dependency])
+        else:
+            extra_args.append('--dependency')
     # Cloud flags are conftest-registered; include them in extra_args so that
     # they reach `pytest --collect-only` (some marks depend on which clouds
     # are active).  They are already captured in default_clouds_to_run for
@@ -257,7 +262,9 @@ def _extract_marked_tests(
     # so the build is visibly broken rather than a noop.
     if output.returncode not in (0, 5):
         print(f'ERROR: pytest collection failed (exit {output.returncode}) '
-              f'for {file_path}:\n{output.stderr}',
+              f'for {file_path}:\n'
+              f'STDOUT:\n{output.stdout}\n'
+              f'STDERR:\n{output.stderr}',
               file=sys.stderr)
         sys.exit(output.returncode)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
@@ -364,7 +371,7 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     # --submodule-base-branch, --dependency, --generic-cloud, --base-branch)
     # that are not in older pinned conftests and would cause
     # `pytest --collect-only` to exit with code 4, silently collecting 0 tests.
-    pytest_collect_args = ' '.join(extra_args + list(pytest_native))
+    pytest_collect_args = shlex.join(extra_args + list(pytest_native))
     function_cloud_map = _extract_marked_tests(test_file, pytest_collect_args,
                                                default_clouds_to_run, k_value,
                                                extra_args)
