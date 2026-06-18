@@ -498,7 +498,7 @@ def test_api_login_clears_residual_sa_token(monkeypatch: pytest.MonkeyPatch,
 
     # Step 1: Login with service account token. This writes the sa token
     # into config and sets local user hash to the sa user.
-    sa_user = {'id': sa_user_hash, 'name': 'hailong'}
+    sa_user = {'id': sa_user_hash, 'name': 'alice'}
     with mock.patch('sky.server.common.check_server_healthy') as mock_check:
         mock_check.return_value = (
             server_common.ApiServerStatus.HEALTHY,
@@ -845,7 +845,7 @@ def test_stream_response_resumable_retry_skips_replayed_lines():
     output_stream = io.StringIO()
     decode_call_count = 0
 
-    def decode_side_effect(_response):
+    def decode_side_effect(_response, relay_rich_status=False):
         nonlocal decode_call_count
         decode_call_count += 1
         if decode_call_count == 1:

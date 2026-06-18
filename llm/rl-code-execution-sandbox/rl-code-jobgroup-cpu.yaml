@@ -1,0 +1,163 @@
+# RL Code-Execution Training with Job Groups - CPU Test Version
+#
+# A simplified CPU-only version for testing the data-server and the
+# sandbox-reward-server end to end without provisioning GPUs. The test client
+# fetches a prompt, then POSTs a known-good and a known-bad solution to the
+# reward server and checks that the sandbox returns 1.0 and 0.0 respectively.
+#
+# Requirements:
+#   The sandbox-reward-server uses the `sky.sandbox` SDK, which requires the
+#   Sandbox feature (SkyPilot Platform) and a reachable API server. Set
+#   SKYPILOT_API_SERVER_ENDPOINT in its envs so it can create sandboxes.
+#
+# Primary/Auxiliary Behavior:
+#   The test-client is the primary task. When tests complete, all auxiliary
+#   services are terminated after a 5-second grace period.
+#
+# Usage:
+#   sky jobs launch llm/rl-code-execution-sandbox/rl-code-jobgroup-cpu.yaml
+---
+name: rl-code-sandbox-cpu
+execution: parallel
+primary_tasks: [test-client]
+termination_delay: 5s
+
+---
+# Data Server: Serves MBPP code prompts + hidden tests
+name: data-server
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-code-execution-sandbox/code
+
+setup: |
+  pip install fastapi uvicorn datasets
+
+run: |
+  echo "Starting data server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This server provides code prompts at http://data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+
+  cd /code
+  python data_server.py --port 8000
+
+---
+# Sandbox Reward Server: Runs model-generated code against hidden tests
+name: sandbox-reward-server
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+envs:
+  SKYPILOT_API_SERVER_ENDPOINT: ""
+  REWARD_POOL_NAME: rl-reward
+  REWARD_POOL_REPLICAS: 4
+  REWARD_EXEC_TIMEOUT: 30
+
+file_mounts:
+  /code: llm/rl-code-execution-sandbox/code
+
+setup: |
+  pip install skypilot fastapi uvicorn
+
+run: |
+  echo "Starting sandbox reward server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Reward API at http://sandbox-reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  cd /code
+  python sandbox_reward_server.py \
+    --port 8002 \
+    --pool "${REWARD_POOL_NAME}" \
+    --pool-replicas "${REWARD_POOL_REPLICAS}" \
+    --exec-timeout "${REWARD_EXEC_TIMEOUT}"
+
+---
+# Test Client: Verifies the data-server and sandbox reward path
+name: test-client
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+setup: |
+  pip install httpx
+
+run: |
+  echo "Starting test client..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+
+  DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+  REWARD_SERVER="sandbox-reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  echo "Data server: ${DATA_SERVER}"
+  echo "Reward server: ${REWARD_SERVER}"
+
+  echo "Waiting for services to be available..."
+  sleep 30
+
+  # Wait for data server
+  for i in {1..10}; do
+    if curl -s "http://${DATA_SERVER}/health" | grep -q "healthy"; then
+      echo "Data server is healthy!"
+      break
+    fi
+    echo "Waiting for data server... attempt $i"
+    sleep 5
+  done
+
+  # Fetch a prompt (+ hidden tests)
+  echo "Fetching a prompt..."
+  PROMPT=$(curl -s "http://${DATA_SERVER}/prompts?batch_size=1")
+  echo "Prompt: ${PROMPT}"
+
+  # Wait for reward server (it creates a warm pool on startup, which can take
+  # a little longer than a plain HTTP service).
+  for i in {1..20}; do
+    if curl -s "http://${REWARD_SERVER}/health" | grep -q "healthy"; then
+      echo "Reward server is healthy!"
+      break
+    fi
+    echo "Waiting for reward server... attempt $i"
+    sleep 5
+  done
+
+  # Known-good solution: should pass all tests -> reward 1.0
+  echo "Scoring a CORRECT solution (expect reward 1.0)..."
+  GOOD=$(curl -s -X POST "http://${REWARD_SERVER}/reward" \
+    -H "Content-Type: application/json" \
+    -d '{
+          "prompt": "Write a function to find the shared elements from the given two lists.",
+          "response": "```python\ndef similar_elements(a, b):\n    return tuple(set(a) & set(b))\n```",
+          "tests": [
+            "assert set(similar_elements((3, 4, 5, 6), (5, 7, 4, 10))) == set((4, 5))",
+            "assert set(similar_elements((1, 2, 3, 4), (5, 4, 3, 7))) == set((3, 4))"
+          ]
+        }')
+  echo "Good solution reward response: ${GOOD}"
+
+  # Known-bad solution: returns the wrong thing -> reward 0.0
+  echo "Scoring an INCORRECT solution (expect reward 0.0)..."
+  BAD=$(curl -s -X POST "http://${REWARD_SERVER}/reward" \
+    -H "Content-Type: application/json" \
+    -d '{
+          "prompt": "Write a function to find the shared elements from the given two lists.",
+          "response": "```python\ndef similar_elements(a, b):\n    return tuple(a)\n```",
+          "tests": [
+            "assert set(similar_elements((3, 4, 5, 6), (5, 7, 4, 10))) == set((4, 5))"
+          ]
+        }')
+  echo "Bad solution reward response: ${BAD}"
+
+  echo ""
+  echo "=========================================="
+  echo "Sandbox reward path test complete!"
+  echo "=========================================="
+  echo ""
+
+  # Keep running to allow inspection
+  sleep 300

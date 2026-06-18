@@ -1114,6 +1114,48 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
 
 
+def refresh_workspace_state_for_sync_handler() -> None:
+    """Refresh workspace/RBAC state for a sync handler in the API process.
+
+    Call this at the top of any plugin endpoint that:
+      * runs as a sync FastAPI handler in the main API-server process
+        (i.e. is NOT queued via ``executor.schedule_request_async`` /
+        ``prepare_request_async``), AND
+      * reads ``workspaces_core.get_workspaces()`` /
+        ``get_accessible_workspace_names()`` /
+        ``permission_service.check_workspace_permission(...)`` to filter
+        results.
+
+    The executor's ``reload_for_new_request`` pipeline refreshes config
+    and the request-scoped lru cache on every queued worker request, but
+    handlers that respond synchronously bypass it and would
+    otherwise see whatever workspace config was loaded into this
+    process's ``_global_config_context`` at boot (or the last time
+    something explicitly reloaded).
+    After workspace create/update runs on a worker process, the YAML
+    /DB state moves forward but this process's cached snapshot does
+    not — so a sync handler filtering by ``accessible_workspaces`` will
+    exclude newly-created workspaces (e.g. jobs land in a workspace the
+    handler doesn't yet know about) and include workspaces that were
+    removed.
+
+    Casbin's in-memory enforcer is refreshed lazily by
+    ``permission_service.get_user_roles`` (called inside
+    ``get_accessible_workspace_names``), so we only need to reload the
+    config + clear the request-scoped lru cache here.
+    """
+    # File-locked variant — sync handlers run in the FastAPI thread pool
+    # and can hit this concurrently; the lock keeps the on-disk read +
+    # in-memory swap atomic with respect to concurrent writers.
+    skypilot_config.safe_reload_config()
+    # `_load_workspaces` (and any other ``@annotations.lru_cache(scope=
+    # 'request')`` function) caches its result for the lifetime of one
+    # request. Plugin sync handlers don't go through the executor's
+    # ``clear_request_level_cache()`` call, so stale entries survive
+    # across requests unless we drop them here.
+    annotations.clear_request_level_cache()
+
+
 def clear_local_api_server_database() -> None:
     """Removes the local API server database.
 

@@ -57,16 +57,12 @@ import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import {
-  extractLinksFromLogs,
-  normalizeUrl,
-  useCustomUrlPatterns,
-} from '@/utils/externalLinks';
+import { normalizeUrl, useLogLinkExtractor } from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
@@ -1147,24 +1143,17 @@ function JobDetailsContent({
     }
   }, [logs, onNodesExtracted]);
 
-  // Persist extracted links across tab changes using a ref
-  const extractedLinksRef = useRef({});
+  // External-link extraction from log lines. Matches accumulate inside
+  // the hook so they survive tab switches and re-renders. `scanLines` is
+  // a stable callback: besides feeding it from the OSS streamer below,
+  // it is handed to a plugin that owns the logs slot — the OSS streamer
+  // does not run in that case, so the plugin forwards its own lines.
+  const { extractedLinks: logExtractedLinks, scanLines } =
+    useLogLinkExtractor();
 
-  // Merge built-in (W&B) and admin-configured patterns. The hook fetches the
-  // admin list on mount; until it returns, only built-ins are active.
-  const urlPatterns = useCustomUrlPatterns();
-
-  // Extract URLs from logs using the merged pattern map. Matches accumulate
-  // in a ref so they survive tab switches and re-renders.
-  const logExtractedLinks = useMemo(() => {
-    const extractedLinks = extractLinksFromLogs(
-      logs,
-      urlPatterns,
-      extractedLinksRef.current
-    );
-    extractedLinksRef.current = extractedLinks;
-    return extractedLinks;
-  }, [logs, urlPatterns]);
+  useEffect(() => {
+    scanLines(logs);
+  }, [logs, scanLines]);
 
   // Notify parent when links are extracted (for cross-component sharing)
   useEffect(() => {
@@ -1246,6 +1235,16 @@ function JobDetailsContent({
           selectedNode,
           isController: false,
           onNodesExtracted,
+          // The OSS streamer that feeds External Links extraction does
+          // not run when a plugin owns this slot. The plugin should
+          // forward its visible log lines (raw buffer string or array of
+          // lines) through this callback so extraction keeps working.
+          onLogLines: scanLines,
+          // Forward the refresh-button signal so a plugin owning this slot
+          // can re-fetch on refresh (the OSS streamer it replaces consumes
+          // the same flag). Without this the refresh button is a no-op for
+          // plugin-owned log panels.
+          refreshTrigger: refreshFlag,
         }}
         fallback={defaultLogsContent}
       />
@@ -1285,6 +1284,8 @@ function JobDetailsContent({
           status: jobData.status,
           isPreStart,
           isController: true,
+          // Forward the refresh-button signal (see jobs.detail.logs slot).
+          refreshTrigger: refreshFlag,
         }}
         fallback={defaultControllerLogsContent}
       />
@@ -1637,7 +1638,7 @@ function JobDetailsContent({
                 </div>
 
                 {isYamlExpanded && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                  <div>
                     {(() => {
                       const yamlDocs = formatJobYaml(jobData.dag_yaml);
                       // Build JobGroup header with name and execution
@@ -1661,9 +1662,10 @@ function JobDetailsContent({
                       } else if (yamlDocs.length === 1) {
                         // Single document - show directly
                         return (
-                          <YamlHighlighter className="whitespace-pre-wrap">
-                            {jobGroupHeader + yamlDocs[0].content}
-                          </YamlHighlighter>
+                          <YamlCodeBlock
+                            value={jobGroupHeader + yamlDocs[0].content}
+                            readOnly
+                          />
                         );
                       } else {
                         // Multiple documents - show toggle and content
@@ -1687,12 +1689,15 @@ function JobDetailsContent({
 
                             {showFullYaml ? (
                               // Show full YAML with JobGroup header
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {jobGroupHeader +
+                              <YamlCodeBlock
+                                value={
+                                  jobGroupHeader +
                                   yamlDocs
                                     .map((doc) => doc.content)
-                                    .join('\n---\n')}
-                              </YamlHighlighter>
+                                    .join('\n---\n')
+                                }
+                                readOnly
+                              />
                             ) : (
                               // Show per-job YAMLs
                               yamlDocs.map((doc, index) => (
@@ -1717,9 +1722,10 @@ function JobDetailsContent({
                                   </button>
                                   {expandedYamlDocs[index] && (
                                     <div className="mt-3 ml-6">
-                                      <YamlHighlighter className="whitespace-pre-wrap">
-                                        {doc.content}
-                                      </YamlHighlighter>
+                                      <YamlCodeBlock
+                                        value={doc.content}
+                                        readOnly
+                                      />
                                     </div>
                                   )}
                                 </div>

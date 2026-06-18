@@ -25,10 +25,19 @@ _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/delete',
     'method': 'POST'
 }, {
+    'path': '/workspaces/batch_add_users',
+    'method': 'POST'
+}, {
+    'path': '/workspaces/batch_remove_users',
+    'method': 'POST'
+}, {
     'path': '/users/delete',
     'method': 'POST'
 }, {
     'path': '/users/create',
+    'method': 'POST'
+}, {
+    'path': '/users/batch_update',
     'method': 'POST'
 }, {
     'path': '/users/import',
@@ -51,6 +60,13 @@ _DEFAULT_VIEWER_ALLOWLIST = [
     # --- Authentication / session ---
     {
         'path': '/users/role',
+        'method': 'GET'
+    },
+    {
+        # Read counterpart of `POST /users/me/workspace`. Returns the
+        # calling user's resolved workspace + preferred + accessible —
+        # all per-user state the viewer is entitled to see.
+        'path': '/users/me/workspace',
         'method': 'GET'
     },
     {
@@ -103,7 +119,7 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'POST'
     },
     {
-        'path': '/autostop_logs',
+        'path': '/hook_logs',
         'method': 'POST'
     },
     # --- Managed jobs reads ---

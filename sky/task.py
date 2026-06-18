@@ -206,7 +206,11 @@ def _with_docker_login_config(
                            'in `image_id`. The login configs will be '
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
-        # Already checked in extract_docker_image
+        # If docker image comes from the 'docker' key in image_id dict,
+        # don't overwrite image_id, just attach login config.
+        if resources._docker_image is not None:  # pylint: disable=protected-access
+            return resources.copy(_docker_login_config=docker_login_config)
+        # Legacy path: image_id contains docker: prefix
         assert resources.image_id is not None and len(
             resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
@@ -901,13 +905,36 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         # Handle the top-level config field
-        config_override = config.pop('config', None)
+        config_override = config.pop('config', None) or {}
+        # Lifecycle hooks live under `config.hooks:` but they are not a
+        # SkyPilot-config override — they are task lifecycle metadata.
+        # Pull them out of the override block and forward to Resources
+        # via the same path master's `resources.hooks:` used (kept for
+        # backward compat — see below).
+        config_hooks = config_override.pop('hooks', None)
 
-        # Store the final config override for use in resource setup
-        cluster_config_override = config_override
+        # Store the final config override for use in resource setup.
+        # Restore None semantics if the override block was hooks-only.
+        cluster_config_override = config_override or None
 
-        # Parse resources field.
-        resources_config = config.pop('resources', {})
+        # Parse resources field. Coerce `resources: null` / `resources:`
+        # (empty value) to {} so the assignment below doesn't fail.
+        resources_config = config.pop('resources', None) or {}
+        # `resources.hooks:` was an in-flight rename during PR1 review;
+        # it never landed in master. Reject the form explicitly so users
+        # write `config.hooks:` (the canonical placement) instead of
+        # discovering the rename via Resources-internal silent acceptance.
+        if 'hooks' in resources_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Lifecycle hooks live under top-level `config.hooks:`, '
+                    'not `resources.hooks:`. Move the list to '
+                    '`config.hooks` at the top level of the task YAML.')
+        # Forward task.config.hooks into the resources block so the
+        # Resources constructor can pick it up via the same key the
+        # internal API uses.
+        if config_hooks is not None:
+            resources_config['hooks'] = config_hooks
         if cluster_config_override is not None:
             assert resources_config.get('_cluster_config_overrides') is None, (
                 'Cannot set _cluster_config_overrides in both resources and '
@@ -1781,6 +1808,34 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.HF:
+                    # Build the base URL without any embedded sub-path; the
+                    # canonical sub-path lives in ``_bucket_sub_path`` and is
+                    # appended via ``get_bucket_sub_path_prefix`` below
+                    # (mirroring the other store types). Stripping first
+                    # avoids doubling the sub-path when the source URL
+                    # already embeds it.
+                    if storage.source is not None and not isinstance(
+                            storage.source, list) and data_utils.is_hf_path(
+                                storage.source):
+                        if data_utils.is_hf_bucket_path(storage.source):
+                            bucket_id, _ = data_utils.split_hf_path(
+                                storage.source)
+                            blob_path = f'hf://buckets/{bucket_id}'
+                        else:
+                            repo_type, repo_id, revision, _ = (
+                                data_utils.split_hf_repo_path(storage.source))
+                            hf_id = (storage_lib.HuggingFaceStore.
+                                     hf_id_from_repo_parts(repo_type, repo_id))
+                            blob_path = f'hf://{hf_id}'
+                            if revision:
+                                blob_path = f'{blob_path}@{revision}'
+                    else:
+                        blob_path = f'hf://buckets/{storage.name}'
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
@@ -1922,6 +1977,21 @@ class Task:
             self.resources, redact_secrets=redact_secrets)
 
         add_if_not_none('resources', tmp_resource_config)
+
+        # Lifecycle hooks are stored on each Resources instance (the
+        # internal API replicates them across all resources), but their
+        # canonical YAML placement is the task-level ``config.hooks:``.
+        # Lift the list off any Resources that carries one and emit
+        # under ``config.hooks`` so round-trips through to_yaml/from_yaml
+        # don't trip the rejection that catches a misplaced
+        # ``resources.hooks`` in user YAML.
+        task_hooks: Optional[List[Dict[str, Any]]] = None
+        for r in self.resources:
+            if r.hooks:
+                task_hooks = [dict(h) for h in r.hooks]
+                break
+        if task_hooks:
+            config.setdefault('config', {})['hooks'] = task_hooks
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())

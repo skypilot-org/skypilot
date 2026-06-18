@@ -3,6 +3,8 @@
 import argparse
 import concurrent.futures
 import os
+import signal
+import sys
 import time
 
 import grpc
@@ -13,8 +15,10 @@ from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2_grpc
 from sky.schemas.generated import managed_jobsv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2_grpc
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import events
+from sky.skylet import hook_executor
 from sky.skylet import services
 
 # Use the explicit logger name so that the logger is under the
@@ -25,7 +29,7 @@ logger.info(f'Skylet started with version {constants.SKYLET_VERSION}; '
             f'SkyPilot v{sky.__version__} (commit: {sky.__commit__})')
 
 EVENTS = [
-    events.AutostopEvent(),
+    events.StopEvent(),
     events.JobSchedulerEvent(),
     # The managed job update event should be after the job update event.
     # Otherwise, the abnormal managed job status update will be delayed
@@ -85,6 +89,40 @@ def run_event_loop():
             event.run()
 
 
+def _sigterm_handler(signum, frame):  # pylint: disable=unused-argument
+    """Run preemption hooks on SIGTERM before the pod is SIGKILLed.
+
+    On Kubernetes the kubelet sends SIGTERM for preemption / eviction
+    / drain. We claim the preemption teardown slot via the file-lock
+    CAS so a concurrent `sky down` subprocess sees the claim and
+    skips its own hooks, then run any matching preemption hooks, then
+    exit cleanly within the pod's terminationGracePeriodSeconds.
+    """
+    logger.info('Skylet received SIGTERM; running preemption hooks.')
+    if hook_executor.try_claim_teardown(hook_executor.PREEMPTION):
+        try:
+            hook_executor.run(hook_executor.PREEMPTION,
+                              autostop_lib.get_hooks())
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Preemption hook execution failed: {e}')
+    sys.exit(0)
+
+
+def _should_install_preemption_sigterm_handler() -> bool:
+    """True iff the skylet is running inside a Kubernetes pod.
+
+    SIGTERM-driven preemption handling is K8s-specific: kubelet sends
+    SIGTERM to pod containers on delete / scale-down / eviction. On VM
+    clouds (AWS/GCP/Azure), preemption is detected via the metadata
+    poller (introduced in PR2), so installing a SIGTERM handler here
+    would be dead code and could mask normal-shutdown signal handling.
+
+    Detection uses the standard ``KUBERNETES_SERVICE_HOST`` env var
+    that the kubelet injects into every pod.
+    """
+    return 'KUBERNETES_SERVICE_HOST' in os.environ
+
+
 def main():
     parser = argparse.ArgumentParser(description='Start skylet daemon')
     parser.add_argument('--port',
@@ -93,6 +131,12 @@ def main():
                         help=f'gRPC port to listen on (default: '
                         f'{constants.SKYLET_GRPC_PORT})')
     args = parser.parse_args()
+
+    # Clear any stale teardown-claim marker from a prior crashed skylet so
+    # this fresh boot does not see a blocked slot.
+    hook_executor.clear_teardown_claim()
+    if _should_install_preemption_sigterm_handler():
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
     grpc_server = start_grpc_server(port=args.port)
     try:

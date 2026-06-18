@@ -43,6 +43,7 @@ from sky.backends import backend_utils
 from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
+from sky.clouds import kubernetes as k8s_cloud
 from sky.clouds.utils import gcp_utils
 from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
@@ -208,43 +209,35 @@ _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
 _RESOURCES_UNAVAILABLE_LOG = (
     'Reasons for provision failures (for details, please check the log above):')
 
-# Hints currently only cover Kubernetes failure modes. Scoped to k8s blocks
-# in _format_provision_failure_blocks to avoid false positives on cloud
-# error messages (e.g., AWS "InsufficientInstanceCapacity").
-_KUBERNETES_FAILURE_HINTS = [
-    (['ImagePullBackOff', 'ErrImagePull'],
-     'Verify the image tag exists and registry credentials are configured.'),
-    (['OOMKilled'], 'The container ran out of memory. '
-     'Try requesting more with `memory: <size>` in resources.'),
-    (['Insufficient'],
-     'The cluster does not have enough free resources. View node '
-     'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
-]
-
 
 def _get_kubernetes_hint(reason: str,
                          context: Optional[str] = None) -> Optional[str]:
     """Return a hint for the given Kubernetes failure reason, or None.
 
-    Hints may contain a literal `{dashboard_url}` token, which is replaced
-    with the SkyPilot dashboard infra page URL — scoped to the failing
-    context when one is available. If URL resolution fails for any reason,
-    the token is replaced with a generic fallback so we never raise from
-    failure-rendering code (which would mask the original provision error).
+    Sources the canonical hint table from
+    ``kubernetes_utils.KUBERNETES_FAILURE_HINTS``. Hints may contain a literal
+    `{dashboard_url}` token, which is replaced with the SkyPilot dashboard
+    infra page URL — scoped to the failing context when one is available. If
+    URL resolution fails for any reason, the token is replaced with a generic
+    fallback so we never raise from failure-rendering code (which would mask
+    the original provision error).
+
+    Only called from the Kubernetes branch of
+    ``_format_provision_failure_blocks`` to avoid false positives on other
+    clouds' error messages (e.g., AWS "InsufficientInstanceCapacity").
     """
-    for substrings, hint in _KUBERNETES_FAILURE_HINTS:
-        if any(s in reason for s in substrings):
-            if '{dashboard_url}' in hint:
-                try:
-                    starting_page = (f'infra/{context}' if context else 'infra')
-                    dashboard_url = server_common.get_dashboard_url(
-                        server_common.get_server_url(),
-                        starting_page=starting_page)
-                except Exception:  # pylint: disable=broad-except
-                    dashboard_url = 'the SkyPilot dashboard infra page'
-                hint = hint.replace('{dashboard_url}', dashboard_url)
-            return hint
-    return None
+    hint = kubernetes_utils.match_kubernetes_failure_hint(reason)
+    if hint is None:
+        return None
+    if '{dashboard_url}' in hint:
+        try:
+            starting_page = (f'infra/{context}' if context else 'infra')
+            dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=starting_page)
+        except Exception:  # pylint: disable=broad-except
+            dashboard_url = 'the SkyPilot dashboard infra page'
+        hint = hint.replace('{dashboard_url}', dashboard_url)
+    return hint
 
 
 def _format_provision_failure_blocks(
@@ -1129,6 +1122,7 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud.canonical_name())
             template_spec = (plugin.template_override(
                 task,
+                to_provision,
                 _extra_launch_context=self._extra_launch_context,
                 _is_launched_by_jobs_controller=self.
                 _is_launched_by_jobs_controller,
@@ -1332,6 +1326,10 @@ class RetryingVmProvisioner(object):
                         # No teardown happens for this error.
                         with ux_utils.print_exception_no_traceback():
                             raise
+                    except exceptions.ExecutionPausedError:
+                        # Pausing to wait on an external condition: keep the
+                        # resources for resume, do not tear down or fail over.
+                        raise
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
@@ -2013,8 +2011,18 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
+        # A handle is created before provisioning runs, so nothing is set up
+        # on the cluster yet; bulk_provision() fills in the real record on
+        # completion. Defaulting to no-Ray keeps teardown of a cluster that
+        # crashed or recovered mid-provisioning from attempting `ray stop` on
+        # a cluster where Ray never started.
         self.provision_runtime_metadata = (
-            provision_common.ProvisionRuntimeMetadata())
+            provision_common.ProvisionRuntimeMetadata(
+                has_ray=False,
+                has_skylet=False,
+                has_job_queue=False,
+                ssh_available=False,
+            ))
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -4146,6 +4154,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 managed_job_info: Optional[jobsv1_pb2.ManagedJobInfo] = None
                 if managed_job_dag is not None:
+                    # `ManagedJobInfo.workspace` is currently not read by
+                    # skylet (see `services.py::QueueJob`). Kept on the
+                    # wire for future consumers.
                     workspace = skypilot_config.get_active_workspace(
                         force_user_workspace=True)
                     entrypoint = common_utils.get_current_command()
@@ -4615,6 +4626,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
+        if not stdout:
+            # We see some cases in the wild where a misbehaving cluster/k8s
+            # apiserver (not sure which) can have a returncode of 0 but
+            # incorrectly empty stdout. Treat this as a failure.
+            raise exceptions.CommandFailureException(
+                command=code,
+                failure='produced no output',
+                error_msg='Failed to get job status.',
+                detailed_reason=f'stderr="{stderr}"',
+            )
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
@@ -4860,14 +4881,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
-    def tail_autostop_logs(self,
-                           handle: CloudVmRayResourceHandle,
-                           follow: bool = True,
-                           tail: int = 0) -> int:
-        """Tail the autostop hook logs.
+    def tail_hook_logs(self,
+                       handle: CloudVmRayResourceHandle,
+                       event: Optional[str] = None,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+        """Tail per-event lifecycle-hook logs.
 
         Args:
             handle: The handle to the cluster.
+            event: One of 'stop', 'preemption', 'down'. When ``None``,
+                auto-selects whichever per-event log exists on the head.
             follow: Whether to follow the logs.
             tail: The number of lines to display from the end of the
                 log file. If 0, print all lines.
@@ -4875,21 +4899,57 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             The exit code of the tail command.
         """
-        # Construct tail command for the autostop hook log
-        log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
-        tail_cmd_parts = ['tail']
+        legacy_log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
+        new_log_dir = f'~/{constants.HOOK_LOG_DIR}'
+        tail_flags = []
         if tail > 0:
-            tail_cmd_parts.extend(['-n', str(tail)])
+            tail_flags.extend(['-n', str(tail)])
+        elif not follow:
+            tail_flags.extend(['-n', '+1'])
         if follow:
-            tail_cmd_parts.append('-f')
-        tail_cmd_parts.append(log_path)
+            tail_flags.append('-f')
+        tail_flag_str = ' '.join(tail_flags)
 
-        # Add fallback to show helpful message if file doesn't exist
-        tail_cmd = ' '.join(tail_cmd_parts)
-        error_msg = (f'Autostop hook log file not found at {log_path}. '
-                     f'The autostop hook may not have been executed yet.')
-        cmd = (f'if [ -f {log_path} ]; then {tail_cmd}; '
-               f'else echo "{error_msg}"; exit 1; fi')
+        if event is None:
+            # Auto-select: pick whichever per-event log exists. Prefer
+            # recency via -t sort (newest first). Fall back to legacy path.
+            # TODO(zpoint): drop the legacy_log_path branch after v0.15.0
+            # (aligned with the autostop.hook removal pinned at v0.15.0
+            # in sky/utils/schemas.py:_AUTOSTOP_SCHEMA). By then, clusters
+            # predating the new ~/.sky/hooks/ layout have aged out via
+            # re-launches.
+            cmd = (f'if ls {new_log_dir}/*.log >/dev/null 2>&1; then '
+                   f'  latest=$(ls -t {new_log_dir}/*.log | head -n1); '
+                   f'  echo "=== $(basename $latest .log) ==="; '
+                   f'  tail {tail_flag_str} "$latest"; '
+                   f'elif [ -f {legacy_log_path} ]; then '
+                   f'  tail {tail_flag_str} {legacy_log_path}; '
+                   f'else '
+                   f'  echo "No hook has fired yet on this cluster."; exit 1; '
+                   f'fi')
+        else:
+            log_path = f'{new_log_dir}/{event}.log'
+            if event == 'stop':
+                # Legacy-path fallback for clusters predating the hooks
+                # framework — master's single autostop_hook.log corresponds
+                # to the new ``stop`` event (idle-timer teardown without
+                # autodown). Autodown clusters had their hook log under
+                # the same legacy path; users who want it via ``--hook down``
+                # should re-launch (the legacy cluster's skylet won't write
+                # to ~/.sky/hooks/down.log anyway).
+                # TODO(zpoint): drop the legacy_log_path branch after
+                # v0.15.0 (aligned with the autostop.hook removal pinned
+                # at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA).
+                cmd = (
+                    f'if [ -f {log_path} ]; then tail {tail_flag_str} '
+                    f'{log_path}; '
+                    f'elif [ -f {legacy_log_path} ]; then tail {tail_flag_str} '
+                    f'{legacy_log_path}; '
+                    f'else echo "No {event} hook log found."; exit 1; fi')
+            else:
+                cmd = (f'if [ -f {log_path} ]; then tail {tail_flag_str} '
+                       f'{log_path}; '
+                       f'else echo "No {event} hook log found."; exit 1; fi')
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -5622,7 +5682,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      down: bool = False,
                      stream_logs: bool = True,
                      hook: Optional[str] = None,
-                     hook_timeout: Optional[int] = None) -> None:
+                     hook_timeout: Optional[int] = None,
+                     hooks: Optional[List[Dict[str, Any]]] = None) -> None:
         if not handle.provision_runtime_metadata.has_skylet:
             return
         # The core.autostop() function should have already checked that the
@@ -5669,6 +5730,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
+            # On Kubernetes, cap any preemption-hook timeout to the pod's
+            # terminationGracePeriodSeconds cap so the stored value
+            # matches kubelet's actual SIGKILL boundary. Done before the
+            # gRPC/SSH branch so the SSH codegen fallback path also sees
+            # the capped values (otherwise pre-gRPC skylets on K8s would
+            # store misleading timeouts).
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                hooks = k8s_cloud.cap_preemption_hook_timeouts(hooks)
             if handle.is_grpc_enabled_with_flag:
                 request = autostopv1_pb2.SetAutostopRequest(
                     idle_minutes=idle_minutes_to_autostop,
@@ -5681,13 +5750,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     request.hook = hook
                 if hook_timeout is not None:
                     request.hook_timeout = hook_timeout
-
+                # v7+: send the full hooks list inline on the same RPC.
+                # Three states for the `hooks` arg:
+                #   None  → legacy/no-hook-aware caller; don't touch stored
+                #   []    → caller explicitly clears stored hooks
+                #   [...] → replace stored hooks with this list
+                if hooks is None:
+                    pass  # leave stored hooks alone
+                elif not hooks:
+                    request.clear_hooks = True
+                else:
+                    request.hooks.extend(autostop_lib.hooks_to_protobuf(hooks))
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
-                    hook_timeout)
+                    hook_timeout, hooks)
                 returncode, _, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
@@ -5740,7 +5819,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
                 handle, code, require_outputs=True, stream_logs=stream_logs)
-            if returncode == 0:
+            # We see some cases in the wild where a misbehaving cluster/k8s
+            # apiserver (not sure which) can have a returncode of 0 but
+            # incorrectly empty stdout. Don't try to decode this.
+            if returncode == 0 and stdout:
                 is_autostopping = message_utils.decode_payload(stdout)
             else:
                 logger.debug('Failed to check if cluster is autostopping with '
@@ -5934,6 +6016,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if one_task_resource.docker_login_config is not None:
                 to_provision = to_provision.copy(
                     _docker_login_config=one_task_resource.docker_login_config)
+
+            # Re-launch with changed config.hooks: propagate the new list
+            # onto to_provision so the next SetAutostop RPC carries the
+            # up-to-date scripts / timeouts.
+            if one_task_resource.hooks != to_provision.hooks:
+                # On Kubernetes the pod's terminationGracePeriodSeconds is
+                # fixed at pod-creation time. Warn if the new hooks would
+                # need more grace than the existing pod has.
+                grace_warning = (
+                    k8s_cloud.warn_if_preemption_grace_change_requires_relaunch(
+                        to_provision.cloud, to_provision.hooks,
+                        one_task_resource.hooks))
+                if grace_warning is not None:
+                    logger.warning(grace_warning)
+                to_provision = to_provision.copy(hooks=one_task_resource.hooks)
 
             # cluster_config_overrides should be the same for all resources.
             for resource in task.resources:

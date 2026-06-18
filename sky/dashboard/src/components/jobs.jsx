@@ -3,9 +3,10 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import { PaginationControls } from '@/components/elements/PaginationControls';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -30,6 +31,7 @@ import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
+import { apiClient, getCurrentUserInfo } from '@/data/connectors/client';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -44,6 +46,8 @@ import {
   Download,
   ChevronDownIcon,
   ChevronRightIcon,
+  CheckIcon,
+  InfoIcon,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -94,6 +98,25 @@ export const statusGroups = {
     'FAILED_CONTROLLER',
   ],
 };
+
+// Statuses shown as primary chips on the Statuses filter bar.
+// Ordered along the typical job lifecycle (STARTING → RUNNING →
+// SUCCEEDED) so the bar reads left-to-right as a progress story.
+// FAILED and other terminal variants live in the "More" dropdown to
+// keep the summary line calm.
+const PRIMARY_STATUSES = ['STARTING', 'RUNNING', 'SUCCEEDED'];
+const OTHER_STATUSES = [
+  'PENDING',
+  'SUBMITTED',
+  'RECOVERING',
+  'CANCELLING',
+  'CANCELLED',
+  'FAILED',
+  'FAILED_SETUP',
+  'FAILED_PRECHECKS',
+  'FAILED_NO_RESOURCE',
+  'FAILED_CONTROLLER',
+];
 
 // Status priority for aggregation (higher index = worse status)
 const STATUS_PRIORITY = {
@@ -149,14 +172,16 @@ export function getAggregatedStatus(tasks) {
 }
 
 // Define filter options for the filter dropdown
+// Name is first so it's the default when users open the dropdown —
+// users typically search by job name, not ID.
 const PROPERTY_OPTIONS = [
-  {
-    label: 'ID',
-    value: 'id',
-  },
   {
     label: 'Name',
     value: 'name',
+  },
+  {
+    label: 'ID',
+    value: 'id',
   },
   {
     label: 'User',
@@ -373,6 +398,12 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
+        {/* Extension point for a small summary badge next to the page
+            title. Renders nothing when no plugin fills it. */}
+        <PluginSlot
+          name="jobs.header.badge"
+          wrapperClassName="flex items-center"
+        />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
@@ -457,18 +488,45 @@ export function ManagedJobsTable({
   });
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const p = parseInt(params.get('page'), 10);
+      return p > 0 ? p : 1;
+    }
+    return 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const ps = parseInt(params.get('pageSize'), 10);
+      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+    }
+    return 10;
+  });
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
   const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
+  // Default to scoping the table to the current user's jobs. Flips to
+  // 'all' when the user clicks the Everyone toggle, or implicitly when
+  // they pick a different user via the FilterDropdown (explicit user
+  // filter wins; see effectiveUserMatch in fetchData).
+  const [userScope, setUserScope] = useState('mine');
+  const [currentUser, setCurrentUser] = useState(null);
+  // True once the /users/role lookup has resolved (with a real user, with
+  // the 'local'/anonymous sentinel, or by erroring out). Used to gate the
+  // initial fetch so we never make the expensive unscoped Everyone request
+  // ahead of the Mine narrow.
+  const [userResolved, setUserResolved] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -478,6 +536,27 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Sync page/pageSize to URL query params.
+  // Use window.history.replaceState instead of router.replace to avoid
+  // triggering Next.js re-renders that cascade into filter resets.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (currentPage > 1) {
+      url.searchParams.set('page', String(currentPage));
+    } else {
+      url.searchParams.delete('page');
+    }
+    if (pageSize !== 10) {
+      url.searchParams.set('pageSize', String(pageSize));
+    } else {
+      url.searchParams.delete('pageSize');
+    }
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url.toString());
+    }
+  }, [currentPage, pageSize]);
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
@@ -580,11 +659,24 @@ export function ManagedJobsTable({
 
         // Build params for jobsCacheManager
         const jobIdFilter = getFilterValue('id');
+        // Explicit user picked via FilterDropdown wins over the Mine/Everyone
+        // toggle. Otherwise, scope to the current user when toggle is "mine".
+        // Send the username (not the id/hash): the server resolves
+        // `user_match` via `get_user_by_name_match` which does a LIKE on the
+        // `name` column. Passing the hash on multi-user tenants where id and
+        // name differ would silently return zero results.
+        const explicitUserMatch = getFilterValue('user');
+        const effectiveUserMatch =
+          explicitUserMatch !== undefined
+            ? explicitUserMatch
+            : userScope === 'mine' && currentUser
+              ? currentUser.name
+              : undefined;
         const params = {
           allUsers: true,
           jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
-          userMatch: getFilterValue('user'),
+          userMatch: effectiveUserMatch,
           workspaceMatch: getFilterValue('workspace'),
           poolMatch: getFilterValue('pool'),
           statuses: computedStatuses.length > 0 ? computedStatuses : undefined,
@@ -614,7 +706,16 @@ export function ManagedJobsTable({
             setTotalCount(response.total || 0);
             setTotalNoFilter(response.totalNoFilter || response.total || 0);
             setStatusCounts(response.statusCounts || {});
+            // Controller is reachable: clear any stale banner state from a
+            // previous fetch and skip the cluster-status lookup below.
+            setControllerStopped(false);
+            setControllerLaunching(false);
           }
+
+          // Render the table as soon as the queue data is in. Any optional
+          // controller-status banner is resolved below without blocking the
+          // table.
+          setIsInitialLoad(false);
 
           // Prefetch next page in background
           if (response.hasNext) {
@@ -622,8 +723,16 @@ export function ManagedJobsTable({
           }
         }
 
-        // Check controller status from clusters
-        if (includeStatus) {
+        // Check controller status from clusters — only needed when the
+        // queue response indicated the controller wasn't reachable. The
+        // queue endpoint catches ClusterNotUpError and returns
+        // controllerStopped=true for both STOPPED and INIT-without-head_ip
+        // (i.e. LAUNCHING). We then call /status to disambiguate so the
+        // right banner is shown. When the controller is reachable
+        // (controllerStopped === false) there is no banner to show, so we
+        // skip /status entirely — saving ~hundreds of ms on every page
+        // load and on every 5-second periodic refresh.
+        if (includeStatus && response.controllerStopped) {
           try {
             const clustersData = await dashboardCache.get(getClusters);
 
@@ -637,11 +746,7 @@ export function ManagedJobsTable({
               const jobControllerClusterStatus = jobControllerCluster
                 ? jobControllerCluster.status
                 : 'NOT_FOUND';
-              // Check both cluster status and API response
-              if (
-                jobControllerClusterStatus === 'STOPPED' &&
-                response.controllerStopped
-              ) {
+              if (jobControllerClusterStatus === 'STOPPED') {
                 isControllerStopped = true;
               }
               if (jobControllerClusterStatus === 'LAUNCHING') {
@@ -656,10 +761,6 @@ export function ManagedJobsTable({
           } catch (error) {
             console.error('Error fetching clusters:', error);
           }
-        }
-
-        if (version === requestSeqRef.current) {
-          setIsInitialLoad(false);
         }
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -686,6 +787,8 @@ export function ManagedJobsTable({
       computedStatuses,
       sortBy,
       sortOrder,
+      userScope,
+      currentUser,
     ]
   );
 
@@ -709,13 +812,35 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - runs immediately on mount, don't wait for full preloading
-  // The preloader will warm the cache in background, but we fetch jobs data
-  // right away so the table displays as fast as possible
+  // Initial load - wait for the /users/role lookup to settle (real
+  // user, 'local' sentinel, or error) before firing the first jobs
+  // fetch. Going Mine-first matters on tenants with tens of thousands
+  // of finished jobs: the Everyone query is expensive (full count +
+  // status aggregation) and we'd pay it twice — once on the unscoped
+  // initial fetch, once on the narrow Mine refetch — if we didn't gate.
+  // With the shared cache warm this gate adds essentially zero latency;
+  // cold loads pay a single ~200ms /users/role wait.
   React.useEffect(() => {
+    if (!isInitialFetch.current) return;
+    if (!userResolved) return;
     fetchData({ includeStatus: true });
-    // Mark that initial fetch is complete so other effects can run
     isInitialFetch.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userResolved]);
+
+  // Safety net: if /users/role somehow never resolves (network hang),
+  // fall back to the unscoped fetch so the page still renders. Almost
+  // never triggers in practice — getCurrentUserInfo() catches its own
+  // errors and resolves with the 'local' sentinel.
+  React.useEffect(() => {
+    if (!isInitialFetch.current) return undefined;
+    const t = setTimeout(() => {
+      if (isInitialFetch.current) {
+        setUserScope('all');
+        setUserResolved(true);
+      }
+    }, 3000);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -789,26 +914,33 @@ export function ManagedJobsTable({
     };
   }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
-  // Reset to first page when activeTab changes
+  // Reset to first page when activeTab, filters, pageSize, or sort changes.
+  // Guard with isInitialFetch so the page number read from the URL isn't
+  // overwritten during initialization (filter hydration from URL params
+  // triggers setFilters which would otherwise reset the page).
   useEffect(() => {
+    if (isInitialFetch.current) return;
     setCurrentPage(1);
-  }, [activeTab]);
-
-  // Reset to first page when filters or page size changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filters, pageSize]);
-
-  // Reset to first page when sort config changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [sortConfig]);
+  }, [activeTab, filters, pageSize, sortConfig]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
     setSelectedStatuses([]);
     setShowAllMode(true); // Default to show all mode when changing tabs
   }, [activeTab]);
+
+  // Switch ownership scope (My Jobs vs All Jobs). Resets status narrowing
+  // so a status chip selected in one scope (e.g. RUNNING in My Jobs)
+  // doesn't carry over and silently empty the table under the new scope.
+  // Leaves `activeTab` alone — Active/All is orthogonal to ownership.
+  const selectScope = React.useCallback((scope) => {
+    React.startTransition(() => {
+      setUserScope(scope);
+      setSelectedStatuses([]);
+      setShowAllMode(true);
+      setCurrentPage(1);
+    });
+  }, []);
 
   // Populate valueList for filter dropdown
   useEffect(() => {
@@ -925,6 +1057,20 @@ export function ManagedJobsTable({
     ).length;
     return { active, finished };
   }, [data]);
+
+  // Non-primary statuses currently selected — surface them as inline chips
+  // alongside the More dropdown so active filters are always visible.
+  const nonPrimarySelectedStatuses = React.useMemo(
+    () => selectedStatuses.filter((s) => !PRIMARY_STATUSES.includes(s)),
+    [selectedStatuses]
+  );
+
+  // Total count of jobs across all "other" (More dropdown) statuses; surfaced
+  // on the dropdown pill so users see how many jobs the long tail covers.
+  const otherStatusesTotalCount = React.useMemo(
+    () => OTHER_STATUSES.reduce((sum, s) => sum + (statusCounts[s] ?? 0), 0),
+    [statusCounts]
+  );
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -1072,6 +1218,109 @@ export function ManagedJobsTable({
 
   // Check if a job group is expanded
   const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
+
+  // Fetch the current user once so the Mine/Everyone toggle can scope
+  // results to the logged-in user. Routes through the shared
+  // getCurrentUserInfo() cache in client.js so we don't pay the
+  // /users/role round-trip more than once per page session (sidebar /
+  // config / etc. typically already populated the cache by the time we
+  // get here). The 'local' sentinel id means the caller is anonymous
+  // (no auth / basic-auth without a logged-in user) — there's no
+  // meaningful "Mine" view in that case, so flip to Everyone and hide
+  // the Mine/Everyone toggle so the dashboard works the way every
+  // unauthenticated tenant expects.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await getCurrentUserInfo();
+        if (cancelled) return;
+        if (info && info.id && info.id !== 'local') {
+          setCurrentUser({ id: info.id, name: info.name || info.id });
+        } else {
+          setUserScope('all');
+        }
+      } catch (e) {
+        // Role endpoint unreachable — assume no usable identity and
+        // default to Everyone rather than leaving the page stuck.
+        if (!cancelled) setUserScope('all');
+      } finally {
+        if (!cancelled) setUserResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // When the Mine view comes up empty, fire a one-shot probe for the
+  // Everyone total so the empty state can tell the user "you haven't
+  // submitted anything yet, but N jobs from others are out there —
+  // click to see them". Avoids leaving the user staring at a blank
+  // table wondering whether SkyPilot has any activity at all.
+  //
+  // We use the client-side rendered row count (data.length) as the
+  // empty signal rather than the server's totalNoFilter — totalNoFilter
+  // currently reflects the unfiltered (including-other-users) total and
+  // doesn't honor userMatch, so it would suppress this CTA for any
+  // installation where other users have jobs.
+  const [everyoneTotal, setEveryoneTotal] = useState(null);
+  useEffect(() => {
+    if (userScope !== 'mine') return;
+    if (!currentUser) return;
+    if (loading || isInitialLoad) return;
+    if (data.length > 0) return;
+    if (everyoneTotal !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await jobsCacheManager.getPaginatedJobs({
+          allUsers: true,
+          page: 1,
+          limit: 1,
+        });
+        if (cancelled) return;
+        setEveryoneTotal(resp?.totalNoFilter ?? resp?.total ?? 0);
+      } catch (e) {
+        if (!cancelled) setEveryoneTotal(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    userScope,
+    currentUser,
+    loading,
+    isInitialLoad,
+    data.length,
+    everyoneTotal,
+  ]);
+
+  // After ~1s of a non-initial load, fade a spinner overlay onto the
+  // table so the user knows their toggle/filter click is in-flight.
+  // We delay so quick (sub-second) fetches don't flash a spinner.
+  const [showSlowSpinner, setShowSlowSpinner] = useState(false);
+  useEffect(() => {
+    if (!loading || isInitialLoad) {
+      setShowSlowSpinner(false);
+      return undefined;
+    }
+    const t = setTimeout(() => setShowSlowSpinner(true), 1000);
+    return () => clearTimeout(t);
+  }, [loading, isInitialLoad]);
+
+  // Close the "More" status menu when clicking outside of it.
+  useEffect(() => {
+    if (!moreMenuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [moreMenuOpen]);
 
   // Handle status selection
   const handleStatusClick = (status) => {
@@ -1727,90 +1976,270 @@ export function ManagedJobsTable({
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
                 <span className="text-gray-500 mr-2">No jobs found</span>
               )}
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <button
-                  key={status}
-                  onClick={() => handleStatusClick(status)}
-                  className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
-                    isStatusHighlighted(status) ||
-                    selectedStatuses.includes(status)
-                      ? getBadgeStyle(status)
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <span>{status}</span>
-                  <span
-                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              ))}
-              {totalNoFilter > 0 && (
-                <div className="flex items-center ml-2 gap-2">
-                  <span className="text-gray-500">(</span>
+              {/* Primary statuses: always rendered in fixed order so the bar
+                  doesn't jitter when counts change. The count badge uses
+                  tabular-nums + a fixed min-width so the chip width stays
+                  stable as counts change between 1 and many digits. */}
+              {PRIMARY_STATUSES.map((status) => {
+                const count = statusCounts[status] ?? 0;
+                const highlighted =
+                  isStatusHighlighted(status) ||
+                  selectedStatuses.includes(status);
+                return (
                   <button
-                    onClick={() => {
-                      // When showing all jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('all');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'all' && showAllMode
-                        ? 'text-purple-700 underline'
-                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${
+                      highlighted
+                        ? getBadgeStyle(status)
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                     }`}
                   >
-                    show all jobs
+                    <span>{status}</span>
+                    <span
+                      className={`text-xs tabular-nums text-center min-w-[1.5rem] ${highlighted ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                    >
+                      {count}
+                    </span>
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
+                );
+              })}
+              {/* Selected non-primary statuses surface as inline chips so the
+                  user can always see which filters are active without opening
+                  the dropdown. */}
+              {nonPrimarySelectedStatuses.map((status) => {
+                const count = statusCounts[status] ?? 0;
+                return (
                   <button
-                    onClick={() => {
-                      // When showing all active jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('active');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'active' && showAllMode
-                        ? 'text-green-700 underline'
-                        : 'text-gray-600 hover:text-green-700 hover:underline'
-                    }`}
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-0.5 rounded-full flex items-center space-x-2 ${getBadgeStyle(status)}`}
                   >
-                    show all active jobs
+                    <span>{status}</span>
+                    <span className="text-xs tabular-nums text-center min-w-[1.5rem] bg-white/50 px-1.5 py-0.5 rounded">
+                      {count}
+                    </span>
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
-                  <button
-                    onClick={() => {
-                      // When showing all finished jobs, clear all selected statuses
-                      // Use React.startTransition to batch state updates
-                      React.startTransition(() => {
-                        setActiveTab('finished');
-                        setSelectedStatuses([]);
-                        setShowAllMode(true);
-                        setCurrentPage(1);
-                      });
-                    }}
-                    className={`text-sm font-medium ${
-                      activeTab === 'finished' && showAllMode
-                        ? 'text-blue-700 underline'
-                        : 'text-gray-600 hover:text-blue-700 hover:underline'
-                    }`}
+                );
+              })}
+              {/* More dropdown: holds the long tail of statuses
+                  (PENDING, STARTING, CANCELLED, FAILED_*, …). */}
+              {(() => {
+                // Count dropdown items currently included in the filter
+                // (either explicitly via selectedStatuses or implicitly
+                // because Active is selected). When the user is in any
+                // narrowed state, surface that count on the pill so the
+                // button itself signals filtering is active.
+                const otherIncludedCount = OTHER_STATUSES.filter((s) =>
+                  isStatusHighlighted(s)
+                ).length;
+                const otherTotalCount = otherStatusesTotalCount;
+                const isNarrowed =
+                  activeTab !== 'all' || selectedStatuses.length > 0;
+                return (
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      onClick={() => setMoreMenuOpen((v) => !v)}
+                      className={`px-3 py-0.5 rounded-full flex items-center space-x-1.5 ${
+                        isNarrowed
+                          ? 'bg-gray-200 text-gray-800'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      }`}
+                      aria-haspopup="true"
+                      aria-expanded={moreMenuOpen}
+                    >
+                      <span>More</span>
+                      {isNarrowed ? (
+                        <span className="text-xs tabular-nums bg-white/70 px-1.5 py-0.5 rounded">
+                          <span className="inline-block text-center min-w-[1rem]">
+                            {otherIncludedCount}
+                          </span>{' '}
+                          selected
+                        </span>
+                      ) : (
+                        otherTotalCount > 0 && (
+                          <span className="text-xs tabular-nums text-center min-w-[1.5rem] inline-block bg-gray-200 px-1.5 py-0.5 rounded">
+                            {otherTotalCount}
+                          </span>
+                        )
+                      )}
+                      <ChevronDownIcon
+                        className={`w-3.5 h-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    {moreMenuOpen && (
+                      <div className="absolute left-0 z-50 mt-1 w-60 rounded-md border border-gray-200 bg-white shadow-md py-1">
+                        {OTHER_STATUSES.map((status) => {
+                          const count = statusCounts[status] ?? 0;
+                          // A status is included in the current view either
+                          // explicitly (selectedStatuses) or implicitly via
+                          // the Active/All toggle (e.g. PENDING/STARTING are
+                          // implicitly included when Active is selected).
+                          // Both cases should light up the check + label.
+                          const included = isStatusHighlighted(status);
+                          const explicit = selectedStatuses.includes(status);
+                          return (
+                            <button
+                              key={status}
+                              onClick={() => handleStatusClick(status)}
+                              className={`w-full px-3 py-1.5 flex items-center justify-between text-sm hover:bg-gray-50 ${
+                                explicit ? 'bg-gray-50' : ''
+                              }`}
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                <CheckIcon
+                                  className={`w-3.5 h-3.5 shrink-0 ${included ? 'text-sky-blue' : 'text-transparent'}`}
+                                />
+                                <span
+                                  className={`truncate ${included ? 'font-medium text-gray-900' : count === 0 ? 'text-gray-400' : 'text-gray-700'}`}
+                                >
+                                  {status}
+                                </span>
+                              </span>
+                              <span
+                                className={`ml-2 text-xs tabular-nums text-right min-w-[2rem] ${count === 0 ? 'text-gray-400' : 'text-gray-500'}`}
+                              >
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {/* Activity toggle stays visible past the loading state.
+                  Hiding it on totalNoFilter===0 stranded users who'd
+                  narrowed Everyone with a filter that returned zero,
+                  or whose Mine view was empty — they had no easy way
+                  back. The toggle is harmless when the table is empty
+                  and indispensable as soon as anything else changes. */}
+              {(() => {
+                const selectTab = (tab) => {
+                  React.startTransition(() => {
+                    setActiveTab(tab);
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                    setCurrentPage(1);
+                  });
+                };
+                const isActive = activeTab === 'active' && showAllMode;
+                const isAll = activeTab === 'all' && showAllMode;
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by activity"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
                   >
-                    show all finished jobs
-                  </button>
-                  <span className="text-gray-500">)</span>
-                </div>
-              )}
+                    <button
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => selectTab('active')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Active
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isAll}
+                      onClick={() => selectTab('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isAll
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      All
+                    </button>
+                  </div>
+                );
+              })()}
+              {(() => {
+                if (!currentUser) return null;
+                const explicitUserFilter = (filters || []).find(
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                const isMine = explicitUserFilter
+                  ? String(explicitUserFilter.value) === currentUser.id ||
+                    String(explicitUserFilter.value) === currentUser.name
+                  : userScope === 'mine';
+                const isEveryone = !explicitUserFilter && userScope === 'all';
+                return (
+                  <div
+                    role="tablist"
+                    aria-label="Filter jobs by owner"
+                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={isMine}
+                      onClick={() => selectScope('mine')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isMine
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      My Jobs
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={isEveryone}
+                      onClick={() => selectScope('all')}
+                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                        isEveryone
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      All Jobs
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Scope hint: when filtered to the current user's jobs,
+                  remind them and offer a one-click path to All Jobs.
+                  Sits at the tail of the chip + toggle row (same flex-wrap
+                  container) so it flows inline with the filter bar on
+                  wide screens and wraps below on narrow ones. Suppress
+                  in the empty state (the CTA already says this) and
+                  when an explicit user filter has overridden the toggle. */}
+              {(() => {
+                const explicitUserFilter = (filters || []).find(
+                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
+                );
+                const showHint =
+                  userScope === 'mine' &&
+                  currentUser &&
+                  !explicitUserFilter &&
+                  !isInitialLoad &&
+                  paginatedData.length > 0;
+                if (!showHint) return null;
+                return (
+                  <div
+                    className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
+                    <span className="text-gray-700">
+                      Showing your jobs only.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => selectScope('all')}
+                      className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                    >
+                      View all jobs
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -1877,7 +2306,15 @@ export function ManagedJobsTable({
         )}
 
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto relative">
+          {showSlowSpinner && (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 pointer-events-none transition-opacity"
+              aria-hidden="true"
+            >
+              <CircularProgress size={28} />
+            </div>
+          )}
           <Table className="min-w-full border-collapse">
             <TableHeader>
               <TableRow>
@@ -1887,7 +2324,18 @@ export function ManagedJobsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && isInitialLoad ? (
+              {(loading ||
+                (userScope === 'mine' &&
+                  currentUser &&
+                  everyoneTotal === null)) &&
+              paginatedData.length === 0 ? (
+                // Show the loading row both on initial fetch AND whenever
+                // a refetch starts with an empty table (e.g. right after
+                // clicking "View all jobs" or flipping the My Jobs/All
+                // Jobs toggle from a zero-row scope). Also covers the
+                // brief window between the empty Mine fetch returning
+                // and the Everyone probe answering, so the user doesn't
+                // flash through "No active jobs" before the CTA renders.
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
@@ -2017,9 +2465,41 @@ export function ManagedJobsTable({
                           </div>
                         </div>
                       )}
-                      {!controllerStopped && !controllerLaunching && (
-                        <p className="text-gray-500">No active jobs</p>
-                      )}
+                      {!controllerStopped &&
+                        !controllerLaunching &&
+                        (userScope === 'mine' &&
+                        currentUser &&
+                        activeTab === 'all' &&
+                        showAllMode &&
+                        everyoneTotal > 0 ? (
+                          <div className="flex flex-col items-center space-y-2 max-w-md">
+                            <p className="text-gray-700">
+                              You haven&apos;t submitted any managed jobs yet.
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {everyoneTotal.toLocaleString()} job
+                              {everyoneTotal === 1 ? '' : 's'} in total — switch
+                              to All Jobs to see them.
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                React.startTransition(() => {
+                                  setUserScope('all');
+                                  setSelectedStatuses([]);
+                                  setShowAllMode(true);
+                                  setCurrentPage(1);
+                                });
+                              }}
+                              className="text-sky-blue hover:text-sky-blue-bright"
+                            >
+                              View all jobs
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-gray-500">No active jobs</p>
+                        ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">
@@ -2057,100 +2537,29 @@ export function ManagedJobsTable({
         </div>
       </Card>
 
-      {/* Pagination controls - always show for visual separation */}
-      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center">
-            <span className="mr-2">Jobs per page:</span>
-            <div className="relative inline-block">
-              <select
-                value={pageSize}
-                onChange={handlePageSizeChange}
-                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                style={{ minWidth: '40px' }}
-              >
-                <option value={10}>10</option>
-                <option value={30}>30</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-                <option value={200}>200</option>
-              </select>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </div>
-          </div>
-          <div>
-            {totalCount > 0
-              ? `${startIndex + 1} – ${Math.min(startIndex + groupedJobs.size, totalCount)} of ${totalCount}`
-              : '0 – 0 of 0'}
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToPreviousPage}
-              disabled={
-                currentPage === 1 || !sortedData || sortedData.length === 0
-              }
-              className="text-gray-500 h-8 w-8 p-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="chevron-left"
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToNextPage}
-              disabled={
-                totalPages === 0 ||
-                currentPage >= totalPages ||
-                !sortedData ||
-                sortedData.length === 0
-              }
-              className="text-gray-500 h-8 w-8 p-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="chevron-right"
-              >
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </Button>
-          </div>
-        </div>
-      </div>
+      {/* Pagination controls */}
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        startIndex={startIndex}
+        endIndex={startIndex + groupedJobs.size}
+        onPageChange={setCurrentPage}
+        onPreviousPage={goToPreviousPage}
+        onNextPage={goToNextPage}
+        isPrevDisabled={
+          currentPage === 1 || !sortedData || sortedData.length === 0
+        }
+        isNextDisabled={
+          totalPages === 0 ||
+          currentPage >= totalPages ||
+          !sortedData ||
+          sortedData.length === 0
+        }
+        pageSize={pageSize}
+        onPageSizeChange={handlePageSizeChange}
+        itemLabel="Jobs"
+      />
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -2510,90 +2919,21 @@ export function ClusterJobs({
       </Card>
 
       {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
-            </div>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={sortedData.length}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setCurrentPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={currentPage === 1}
+          isNextDisabled={currentPage === totalPages || totalPages === 0}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={[5, 10, 20, 50]}
+        />
       )}
     </div>
   );
@@ -2876,41 +3216,21 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
 
       {/* Pagination */}
       {paginatedData.length > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">Rows per page:</span>
-            <select
-              value={pageSize}
-              onChange={handlePageSizeChange}
-              className="border border-gray-300 rounded px-2 py-1 text-sm"
-            >
-              <option value={5}>5</option>
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">
-              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </span>
-            <button
-              onClick={goToPreviousPage}
-              disabled={currentPage === 1}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <button
-              onClick={goToNextPage}
-              disabled={currentPage === totalPages}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={sortedData.length}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setCurrentPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={currentPage === 1}
+          isNextDisabled={currentPage === totalPages}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={[5, 10, 25, 50]}
+        />
       )}
     </Card>
   );

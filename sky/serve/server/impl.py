@@ -24,6 +24,7 @@ from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
+from sky.serve import runner as serve_runner
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -814,6 +815,60 @@ def down(
     logger.info(stdout)
 
 
+class _DefaultServiceStatusRunner:
+    """Default implementation — gRPC with codegen + run_on_head fallback.
+
+    Registered lazily by ``sky.serve.runner.current()``. Plugins override
+    by calling ``sky.serve.runner.register()`` with their own
+    implementation (e.g. an in-process runner for consolidation mode).
+    """
+
+    def get_service_status(
+        self,
+        *,
+        handle: 'backends.CloudVmRayResourceHandle',
+        service_names: Optional[List[str]],
+        pool: bool,
+    ) -> List[Dict[str, Any]]:
+        noun = 'pool' if pool else 'service'
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        service_records: List[Dict[str, Any]] = []
+        if not use_legacy:
+            try:
+                service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                    handle, service_names, pool)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+
+            code = serve_utils.ServeCodeGen.get_service_status(service_names,
+                                                               pool=pool)
+            returncode, serve_status_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   f'Failed to fetch {noun}s',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+
+            service_records = serve_utils.load_service_status(
+                serve_status_payload)
+
+        return service_records
+
+
 def status(
     service_names: Optional[Union[str, List[str]]] = None,
     pool: bool = False,
@@ -838,38 +893,9 @@ def status(
         replace('service', noun))
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if not use_legacy:
-        try:
-            service_records = serve_rpc_utils.RpcRunner.get_service_status(
-                handle, service_names, pool)
-        except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
-
-    if use_legacy:
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-
-        code = serve_utils.ServeCodeGen.get_service_status(service_names,
-                                                           pool=pool)
-        returncode, serve_status_payload, stderr = backend.run_on_head(
-            handle,
-            code,
-            require_outputs=True,
-            stream_logs=False,
-            separate_stderr=True)
-
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               f'Failed to fetch {noun}s',
-                                               stderr,
-                                               stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
-
-        service_records = serve_utils.load_service_status(serve_status_payload)
+    service_records = serve_runner.current().get_service_status(
+        handle=handle, service_names=service_names, pool=pool)
 
     # Get the endpoint for each service
     for service_record in service_records:

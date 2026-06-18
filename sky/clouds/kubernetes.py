@@ -4,6 +4,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -48,6 +49,145 @@ _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
+
+# Cluster-autoscaler caps graceful pod termination at this many
+# seconds by default (--max-graceful-termination-sec=600). Rendering a
+# higher `terminationGracePeriodSeconds` doesn't extend the autoscaler's
+# willingness to wait — it just SIGKILLs at 600 anyway. Keep our render
+# inside that envelope so a "hooks took longer than expected" failure
+# mode falls inside the kubelet's deterministic SIGKILL rather than
+# the autoscaler's.
+_PREEMPTION_GRACE_CAP_SECONDS = 600
+
+
+def _compute_preemption_hook_timeout(
+        hooks: Optional[List[Dict[str, Any]]]) -> Optional[int]:
+    """Sum of timeouts for all preemption-event hooks, capped.
+
+    Returns ``None`` when no hook declares the ``preemption`` event,
+    so the caller can omit ``terminationGracePeriodSeconds`` from the
+    pod spec entirely (K8s falls back to its 30 s default).
+
+    Why sum rather than max: ``hook_executor.run`` executes matching
+    hooks sequentially, so the wall-clock cost is the sum of per-hook
+    timeouts. Using max would let kubelet SIGKILL the daemon
+    mid-execution after the first hook's timeout expires.
+
+    Why we cap at 600s: cluster-autoscaler's
+    ``--max-graceful-termination-sec`` defaults to 600. A render larger
+    than that is silently truncated by the autoscaler on scale-down,
+    so the daemon would be SIGKILLed mid-hook anyway. We log a stderr
+    warning when the raw sum exceeds the cap so users can shrink their
+    timeouts (or the operator can raise ``--max-graceful-termination-sec``
+    on their cluster). See:
+    https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#does-ca-respect-gracefultermination-in-scale-down
+    """
+    timeouts = [
+        entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        for entry in (hooks or [])
+        if 'preemption' in (entry.get('events') or [])
+    ]
+    if not timeouts:
+        return None
+    raw = sum(timeouts)
+    if raw > _PREEMPTION_GRACE_CAP_SECONDS:
+        cap = _PREEMPTION_GRACE_CAP_SECONDS
+        sys.stderr.write(
+            f'WARNING: preemption-hook timeouts sum to {raw}s, but '
+            f'cluster-autoscaler caps graceful pod termination at '
+            f'{cap}s by default. Capping '
+            f'terminationGracePeriodSeconds at {cap}s. '
+            f'Reduce per-hook timeouts or raise '
+            f'--max-graceful-termination-sec on your cluster if longer '
+            f'hooks are required.\n')
+        return _PREEMPTION_GRACE_CAP_SECONDS
+    return raw
+
+
+def warn_if_preemption_grace_change_requires_relaunch(
+    cloud: Optional['clouds.Cloud'],
+    prior_hooks: Optional[List[Dict[str, Any]]],
+    new_hooks: Optional[List[Dict[str, Any]]],
+) -> Optional[str]:
+    """Return a warning string if a re-launch would need more K8s grace.
+
+    Pod ``terminationGracePeriodSeconds`` is set at pod-creation time
+    and is immutable for the lifetime of the pod. Re-launching an
+    existing Kubernetes cluster with a *larger* preemption-hook timeout
+    than before means the new timeout would be silently truncated by
+    kubelet at SIGTERM — the preemption hook would be SIGKILLed
+    mid-run.
+
+    Returns ``None`` when no warning is needed (non-K8s cloud, no new
+    preemption hooks, or new timeout ≤ prior timeout).
+
+    Lives here (rather than in the re-launch caller in
+    ``cloud_vm_ray_backend``) so the ``_compute_preemption_hook_timeout``
+    helper stays a same-module private — see review thread on PR #9064.
+    """
+    if not isinstance(cloud, Kubernetes):
+        return None
+    prior_t = _compute_preemption_hook_timeout(prior_hooks)
+    new_t = _compute_preemption_hook_timeout(new_hooks)
+    if new_t is None:
+        return None
+    if prior_t is not None and new_t <= prior_t:
+        return None
+    prior_label = f'{prior_t}s' if prior_t is not None else '~30s (k8s default)'
+    return (f'Re-launch increased the preemption-hook grace requirement '
+            f'from {prior_label} to {new_t}s, but Kubernetes pod\'s '
+            '`terminationGracePeriodSeconds` is fixed at pod creation and '
+            'cannot be updated in place. The new preemption hooks will be '
+            'SIGKILLed by kubelet once the existing grace expires. To apply '
+            'the new grace, run `sky down <cluster>` then `sky launch` to '
+            'recreate the pod.')
+
+
+def cap_preemption_hook_timeouts(
+    hooks: Optional[List[Dict[str, Any]]],) -> Optional[List[Dict[str, Any]]]:
+    """Cap each preemption-event hook's ``timeout`` to the K8s grace cap.
+
+    On Kubernetes the pod's ``terminationGracePeriodSeconds`` is
+    bounded by cluster-autoscaler's ``--max-graceful-termination-sec``
+    (default 600). A user-set or default hook ``timeout`` larger than
+    that is meaningless — kubelet SIGKILLs at the grace, leaving the
+    skylet's stored timeout misleading. Cap the individual timeout on
+    send so the stored value matches what kubelet will actually honor,
+    and warn the user once per offending hook.
+
+    Only ``preemption``-event entries are affected; ``autostop``/``down``
+    hooks don't interact with the pod grace.
+    """
+    if not hooks:
+        return hooks
+    out: List[Dict[str, Any]] = []
+    for entry in hooks:
+        events = list(entry.get('events') or [])
+        timeout = entry.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        if ('preemption' in events and timeout > _PREEMPTION_GRACE_CAP_SECONDS):
+            sys.stderr.write(
+                f'WARNING: preemption-hook timeout {timeout}s on '
+                f'Kubernetes capped to {_PREEMPTION_GRACE_CAP_SECONDS}s '
+                f'(pod terminationGracePeriodSeconds limit; '
+                f'cluster-autoscaler --max-graceful-termination-sec). '
+                f'Raise the autoscaler flag if longer hooks are needed.\n')
+            other_events = [e for e in events if e != 'preemption']
+            # Split a multi-event entry so the K8s grace cap only
+            # applies to the preemption dispatch. The non-preemption
+            # events (stop/down) keep the user's original timeout —
+            # kubelet's SIGKILL boundary doesn't apply to idle-timer
+            # stops or `sky down` teardowns.
+            capped = dict(entry)
+            capped['events'] = ['preemption']
+            capped['timeout'] = _PREEMPTION_GRACE_CAP_SECONDS
+            out.append(capped)
+            if other_events:
+                uncapped = dict(entry)
+                uncapped['events'] = other_events
+                out.append(uncapped)
+        else:
+            out.append(entry)
+    return out
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
@@ -198,6 +338,14 @@ class Kubernetes(clouds.Cloud):
                 keys=('allowed_contexts',),
                 default_value=None)
 
+        # Whether the user explicitly pinned the contexts to a list, as
+        # opposed to leaving them to be derived (`'all'`, the allow-all env
+        # var, or the in-cluster fallback below). The in-cluster exclusion at
+        # the end of this method only applies to the derived case; an explicit
+        # list is a deliberate choice and is honored as-is.
+        contexts_explicitly_set = (allowed_contexts is not None and
+                                   allowed_contexts != 'all')
+
         # Exclude contexts starting with `ssh-`
         # TODO(romilb): Remove when SSH Node Pools use a separate kubeconfig.
         all_contexts = [
@@ -208,19 +356,7 @@ class Kubernetes(clouds.Cloud):
             allowed_contexts is None and
             env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
         if allow_all_contexts:
-            # `SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false`
-            # excludes the API server's own in-cluster context from the
-            # `'all'` expansion, so the cluster running the API server is
-            # not surfaced as a user-facing compute target. Default is to
-            # include in-cluster (backward compatible).
-            if (env_options.Options.ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.
-                    get()):
-                allowed_contexts = all_contexts
-            else:
-                in_cluster_name = kubernetes.in_cluster_context_name()
-                allowed_contexts = [
-                    c for c in all_contexts if c != in_cluster_name
-                ]
+            allowed_contexts = all_contexts
 
         if allowed_contexts is None:
             # Try kubeconfig if present
@@ -244,6 +380,21 @@ class Kubernetes(clouds.Cloud):
                 if context.startswith('ssh-'):
                     continue
                 skipped_contexts.append(context)
+
+        # `SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false` keeps the
+        # API server's own in-cluster context from being surfaced as a
+        # user-facing compute target. Applied to the final result so it holds
+        # regardless of how the contexts were derived -- the `allowed_contexts:
+        # all` expansion, the allow-all env var, or the in-cluster fallback
+        # above. An explicitly configured list is honored as-is. Default is to
+        # include in-cluster (backward compatible).
+        if (not contexts_explicitly_set and not env_options.Options.
+                ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER.get()):
+            in_cluster_name = kubernetes.in_cluster_context_name()
+            existing_contexts = [
+                c for c in existing_contexts if c != in_cluster_name
+            ]
+
         if not silent:
             cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
@@ -640,7 +791,7 @@ class Kubernetes(clouds.Cloud):
                 avoid_label_keys = None
         port_mode = network_utils.get_port_mode(None, context)
 
-        remote_identity = skypilot_config.get_effective_region_config(
+        remote_identity = skypilot_config.get_effective_workspace_region_config(
             # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,
@@ -778,7 +929,11 @@ class Kubernetes(clouds.Cloud):
             default_value=timeout,
             override_configs=resources.cluster_config_overrides)
 
-        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+        namespace = kubernetes_utils.get_namespace(
+            context=context,
+            override_configs=resources.cluster_config_overrides,
+            cloud=cloud_config_str,
+        )
 
         # Detect hostNetwork before the template is rendered so the probe
         # env vars can be wired into deploy_vars. Two independent paths put
@@ -867,6 +1022,16 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace': namespace,
             'k8s_host_network': k8s_host_network,
         }
+
+        # Pod-level terminationGracePeriodSeconds rendered from any
+        # preemption hooks the resources declare (see
+        # `_compute_preemption_hook_timeout`).  Autostop and `sky down`
+        # paths control their own timing so they don't need a
+        # grace-period override — hook-free pods stay on the K8s
+        # default (30s).
+        preemption_timeout = _compute_preemption_hook_timeout(resources.hooks)
+        if preemption_timeout is not None:
+            deploy_vars['preemption_hook_timeout'] = preemption_timeout
 
         # Add ephemeral storage to deploy vars if specified.
         ephemeral_storage = resources.ephemeral_storage
@@ -1086,7 +1251,7 @@ class Kubernetes(clouds.Cloud):
 
         try:
             check_result = kubernetes_utils.check_credentials(
-                context, run_optional_checks=True)
+                context, run_optional_checks=True, cloud=cls._REPR.lower())
             if check_result[0]:
                 if check_result[1] is not None:
                     return True, (_bright_green_color('enabled.') +

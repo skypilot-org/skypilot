@@ -285,23 +285,32 @@ class JobController:
                                             'managed_jobs',
                                             f'job-id-{self._job_id}')
 
+        def _persist_local_log_file(local_log_file: str) -> None:
+            # Persist the log path for the current task so it can be accessed
+            # after the job finishes. Do this as early as possible -- right
+            # after the log is synced down, before the (potentially minutes-
+            # long for multi-GB logs) re-stream into the controller log --
+            # so the dashboard can serve the job's logs immediately instead
+            # of showing "already in terminal state" until the re-stream
+            # completes.
+            managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                 local_log_file)
+
         log_file = None
         if managed_job_runtime.is_registered():
             log_file = managed_job_runtime.download_logs(
                 handle, self._job_id, task_id)
+            if log_file is not None:
+                _persist_local_log_file(log_file)
         if log_file is None:
             log_file = controller_utils.download_and_stream_job_log(
                 self._backend,
                 handle,
                 managed_job_logs_dir,
                 job_ids=[str(job_id_on_pool_cluster)]
-                if job_id_on_pool_cluster is not None else None)
-        if log_file is not None:
-            # Set the path of the log file for the current task, so it can
-            # be accessed even after the job is finished
-            managed_job_state.set_local_log_file(self._job_id, task_id,
-                                                 log_file)
-        else:
+                if job_id_on_pool_cluster is not None else None,
+                on_downloaded=_persist_local_log_file)
+        if log_file is None:
             logger.warning(
                 f'No log file was downloaded for job {self._job_id}, '
                 f'task {task_id}')
@@ -1265,6 +1274,21 @@ class JobController:
             await job_group_networking.setup_job_group_networking(
                 job_group_name, updated_handles)
 
+        # Mirror the dispatch in `_run_one_task`: give the recovery
+        # strategy first refusal at owning the per-task monitor loop so
+        # both code paths behave consistently. Strategies that return
+        # None fall through to `_monitor_one_task` below unchanged.
+        result = await executor.monitor_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            job_id_on_pool_cluster=None,
+            cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
+            force_transit_to_recovering=force_transit_to_recovering,
+            on_recovery=on_recovery,
+        )
+        if result is not None:
+            return result
         return await self._monitor_one_task(
             task_id=task_id,
             task=task,
@@ -1788,6 +1812,17 @@ class JobController:
             # managed job may be able to launch next time.
             await self._update_failed_task_state(
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                failure_reason)
+        except exceptions.ClusterSetUpError as e:
+            # Raised by the launch path for a non-retryable setup failure, e.g.
+            # the job's pod was OOMKilled during cluster/runtime setup. The
+            # failure is deterministic, so we mark the job terminal (rather than
+            # retrying forever) and surface the reason to the CLI/dashboard.
+            logger.error(f'Cluster setup failed for task {task_id}')
+            failure_reason = common_utils.format_exception(e, use_bracket=True)
+            logger.error(failure_reason)
+            await self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_SETUP,
                 failure_reason)
         except asyncio.CancelledError:  # pylint: disable=try-except-raise
             # have this here to avoid getting caught by the general except block

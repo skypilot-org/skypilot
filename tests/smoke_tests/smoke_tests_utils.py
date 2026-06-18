@@ -440,6 +440,29 @@ def is_eks_cluster() -> bool:
     return result.returncode == 0
 
 
+def kubectl_for_cluster(cluster_name: str) -> str:
+    """``kubectl --context <ctx>`` with <ctx> resolved at *shell* runtime
+    to the kubeconfig context that contains a pod for ``cluster_name``.
+
+    Smoke pipelines fall into two shapes:
+
+    * Single-context (kind-based): only ``kind-skypilot`` exists, so the
+      discovery loop short-circuits on the first iteration.
+    * Multi-context (shared-GKE): the runner has the API server's
+      cluster as current-context and the workload cluster as a second
+      entry; the loop picks the one that actually owns the pod.
+
+    The returned string is meant to be interpolated into an f-string
+    command, e.g. ``f'{kubectl_for_cluster(name)} delete pod foo'``.
+    The context lookup runs at command-execution time (not test-collection
+    time), so it sees the pod created by an earlier ``sky launch`` step.
+    """
+    return (
+        f'kubectl --context "$(for c in $(kubectl config get-contexts -o name); '
+        f'do kubectl --context "$c" get pods -o name 2>/dev/null '
+        f'| grep -q {cluster_name} && echo "$c" && break; done)"')
+
+
 def get_replica_cluster_name_on_gcp(name: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     return common_utils.make_cluster_name_on_cloud(
@@ -954,13 +977,29 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,
                              timeout: int = 180,
-                             skip_remote_server_check: bool = False) -> str:
-    """Run the cloud command on the remote cluster for cloud commands."""
+                             skip_remote_server_check: bool = False,
+                             setup_cmd: Optional[str] = None) -> str:
+    """Run the cloud command on the remote cluster for cloud commands.
+
+    Args:
+        setup_cmd: Optional command to prepare the remote cloud-cmd cluster
+            (e.g. installing cloud CLIs into the SkyPilot runtime venv). Only
+            run when `cmd` targets the remote cluster: when the API server is
+            local, `cmd` runs verbatim on the local machine, where the
+            runtime venv does not exist and the local environment is assumed
+            to already have the cloud dependencies.
+    """
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
     if not skip_remote_server_check and sky.server.common.is_api_server_local(
     ) and not is_remote_server_test():
         return cmd
     else:
+        if setup_cmd is not None:
+            # Group `cmd` so that a setup failure fails the whole command
+            # instead of falling through to any `||` branches in `cmd`.
+            # Strip trailing semicolons from `cmd` first: `;;` inside the
+            # group is a bash syntax error.
+            cmd = f'{setup_cmd} && {{ {cmd.rstrip().rstrip(";")}; }}'
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
         wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
             cluster_name=cluster_name,

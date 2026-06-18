@@ -450,7 +450,7 @@ last setting takes precedence.
         hook fails, autostop will still proceed but a warning will be
         logged.
     hook_timeout: timeout in seconds for hook execution. If None, uses
-        DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+        DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
         be terminated if it exceeds this timeout.
 
 **Returns:**
@@ -721,32 +721,23 @@ Tails the provisioning logs (provision.log) for a cluster.
 **Returns:**
     Exit code 0 on streaming success; raises on HTTP error.
 
-### `sky.tail_autostop_logs`
+### `sky.tail_hook_logs`
 
 ```python
-sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
+sky.tail_hook_logs(cluster_name: str, event: Optional[str] = None, follow: bool = True, tail: int = 0) -> int
 ```
 
-Tails the autostop hook logs (autostop_hook.log) for a cluster.
+Tails a per-event lifecycle-hook log on the cluster.
 
 **Args:**
     cluster_name: name of the cluster.
+    event: one of ``stop``, ``preemption``, ``down``. When None,
+        auto-selects whichever log exists on the cluster.
     follow: whether to follow the logs.
     tail: number of lines to display from the end of the log file.
 
 **Returns:**
     Exit code 0 on streaming success; non-zero on failure.
-
-**Request Raises:**
-    ValueError: if arguments are invalid or the cluster is not supported.
-    sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-    sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-    sky.exceptions.NotSupportedError: if the cluster is not based on
-      CloudVmRayBackend.
-    sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-      not the same as the user who created the cluster.
-    sky.exceptions.CloudUserIdentityError: if we fail to get the current
-      user identity.
 
 ### `sky.download_logs`
 
@@ -1177,7 +1168,7 @@ may cause GET /api/get being sent to a restarted API server.
 ### `sky.stream_and_get`
 
 ```python
-sky.stream_and_get(request_id: Optional[server_common.RequestId[T]] = None, log_path: Optional[str] = None, tail: Optional[int] = None, follow: bool = True, output_stream: Optional['io.TextIOBase'] = None) -> Optional[T]
+sky.stream_and_get(request_id: Optional[server_common.RequestId[T]] = None, log_path: Optional[str] = None, tail: Optional[int] = None, follow: bool = True, output_stream: Optional['io.TextIOBase'] = None, relay_rich_status: bool = False) -> Optional[T]
 ```
 
 Streams the logs of a request or a log file and gets the final result.
@@ -1196,6 +1187,11 @@ prefix of the full request id.
     follow: Whether to follow the logs.
     output_stream: The output stream to write to. If None, print to the
         console.
+    relay_rich_status: If True, forward encoded rich-status control payloads
+        verbatim to the output instead of rendering a local spinner. Used by
+        the managed jobs controller to preserve provisioning spinner codes
+        in its per-job log. See
+        :func:`sky.utils.rich_utils.decode_rich_status`.
 
 **Returns:**
     The ``Request Returns`` of the specified request. See the documentation
@@ -1215,6 +1211,65 @@ sky.workspaces() -> server_common.RequestId[Dict[str, Any]]
 ```
 
 Gets the workspaces.
+
+### `sky.set_preferred_workspace`
+
+```python
+sky.set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]
+```
+
+Sets (or clears with None) the user's preferred workspace.
+
+**Args:**
+    preferred: workspace name to set as default, or None to clear.
+
+**Returns:**
+    ``{'preferred': <new value>}`` echoing what was set. Callers that
+    need the resolved workspace + accessible list should follow up
+    with :func:`get_user_workspace`. Raises if the server rejects
+    the change (workspace does not exist, or user lacks permission
+    to it).
+
+### `sky.get_user_workspace`
+
+```python
+sky.get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]
+```
+
+Returns workspace state for the calling user.
+
+Mirrors the launch-path precedence — if the caller has an explicit
+``active_workspace``, the server returns that with ``source='explicit'``;
+otherwise the resolver runs (preferred / default-fallback /
+single-membership).
+
+**Args:**
+    requested: explicit active workspace to ask about. ``None`` (the
+        default) — the SDK reads your locally-configured
+        ``active_workspace`` (the value `skypilot_config` merges
+        from ``~/.sky/config.yaml`` + ``./.sky.yaml`` + any
+        ``--config active_workspace=X`` override) and forwards it
+        on the wire as ``?requested=``. Pass a non-None value to
+        query the resolver as if ``active_workspace`` were that
+        value, without changing your local config — useful for
+        previewing "what would land if I switched to X".
+
+**Returns:**
+    ``{workspace, source, note, preferred, accessible}``.
+
+    * ``workspace``: the workspace the launch path would pick. Can
+      be ``None`` when the resolver couldn't pick (no access /
+      ambiguous / explicit ``requested`` rejected by RBAC); the
+      reason is then in ``note``.
+    * ``source``: one of ``WORKSPACE_SOURCE_*`` on success, ``None``
+      when ``workspace`` is ``None``.
+    * ``note``: optional message — drift on success
+      (``preferred 'team-x' not accessible``) or the resolver error
+      when ``workspace`` is ``None``.
+    * ``preferred``: the persisted preferred workspace (``None`` if
+      unset).
+    * ``accessible``: sorted list of workspaces the user can launch
+      into.
 
 ## Other Functions
 
@@ -1415,7 +1470,7 @@ as managed jobs or services.
 ### `sky.stream_response`
 
 ```python
-sky.stream_response(request_id: Optional[server_common.RequestId[T]], response: 'requests.Response', output_stream: Optional['io.TextIOBase'] = None, resumable: bool = False, get_result: bool = True) -> Optional[T]
+sky.stream_response(request_id: Optional[server_common.RequestId[T]], response: 'requests.Response', output_stream: Optional['io.TextIOBase'] = None, resumable: bool = False, get_result: bool = True, relay_rich_status: bool = False) -> Optional[T]
 ```
 
 Streams the response to the console.
@@ -1433,3 +1488,19 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
+    relay_rich_status: If True, forward encoded rich-status control payloads
+        verbatim to the output instead of rendering a local spinner. See
+        :func:`sky.utils.rich_utils.decode_rich_status`.
+
+### `sky.tail_autostop_logs`
+
+```python
+sky.tail_autostop_logs(cluster_name: str, follow: bool = True, tail: int = 0) -> int
+```
+
+[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+The autostop event was renamed to ``stop`` in the generalized
+lifecycle-hooks framework. This shim emits a one-line stderr
+deprecation warning and delegates to :func:`tail_hook_logs` so
+master-version code keeps working through the v0.15.0 grace window.

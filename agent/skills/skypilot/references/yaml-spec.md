@@ -50,12 +50,6 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none
-    hook: |
-      cd my-code-base
-      git add .
-      git commit -m "Auto-commit before shutdown"
-      git push
-    hook_timeout: 300
 
   any_of:
     - infra: aws/us-west-2
@@ -272,12 +266,10 @@ Format:
     - `jobs_and_ssh` (default): Wait for in‑progress jobs and SSH connections to finish
     - `jobs`: Only wait for in‑progress jobs
     - `none`: Wait for nothing; autostop right after `idle_minutes`
-  - `hook`: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
-    See Autostop hooks for detailed explanation and examples.
-
-  - `hook_timeout`: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
-    If the hook exceeds this timeout, it will be terminated and autostop continues.
+To run a script before autostop, see Lifecycle hooks
+(under `config.hooks` with `events: [stop]` for autostop, or
+`events: [down]` for autodown — `autostop: {down: true}`).
 
 `<unit>` can be one of:
 - `m`: minutes (default if not specified)
@@ -323,20 +315,6 @@ resources:
   autostop:
     idle_minutes: 10
     wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
-```
-
-OR
-
-```yaml
-resources:
-  autostop:
-    idle_minutes: 10
-    hook: |
-      cd my-code-base
-      git add .
-      git commit -m "Auto-commit before shutdown"
-      git push
-    hook_timeout: 300
 
 ```
 
@@ -1264,7 +1242,17 @@ config:
     managed_instance_group: ...
   nvidia_gpus:
     disable_ecc: ...
+  hooks:
+    - run: |
+        cd my-code-base
+        git add . && git commit -m "Auto-commit" && git push
+      events: [stop, preemption, down]  # optional; defaults to all three
+      timeout: 300                      # optional; default 3600s
 ```
+
+The `hooks` field lists scripts to run on the cluster on lifecycle events
+(`stop`, `preemption`, `down`). See :ref:`Lifecycle hooks
+<lifecycle-hooks>` for the full reference.
 
 
 # SkyServe Service
@@ -1280,6 +1268,11 @@ service:
     post_data: {'model_name': 'model'}
     initial_delay_seconds: 1200
     timeout_seconds: 15
+    endpoint_probe_interval_seconds: 10
+    consecutive_failure_threshold_timeout: 180
+
+  load_balancer:
+    stream_timeout_seconds: 120
 
   readiness_probe: /v1/models
 
@@ -1324,6 +1317,11 @@ service:
     post_data: '{"model_name": "my_model"}'
     initial_delay_seconds: 600
     timeout_seconds: 10
+    endpoint_probe_interval_seconds: 10
+    consecutive_failure_threshold_timeout: 180
+
+  load_balancer:
+    stream_timeout_seconds: 120
 
 ```
 
@@ -1388,6 +1386,66 @@ Note, having a too high timeout will delay the detection of a real failure of yo
   service:
     readiness_probe:
       timeout_seconds: 10
+
+```
+
+
+### ``service.readiness_probe.endpoint_probe_interval_seconds``
+
+Time between readiness probe attempts (default: 10).
+
+SkyServe probes each replica endpoint at this interval to update readiness and
+detect unhealthy replicas.
+
+```yaml
+  service:
+    readiness_probe:
+      endpoint_probe_interval_seconds: 5
+
+```
+
+
+### ``service.readiness_probe.consecutive_failure_threshold_timeout``
+
+Maximum consecutive probe failure window before tearing down a ready replica.
+
+If omitted, SkyServe keeps the existing defaults: `10` seconds for pools and
+`180` seconds for regular services.
+
+```yaml
+  service:
+    readiness_probe:
+      consecutive_failure_threshold_timeout: 30
+
+```
+
+
+### ``service.load_balancer``
+
+Load balancer configuration (optional).
+
+Controls request proxy behavior for the SkyServe load balancer.
+
+```yaml
+  service:
+    load_balancer:
+      stream_timeout_seconds: 300
+
+```
+
+
+### ``service.load_balancer.stream_timeout_seconds``
+
+Maximum time the load balancer waits for a proxied response stream (default:
+120).
+
+This controls the timeout for requests forwarded by the SkyServe load balancer
+to a ready replica.
+
+```yaml
+  service:
+    load_balancer:
+      stream_timeout_seconds: 300
 
 ```
 

@@ -25,6 +25,11 @@ import uuid
 import pytest
 from smoke_tests import smoke_tests_utils
 
+import sky
+from sky.client import sdk as sky_sdk
+
+_kc = smoke_tests_utils.kubectl_for_cluster
+
 
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
@@ -134,37 +139,51 @@ def test_kubernetes_host_network_coexistence():
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency
 def test_kubernetes_host_network_multi_node_same_node():
-    """A 2-node SkyPilot cluster, spread across two K8s nodes, hostNetwork on.
+    """A 2-node hostNetwork SkyPilot cluster exercises mode-b's
+    per-cluster ``podAntiAffinity`` in *both* documented regimes —
+    the branch is picked at runtime from the API server's view of
+    the target K8s cluster.
 
-    This asserts fail-loud guarantee on the infra the smoke
-    suite actually runs against (single-node K8s clusters). The required,
-    per-cluster ``podAntiAffinity`` SkyPilot injects for every hostNetwork
-    pod forbids the head and worker of one cluster from sharing a node;
-    with only one node available the worker cannot be scheduled, so the
-    launch must fail with the scheduler's pod-anti-affinity error rather
-    than silently packing both pods onto one host (which is exactly the
-    raylet-collapse / port-collision race mode b exists to prevent).
+    Single-node K8s
+        Anti-affinity makes the worker unschedulable, so
+        ``sky launch --num-nodes 2`` must fail with the scheduler's
+        actual rejection (verbatim ``didn't match pod anti-affinity
+        rules`` from kube-scheduler). This is the fail-loud guarantee
+        that protects against same-node port collisions / raylet
+        identity collapse on Kind-style smoke pipelines.
 
-    On a >=2-node K8s cluster this same config would instead succeed and
-    spread one pod per node (the cross-node capability mode b unlocks);
-    that path is not exercised here because the smoke clusters are
-    single-node.
+    Multi-node K8s
+        Anti-affinity is satisfied by spreading pods across nodes, so
+        the same launch must succeed *and* the head + worker pods must
+        land on distinct K8s nodes (mode-b's cross-node happy path).
+        This exercises the capability mode b actually unlocks — a
+        regime the test previously did not cover.
 
-    Verifies:
-
-    1. ``sky launch --num-nodes 2`` returns non-zero (it must not
-       succeed by co-locating the pods).
-    2. The failure is specifically the pod-anti-affinity scheduling
-       rejection (SkyPilot surfaces the verbatim kube-scheduler
-       ``FailedScheduling`` message, which contains "anti-affinity"),
-       not some unrelated error.
+    The single-node grep is strict (``didn't match.*anti-affinity``)
+    rather than the bare substring ``anti-affinity``: the looser form
+    also matched SkyPilot's debug dump of the generated pod spec
+    (``"podAntiAffinity":``), so a transient connection error
+    incidentally containing that field could pass the test for the
+    wrong reason — observed historically on the shared-API-server
+    pipeline.
     """
+    # Resolve which regime to exercise. Failing closed (treat as
+    # single-node) is the right default: that assertion is strictly
+    # stricter, so a misclassified multi-node pipeline still fails
+    # loudly rather than silently giving up coverage.
+    try:
+        nodes_info = sky.get(sky_sdk.kubernetes_node_info())
+        schedulable = sum(1 for n in nodes_info.node_info_dict.values()
+                          if n.is_ready and not n.is_cordoned)
+    except Exception:  # pylint: disable=broad-except
+        schedulable = 1
+    multi_node = schedulable > 1
+
     name = smoke_tests_utils.get_cluster_name()
     cfg = f'/tmp/sky-hostnet-multinode-{uuid.uuid4().hex[:12]}.yaml'
 
     # hostNetwork only. SkyPilot injects the per-cluster podAntiAffinity
-    # (mode b); on a single-node cluster that leaves the 2nd pod
-    # unschedulable.
+    # (mode b).
     write_cfg = (f'cat > {cfg} <<EOF\n'
                  f'kubernetes:\n'
                  f'  pod_config:\n'
@@ -172,35 +191,51 @@ def test_kubernetes_host_network_multi_node_same_node():
                  f'      hostNetwork: true\n'
                  f'EOF')
 
-    # One self-contained command: capture the launch, assert it failed,
-    # and assert it failed *for the anti-affinity reason* (so an
-    # unrelated failure — image pull, quota — doesn't spuriously pass).
-    # grep -iE "anti-?affinity" matches the kube-scheduler phrasings
-    # ("...didn't match pod anti-affinity rules", "antiaffinity").
-    expect_fail = (
-        f'set +e; '
-        f'OUT=$(sky launch -y -c {name} --infra kubernetes '
-        f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2 2>&1); '
-        f'RC=$?; set -e; '
-        f'echo "$OUT"; '
-        f'if [ $RC -eq 0 ]; then '
-        f'echo "FAIL: 2-node hostNetwork launch unexpectedly SUCCEEDED on '
-        f'single-node K8s; mode-b anti-affinity should have blocked it"; '
-        f'exit 1; fi; '
-        f'echo "$OUT" | grep -qiE "anti-?affinity" || {{ '
-        f'echo "FAIL: launch failed but NOT via the pod anti-affinity '
-        f'scheduling rule (unexpected failure reason)"; exit 1; }}; '
-        f'echo "OK: mode-b anti-affinity correctly rejected the 2-node '
-        f'hostNetwork cluster on single-node K8s"')
+    launch = (f'sky launch -y -c {name} --infra kubernetes '
+              f'--config {cfg} --num-nodes 2 --cpus 1 --memory 2')
+
+    if not multi_node:
+        assertion = (
+            f'set +e; OUT=$({launch} 2>&1); RC=$?; set -e; '
+            f'echo "$OUT"; '
+            f'if [ $RC -eq 0 ]; then '
+            f'echo "FAIL: 2-node hostNetwork launch unexpectedly SUCCEEDED '
+            f'on single-node K8s; mode-b anti-affinity should have blocked '
+            f'it"; exit 1; fi; '
+            f'echo "$OUT" | grep -qiE "didn.t match.*anti-?affinity" || {{ '
+            f'echo "FAIL: launch failed but NOT via the pod anti-affinity '
+            f'scheduling rule (unexpected failure reason)"; exit 1; }}; '
+            f'echo "OK: mode-b anti-affinity correctly rejected the 2-node '
+            f'hostNetwork cluster on single-node K8s"')
+    else:
+        # Read {.spec.nodeName} for every pod whose name contains the
+        # cluster name; sort -u | wc -l gives the unique-node count.
+        node_count = (f'{_kc(name)} get pods -o name 2>/dev/null '
+                      f'| grep {name} | while read p; do '
+                      f'{_kc(name)} get $p '
+                      f'-o jsonpath=\'{{.spec.nodeName}}{{"\\n"}}\'; '
+                      f'done | sort -u | grep -c .')
+        assertion = (
+            f'{launch} || {{ '
+            f'echo "FAIL: 2-node hostNetwork launch FAILED on multi-node '
+            f'K8s; mode-b should let pods spread across nodes"; exit 1; }}; '
+            f'NODES=$({node_count}); '
+            f'if [ "$NODES" -lt 2 ]; then '
+            f'echo "FAIL: head+worker landed on the same K8s node '
+            f'($NODES distinct nodes); mode-b anti-affinity should have '
+            f'spread them"; exit 1; fi; '
+            f'echo "OK: 2-node hostNetwork cluster spread across $NODES '
+            f'distinct K8s nodes (mode-b cross-node happy path)"')
 
     test = smoke_tests_utils.Test(
         'kubernetes_host_network_multi_node_same_node',
         [
             write_cfg,
-            expect_fail,
+            assertion,
         ],
         # Best-effort cleanup: a failed launch still leaves a cluster
-        # record (and the head pod that did schedule).
+        # record (and the head pod that did schedule); a successful
+        # multi-node launch leaves both pods.
         teardown=f'sky down -y {name}; rm -f {cfg}',
         timeout=10 * 60,
     )

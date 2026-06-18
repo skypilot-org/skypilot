@@ -197,3 +197,50 @@ def test_get_clusters_no_launch_status_reason_for_up(tmp_path, monkeypatch):
     assert len(match) == 1
     assert match[0]['status'] is status_lib.ClusterStatus.UP
     assert match[0].get('launch_status_reason') is None
+
+
+def test_get_cluster_events_multiple_types_merged_and_ordered(
+        tmp_path, monkeypatch):
+    """get_cluster_events accepts a list of types and merges them in one query,
+    ordered oldest-to-newest, with limit applied across the combined set."""
+    _fresh_db(tmp_path, monkeypatch)
+    cluster_hash = _add_cluster('c')
+
+    for reason, event_type, ts in [
+        ('Provisioning', global_user_state.ClusterEventType.STATUS_CHANGE, 100),
+        ('Launching (pulling)',
+         global_user_state.ClusterEventType.LAUNCH_PROGRESS, 200),
+        ('Cluster provisioned',
+         global_user_state.ClusterEventType.STATUS_CHANGE, 300),
+            # A DEBUG row that must be excluded by the type filter.
+        ('debug-noise', global_user_state.ClusterEventType.DEBUG, 250),
+    ]:
+        global_user_state.add_cluster_event('c',
+                                            new_status=None,
+                                            reason=reason,
+                                            event_type=event_type,
+                                            transitioned_at=ts)
+
+    both = [
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    ]
+    # Merged across both types, oldest-to-newest, DEBUG excluded.
+    assert global_user_state.get_cluster_events(cluster_name=None,
+                                                cluster_hash=cluster_hash,
+                                                event_type=both) == [
+                                                    'Provisioning',
+                                                    'Launching (pulling)',
+                                                    'Cluster provisioned'
+                                                ]
+    # A single type still behaves as before.
+    assert global_user_state.get_cluster_events(
+        cluster_name=None,
+        cluster_hash=cluster_hash,
+        event_type=global_user_state.ClusterEventType.LAUNCH_PROGRESS) == [
+            'Launching (pulling)'
+        ]
+    # limit keeps the most recent N across the combined set (still ASC).
+    assert global_user_state.get_cluster_events(
+        cluster_name=None, cluster_hash=cluster_hash, event_type=both,
+        limit=2) == ['Launching (pulling)', 'Cluster provisioned']
