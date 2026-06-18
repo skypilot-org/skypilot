@@ -815,8 +815,8 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
                                 waiting.message) else str(waiting)
                             unmasked = _unmask_crashloopbackoff_reason(
                                 container_status)
-                            reason_text = (unmasked if unmasked is not None
-                                           else (waiting.reason or 'Unknown'))
+                            reason_text = (unmasked if unmasked is not None else
+                                           (waiting.reason or 'Unknown'))
                             raise config_lib.KubernetesError(
                                 f'{reason_text}: {msg}')
                     terminated = container_status.state.terminated
