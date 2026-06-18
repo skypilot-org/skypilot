@@ -6,7 +6,7 @@ import os
 import pathlib
 import shutil
 import time
-from typing import List, Tuple
+from typing import List, Optional, Set, Tuple
 
 import anyio
 import filelock
@@ -17,6 +17,31 @@ from sky.server.blob import blob_storage as bs
 from sky.server.requests import executor
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _remove_dir_contents_except(root: pathlib.Path,
+                                keep: Set[pathlib.Path]) -> None:
+    """Remove everything under ``root`` except the paths in ``keep``.
+
+    ``root`` itself is never removed. Directories that contain a kept path
+    are recursed into (and so survive); any directory or file that does not
+    lead to a kept path is removed wholesale.
+    """
+    root = root.resolve()
+    if root in keep:
+        return
+    has_kept_descendant = any(root in path.parents for path in keep)
+    if not has_kept_descendant:
+        if root.is_dir() and not root.is_symlink():
+            shutil.rmtree(root, ignore_errors=True)
+        else:
+            try:
+                root.unlink()
+            except OSError:
+                pass
+        return
+    for child in root.iterdir():
+        _remove_dir_contents_except(child, keep)
 
 
 class LocalFilesystemBlobStorage(bs.BlobStorage):
@@ -112,8 +137,56 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         return users
 
     def reset_on_startup(self) -> None:
-        """Called on server startup to clean up ephemeral client state."""
-        logger.debug('clearing local API server client directory at '
-                     f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
-        shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
-                      ignore_errors=True)
+        """Reclaim ephemeral client state on server startup.
+
+        Historically this wiped the entire client directory. That is unsafe:
+        a file-mounts blob referenced by a non-terminal managed job must
+        survive a server restart, because the jobs controller re-resolves the
+        blob to stage file mounts when it recovers the job. Wiping it breaks
+        recovery with a ``Blob not found`` error.
+
+        Instead, preserve blobs that are still referenced -- reusing the same
+        ref-count as the periodic GC (``cleanup_unreferenced_file_mounts``):
+        the union of blobs referenced by active requests and by non-terminal
+        managed jobs -- and remove everything else (unreferenced blobs, stale
+        uploads, and per-user log/download staging).
+        """
+        client_dir = server_common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        logger.debug(
+            f'resetting local API server client directory at {client_dir}')
+        if not client_dir.exists():
+            return
+
+        # Imported here rather than at module scope to avoid an import cycle
+        # during server bootstrap; reset_on_startup runs once at startup, so
+        # the import cost is irrelevant.
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import state as managed_job_state
+        from sky.server.requests import requests as requests_lib
+        active_blob_ids: Optional[Set[str]]
+        try:
+            active_blob_ids = (
+                requests_lib.get_active_file_mounts_blob_ids() |
+                managed_job_state.get_active_file_mounts_blob_ids())
+        except Exception as e:  # pylint: disable=broad-except
+            # If we cannot determine which blobs are still referenced, preserve
+            # all of them: a leaked blob is reclaimed later by the periodic GC,
+            # but a wrongly-deleted blob breaks managed-job recovery.
+            logger.warning(
+                'Failed to query active file-mount blobs on startup; '
+                f'preserving all blobs. Error: {e}')
+            active_blob_ids = None
+
+        preserved: Set[pathlib.Path] = set()
+        for user_id in self.list_users():
+            for blob_id, _ in self.list_blob_ids(user_id):
+                if active_blob_ids is None or blob_id in active_blob_ids:
+                    preserved.add(
+                        self.get_target_dir(user_id, blob_id).resolve())
+
+        if not preserved:
+            # Nothing to preserve: keep the cheap blanket wipe.
+            shutil.rmtree(client_dir, ignore_errors=True)
+            return
+
+        _remove_dir_contents_except(client_dir, preserved)
