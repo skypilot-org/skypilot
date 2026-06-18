@@ -2422,8 +2422,9 @@ def get_clusters_from_history(
         if exclude_managed_clusters:
             # Treat NULL (rows predating the is_managed column) as not managed.
             query = query.filter(
-                sqlalchemy.or_(cluster_history_table.c.is_managed.is_(None),
-                               cluster_history_table.c.is_managed == 0))
+                sqlalchemy.or_(
+                    cluster_history_table.c.is_managed.is_(None),
+                    cluster_history_table.c.is_managed == int(False)))
         rows = query.all()
 
     usage_intervals_dict = {}
