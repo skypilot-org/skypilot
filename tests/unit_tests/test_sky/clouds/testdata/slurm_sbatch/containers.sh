@@ -4,7 +4,9 @@
 #SBATCH --error=/home/testuser/.sky_provision/slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --wait-all-nodes=1
-# Let the job be terminated rather than requeued implicitly.
+# Let the job be terminated rather than requeued implicitly. Users
+# can opt back in via slurm.sbatch_options.requeue=true (the directive
+# is appended after --no-requeue and Slurm honors the last-set value).
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16384M

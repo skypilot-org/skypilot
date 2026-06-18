@@ -594,6 +594,18 @@ def _create_virtual_instance(
                                                        partition_info,
                                                        partition)
 
+    # Resolved by clouds/slurm.py:_resolve_use_whole_node. When True,
+    # the provision sbatch omits --cpus-per-task and adds --exclusive,
+    # which is the combination required by the HyperPod auto-resume
+    # SPANK plugin and is the natural default on TaskPlugin=task/none
+    # clusters where per-task CPU subdivision isn't enforced anyway.
+    use_whole_node = bool(resources.get('use_whole_node', False))
+    if use_whole_node:
+        cpus_per_task_directive = '#SBATCH --exclusive'
+    else:
+        cpus_per_task_directive = (
+            f'#SBATCH --cpus-per-task={int(resources["cpus"])}')
+
     # Build the sbatch script
     gpu_directive = ''
     if accelerator_count > 0:
@@ -705,9 +717,11 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --error={_sbatch_log_path(sbatch_log_base_dir, '%j')}
 #SBATCH --nodes={num_nodes}
 #SBATCH --wait-all-nodes=1
-# Let the job be terminated rather than requeued implicitly.
+# Let the job be terminated rather than requeued implicitly. Users
+# can opt back in via slurm.sbatch_options.requeue=true (the directive
+# is appended after --no-requeue and Slurm honors the last-set value).
 #SBATCH --no-requeue
-#SBATCH --cpus-per-task={int(resources["cpus"])}
+{cpus_per_task_directive}
 {mem_directive}{gpu_directive}{extra_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.

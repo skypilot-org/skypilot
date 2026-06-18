@@ -19,8 +19,8 @@ class TestBuildCustomSrunArgs:
         assert _build_custom_srun_args({}) == ''
 
     def test_string_value(self):
-        assert _build_custom_srun_args({'cpu-bind': 'cores'}) == (
-            "--cpu-bind=cores")
+        assert _build_custom_srun_args({'cpu-bind': 'cores'
+                                       }) == ("--cpu-bind=cores")
 
     def test_numeric_value(self):
         assert _build_custom_srun_args({'auto-resume': 1}) == '--auto-resume=1'
@@ -90,12 +90,7 @@ class TestSrunConfigSchema:
         jsonschema.validate(instance=config, schema=schema)
 
     def test_valid_cloud_level(self):
-        self._validate(
-            {'slurm': {
-                'srun_options': {
-                    'auto-resume': 1,
-                }
-            }})
+        self._validate({'slurm': {'srun_options': {'auto-resume': 1,}}})
 
     def test_valid_cluster_level(self):
         self._validate({

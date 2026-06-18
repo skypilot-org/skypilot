@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 import unittest.mock as mock
 
@@ -961,6 +962,193 @@ class TestSrunOptionsPrecedence:
         assert result == {}
 
 
+class TestUseWholeNodeResolution:
+    """Resolution of ``slurm.use_whole_node`` across the four config levels
+    plus auto-detect from TaskPlugin.
+    """
+
+    FAKE_SSH_CONFIG = {
+        'hostname': '10.0.0.1',
+        'port': '22',
+        'user': 'slurm',
+        'identityfile': ['/home/user/.ssh/id_rsa'],
+    }
+
+    def _resolve(self,
+                 tmp_path,
+                 skypilot_config_dict,
+                 cluster_config_overrides=None,
+                 task_plugin_value: Optional[str] = None):
+        """Drive ``make_deploy_resources_variables`` and read ``use_whole_node``
+        from the returned ``deploy_vars``. Optionally stubs the TaskPlugin
+        lookup to exercise the auto-detect path.
+        """
+        from sky import skypilot_config
+        from sky.utils import yaml_utils
+
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text(yaml_utils.dump_yaml_str(skypilot_config_dict))
+
+        saved_global = skypilot_config._GLOBAL_CONFIG_PATH
+        saved_project = skypilot_config._PROJECT_CONFIG_PATH
+        saved_ctx = skypilot_config._global_config_context
+        try:
+            skypilot_config._GLOBAL_CONFIG_PATH = str(config_path)
+            skypilot_config._PROJECT_CONFIG_PATH = str(tmp_path /
+                                                       'nonexistent.yaml')
+            skypilot_config._global_config_context = (
+                skypilot_config.ConfigContext())
+            skypilot_config.reload_config()
+
+            cloud = slurm_cloud.Slurm()
+            mock_resources = mock.MagicMock(unsafe=True)
+            mock_resources.zone = 'gpu'
+            mock_resources.instance_type = '4CPU--16GB'
+            mock_resources.assert_launchable.return_value = mock_resources
+            mock_resources.extract_docker_image.return_value = None
+            mock_resources.cluster_config_overrides = (cluster_config_overrides
+                                                       or {})
+
+            region = mock.MagicMock()
+            region.name = 'mycluster'
+            zone_mock = mock.MagicMock()
+            zone_mock.name = 'gpu'
+
+            mock_ssh_config = mock.MagicMock()
+            mock_ssh_config.lookup.return_value = self.FAKE_SSH_CONFIG
+
+            with patch(
+                    'sky.clouds.slurm.slurm_utils.get_slurm_ssh_config',
+                    return_value=mock_ssh_config), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.get_partitions',
+                    return_value=['gpu', 'cpu']), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
+                    side_effect=lambda cluster, t, count=1, partition=None: t), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.get_task_plugin',
+                    return_value=task_plugin_value), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.get_slurm_nodes_info',
+                    return_value=[]):
+                deploy_vars = cloud.make_deploy_resources_variables(
+                    resources=mock_resources,
+                    cluster_name=mock.MagicMock(),
+                    region=region,
+                    zones=[zone_mock],
+                    num_nodes=1,
+                )
+            return deploy_vars['use_whole_node']
+        finally:
+            skypilot_config._GLOBAL_CONFIG_PATH = saved_global
+            skypilot_config._PROJECT_CONFIG_PATH = saved_project
+            skypilot_config._global_config_context = saved_ctx
+
+    def test_default_is_false_when_no_config_and_taskplugin_subdivides(
+            self, tmp_path):
+        # Auto-detect: cgroup → subdivision → use_whole_node defaults to False.
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={},
+                               task_plugin_value='task/cgroup,task/affinity')
+        assert result is False
+
+    def test_default_true_when_taskplugin_is_none(self, tmp_path):
+        # Auto-detect: task/none → no subdivision → defaults to True.
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={},
+                               task_plugin_value='task/none')
+        assert result is True
+
+    def test_default_true_when_taskplugin_reports_null(self, tmp_path):
+        # scontrol reports 'task/none' as '(null)' on some Slurm versions.
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={},
+                               task_plugin_value='(null)')
+        assert result is True
+
+    def test_default_false_when_taskplugin_unknown(self, tmp_path):
+        # Unreachable cluster / detection fails → conservative default.
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={},
+                               task_plugin_value=None)
+        assert result is False
+
+    def test_global_true_overrides_autodetect_false(self, tmp_path):
+        # Explicit global=True wins over auto-detect=False.
+        result = self._resolve(
+            tmp_path,
+            skypilot_config_dict={'slurm': {
+                'use_whole_node': True
+            }},
+            task_plugin_value='task/cgroup,task/affinity')
+        assert result is True
+
+    def test_global_false_overrides_autodetect_true(self, tmp_path):
+        # Explicit global=False wins over auto-detect=True.
+        result = self._resolve(
+            tmp_path,
+            skypilot_config_dict={'slurm': {
+                'use_whole_node': False
+            }},
+            task_plugin_value='task/none')
+        assert result is False
+
+    def test_cluster_overrides_global(self, tmp_path):
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={
+                                   'slurm': {
+                                       'use_whole_node': False,
+                                       'cluster_configs': {
+                                           'mycluster': {
+                                               'use_whole_node': True,
+                                           },
+                                       },
+                                   },
+                               },
+                               task_plugin_value='task/cgroup,task/affinity')
+        assert result is True
+
+    def test_partition_overrides_cluster(self, tmp_path):
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={
+                                   'slurm': {
+                                       'cluster_configs': {
+                                           'mycluster': {
+                                               'use_whole_node': False,
+                                               'partition_configs': {
+                                                   'gpu': {
+                                                       'use_whole_node': True,
+                                                   },
+                                               },
+                                           },
+                                       },
+                                   },
+                               },
+                               task_plugin_value='task/cgroup,task/affinity')
+        assert result is True
+
+    def test_task_yaml_overrides_all(self, tmp_path):
+        result = self._resolve(tmp_path,
+                               skypilot_config_dict={
+                                   'slurm': {
+                                       'use_whole_node': False,
+                                       'cluster_configs': {
+                                           'mycluster': {
+                                               'use_whole_node': False,
+                                           },
+                                       },
+                                   },
+                               },
+                               cluster_config_overrides={
+                                   'slurm': {
+                                       'use_whole_node': True,
+                                   },
+                               },
+                               task_plugin_value='task/cgroup,task/affinity')
+        assert result is True
+
+
 class TestSlurmProvisionTimeout:
     """Test conditional provision timeout logic in make_deploy_resources_variables.
 
@@ -1311,6 +1499,56 @@ class TestCreateVirtualInstance:
         written_script = self._run_and_capture_script(
             'test-cluster-no-container', config)
         assert_sbatch_matches_snapshot('basic', written_script)
+
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
+    def test_use_whole_node_swaps_cpus_per_task_for_exclusive(
+            self, mock_ssh_runner, mock_slurm_client, mock_get_partition_info,
+            mock_get_proctrack_type, mock_wait_for_job_nodes):
+        """When use_whole_node is true, the provision script must drop
+        ``--cpus-per-task`` and emit ``--exclusive`` instead. This is the
+        directive combination required for the HyperPod auto-resume SPANK
+        plugin and for any cluster running ``TaskPlugin=task/none``."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+                'provision_timeout': 300,
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'use_whole_node': True,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        written_script = self._run_and_capture_script('test-cluster-whole-node',
+                                                      config)
+        # The hardcoded line for cpus-per-task must be gone.
+        assert '#SBATCH --cpus-per-task=' not in written_script
+        # And replaced by --exclusive.
+        assert '#SBATCH --exclusive' in written_script
 
     @pytest.mark.parametrize('memory_gb,expected_mem_mb', [
         (0.5, 512),

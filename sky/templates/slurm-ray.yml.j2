@@ -51,6 +51,9 @@ available_node_types:
 {% if sbatch_options is defined and sbatch_options %}
       sbatch_options: {{sbatch_options | tojson}}
 {% endif %}
+{% if use_whole_node is defined and use_whole_node %}
+      use_whole_node: true
+{% endif %}
 
       # TODO: more configs that is required by the provisioner to create new
       # instances on the FluffyCloud:

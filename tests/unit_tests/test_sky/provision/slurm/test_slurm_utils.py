@@ -20,6 +20,34 @@ class TestFormatSlurmDuration:
         assert result == expected
 
 
+class TestIsTaskPluginEffectivelyNone:
+    """Test is_task_plugin_effectively_none() classification."""
+
+    @pytest.mark.parametrize(
+        'task_plugin,expected',
+        [
+            # Effectively "no subdivision" — all map to True.
+            ('task/none', True),
+            ('TASK/NONE', True),  # case-insensitive
+            ('(null)', True),  # scontrol's representation on some versions
+            ('none', True),
+            ('', True),  # explicitly empty
+            # Anything that enforces per-task pinning — False.
+            ('task/cgroup', False),
+            ('task/affinity', False),
+            ('task/cgroup,task/affinity', False),
+            ('task/affinity,task/cgroup', False),
+        ],
+    )
+    def test_classification(self, task_plugin, expected):
+        assert utils.is_task_plugin_effectively_none(task_plugin) is expected
+
+    def test_none_input_is_false(self):
+        # Unreachable cluster / detection failure should NOT default to
+        # "no subdivision" — that would be unsafe on shared clusters.
+        assert utils.is_task_plugin_effectively_none(None) is False
+
+
 class TestValidateSbatchTime:
     """Test validate_sbatch_time()."""
 

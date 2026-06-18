@@ -64,6 +64,61 @@ def _merge_slurm_options(
     return merged
 
 
+def _resolve_use_whole_node(
+    cluster: Optional[str],
+    partition: Optional[str],
+    cluster_config_overrides: Optional[Dict[str, Any]],
+) -> bool:
+    """Resolve ``slurm.use_whole_node`` across four config levels + auto-detect.
+
+    Precedence (highest first):
+      1. task-YAML ``cluster_config_overrides`` (``config.slurm.use_whole_node``)
+      2. partition-level
+      3. cluster-level
+      4. global
+      5. auto-detect from the cluster's ``TaskPlugin`` — if effectively
+         ``task/none`` (no per-task CPU subdivision enforcement), default
+         to ``True``; otherwise ``False``.
+
+    Returns ``False`` by default (the conservative choice for
+    cgroup-managed multi-tenant clusters).
+    """
+    # Highest precedence first: task-YAML cluster_config_overrides.
+    if cluster_config_overrides and cluster is not None:
+        task_value = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='slurm',
+            region=cluster,
+            keys=('use_whole_node',))
+        if task_value is not None:
+            return bool(task_value)
+    for keys in [
+        ('slurm', 'cluster_configs', cluster, 'partition_configs', partition,
+         'use_whole_node') if cluster and partition else None,
+        ('slurm', 'cluster_configs', cluster,
+         'use_whole_node') if cluster else None,
+        ('slurm', 'use_whole_node'),
+    ]:
+        if keys is None:
+            continue
+        value = skypilot_config.get_nested(keys, default_value=None)
+        if value is not None:
+            return bool(value)
+    # Auto-detect: default to True only if TaskPlugin is effectively
+    # task/none (no per-task subdivision enforcement). Failure to detect
+    # is treated as "subdivide" (safer default for shared clusters).
+    if cluster is not None:
+        try:
+            task_plugin = slurm_utils.get_task_plugin(cluster)
+            if slurm_utils.is_task_plugin_effectively_none(task_plugin):
+                return True
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Could not auto-detect TaskPlugin for {cluster}: '
+                         f'{common_utils.format_exception(e)}; defaulting '
+                         'use_whole_node=False')
+    return False
+
+
 @registry.CLOUD_REGISTRY.register
 class Slurm(clouds.Cloud):
     """Slurm."""
@@ -603,6 +658,38 @@ class Slurm(clouds.Cloud):
             resources.cluster_config_overrides)
         srun_options = _merge_slurm_options('srun_options', cluster, partition,
                                             resources.cluster_config_overrides)
+        # Resolve use_whole_node (explicit config > auto-detect from
+        # TaskPlugin > False). When True, the provision sbatch omits
+        # --cpus-per-task and adds --exclusive (required for the HyperPod
+        # auto-resume SPANK plugin and similar single-tenant patterns).
+        # Also rewrite displayed cpus/memory to match the chosen node so
+        # the optimizer reflects what the task actually receives.
+        use_whole_node = _resolve_use_whole_node(
+            cluster, partition, resources.cluster_config_overrides)
+        if use_whole_node:
+            # Rewrite cpus/memory to match the smallest cluster node that
+            # satisfies the request, since with --exclusive the task gets
+            # the full node regardless of --cpus-per-task. This keeps the
+            # optimizer's display honest about what the user actually
+            # gets. Falls through to the original (requested) values if
+            # we can't enumerate nodes.
+            try:
+                nodes = slurm_utils.get_slurm_nodes_info(cluster)
+                matching = [
+                    n for n in nodes
+                    if (partition is None or
+                        partition in n.partition.rstrip('*').split(',')) and
+                    n.cpus >= cpus and n.memory_gb >= mem
+                ]
+                if matching:
+                    smallest = min(matching,
+                                   key=lambda n: (n.cpus, n.memory_gb))
+                    cpus = float(smallest.cpus)
+                    mem = float(smallest.memory_gb)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'use_whole_node: could not enumerate nodes on '
+                             f'{cluster!r} to rewrite displayed resources: '
+                             f'{common_utils.format_exception(e)}')
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -632,6 +719,7 @@ class Slurm(clouds.Cloud):
             'image_id': image_id,
             'sbatch_options': sbatch_options,
             'srun_options': srun_options,
+            'use_whole_node': use_whole_node,
         }
 
         return deploy_vars
