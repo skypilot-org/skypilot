@@ -303,17 +303,22 @@ class FederationStats:
         """A compact 'port_forward=..s, federate=..' breakdown for logs.
 
         'incomplete' marks a phase that did not finish (the key signal on a
-        timeout: which phase blew the budget).
+        timeout: which phase blew the budget). This runs inside log calls, so
+        it must never raise: the byte fields are formatted defensively even
+        though federate_seconds is assigned last (so in practice they are
+        always set whenever federate_seconds is).
         """
         if self.port_forward_seconds is not None:
             pf = f'{self.port_forward_seconds:.2f}s'
         else:
             pf = 'incomplete'
         if self.federate_seconds is not None:
-            fed = (f'{self.federate_seconds:.2f}s, '
-                   f'body={self.body_bytes / _MB:.1f}MiB, '
-                   f'wire={self.wire_bytes / _MB:.2f}MiB, '
-                   f'enc={self.content_encoding}')
+            body = (f'{self.body_bytes / _MB:.1f}MiB'
+                    if self.body_bytes is not None else 'unknown')
+            wire = (f'{self.wire_bytes / _MB:.2f}MiB'
+                    if self.wire_bytes is not None else 'unknown')
+            fed = (f'{self.federate_seconds:.2f}s, body={body}, '
+                   f'wire={wire}, enc={self.content_encoding}')
         else:
             fed = 'incomplete'
         return f'port_forward={pf}, federate={fed}'

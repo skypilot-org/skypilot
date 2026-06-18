@@ -742,11 +742,10 @@ def _handle_federation_result(context: str, route: str, result: object,
         return
     if isinstance(result, Exception):
         metrics_utils.record_federation_outcome(context, route, 'error')
+        # format_exception already renders as '<ClassName>: <message>'.
         logger.error(
             f'Failed to get metrics for context {context} (route {route}): '
-            f'{type(result).__name__}: '
-            f'{common_utils.format_exception(result) or repr(result)} '
-            f'({stats.summary()})')
+            f'{common_utils.format_exception(result)} ({stats.summary()})')
         return
     if isinstance(result, BaseException):
         # Avoid changing behavior for non-Exception BaseExceptions like
