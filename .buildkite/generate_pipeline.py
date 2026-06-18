@@ -439,6 +439,10 @@ def _dump_pipeline_to_file(yaml_file_path: str,
     }
     if extra_env:
         default_env.update(extra_env)
+    # No test files matched the pattern — nothing to generate, skip silently.
+    if not pipelines:
+        print(f'No test files matched for {yaml_file_path}, skipping.')
+        return
     with open(yaml_file_path, 'w', encoding='utf-8') as file:
         file.write(GENERATED_FILE_HEAD)
         all_steps = []
@@ -453,10 +457,10 @@ def _dump_pipeline_to_file(yaml_file_path: str,
             word.capitalize() for word in re.split(r'[-_]', key))
 
         if not all_steps:
-            # Zero steps means pytest --collect-only found no matching tests
-            # for any test file.  This is almost always a misconfiguration
-            # (wrong cloud filter, unrecognised ARGS flag, missing env file,
-            # etc.) rather than a legitimate "nothing to run" outcome.
+            # Test files were found and processed, but pytest --collect-only
+            # matched 0 tests across all of them.  This is almost always a
+            # misconfiguration (wrong cloud filter, unrecognised ARGS flag,
+            # missing env-file, etc.) rather than a legitimate empty run.
             # Failing loudly here prevents the empty YAML from being uploaded
             # as a vacuous success — which would post a false "✅ passed" to
             # any CI notifiers while running zero tests.
