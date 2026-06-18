@@ -903,6 +903,35 @@ class TestRsyncTimeout:
         # Each attempt got a positive remaining budget.
         assert all(t is not None and t > 0 for t in calls)
 
+    def test_deadline_exhausted_before_first_attempt_raises_cleanly(
+            self) -> None:
+        """A non-positive timeout trips the deadline before any attempt runs.
+
+        This must raise a clean CommandError rather than UnboundLocalError
+        from referencing undefined returncode/stdout/stderr after the loop.
+        """
+        calls = []
+
+        def fake_run_with_log(command, *args, **kwargs):
+            calls.append(kwargs.get('timeout'))
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log), \
+             mock.patch.object(command_runner.time, 'sleep'):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(exceptions.CommandError) as exc_info:
+                runner.rsync('/tmp/src',
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False,
+                             timeout=0)
+
+        assert 'timed out' in str(exc_info.value).lower()
+        # No rsync attempt should have run.
+        assert calls == []
+
     def test_deadline_stops_retries_even_with_budget_for_max_retry(
             self) -> None:
         """The deadline caps total time even if max_retry is not exhausted."""

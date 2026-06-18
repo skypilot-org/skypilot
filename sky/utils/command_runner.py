@@ -543,7 +543,13 @@ class CommandRunner:
             if deadline is not None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    # The deadline is exhausted before this attempt could run.
+                    # Set the outputs to reflect the timeout so the post-loop
+                    # error handling has defined (and accurate) values.
                     timed_out = True
+                    returncode = 255
+                    stdout = ''
+                    stderr = f'rsync timed out after {timeout} seconds.'
                     break
                 # run_with_log expects an int; clamp to >=1 so we never pass 0,
                 # which would disable the timeout.
