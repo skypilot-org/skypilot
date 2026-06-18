@@ -26,22 +26,39 @@ def _remove_dir_contents_except(root: pathlib.Path,
     ``root`` itself is never removed. Directories that contain a kept path
     are recursed into (and so survive); any directory or file that does not
     lead to a kept path is removed wholesale.
+
+    Children are not path-resolved during traversal: a symlinked directory is
+    unlinked (the link removed) rather than followed and its target deleted.
     """
     root = root.resolve()
-    if root in keep:
-        return
-    has_kept_descendant = any(root in path.parents for path in keep)
-    if not has_kept_descendant:
-        if root.is_dir() and not root.is_symlink():
-            shutil.rmtree(root, ignore_errors=True)
-        else:
-            try:
-                root.unlink()
-            except OSError:
-                pass
-        return
-    for child in root.iterdir():
-        _remove_dir_contents_except(child, keep)
+    # Pre-compute the ancestors of every kept path for O(1) membership tests.
+    kept_ancestors = {ancestor for path in keep for ancestor in path.parents}
+
+    def _prune(path: pathlib.Path) -> None:
+        if path in keep:
+            return
+        if path not in kept_ancestors:
+            # Not on the path to any kept blob: remove it. Do not resolve()
+            # here -- a symlinked directory must be unlinked, not followed.
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+            return
+        try:
+            for child in path.iterdir():
+                _prune(child)
+        except OSError:
+            pass
+
+    try:
+        for child in root.iterdir():
+            _prune(child)
+    except OSError:
+        pass
 
 
 class LocalFilesystemBlobStorage(bs.BlobStorage):

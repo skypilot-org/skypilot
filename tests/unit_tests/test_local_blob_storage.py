@@ -51,6 +51,29 @@ def test_reset_on_startup_preserves_active_blobs(tmp_path, monkeypatch):
     assert client_dir.exists()
 
 
+def test_reset_on_startup_does_not_follow_symlinks(tmp_path, monkeypatch):
+    client_dir = tmp_path / 'clients'
+    _patch_client_dir(monkeypatch, client_dir)
+    active = _make_blob(client_dir, 'user1', 'active')
+
+    # An external directory that a symlink under the client dir points to. It
+    # must not be touched: the symlink should be unlinked, not followed.
+    external = tmp_path / 'external'
+    external.mkdir()
+    (external / 'important').write_text('do-not-delete')
+    link = client_dir / 'user1' / 'link'
+    link.symlink_to(external)
+
+    _patch_active(monkeypatch, requests=set(), jobs={'active'})
+
+    local_blob_storage.LocalFilesystemBlobStorage().reset_on_startup()
+
+    assert active.exists()
+    assert not link.exists()  # the symlink itself is removed
+    assert external.exists()  # ... but its target is untouched
+    assert (external / 'important').read_text() == 'do-not-delete'
+
+
 def test_reset_on_startup_honors_request_refs(tmp_path, monkeypatch):
     client_dir = tmp_path / 'clients'
     _patch_client_dir(monkeypatch, client_dir)
