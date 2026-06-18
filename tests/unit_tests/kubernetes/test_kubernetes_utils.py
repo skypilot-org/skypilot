@@ -21,6 +21,7 @@ from sky import exceptions
 from sky import models
 from sky.catalog import kubernetes_catalog
 from sky.provision.kubernetes import utils
+from sky.utils import annotations
 
 
 # Test for exception on permanent errors like 401 (Unauthorized)
@@ -530,6 +531,43 @@ users:
             # Clean up temporary files
             os.unlink(f1.name)
             os.unlink(f2.name)
+
+
+def test_get_default_volume_context_prefers_allowed_context():
+    """Default context for a volume must be an enabled allowed_context.
+
+    Regression test: `sky volumes apply` without --infra used to default to
+    the kubeconfig current/first context even when it was not one of the
+    configured allowed_contexts, producing a volume the optimizer could never
+    schedule on.
+    """
+    # The helper is request-cached; clear between cases to exercise each one.
+    # Current context is NOT in allowed_contexts: fall back to an allowed one.
+    annotations.clear_request_level_cache()
+    with patch('sky.provision.kubernetes.utils.'
+               'get_current_kube_config_context_name',
+               return_value='context-a'), \
+         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
+               return_value=['context-b']):
+        assert utils.get_default_volume_context() == 'context-b'
+
+    # Current context IS allowed: prefer it (preserves prior behavior).
+    annotations.clear_request_level_cache()
+    with patch('sky.provision.kubernetes.utils.'
+               'get_current_kube_config_context_name',
+               return_value='context-b'), \
+         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
+               return_value=['context-a', 'context-b']):
+        assert utils.get_default_volume_context() == 'context-b'
+
+    # No allowed contexts available: fall back to the current context.
+    annotations.clear_request_level_cache()
+    with patch('sky.provision.kubernetes.utils.'
+               'get_current_kube_config_context_name',
+               return_value='context-a'), \
+         patch('sky.clouds.Kubernetes.existing_allowed_contexts',
+               return_value=[]):
+        assert utils.get_default_volume_context() == 'context-a'
 
 
 def test_detect_gpu_label_formatter_invalid_label_skip():
