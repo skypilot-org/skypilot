@@ -2636,10 +2636,13 @@ class TestResolveRemoteSkyletLogPath:
         path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
 
         assert path == '/scratch/rt/.sky/skylet.log'
-        # Resolved with source_bashrc to match how skylet is started.
         _, kwargs = runner.run.call_args
+        # Resolved with source_bashrc to match how skylet is started.
         assert kwargs['source_bashrc'] is True
         assert kwargs['require_outputs'] is True
+        # Bounded by a connect timeout so an unreachable node fails fast.
+        assert kwargs['connect_timeout'] == (
+            debug_utils._SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
 
     def test_takes_last_non_empty_line(self):
         """bashrc banner/warning lines before the echo are ignored."""

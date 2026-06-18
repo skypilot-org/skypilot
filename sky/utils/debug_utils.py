@@ -758,6 +758,13 @@ def _dump_request_id_info(
     logger.debug('Exiting _dump_request_id_info')
 
 
+# Short connection timeout for the skylet-log-path resolution command. The
+# debug dump may run against many clusters, some of which are still
+# provisioning or otherwise unreachable; we want such a node to fail fast
+# rather than hang the dump waiting to connect.
+_SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT = 10
+
+
 def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
     """Resolve the absolute skylet log path on the head node.
 
@@ -771,9 +778,11 @@ def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
     ``source_bashrc`` environment that instance_setup uses to start skylet (see
     start_skylet_on_head_node), so it is correct for every runner.
 
-    Falls back to ``~/.sky/skylet.log`` if the resolution command fails; rsync
-    then handles a missing file best-effort. posixpath (not os.path) is used for
-    the fallback because this is a remote *nix path resolved on the cluster.
+    Bounded by a short connect timeout so an unreachable node (e.g. a cluster
+    still provisioning) fails fast instead of hanging the dump. Falls back to
+    ``~/.sky/skylet.log`` if the resolution command fails; rsync then handles a
+    missing file best-effort. posixpath (not os.path) is used for the fallback
+    because this is a remote *nix path resolved on the cluster.
     """
     default_path = posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
     # Mirror the shell form of the runtime dir (constants.SKY_RUNTIME_DIR) so
@@ -781,10 +790,12 @@ def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
     cmd = (f'echo "${{{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}:-$HOME}}/'
            f'{skylet_constants.SKYLET_LOG_FILE}"')
     try:
-        returncode, stdout, _ = runner.run(cmd,
-                                           require_outputs=True,
-                                           stream_logs=False,
-                                           source_bashrc=True)
+        returncode, stdout, _ = runner.run(
+            cmd,
+            require_outputs=True,
+            stream_logs=False,
+            source_bashrc=True,
+            connect_timeout=_SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to resolve skylet log path on cluster '
                      f'{cluster_name!r}, falling back to {default_path!r}: {e}')
