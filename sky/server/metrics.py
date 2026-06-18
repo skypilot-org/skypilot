@@ -737,7 +737,7 @@ def _handle_federation_result(context: str, route: str, result: object,
             f'Failed to get metrics for context {context} (route {route}): '
             f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
             f'({stats.summary()}); kubectl port-forward + /federate exceeded '
-            f"the per-context budget; this cluster's series are omitted from "
+            f'the per-context budget; series for this cluster are omitted from '
             f'this scrape')
         return
     if isinstance(result, Exception):
