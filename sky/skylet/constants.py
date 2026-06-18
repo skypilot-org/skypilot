@@ -563,6 +563,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'create_instance_kwargs'),
     ('slurm', 'sbatch_options'),
     ('slurm', 'srun_options'),
+    ('slurm', 'use_whole_node'),
     ('slurm', 'cpu_partition'),
     ('active_workspace',),
 ]

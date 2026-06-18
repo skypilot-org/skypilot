@@ -38,6 +38,8 @@ _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 # Proctrack type is highly unlikely to change.
 _SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
+
+_SLURM_TASK_PLUGIN_CACHE_TTL = 24 * 60 * 60
 # Pyxis plugin availability is unlikely to change frequently.
 _SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
 # FUSE availability is unlikely to change frequently.
@@ -175,6 +177,61 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
                          f'{common_utils.format_exception(e)}')
 
     return proctrack_type
+
+
+def get_task_plugin(cluster: str) -> Optional[str]:
+    """Get the TaskPlugin setting from Slurm configuration.
+
+    Returns the raw value (e.g. ``task/none`` or
+    ``task/cgroup,task/affinity``) or ``None`` if it cannot be
+    determined. Cached per cluster — TaskPlugin only changes via
+    slurm.conf edits and slurmctld restart, so a long TTL is fine.
+    """
+    cache_key = f'slurm:task_plugin:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm TaskPlugin found in cache ({cache_key})')
+        return cached
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    task_plugin = client.get_task_plugin()
+
+    if task_plugin is not None:
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, task_plugin,
+                time.time() + _SLURM_TASK_PLUGIN_CACHE_TTL)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache slurm task plugin for {cluster}: '
+                         f'{common_utils.format_exception(e)}')
+
+    return task_plugin
+
+
+def is_task_plugin_effectively_none(task_plugin: Optional[str]) -> bool:
+    """Return True iff the TaskPlugin value implies no per-task subdivision.
+
+    Slurm reports ``task/none`` as ``(null)`` in some versions of
+    ``scontrol show config``; both mean the same thing. Treat an
+    unknown / unreachable value as ``False`` (preserve subdivision
+    semantics by default — safer for shared clusters).
+    """
+    if task_plugin is None:
+        return False
+    value = task_plugin.strip().lower()
+    if value in ('(null)', 'none', 'task/none', ''):
+        return True
+    return False
 
 
 def _check_cluster_feature(

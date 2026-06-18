@@ -671,6 +671,29 @@ class SlurmClient:
             return match.group(1)
         return None
 
+    def get_task_plugin(self) -> Optional[str]:
+        """Get the TaskPlugin from Slurm configuration.
+
+        Returns:
+            The raw TaskPlugin value (e.g., 'task/none',
+            'task/cgroup,task/affinity', or '(null)' which Slurm reports
+            when TaskPlugin=task/none), or None if it cannot be
+            determined.
+
+        Note: ``scontrol show config`` reports ``task/none`` as ``(null)``
+        in newer Slurm versions. Callers should treat both as equivalent
+        when deciding whether per-task CPU subdivision is enforced.
+        """
+        cmd = 'scontrol show config | grep -i "^TaskPlugin"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.warning(f'Failed to get TaskPlugin: {stderr}')
+            return None
+        match = re.search(r'TaskPlugin\s*=\s*(\S+)', stdout)
+        if match:
+            return match.group(1)
+        return None
+
     def get_select_type_parameters(self) -> Optional[str]:
         """Get SelectTypeParameters from Slurm configuration.
 
