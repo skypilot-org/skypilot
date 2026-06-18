@@ -27,9 +27,14 @@ export const yamlGutterTheme = EditorView.theme({
     border: 'none',
     color: '#8c959f',
   },
+  // Fixed-width line-number column so the gutter doesn't jitter when the
+  // line count crosses 1 → 2 → 3 digits. Right-aligned within a 4em box
+  // (fits 3-digit numbers at 13px font without growing).
   '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 16px 0 16px',
-    minWidth: '3em',
+    padding: '0 16px 0 8px',
+    minWidth: '4em',
+    boxSizing: 'border-box',
+    textAlign: 'right',
   },
   '&.cm-focused': {
     outline: 'none',
