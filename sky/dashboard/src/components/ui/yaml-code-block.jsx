@@ -7,36 +7,20 @@ import { Prec } from '@codemirror/state';
 import { yaml } from '@codemirror/lang-yaml';
 import { syntaxHighlighting } from '@codemirror/language';
 import { getNonce } from '@/utils/csp';
-import { yamlHighlightStyle } from './yaml-editor';
+import {
+  yamlHighlightStyle,
+  yamlGutterTheme,
+  yamlTextCursorTheme,
+} from './yaml-editor';
 
-const editorTheme = EditorView.theme({
-  '&': {
-    height: '100%',
-    backgroundColor: '#f9fafb',
-  },
-  '.cm-scroller': {
-    minHeight: '100%',
-    overflow: 'auto',
-    backgroundColor: '#f9fafb',
-  },
-  '.cm-content': {
-    minHeight: '100%',
-    backgroundColor: '#f9fafb',
-    padding: '8px 0',
-  },
-  '.cm-gutters': {
-    backgroundColor: '#f3f4f6',
-    borderRight: '1px solid #e5e7eb',
-    color: '#9ca3af',
-    minHeight: '100%',
-  },
-  '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 12px 0 8px',
-    minWidth: '2.5em',
-  },
-  '&.cm-focused': {
-    outline: 'none',
-  },
+// In read-only mode, suppress CodeMirror's drawn caret so the viewer
+// doesn't look editable when focused. Selection backgrounds still render
+// (they're drawn by a separate layer). `!important` is required because
+// CodeMirror's base theme has a more-specific
+// `&.cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor { display: block }`
+// rule that re-enables the cursor on focus.
+const hideCaretTheme = EditorView.theme({
+  '.cm-cursor, .cm-cursor-primary': { display: 'none !important' },
 });
 
 export function YamlCodeBlock({
@@ -63,16 +47,17 @@ export function YamlCodeBlock({
         onChange={onChange}
         extensions={[
           yaml(),
-          editorTheme,
+          yamlGutterTheme,
+          ...(readOnly ? [hideCaretTheme] : [yamlTextCursorTheme]),
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
         ]}
-        editable={!readOnly}
+        readOnly={readOnly}
         height={fixed ? '100%' : undefined}
         maxHeight={fixed ? undefined : maxHeight}
         basicSetup={{
           lineNumbers: true,
-          foldGutter: true,
+          foldGutter: false,
           highlightActiveLineGutter: false,
           highlightActiveLine: false,
           indentOnInput: true,
