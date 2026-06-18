@@ -26,6 +26,7 @@ import collections
 import os
 import re
 import subprocess
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -154,7 +155,10 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--dependency', nargs='?', const='', default='all')
     parser.add_argument('--concurrency', type=int)
 
-    parsed_args, _ = parser.parse_known_args(args_list)
+    # pytest_native: args the generate_pipeline parser does not recognise
+    # (e.g. --no-resource-heavy).  They are conftest-registered pytest flags
+    # and must be forwarded to `pytest --collect-only` unchanged.
+    parsed_args, pytest_native = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
     # TODO(zpoint): get default clouds from the conftest.py
@@ -206,9 +210,19 @@ def _parse_args(args: Optional[str] = None):
     if parsed_args.dependency != 'all':
         space = ' ' if parsed_args.dependency else ''
         extra_args.append(f'--dependency{space}{parsed_args.dependency}')
+    # Cloud flags are conftest-registered; include them in extra_args so that
+    # they reach `pytest --collect-only` (some marks depend on which clouds
+    # are active).  They are already captured in default_clouds_to_run for
+    # Buildkite-step generation; adding them here is intentional duplication.
+    for cloud in all_clouds_in_smoke_tests:
+        if getattr(parsed_args, cloud, False):
+            extra_args.append(f'--{cloud}')
+    if parsed_args.generic_cloud:
+        extra_args.append(f'--generic-cloud {parsed_args.generic_cloud}')
 
     return (default_clouds_to_run, parsed_args.k, extra_args,
-            parsed_args.concurrency, parsed_args.env_file is not None)
+            parsed_args.concurrency, parsed_args.env_file is not None,
+            pytest_native)
 
 
 def _extract_marked_tests(
@@ -236,6 +250,16 @@ def _extract_marked_tests(
     # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # Exit code 5 means "no tests collected" — normal when a file has no
+    # matching tests for the requested clouds.  Any other non-zero code is a
+    # real error (e.g. unrecognised arguments, import failure) that would
+    # silently produce 0 matches and generate an empty pipeline.  Fail loudly
+    # so the build is visibly broken rather than a noop.
+    if output.returncode not in (0, 5):
+        print(f'ERROR: pytest collection failed (exit {output.returncode}) '
+              f'for {file_path}:\n{output.stderr}',
+              file=sys.stderr)
+        sys.exit(output.returncode)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
 
@@ -332,8 +356,16 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     steps = []
     generated_steps_set = set()
     (default_clouds_to_run, k_value, extra_args, concurrency,
-     has_env_file) = _parse_args(args)
-    function_cloud_map = _extract_marked_tests(test_file, args,
+     has_env_file, pytest_native) = _parse_args(args)
+    # Pass a clean arg string: extra_args (conftest-registered flags extracted
+    # from the generate_pipeline parser) + pytest_native (conftest-registered
+    # flags the generate_pipeline parser did not recognise).
+    # This excludes generate_pipeline-only flags (--concurrency,
+    # --submodule-base-branch, --dependency, --generic-cloud, --base-branch)
+    # that are not in older pinned conftests and would cause
+    # `pytest --collect-only` to exit with code 4, silently collecting 0 tests.
+    pytest_collect_args = ' '.join(extra_args + list(pytest_native))
+    function_cloud_map = _extract_marked_tests(test_file, pytest_collect_args,
                                                default_clouds_to_run, k_value,
                                                extra_args)
     concurrency_limit = None
