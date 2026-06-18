@@ -779,9 +779,7 @@ async def gpu_metrics() -> fastapi.Response:
     # One stats record per context, filled in by get_metrics_for_context even
     # if the task is later cancelled by the wait_for timeout — so the timeout
     # log can report how far the attempt got (port-forward vs. federate).
-    stats_list = [
-        metrics_utils.FederationStats() for _ in remote_contexts
-    ]
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(
@@ -824,9 +822,7 @@ async def endpoint_metrics() -> fastapi.Response:
     remote_contexts = [
         context for context in contexts if context != 'in-cluster'
     ]
-    stats_list = [
-        metrics_utils.FederationStats() for _ in remote_contexts
-    ]
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(

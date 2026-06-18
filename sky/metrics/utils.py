@@ -265,8 +265,7 @@ def record_federation_phase(context: str, route: str, phase: str,
             context=context, route=route, phase=phase).observe(seconds)
 
 
-def record_federation_payload(context: str, route: str,
-                              num_bytes: int) -> None:
+def record_federation_payload(context: str, route: str, num_bytes: int) -> None:
     """Records the decompressed federate payload size (non-blocking)."""
     if METRICS_ENABLED:
         SKY_APISERVER_FEDERATION_PAYLOAD_BYTES.labels(
@@ -641,9 +640,9 @@ GPU_METRICS_MATCH_PATTERNS = [
 ]
 
 
-async def get_metrics_for_context(
-        context: str,
-        stats: Optional[FederationStats] = None) -> str:
+async def get_metrics_for_context(context: str,
+                                  stats: Optional[FederationStats] = None
+                                 ) -> str:
     """Get GPU metrics for a single Kubernetes context.
     Args:
         context: Kubernetes context name
@@ -687,8 +686,7 @@ ENDPOINT_METRICS_MATCH_PATTERNS = [
 
 
 async def get_endpoint_metrics_for_context(
-        context: str,
-        stats: Optional[FederationStats] = None) -> str:
+        context: str, stats: Optional[FederationStats] = None) -> str:
     """Get Sky Endpoint serving-engine metrics for a single K8s context.
 
     Mirrors get_metrics_for_context() but federates the serving engines'
