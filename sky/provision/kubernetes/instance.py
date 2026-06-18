@@ -798,27 +798,37 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             init_reason: Optional[str] = None
             if container_statuses is not None:
                 for container_status in container_statuses:
-                    waiting = (container_status.state.waiting
-                               if container_status.state else None)
-                    if waiting is None:
+                    if not container_status.state:
                         continue
-                    if waiting.reason == 'PodInitializing':
-                        running_init = _check_init_containers(pod)
-                        if running_init is not None:
-                            name, idx, total = running_init
-                            init_reason = (f'init container {name!r} '
-                                           f'running ({idx}/{total})')
-                        else:
-                            init_reason = 'init container running'
-                    elif waiting.reason != 'ContainerCreating':
-                        msg = waiting.message if (
-                            waiting.message) else str(waiting)
-                        unmasked = _unmask_crashloopbackoff_reason(
-                            container_status)
-                        reason_text = (unmasked if unmasked is not None else
-                                       (waiting.reason or 'Unknown'))
+                    waiting = container_status.state.waiting
+                    if waiting is not None:
+                        if waiting.reason == 'PodInitializing':
+                            running_init = _check_init_containers(pod)
+                            if running_init is not None:
+                                name, idx, total = running_init
+                                init_reason = (f'init container {name!r} '
+                                               f'running ({idx}/{total})')
+                            else:
+                                init_reason = 'init container running'
+                        elif waiting.reason != 'ContainerCreating':
+                            msg = waiting.message if (
+                                waiting.message) else str(waiting)
+                            unmasked = _unmask_crashloopbackoff_reason(
+                                container_status)
+                            reason_text = (unmasked if unmasked is not None
+                                           else (waiting.reason or 'Unknown'))
+                            raise config_lib.KubernetesError(
+                                f'{reason_text}: {msg}')
+                    terminated = container_status.state.terminated
+                    if terminated is not None and terminated.exit_code != 0:
+                        reason_str = (terminated.reason if terminated.reason
+                                      else f'exit({terminated.exit_code})')
                         raise config_lib.KubernetesError(
-                            f'{reason_text}: {msg}')
+                            f'Container in pod {pod.metadata.name} '
+                            f'terminated with error while pod is still '
+                            f'pending: {reason_str}. Run '
+                            f'`sky logs --provision {cluster_name}` '
+                            'for more details.')
 
             # Init container reason wins over all event-based reasons,
             # since events can retain stale "Pulling image" entries long
