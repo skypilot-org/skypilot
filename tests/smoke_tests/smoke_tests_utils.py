@@ -871,8 +871,11 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── To submit a job:            sky exec test yaml_file
     # ├── To stop the cluster:        sky stop test
     # └── To teardown the cluster:    sky down test
-    # Reset s to remove any line with FutureWarning
-    's=$(echo "$s" | grep -v "FutureWarning") && '
+    # Reset s to drop transient warning lines that can interleave with the
+    # structured launch output and break the one-line-adjacency greps below:
+    # Python FutureWarning lines, and any server-emitted notice banner that is
+    # streamed back to the client prefixed with the warning glyph (⚠).
+    's=$(echo "$s" | grep -v "FutureWarning" | grep -v "⚠") && '
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
