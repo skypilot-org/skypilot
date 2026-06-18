@@ -888,9 +888,9 @@ def down(cluster_name: str,
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
 
-    # Record the event while the cluster row still exists, so its hash can be
-    # resolved (the row is deleted during teardown). There is no TERMINATED
-    # cluster status, so new_status is None. Mirrors stop() above.
+    # Record the event before teardown, while the cluster row still exists so
+    # its hash can be resolved (teardown deletes the row). There is no
+    # TERMINATED cluster status, so new_status is None.
     global_user_state.add_cluster_event(
         cluster_name, None, 'Cluster was terminated by user.',
         global_user_state.ClusterEventType.STATUS_CHANGE)

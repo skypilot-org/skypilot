@@ -28,8 +28,9 @@ def test_down_records_termination_event(monkeypatch):
     # Track call order: the event must be recorded before teardown removes the
     # cluster row.
     order = []
-    add_event.side_effect = lambda *a, **k: order.append('event')
-    backend.teardown.side_effect = lambda *a, **k: order.append('teardown')
+    add_event.side_effect = lambda *args, **kwargs: order.append('event')
+    backend.teardown.side_effect = lambda *args, **kwargs: order.append(
+        'teardown')
 
     core.down(cluster_name)
 
