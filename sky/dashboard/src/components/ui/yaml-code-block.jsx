@@ -11,9 +11,12 @@ import { yamlHighlightStyle, yamlGutterTheme } from './yaml-editor';
 
 // In read-only mode, suppress CodeMirror's drawn caret so the viewer
 // doesn't look editable when focused. Selection backgrounds still render
-// (they're drawn by a separate layer).
+// (they're drawn by a separate layer). `!important` is required because
+// CodeMirror's base theme has a more-specific
+// `&.cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor { display: block }`
+// rule that re-enables the cursor on focus.
 const hideCaretTheme = EditorView.theme({
-  '.cm-cursor, .cm-cursor-primary': { display: 'none' },
+  '.cm-cursor, .cm-cursor-primary': { display: 'none !important' },
 });
 
 export function YamlCodeBlock({
