@@ -519,6 +519,10 @@ class MountConfig:
     """
     # Mount as read-only.
     read_only: Optional[bool] = None
+    # Extra CLI flags forwarded verbatim to ``hf-mount`` (Hugging Face stores
+    # only; ignored by every other store). Each element is one shell token,
+    # e.g. ``['--cache-dir', '/mnt/nvme/hf-cache', '--advanced-writes']``.
+    hf_mount_args: Optional[List[str]] = None
 
     def to_yaml_config(self) -> Dict[str, Any]:
         """Serialize non-None fields to a dict for YAML round-tripping."""
@@ -5932,12 +5936,19 @@ class HuggingFaceStore(AbstractStore):
             return None
         return [f'{self._bucket_sub_path.rstrip("/")}/*']
 
-    def mount_command(self, mount_path: str, read_only: bool = False) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      read_only: bool = False,
+                      hf_mount_args: Optional[List[str]] = None) -> str:
         """Returns a command to mount the HF bucket/repo at ``mount_path``.
 
         Uses the ``hf-mount`` NFS backend. The token file is expected to be
         available on the remote host (it is synced via
         ``huggingface.get_credential_file_mounts``).
+
+        ``hf_mount_args`` are extra ``hf-mount`` flags (from
+        ``config.mount.hf_mount_args``) forwarded verbatim to the daemon,
+        e.g. ``--cache-dir`` / ``--cache-size`` / ``--advanced-writes``.
         """
         install_cmd = mounting_utils.get_hf_mount_install_cmd()
         mount_cmd = mounting_utils.get_hf_mount_cmd(
@@ -5946,7 +5957,8 @@ class HuggingFaceStore(AbstractStore):
             _bucket_sub_path=self._bucket_sub_path,
             read_only=read_only,
             mode='repo' if self.is_repo else 'bucket',
-            revision=self._revision)
+            revision=self._revision,
+            extra_args=hf_mount_args)
         version_check_cmd = mounting_utils.get_hf_mount_version_check_cmd()
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
