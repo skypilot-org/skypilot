@@ -219,6 +219,13 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # Whether the cluster was launched by a controller (managed job or
+    # service). Mirrors the `is_managed` column on the clusters table so that
+    # history queries (e.g. the dashboard's cost report) can filter out
+    # controller-backed clusters even after they are terminated, since at that
+    # point the clusters table row is gone and the join can no longer supply
+    # the flag.
+    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
 )
 
 
@@ -929,6 +936,7 @@ def add_or_update_cluster(cluster_name: str,
             region=region,
             zone=zone,
             node_names=node_names,
+            is_managed=int(is_managed),
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -951,6 +959,7 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
+                cluster_history_table.c.is_managed: int(is_managed),
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -2322,7 +2331,8 @@ def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
-        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -2337,6 +2347,9 @@ def get_clusters_from_history(
               specified, rows matching either are returned (logical OR).
               Note that a single cluster name can map to multiple history
               records when a name is reused across launches.
+        exclude_managed_clusters: If True, exclude clusters launched by a
+              controller (managed jobs and services). Rows recorded before the
+              is_managed column existed are treated as not managed.
 
     Returns:
         List of cluster records with history information.
@@ -2406,6 +2419,11 @@ def get_clusters_from_history(
                 cluster_history_table.c.name.in_(cluster_names))
         if identifier_filters:
             query = query.filter(sqlalchemy.or_(*identifier_filters))
+        if exclude_managed_clusters:
+            # Treat NULL (rows predating the is_managed column) as not managed.
+            query = query.filter(
+                sqlalchemy.or_(cluster_history_table.c.is_managed.is_(None),
+                               cluster_history_table.c.is_managed == 0))
         rows = query.all()
 
     usage_intervals_dict = {}

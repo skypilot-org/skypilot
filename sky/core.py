@@ -396,11 +396,11 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(
-        days: Optional[int] = None,
-        dashboard_summary_response: bool = False,
-        cluster_hashes: Optional[List[str]] = None,
-        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = None,
+                dashboard_summary_response: bool = False,
+                cluster_hashes: Optional[List[str]] = None,
+                cluster_names: Optional[List[str]] = None,
+                exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -449,6 +449,10 @@ def cost_report(
             provided, rows matching either are returned (logical OR). Note
             that a single cluster name may map to multiple history records
             when the name is reused across launches.
+        exclude_managed_clusters: If True, exclude clusters launched by a
+            controller (managed jobs and services). Used by the dashboard so
+            that clusters backing managed jobs do not show up in the cluster
+            history view.
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
@@ -464,7 +468,8 @@ def cost_report(
         days=days,
         abbreviate_response=abbreviate_response,
         cluster_hashes=cluster_hashes,
-        cluster_names=cluster_names)
+        cluster_names=cluster_names,
+        exclude_managed_clusters=exclude_managed_clusters)
     logger.debug(
         f'{len(cluster_reports)} clusters found from history with {days} days.')
 

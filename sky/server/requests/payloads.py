@@ -983,6 +983,10 @@ class CostReportBody(RequestBody):
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False
+    # Exclude clusters launched by a controller (managed jobs and services).
+    # Used by the dashboard so that clusters backing managed jobs do not show
+    # up in the cluster history view.
+    exclude_managed_clusters: bool = False
 
 
 class CreateDebugDumpBody(RequestBody):
