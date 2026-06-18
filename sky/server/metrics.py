@@ -752,8 +752,10 @@ def _handle_federation_result(context: str, route: str, result: object,
         # KeyboardInterrupt/SystemExit: re-raise them.
         raise result
     metrics_utils.record_federation_outcome(context, route, 'success')
-    logger.info(f'Federated metrics for context {context} (route {route}): '
-                f'{stats.summary()}')
+    # debug: one line per context per scrape; the timeout/error paths above
+    # log at error level, and the Prometheus metrics capture this regardless.
+    logger.debug(f'Federated metrics for context {context} (route {route}): '
+                 f'{stats.summary()}')
     # The three guards above leave only the success case: a metrics-text str.
     assert isinstance(result, str)
     all_metrics.append(result)
