@@ -1083,6 +1083,15 @@ def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
             'nested/exclude_subdir/test.sh',  # Directory excluded
         ]
 
+        # For .gitignore, also test negation patterns (e.g., !important.log).
+        # Negation only works for .gitignore (via git ls-files); rsync's
+        # dir-merge filter used by .skyignore treats all patterns as excludes.
+        if ignore_file == constants.GIT_IGNORE_FILE:
+            files += [
+                'important.log',  # Negated: excluded by *.log, kept by !important.log
+                'keep_dir/important.log',  # Same negation in subdirectory
+            ]
+
         # Create directories
         for dir_name in dirs:
             os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
@@ -1093,7 +1102,7 @@ def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(f'Content for {file_path}')
 
-        # Create .skyignore file
+        # Create ignore file
         ignore_content = """
 # Exclude specific files
 exclude.py
@@ -1102,6 +1111,11 @@ exclude.py
 # Exclude directories
 /exclude_dir
 /nested/exclude_subdir
+"""
+        if ignore_file == constants.GIT_IGNORE_FILE:
+            ignore_content += """
+# Negate: keep important.log despite *.log
+!important.log
 """
         with open(os.path.join(temp_dir, ignore_file), 'w',
                   encoding='utf-8') as f:
@@ -1115,7 +1129,16 @@ exclude.py
             # Test with sky launch
             f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --workdir {temp_dir} {yaml_path}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded
+        ]
 
+        # For .gitignore, verify negation patterns work on the cluster.
+        if ignore_file == constants.GIT_IGNORE_FILE:
+            test_commands.append(
+                f'sky exec {name} -- '
+                f'"test -f ~/sky_workdir/important.log && '
+                f'test -f ~/sky_workdir/keep_dir/important.log"')
+
+        test_commands += [
             # Test with sky jobs launch
             f'sky jobs launch -y -n {jobs_name} --infra {generic_cloud} --workdir {temp_dir} {yaml_path}',
             smoke_tests_utils.

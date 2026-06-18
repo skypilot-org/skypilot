@@ -3,7 +3,9 @@
 from contextlib import suppress
 import os
 import select
+import shlex
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -405,6 +407,139 @@ def test_kubernetes_runner_rsync_does_not_set_exec_container_envvar_by_default(
         runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
 
     assert 'SKYPILOT_K8S_EXEC_CONTAINER=' not in captured['command']
+
+
+def test_rsync_up_uses_git_excludes_for_gitignore_negation() -> None:
+    captured = {}
+
+    def fake_run_with_log(command: str, *args, **kwargs):
+        captured['command'] = command
+        for token in shlex.split(command):
+            if token.startswith('--exclude-from='):
+                exclude_path = token.split('=', 1)[1]
+                captured['exclude_path'] = exclude_path
+                with open(exclude_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                # File is NUL-delimited (--from0); split and drop trailing empty
+                captured['excluded_files'] = content.split('\0')[:-1]
+                break
+        return 0, '', ''
+
+    with tempfile.TemporaryDirectory() as source, \
+            tempfile.TemporaryDirectory() as target:
+        scripts_dir = os.path.join(source, 'scripts')
+        os.makedirs(scripts_dir)
+        with open(os.path.join(scripts_dir, 'entrypoint.sh'),
+                  'w',
+                  encoding='utf-8') as f:
+            f.write('#!/bin/sh\necho ok\n')
+        with open(os.path.join(scripts_dir, 'secret.txt'),
+                  'w',
+                  encoding='utf-8') as f:
+            f.write('secret\n')
+        with open(os.path.join(source, '.gitignore'), 'w',
+                  encoding='utf-8') as f:
+            f.write('scripts/*\n!scripts/entrypoint.sh\n')
+
+        subprocess.run(['git', 'init'], cwd=source, check=True)
+        subprocess.run(['git', 'add', 'scripts/entrypoint.sh'],
+                       cwd=source,
+                       check=True)
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(source, target, up=True, stream_logs=False)
+
+    assert command_runner.RSYNC_FILTER_GITIGNORE not in captured['command']
+    assert '--from0' in captured['command']
+    assert captured['excluded_files'] == ['scripts/secret.txt']
+    assert not os.path.exists(captured['exclude_path'])
+
+
+def test_rsync_up_uses_gitignore_negation_outside_git_repo() -> None:
+    captured = {}
+
+    def fake_run_with_log(command: str, *args, **kwargs):
+        captured['command'] = command
+        for token in shlex.split(command):
+            if token.startswith('--exclude-from='):
+                exclude_path = token.split('=', 1)[1]
+                captured['exclude_path'] = exclude_path
+                with open(exclude_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                # File is NUL-delimited (--from0); split and drop trailing empty
+                captured['excluded_files'] = content.split('\0')[:-1]
+                break
+        return 0, '', ''
+
+    with tempfile.TemporaryDirectory() as source, \
+            tempfile.TemporaryDirectory() as target:
+        scripts_dir = os.path.join(source, 'scripts')
+        os.makedirs(scripts_dir)
+        with open(os.path.join(scripts_dir, 'entrypoint.sh'),
+                  'w',
+                  encoding='utf-8') as f:
+            f.write('#!/bin/sh\necho ok\n')
+        with open(os.path.join(scripts_dir, 'secret.txt'),
+                  'w',
+                  encoding='utf-8') as f:
+            f.write('secret\n')
+        with open(os.path.join(source, '.gitignore'), 'w',
+                  encoding='utf-8') as f:
+            f.write('scripts/*\n!scripts/entrypoint.sh\n')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(source, target, up=True, stream_logs=False)
+
+    assert command_runner.RSYNC_FILTER_GITIGNORE not in captured['command']
+    assert '--from0' in captured['command']
+    assert captured['excluded_files'] == ['scripts/secret.txt']
+    assert not os.path.exists(captured['exclude_path'])
+
+
+def test_rsync_up_nul_delimited_with_multiple_excludes() -> None:
+    """Verifies the exclude file is NUL-delimited when multiple files match."""
+    captured = {}
+
+    def fake_run_with_log(command: str, *args, **kwargs):
+        captured['command'] = command
+        for token in shlex.split(command):
+            if token.startswith('--exclude-from='):
+                exclude_path = token.split('=', 1)[1]
+                with open(exclude_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                captured['excluded_files'] = content.split('\0')[:-1]
+                break
+        return 0, '', ''
+
+    with tempfile.TemporaryDirectory() as source, \
+            tempfile.TemporaryDirectory() as target:
+        # Create multiple files that will be excluded
+        with open(os.path.join(source, '.gitignore'), 'w',
+                  encoding='utf-8') as f:
+            f.write('*.log\n*.tmp\n!keep.log\n')
+
+        for name in ['a.log', 'b.log', 'keep.log', 'c.tmp', 'keep.py']:
+            with open(os.path.join(source, name), 'w', encoding='utf-8') as f:
+                f.write('content')
+
+        subprocess.run(['git', 'init'], cwd=source, check=True)
+        subprocess.run(['git', 'add', 'keep.log'], cwd=source, check=True)
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(source, target, up=True, stream_logs=False)
+
+    assert '--from0' in captured['command']
+    excluded = sorted(captured['excluded_files'])
+    assert excluded == ['a.log', 'b.log', 'c.tmp']
 
 
 def test_get_pod_primary_container_prefers_ray_node() -> None:

@@ -369,22 +369,134 @@ temp/
         assert os.path.join('submod', 'data.txt') in norm_excluded_files
 
 
-def test_get_excluded_files_no_git():
+def test_get_excluded_files_non_git_dir():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create .gitignore but don't initialize git
         with open(os.path.join(temp_dir, '.gitignore'), 'w') as f:
-            f.write('*.pyc\n')
+            f.write('*.pyc\n!important.pyc\n')
 
-        with mock.patch('sky.data.storage_utils.logger') as mock_logger:
+        for filename in ['test.pyc', 'important.pyc', 'test.py']:
+            with open(os.path.join(temp_dir, filename), 'w') as f:
+                f.write('content')
+
+        excluded_files = storage_utils.get_excluded_files_from_gitignore(
+            temp_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+        assert 'test.pyc' in norm_excluded_files
+        assert 'important.pyc' not in norm_excluded_files
+        assert 'test.py' not in norm_excluded_files
+
+
+def test_get_excluded_files_non_git_dir_nested_gitignore():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        subdir = os.path.join(temp_dir, 'subdir')
+        os.makedirs(subdir)
+        with open(os.path.join(subdir, '.gitignore'), 'w') as f:
+            f.write('*.tmp\n')
+        with open(os.path.join(subdir, 'ignored.tmp'), 'w') as f:
+            f.write('content')
+        with open(os.path.join(subdir, 'kept.txt'), 'w') as f:
+            f.write('content')
+
+        excluded_files = storage_utils.get_excluded_files_from_gitignore(
+            temp_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+        assert os.path.join('subdir', 'ignored.tmp') in norm_excluded_files
+        assert os.path.join('subdir', 'kept.txt') not in norm_excluded_files
+
+
+def test_get_excluded_files_non_git_dir_ignores_global_gitignore():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        source_dir = os.path.join(temp_dir, 'source')
+        os.makedirs(source_dir)
+        global_ignore_path = os.path.join(temp_dir, 'global-ignore')
+        git_config_path = os.path.join(temp_dir, 'gitconfig')
+        with open(global_ignore_path, 'w') as f:
+            f.write('*.global\n')
+        with open(git_config_path, 'w') as f:
+            f.write(f'[core]\n\texcludesFile = {global_ignore_path}\n')
+        with open(os.path.join(source_dir, '.gitignore'), 'w') as f:
+            f.write('*.local\n')
+
+        for filename in ['ignored.global', 'ignored.local', 'kept.txt']:
+            with open(os.path.join(source_dir, filename), 'w') as f:
+                f.write('content')
+
+        with mock.patch.dict(os.environ,
+                             {'GIT_CONFIG_GLOBAL': git_config_path}):
             excluded_files = storage_utils.get_excluded_files_from_gitignore(
-                temp_dir)
+                source_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
 
-        assert excluded_files == []
-        mock_logger.warning.assert_called_once()
-        assert '.gitignore file will be ignored' in mock_logger.warning.call_args[
-            0][0]
-        assert storage_utils._USE_SKYIGNORE_HINT in mock_logger.warning.call_args[
-            0][0]
+        assert 'ignored.local' in norm_excluded_files
+        assert 'ignored.global' not in norm_excluded_files
+        assert 'kept.txt' not in norm_excluded_files
+
+
+def test_get_excluded_files_non_git_dir_ignores_template_dir():
+    """Ensures init.templateDir cannot leak patterns via .git/info/exclude."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        source_dir = os.path.join(temp_dir, 'source')
+        os.makedirs(source_dir)
+
+        # Create a git template that populates .git/info/exclude
+        template_dir = os.path.join(temp_dir, 'git-template')
+        info_dir = os.path.join(template_dir, 'info')
+        os.makedirs(info_dir)
+        with open(os.path.join(info_dir, 'exclude'), 'w') as f:
+            f.write('*.secret\n')
+
+        git_config_path = os.path.join(temp_dir, 'gitconfig')
+        with open(git_config_path, 'w') as f:
+            f.write(f'[init]\n\ttemplateDir = {template_dir}\n')
+
+        with open(os.path.join(source_dir, '.gitignore'), 'w') as f:
+            f.write('*.local\n')
+
+        for filename in ['leaked.secret', 'ignored.local', 'kept.txt']:
+            with open(os.path.join(source_dir, filename), 'w') as f:
+                f.write('content')
+
+        with mock.patch.dict(os.environ, {
+                'GIT_CONFIG_GLOBAL': git_config_path,
+                'GIT_CONFIG_NOSYSTEM': '1'
+        }):
+            excluded_files = storage_utils.get_excluded_files_from_gitignore(
+                source_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+        assert 'ignored.local' in norm_excluded_files
+        # The templateDir's exclude pattern should NOT leak through
+        assert 'leaked.secret' not in norm_excluded_files
+        assert 'kept.txt' not in norm_excluded_files
+
+
+def test_get_excluded_files_git_repo_uses_global_gitignore():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        source_dir = os.path.join(temp_dir, 'source')
+        global_ignore_path = os.path.join(temp_dir, 'global-ignore')
+        git_config_path = os.path.join(temp_dir, 'gitconfig')
+        os.makedirs(source_dir)
+        subprocess.run(['git', 'init'], cwd=source_dir, check=True)
+        with open(global_ignore_path, 'w') as f:
+            f.write('*.global\n')
+        with open(git_config_path, 'w') as f:
+            f.write(f'[core]\n\texcludesFile = {global_ignore_path}\n')
+
+        for filename in ['ignored.global', 'kept.txt']:
+            with open(os.path.join(source_dir, filename), 'w') as f:
+                f.write('content')
+
+        with mock.patch.dict(os.environ,
+                             {'GIT_CONFIG_GLOBAL': git_config_path}):
+            excluded_files = storage_utils.get_excluded_files_from_gitignore(
+                source_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+        assert 'ignored.global' in norm_excluded_files
+        assert 'kept.txt' not in norm_excluded_files
 
 
 def test_get_excluded_files_git_not_installed():
