@@ -33,7 +33,6 @@ import zlib
 import aiofiles
 import anyio
 import fastapi
-from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import jwt as pyjwt
 import starlette.background
@@ -2277,7 +2276,7 @@ async def get_expanded_request_id(request_id: str) -> str:
 
 
 # === API server related APIs ===
-@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/api/get')
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     # Validate request_id prefix matches a single request.
@@ -2606,7 +2605,7 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/dashboard_config', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/dashboard_config')
 async def dashboard_config() -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
@@ -2628,7 +2627,7 @@ async def dashboard_config() -> Dict[str, Any]:
     return {'external_links': sanitized}
 
 
-@app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/api/plugins')
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
     plugin_infos = []
