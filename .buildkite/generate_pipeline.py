@@ -226,8 +226,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--generic-cloud {parsed_args.generic_cloud}')
 
     return (default_clouds_to_run, parsed_args.k, extra_args,
-            parsed_args.concurrency, parsed_args.env_file is not None,
-            pytest_native)
+            parsed_args.concurrency, parsed_args.env_file
+            is not None, pytest_native)
 
 
 def _extract_marked_tests(
@@ -261,11 +261,12 @@ def _extract_marked_tests(
     # silently produce 0 matches and generate an empty pipeline.  Fail loudly
     # so the build is visibly broken rather than a noop.
     if output.returncode not in (0, 5):
-        print(f'ERROR: pytest collection failed (exit {output.returncode}) '
-              f'for {file_path}:\n'
-              f'STDOUT:\n{output.stdout}\n'
-              f'STDERR:\n{output.stderr}',
-              file=sys.stderr)
+        print(
+            f'ERROR: pytest collection failed (exit {output.returncode}) '
+            f'for {file_path}:\n'
+            f'STDOUT:\n{output.stdout}\n'
+            f'STDERR:\n{output.stderr}',
+            file=sys.stderr)
         sys.exit(output.returncode)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
@@ -362,8 +363,8 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
-    (default_clouds_to_run, k_value, extra_args, concurrency,
-     has_env_file, pytest_native) = _parse_args(args)
+    (default_clouds_to_run, k_value, extra_args, concurrency, has_env_file,
+     pytest_native) = _parse_args(args)
     # Pass a clean arg string: extra_args (conftest-registered flags extracted
     # from the generate_pipeline parser) + pytest_native (conftest-registered
     # flags the generate_pipeline parser did not recognise).
