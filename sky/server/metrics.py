@@ -27,6 +27,7 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.utils import annotations
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -715,6 +716,51 @@ async def gpu_metrics_debug() -> dict:
     }
 
 
+def _handle_federation_result(context: str, route: str, result: object,
+                              stats: metrics_utils.FederationStats,
+                              all_metrics: List[str]) -> None:
+    """Classifies one federation task result and records its outcome.
+
+    On success appends the metrics text; on failure logs a readable, per-
+    cluster message that names the context and includes the port-forward vs.
+    /federate timing breakdown (so a timeout shows which phase blew the
+    budget). Records the per-context outcome counter. Re-raises non-Exception
+    BaseExceptions (KeyboardInterrupt/SystemExit) to preserve prior behavior.
+
+    All work here is synchronous and non-blocking — no awaits, no I/O beyond
+    logging — so it cannot hang the gather loop.
+    """
+    # asyncio.TimeoutError is an Exception subclass, so check it first.
+    if isinstance(result, asyncio.TimeoutError):
+        metrics_utils.record_federation_outcome(context, route, 'timeout')
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
+            f'({stats.summary()}); kubectl port-forward + /federate exceeded '
+            f'the per-context budget; series for this cluster are omitted from '
+            f'this scrape')
+        return
+    if isinstance(result, Exception):
+        metrics_utils.record_federation_outcome(context, route, 'error')
+        # format_exception already renders as '<ClassName>: <message>'.
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'{common_utils.format_exception(result)} ({stats.summary()})')
+        return
+    if isinstance(result, BaseException):
+        # Avoid changing behavior for non-Exception BaseExceptions like
+        # KeyboardInterrupt/SystemExit: re-raise them.
+        raise result
+    metrics_utils.record_federation_outcome(context, route, 'success')
+    # debug: one line per context per scrape; the timeout/error paths above
+    # log at error level, and the Prometheus metrics capture this regardless.
+    logger.debug(f'Federated metrics for context {context} (route {route}): '
+                 f'{stats.summary()}')
+    # The three guards above leave only the success case: a metrics-text str.
+    assert isinstance(result, str)
+    all_metrics.append(result)
+
+
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
@@ -728,34 +774,27 @@ async def gpu_metrics() -> fastapi.Response:
     annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
-    successful_contexts = 0
 
     remote_contexts = [
         context for context in contexts if context != 'in-cluster'
     ]
+    # One stats record per context, filled in by get_metrics_for_context even
+    # if the task is later cancelled by the wait_for timeout — so the timeout
+    # log can report how far the attempt got (port-forward vs. federate).
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(
-                metrics_utils.get_metrics_for_context(context),
+                metrics_utils.get_metrics_for_context(context, stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
-            )) for context in remote_contexts
+            )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(
-                f'Failed to get metrics for context {remote_contexts[i]}: '
-                f'{result}')
-        elif isinstance(result, BaseException):
-            # Avoid changing behavior for non-Exception BaseExceptions
-            # like KeyboardInterrupt/SystemExit: re-raise them.
-            raise result
-        else:
-            metrics_text = result
-            all_metrics.append(metrics_text)
-            successful_contexts += 1
+        _handle_federation_result(remote_contexts[i], 'gpu-metrics', result,
+                                  stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)
 
@@ -785,25 +824,21 @@ async def endpoint_metrics() -> fastapi.Response:
     remote_contexts = [
         context for context in contexts if context != 'in-cluster'
     ]
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(
-                metrics_utils.get_endpoint_metrics_for_context(context),
+                metrics_utils.get_endpoint_metrics_for_context(context,
+                                                               stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
-            )) for context in remote_contexts
+            )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(f'Failed to get endpoint metrics for context '
-                         f'{remote_contexts[i]}: {result}')
-        elif isinstance(result, BaseException):
-            raise result
-        else:
-            metrics_text = result
-            all_metrics.append(metrics_text)
+        _handle_federation_result(remote_contexts[i], 'endpoints-metrics',
+                                  result, stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)
 
