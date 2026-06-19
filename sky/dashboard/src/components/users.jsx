@@ -3329,14 +3329,9 @@ function ServiceAccountTokensView({
                       {!token.expires_at ? (
                         'Never'
                       ) : new Date(token.expires_at * 1000) < new Date() ? (
-                        <CustomTooltip
-                          content={new Date(token.expires_at * 1000).toLocaleString()}
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border-b border-dotted border-red-300 cursor-help">
-                            Expired {formatDistance(new Date(token.expires_at * 1000), new Date(), { addSuffix: true })}
-                          </span>
-                        </CustomTooltip>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          Expired {formatDistance(new Date(token.expires_at * 1000), new Date(), { addSuffix: true })}
+                        </span>
                       ) : (
                         <TimestampWithTooltip
                           date={new Date(token.expires_at * 1000)}
