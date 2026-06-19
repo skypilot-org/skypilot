@@ -660,7 +660,7 @@ class RayCodeGen(TaskCodeGen):
                 name_str = '{task_name},' if {task_name!r} != None else 'task,'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
             else: # Single-node or multi-node task on multi-node cluster
-                idx_in_cluster = cluster_ips_to_node_id.get(ip, {gang_scheduling_id!r})
+                idx_in_cluster = cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id) + {gang_scheduling_id!r})
                 if idx_in_cluster == 0:
                     node_name = 'head'
                 else:
