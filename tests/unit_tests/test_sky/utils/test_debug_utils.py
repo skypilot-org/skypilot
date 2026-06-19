@@ -2624,6 +2624,80 @@ class TestCollectClusterSkyletLog:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'c/skylet_log'
 
+    def test_init_rsync_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, a (non-23) rsync failure is expected and is
+        debug-logged, not recorded as a dump error."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_init_get_runners_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, an unreachable node (no runners yet) is
+        expected and not recorded."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('not up yet')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_up_rsync_failure_is_recorded(self, tmp_path):
+        """For an UP cluster, a (non-23) rsync failure is genuinely worth
+        surfacing and is recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_exception_message_falls_back_to_type_name(self, tmp_path):
+        """A recorded error never has a blank message: an exception whose
+        str() is empty falls back to the exception type name."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['error'] == 'RuntimeError'
+
 
 class TestResolveRemoteSkyletLogPath:
     """Tests for the _resolve_remote_skylet_log_path helper."""

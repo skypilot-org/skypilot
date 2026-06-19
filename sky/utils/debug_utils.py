@@ -815,7 +815,8 @@ def _collect_cluster_skylet_log(
         cluster_name: str,
         cluster_dir: str,
         handle: Any,
-        errors: Optional[List[Dict[str, str]]] = None) -> None:
+        errors: Optional[List[Dict[str, str]]] = None,
+        status: Optional['status_lib.ClusterStatus'] = None) -> None:
     """Rsync the head node's skylet log into the cluster dump dir.
 
     Skylet runs only on the head node (see
@@ -823,21 +824,40 @@ def _collect_cluster_skylet_log(
     command runner (runners[0] is always the head; ClusterInfo.ip_tuples()
     guarantees head-first ordering). The log path is resolved on the remote node
     (see _resolve_remote_skylet_log_path) to honor a relocated SKY_RUNTIME_DIR.
-    Best-effort: a missing log or any failure is recorded in ``errors`` and
-    never aborts the dump.
+
+    Best-effort: the dump is never aborted. For an INIT cluster, collection
+    failures are *expected* (the node may not be reachable or provisioned yet),
+    so they are logged at debug level rather than recorded as dump errors --
+    otherwise a fleet with some always-launching clusters would fill ``errors``
+    with benign connection-refused noise. For other statuses a failure is
+    genuinely worth surfacing, so it is recorded in ``errors``.
     """
-    try:
-        runners = handle.get_command_runners()
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to get command runners for cluster '
-                       f'{cluster_name}: {e}')
+    # INIT clusters are expected to sometimes be unreachable; don't treat a
+    # collection failure as a real dump error in that case.
+    expected_failure = (status == status_lib.ClusterStatus.INIT)
+
+    def _record_failure(message: str, exc: BaseException) -> None:
+        # str(exc) is empty for some exceptions (e.g. FetchClusterInfoError);
+        # fall back to the type name so the entry is never blank.
+        detail = str(exc) or type(exc).__name__
+        if expected_failure:
+            logger.debug(f'{message} (expected for {status} cluster '
+                         f'{cluster_name!r}): {detail}')
+            return
+        logger.warning(f'{message}: {detail}')
         if errors is not None:
             errors.append({
                 'component': 'clusters',
                 'resource': f'{cluster_name}/skylet_log',
-                'error': str(e),
+                'error': detail,
                 'traceback': _full_traceback()
             })
+
+    try:
+        runners = handle.get_command_runners()
+    except Exception as e:  # pylint: disable=broad-except
+        _record_failure(
+            f'Failed to get command runners for cluster {cluster_name}', e)
         return
 
     if not runners:
@@ -858,25 +878,11 @@ def _collect_cluster_skylet_log(
         if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
             logger.debug(f'No skylet log found on cluster {cluster_name!r}')
         else:
-            logger.warning(f'Failed to rsync skylet log for cluster '
-                           f'{cluster_name}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'clusters',
-                    'resource': f'{cluster_name}/skylet_log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
+            _record_failure(
+                f'Failed to rsync skylet log for cluster {cluster_name}', e)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to collect skylet log for cluster '
-                       f'{cluster_name}: {e}')
-        if errors is not None:
-            errors.append({
-                'component': 'clusters',
-                'resource': f'{cluster_name}/skylet_log',
-                'error': str(e),
-                'traceback': _full_traceback()
-            })
+        _record_failure(
+            f'Failed to collect skylet log for cluster {cluster_name}', e)
 
 
 def _dump_cluster_info(cluster_names: Set[str],
@@ -988,7 +994,7 @@ def _dump_cluster_info(cluster_names: Set[str],
 
         if status != status_lib.ClusterStatus.STOPPED and handle is not None:
             _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
-                                        errors)
+                                        errors, status)
         else:
             logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
                          f'(status={status})')
