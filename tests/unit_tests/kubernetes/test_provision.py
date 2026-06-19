@@ -3262,3 +3262,106 @@ class TestConfigureRuntimeClass:
                                           nvidia_runtime_exists=True,
                                           needs_gpus_nvidia=False)
         assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'
+
+
+def _make_event(reason, message):
+    """Build a fake Kubernetes event with a real timestamp."""
+    import datetime
+    event = mock.MagicMock()
+    event.reason = reason
+    event.message = message
+    event.metadata.creation_timestamp = datetime.datetime(2024, 1, 1, 0, 0, 0)
+    return event
+
+
+def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch):
+    """`sky stop` on Kubernetes must delete pods/services but never PVCs."""
+    core_api_mock = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: core_api_mock)
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+    head_pod = mock.MagicMock()
+    head_pod.metadata.name = 'test-cluster-head'
+    monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
+                        lambda *a, **k: {'test-cluster-head': head_pod})
+    monkeypatch.setattr(instance, '_is_head', lambda pod: True)
+    monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                        lambda fn, items, n: [fn(i) for i in items])
+
+    instance.stop_instances('test-cluster-on-cloud',
+                            provider_config={'namespace': 'default'})
+
+    # Pods are deleted ...
+    assert core_api_mock.delete_namespaced_pod.called
+    # ... but the PersistentVolumeClaim is retained for restart.
+    assert not core_api_mock.delete_namespaced_persistent_volume_claim.called
+
+
+def test_stop_instances_high_availability_raises(monkeypatch):
+    """Stopping an HA (Deployment-backed) cluster is not supported."""
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: True)
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={'namespace': 'default'})
+
+
+def test_pod_missing_reason_classifies_evicted(monkeypatch):
+    """A pod `Evicted` event (survives the pod) is surfaced as the cause."""
+    from sky import global_user_state
+    evicted = _make_event('Evicted', 'The node was low on resource: memory.')
+    monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **k: [evicted])
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: mock.MagicMock())
+    monkeypatch.setattr(global_user_state, 'add_cluster_event',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_events', lambda *a, **k: [
+            '[kubernetes pod test-pod] Evicted The node was low on resource: '
+            'memory.'
+        ])
+
+    reason = instance._get_pod_missing_reason('ctx', 'ns', 'test-cluster',
+                                              'test-pod', True)
+    assert reason is not None
+    assert 'Evicted' in reason
+
+
+def test_pod_missing_reason_classifies_system_oom(monkeypatch):
+    """A node `SystemOOM` event (kernel OOM, survives the pod) is surfaced."""
+    from sky import global_user_state
+    scheduled = _make_event('Scheduled',
+                            'Successfully assigned ns/test-pod to node-1')
+    monkeypatch.setattr(instance, '_get_pod_events',
+                        lambda *a, **k: [scheduled])
+    system_oom = _make_event('SystemOOM',
+                             'System OOM encountered, victim process: python')
+    core_api_mock = mock.MagicMock()
+    core_api_mock.list_namespaced_event.return_value.items = [system_oom]
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: core_api_mock)
+    monkeypatch.setattr(global_user_state, 'add_cluster_event',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(
+        global_user_state, 'get_cluster_events', lambda *a, **k: [
+            '[kubernetes node node-1] SystemOOM System OOM encountered, '
+            'victim process: python'
+        ])
+
+    reason = instance._get_pod_missing_reason('ctx', 'ns', 'test-cluster',
+                                              'test-pod', True)
+    assert reason is not None
+    assert 'SystemOOM' in reason

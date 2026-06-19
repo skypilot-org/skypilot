@@ -1582,6 +1582,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             type.value for type in kubernetes_enums.KubernetesAutoscalerType
         ],
     },
+    # Allow `sky stop` on Kubernetes. This is "destructive": stopping deletes
+    # the pod, so any state not on a PersistentVolume is lost. Restart
+    # recreates the pod and reattaches the cluster's PVC(s).
+    'allow_unmanaged_cluster_destructive_stop': {
+        'type': 'boolean',
+    },
     'high_availability': {
         'type': 'object',
         'required': [],

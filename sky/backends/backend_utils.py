@@ -2373,6 +2373,37 @@ def _query_cluster_status_via_cloud_api(
     return node_status_dict
 
 
+def _kubernetes_pod_loss_reason(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',) -> Optional[str]:
+    """Best-effort reason why a Kubernetes cluster's pods disappeared.
+
+    Returns a human-readable reason derived from the pods'/nodes' Kubernetes
+    events (e.g. an eviction or node-loss message), or None if no specific
+    cause can be recovered -- common once the pod object is fully gone, e.g. a
+    container OOMKill, whose signal is lost with the pod. As a side effect, the
+    underlying query records the pods'/nodes' Kubernetes events as cluster
+    events, surfacing them on the dashboard's cluster events page.
+    """
+    try:
+        ray_config = global_user_state.get_cluster_yaml_dict(
+            handle.cluster_yaml)
+        node_status_dict = provision_lib.query_instances(
+            repr(handle.launched_resources.cloud),
+            handle.cluster_name,
+            handle.cluster_name_on_cloud,
+            ray_config['provider'],
+            non_terminated_only=False)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to query pod-loss reason for '
+                     f'{handle.cluster_name!r}: {e}')
+        return None
+    reasons = sorted(
+        {reason for _, reason in node_status_dict.values() if reason})
+    if not reasons:
+        return None
+    return '; '.join(reasons)
+
+
 def _query_cluster_info_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> provision_common.ClusterInfo:
@@ -3116,6 +3147,56 @@ def _update_cluster_status(
             cluster_name,
             include_user_info=include_user_info,
             summary_response=summary_response)
+
+    # Kubernetes clusters delete their pods on stop, so a cloud query returns
+    # no nodes. Unlike VM clouds -- which still report a STOPPED instance --
+    # an empty result is ambiguous between "stopped" and "terminated". When
+    # destructive stops are enabled for the cluster
+    # (`kubernetes.allow_unmanaged_cluster_destructive_stop`), treat a pod-less
+    # cluster as STOPPED rather than tearing it down, so the retained
+    # PersistentVolumes survive and the cluster can be restarted with
+    # `sky start`. This covers
+    # both clusters we explicitly stopped and clusters whose pods vanished
+    # unexpectedly (e.g. OOM with restartPolicy=Never, eviction, node loss).
+    # The entire behavior is gated behind the feature flag.
+    if to_terminate and isinstance(launched_resources.cloud, clouds.Kubernetes):
+        allow_unmanaged_cluster_destructive_stop = (
+            skypilot_config.get_effective_region_config(
+                cloud='kubernetes',
+                region=handle.launched_resources.region,
+                keys=('allow_unmanaged_cluster_destructive_stop',),
+                default_value=False))
+        if allow_unmanaged_cluster_destructive_stop:
+            if record['status'] != status_lib.ClusterStatus.STOPPED:
+                # Pods vanished while the cluster was running. Record the
+                # transition for visibility (surfaced on the dashboard's
+                # cluster events page) and stop the cluster instead of
+                # terminating it. Include the detected cause when available
+                # (e.g. an eviction/node-loss reason); a container OOMKill
+                # often leaves no recoverable signal once the pod is gone.
+                pod_loss_reason = _kubernetes_pod_loss_reason(handle)
+                cause = (pod_loss_reason
+                         if pod_loss_reason else 'e.g. OOM, eviction, or '
+                         'node loss')
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    status_lib.ClusterStatus.STOPPED,
+                    f'Kubernetes pods are no longer present ({cause}). '
+                    'Stopping the cluster instead of terminating it; '
+                    'persistent volumes are retained so it can be restarted '
+                    'with `sky start`.',
+                    global_user_state.ClusterEventType.STATUS_CHANGE,
+                    nop_if_duplicate=True)
+                backend = backends.CloudVmRayBackend()
+                backend.post_teardown_cleanup(handle,
+                                              terminate=False,
+                                              purge=False)
+            # Already STOPPED: leave the record (and its retained PVCs /
+            # generated YAML) intact.
+            return global_user_state.get_cluster_from_name(
+                cluster_name,
+                include_user_info=include_user_info,
+                summary_response=summary_response)
 
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()

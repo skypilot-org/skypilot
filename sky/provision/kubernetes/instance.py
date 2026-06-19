@@ -1718,7 +1718,49 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    raise NotImplementedError()
+    """Stop a Kubernetes cluster by deleting its pods and services.
+
+    Unlike `terminate_instances`, this retains the cluster's
+    PersistentVolumeClaim(s): only the pods (and their services) are deleted,
+    so any state on a persistent volume survives and is reattached when the
+    cluster is restarted with `sky start`.
+
+    Note: a pod's ephemeral (non-PV) filesystem is lost on stop. Enabled only
+    when `kubernetes.allow_unmanaged_cluster_destructive_stop` is set in the
+    SkyPilot config
+    (gated in `Kubernetes._unsupported_features_for_resources`).
+    """
+    assert provider_config is not None, cluster_name_on_cloud
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+
+    # High-availability clusters are backed by a Deployment that would
+    # immediately recreate any deleted pod, so stopping is not meaningful here.
+    if is_high_availability_cluster_by_kubectl(cluster_name_on_cloud, context,
+                                               namespace):
+        raise NotImplementedError(
+            'Stopping high-availability Kubernetes clusters is not supported.')
+
+    pods = kubernetes_utils.filter_pods(namespace, context,
+                                        ray_tag_filter(cluster_name_on_cloud),
+                                        None)
+
+    def _stop_pod_thread(pod_info):
+        pod_name, pod = pod_info
+        if _is_head(pod) and worker_only:
+            return
+        # `_terminate_node` deletes the pod and its services but never deletes
+        # PersistentVolumeClaims, which is exactly the stop semantics we want.
+        logger.debug(f'stop_instances: deleting pod {pod_name}')
+        _terminate_node(namespace, context, pod_name, _is_head(pod))
+
+    subprocess_utils.run_in_parallel(_stop_pod_thread, list(pods.items()),
+                                     _NUM_THREADS)
+
+    if not worker_only:
+        # Fallback service cleanup by label selector, in case pods were
+        # already gone. PVCs are intentionally left intact.
+        _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
 def _delete_services(name_prefix: str,
@@ -2869,6 +2911,16 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             _record_failure_reason('pod was evicted by taint manager', 2)
         elif event.startswith('DeletingNode '):
             _record_failure_reason(event[len('DeletingNode '):], 3)
+        elif event.startswith('Evicted '):
+            # Pod evicted under node resource pressure (e.g. memory). Unlike a
+            # container cgroup OOMKill, this Event survives the pod, so it is
+            # recoverable here. Keep the full message (it names the resource).
+            _record_failure_reason(event, 4)
+        elif event.startswith(('SystemOOM ', 'OOMKilling ')):
+            # Node-level (kernel) OOM killer fired. Emitted as a Node event
+            # that outlives the pod, so it is recoverable even after the pod
+            # is gone -- the most decisive cause when present.
+            _record_failure_reason(event, 5)
     return failure_reason
 
 

@@ -261,10 +261,26 @@ class Kubernetes(clouds.Cloud):
         else:
             contexts = [context]
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
-            'Stopping clusters is not supported on Kubernetes.')
+            'Stopping clusters is not supported on Kubernetes. To enable it, '
+            'set `kubernetes.allow_unmanaged_cluster_destructive_stop: true` '
+            'in your SkyPilot '
+            'config. Note: stopping deletes the pod, so any state not on a '
+            'persistent volume is lost.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
         for context in contexts:
+            # Allow `sky stop` if the destructive-stop flag is enabled for the
+            # context. The pod is deleted on stop; only PersistentVolume-backed
+            # state survives and is reattached on restart.
+            allow_unmanaged_cluster_destructive_stop = (
+                skypilot_config.get_effective_region_config(
+                    cloud=cls._REPR.lower(),
+                    region=context,
+                    keys=('allow_unmanaged_cluster_destructive_stop',),
+                    default_value=False))
+            if allow_unmanaged_cluster_destructive_stop:
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.STOP, None)
             # Allow spot instances if supported by the cluster
             try:
                 # Run spot label check and network type detection concurrently
