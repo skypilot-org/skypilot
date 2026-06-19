@@ -6421,7 +6421,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 read_only = bool(storage_obj.mount_config and
                                  storage_obj.mount_config.read_only)
-                mount_cmd = store.mount_command(dst, read_only=read_only)
+                mount_cmd = store.mount_command(
+                    dst, read_only=read_only, mount_options=storage_obj.mount_options)
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
