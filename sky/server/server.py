@@ -61,6 +61,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
+from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -3554,6 +3555,15 @@ if __name__ == '__main__':
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_download_tmp()))
         threading.Thread(target=background.run_forever, daemon=True).start()
+
+        # Snapshot a clean copy of os.environ BEFORE spawning workers and
+        # before any per-request env mutation can happen. Used when
+        # spawning consolidation-mode controllers so they don't inherit
+        # the client request's env vars (e.g. SKYPILOT_API_SERVER_ENDPOINT).
+        # The same snapshot is forwarded to workers via initargs (see
+        # executor.start) and to coroutine-path requests running in this
+        # same process.
+        clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
 

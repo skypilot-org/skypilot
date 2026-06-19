@@ -393,6 +393,10 @@ def _consolidated_launch(
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
+    # a clean server env on the subprocess by default to keep per-request
+    # env pollution from leaking into the long-lived controller process
+    # tree. See LocalProcessCommandRunner.run for details.
     backend.run_on_head(local_handle, run_script, log_path=log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle

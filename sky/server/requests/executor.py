@@ -28,7 +28,7 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
 
 import psutil
 import setproctitle
@@ -40,6 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import clean_env as clean_env_module
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -161,7 +162,8 @@ class RequestQueue:
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
-def executor_initializer(proc_group: str):
+def executor_initializer(proc_group: str,
+                         clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     # Load plugins for executor process.
@@ -170,6 +172,13 @@ def executor_initializer(proc_group: str):
     # Same rationale as in sky.server.uvicorn.Server.run: reap this
     # executor's prometheus multiproc files when it exits.
     metrics_lib.register_multiproc_cleanup_atexit()
+    # The main API server process captures its env at startup and forwards
+    # it via initargs (see RequestWorker.run). Adopt that snapshot directly
+    # so the worker doesn't depend on its own spawn-time os.environ, which
+    # for a lazy-spawned burst worker could reflect a coroutine-path
+    # request mid-pollution in the main process.
+    if clean_env is not None:
+        clean_env_module.set_clean_server_env(clean_env)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -377,11 +386,14 @@ class RequestWorker:
         # the overhead of forking a new process for each request, which can be
         # about 1s delay.
         try:
+            # Pass the main process's clean env snapshot so workers (incl.
+            # lazy-spawned burst workers) record the same pre-pollution env
+            # regardless of when they spawn.
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group,))
+                initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)

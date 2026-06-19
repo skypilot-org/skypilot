@@ -23,6 +23,7 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import auth_utils
@@ -1763,7 +1764,25 @@ class LocalProcessCommandRunner(CommandRunner):
             skip_num_lines: int = 0,
             run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Use subprocess to run the command."""
+        """Use subprocess to run the command.
+
+        Unlike the SSH/Slurm runners, this spawns the command in-process via
+        subprocess.Popen — so without intervention the child inherits the
+        caller's os.environ. Inside an API-server worker that environ may have
+        been mutated mid-request by override_request_env_and_config, which is
+        how SKYPILOT_API_SERVER_ENDPOINT and other client-side SKYPILOT_-
+        prefixed vars used to leak into long-lived consolidation-mode
+        controllers. We pass an explicit `env` to subprocess.Popen so the child
+        bash (and everything it spawns: scheduler, nohup controller) starts
+        from the server's pre-pollution snapshot. controller_envs that the
+        caller wants on top are already prepended to the run script as
+        `export` lines, so they layer in correctly.
+
+        In non-API-server contexts (e.g. a Slurm skylet running locally on
+        a Slurm node) no snapshot has been captured;
+        get_clean_server_env() returns None and subprocess.Popen falls
+        back to inheriting os.environ — which is the right default there.
+        """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
         command_str = self._get_command_to_run(
@@ -1806,6 +1825,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
+                                    env=clean_env_module.get_clean_server_env(),
                                     **kwargs)
 
     @timeline.event
