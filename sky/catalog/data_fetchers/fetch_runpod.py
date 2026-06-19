@@ -248,17 +248,25 @@ USEFUL_COLUMNS = [
     'GpuInfo',
 ]
 
-# Mapping of regions to their availability zones
-# TODO: Investigate if these can be found from the API in an automated way
-#       currently there is little documentation or API to obtain them.
+# Mapping of regions to their availability zones.
+# The full list is from RunPod's API, you can get it with the
+# `dataCenters` query at https://api.runpod.io/graphql. Keep this in
+# sync when RunPod adds or removes datacenters.
+# TODO: this could be fetched automatically at catalog build time.
 REGION_ZONES = {
-    'CA': ['CA-MTL-1', 'CA-MTL-2', 'CA-MTL-3'],
+    'AU': ['OC-AU-1'],
+    'CA': ['CA-MTL-1', 'CA-MTL-2', 'CA-MTL-3', 'CA-MTL-4'],
     'CZ': ['EU-CZ-1'],
-    'IS': ['EUR-IS-1', 'EUR-IS-2', 'EUR-IS-3'],
+    'DK': ['EU-DK-1'],
+    'FR': ['EU-FR-1'],
+    'IN': ['AP-IN-1'],
+    'IS': ['EUR-IS-1', 'EUR-IS-2', 'EUR-IS-3', 'EUR-IS-4', 'EUR-IS-5'],
+    'JP': ['AP-JP-1'],
     'NL': ['EU-NL-1'],
-    'NO': ['EU-SE-1'],
+    'NO': ['EUR-NO-1', 'EUR-NO-2'],
     'RO': ['EU-RO-1'],
-    'SE': ['EU-SE-1'],
+    'SE': ['EU-SE-1', 'EU-SE-2'],
+    'SG': ['SEA-SG-1'],
     'US': [
         'US-CA-1',
         'US-CA-2',
@@ -268,13 +276,22 @@ REGION_ZONES = {
         'US-IL-1',
         'US-KS-1',
         'US-KS-2',
+        'US-KS-3',
+        'US-MD-1',
         'US-MO-1',
+        'US-MO-2',
         'US-NC-1',
+        'US-NC-2',
         'US-NE-1',
+        'US-OR-1',
+        'US-OR-2',
+        'US-PA-1',
         'US-TX-1',
         'US-TX-2',
         'US-TX-3',
         'US-TX-4',
+        'US-TX-5',
+        'US-TX-6',
         'US-WA-1',
     ],
 }
