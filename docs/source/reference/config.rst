@@ -256,6 +256,9 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
 
+  :ref:`dashboard <config-yaml-dashboard>`:
+    :ref:`disable_config_editor <config-yaml-dashboard-disable-config-editor>`: false
+
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
   :ref:`logs <config-yaml-logs>`:
@@ -2730,6 +2733,34 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-dashboard:
+
+``dashboard``
+~~~~~~~~~~~~~
+
+SkyPilot dashboard configuration (optional).
+
+.. _config-yaml-dashboard-disable-config-editor:
+
+``dashboard.disable_config_editor``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Set to ``true`` to keep the dashboard available while disabling config edits
+from ``/dashboard/config``. This is useful for API server deployments where
+``~/.sky/config.yaml`` is managed outside the dashboard, for example with Helm,
+Terraform, Nix, or GitOps.
+
+When enabled, the dashboard renders the config editor read-only, and
+``POST /workspaces/config`` returns ``403 Forbidden`` without scheduling a
+config update.
+
+Example:
+
+.. code-block:: yaml
+
+  dashboard:
+    disable_config_editor: true
 
 .. _config-yaml-db:
 

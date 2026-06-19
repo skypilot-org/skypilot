@@ -2668,6 +2668,10 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'disable_config_editor': {
+                'type': 'boolean',
+                'default': False,
+            },
             'external_links': {
                 'type': 'array',
                 'items': {

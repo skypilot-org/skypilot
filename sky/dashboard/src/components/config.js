@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
@@ -25,7 +25,40 @@ export function Config() {
   const [error, setError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+  const [configEditorDisabled, setConfigEditorDisabled] = useState(false);
   const successTimeoutRef = useRef(null);
+
+  const loadDashboardConfig = useCallback(async () => {
+    const response = await apiClient.get('/dashboard_config');
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load dashboard settings: ${response.statusText}`
+      );
+    }
+    return await response.json();
+  }, []);
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [config, dashboardConfig] = await Promise.all([
+        getConfig(),
+        loadDashboardConfig(),
+      ]);
+      setConfigEditorDisabled(Boolean(dashboardConfig?.disable_config_editor));
+      if (Object.keys(config).length === 0) {
+        setEditableConfig('');
+      } else {
+        setEditableConfig(yaml.dump(config, { indent: 2 }));
+      }
+    } catch (error) {
+      console.error('Error loading config:', error);
+      setError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadDashboardConfig]);
 
   useEffect(() => {
     loadConfig();
@@ -39,7 +72,7 @@ export function Config() {
     if (typeof window !== 'undefined') {
       checkGrafana();
     }
-  }, []);
+  }, [loadConfig]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -49,24 +82,6 @@ export function Config() {
       }
     };
   }, []);
-
-  const loadConfig = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const config = await getConfig();
-      if (Object.keys(config).length === 0) {
-        setEditableConfig('');
-      } else {
-        setEditableConfig(yaml.dump(config, { indent: 2 }));
-      }
-    } catch (error) {
-      console.error('Error loading config:', error);
-      setError(error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSave = async () => {
     trackSettingsAction('save');
@@ -79,6 +94,14 @@ export function Config() {
     }
 
     try {
+      if (configEditorDisabled) {
+        setError(
+          new Error('Configuration editing is disabled for this deployment.')
+        );
+        setSaving(false);
+        return;
+      }
+
       // Check user role first
       const response = await apiClient.get(`/users/role`);
       if (!response.ok) {
@@ -292,20 +315,29 @@ export function Config() {
             </div>
           )}
 
+          {configEditorDisabled && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-6">
+              <p className="text-sm font-medium text-blue-900">
+                This deployment is GitOps-managed. Configuration changes are
+                disabled in the dashboard.
+              </p>
+            </div>
+          )}
+
           <div className="w-full">
             <YamlEditor
               value={editableConfig}
               onChange={(val) => setEditableConfig(val)}
               minHeight="384px"
               maxHeight="600px"
-              disabled={loading || saving}
+              disabled={loading || saving || configEditorDisabled}
             />
           </div>
 
           <div className="flex justify-end space-x-3 pt-3">
             <Button
               onClick={handleSave}
-              disabled={loading || saving}
+              disabled={loading || saving || configEditorDisabled}
               className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
             >
               {saving ? (

@@ -856,11 +856,17 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
 
     from sky import skypilot_config
 
-    monkeypatch.setattr(
-        skypilot_config, 'get_nested', lambda keys, default: [{
-            'label': 'Grafana',
-            'regex': 'https://grafana.example.com/.*'
-        }])
+    def fake_get_nested(keys, default):
+        if keys == ('dashboard', 'external_links'):
+            return [{
+                'label': 'Grafana',
+                'regex': 'https://grafana.example.com/.*'
+            }]
+        if keys == ('dashboard', 'disable_config_editor'):
+            return True
+        return default
+
+    monkeypatch.setattr(skypilot_config, 'get_nested', fake_get_nested)
 
     client = TestClient(server.app)
     response = client.get('/dashboard_config')
@@ -868,6 +874,7 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data == {
+        'disable_config_editor': True,
         'external_links': [{
             'label': 'Grafana',
             'regex': 'https://grafana.example.com/.*'
