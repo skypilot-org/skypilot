@@ -7263,3 +7263,48 @@ def test_missing_pod_reason_from_cluster_events_taint_eviction(
         kwargs: [f'[kubernetes pod p] TaintManagerEviction {message}'])
     assert instance._derive_missing_pod_reason_from_cluster_events(
         'c') == expected
+
+
+def test_stop_instances_deletes_pods_but_keeps_pvc(monkeypatch):
+    """`sky stop` on Kubernetes must delete pods/services but never PVCs."""
+    core_api_mock = mock.MagicMock()
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *a, **k: core_api_mock)
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+    head_pod = mock.MagicMock()
+    head_pod.metadata.name = 'test-cluster-head'
+    monkeypatch.setattr('sky.provision.kubernetes.utils.filter_pods',
+                        lambda *a, **k: {'test-cluster-head': head_pod})
+    monkeypatch.setattr(instance, '_is_head', lambda pod: True)
+    monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                        lambda fn, items, n: [fn(i) for i in items])
+
+    instance.stop_instances('test-cluster-on-cloud',
+                            provider_config={'namespace': 'default'})
+
+    # Pods are deleted ...
+    assert core_api_mock.delete_namespaced_pod.called
+    # ... but the PersistentVolumeClaim is retained for restart.
+    assert not core_api_mock.delete_namespaced_persistent_volume_claim.called
+
+
+def test_stop_instances_high_availability_raises(monkeypatch):
+    """Stopping an HA (Deployment-backed) cluster is not supported."""
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_namespace_from_config',
+        lambda *a, **k: 'default')
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.get_context_from_config',
+        lambda *a, **k: 'test-context')
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: True)
+    with pytest.raises(NotImplementedError):
+        instance.stop_instances('test-cluster-on-cloud',
+                                provider_config={'namespace': 'default'})
