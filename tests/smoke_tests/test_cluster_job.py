@@ -2360,7 +2360,11 @@ def test_kubernetes_pod_failure_detection():
         [
             f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y --image-id docker:busybox:latest --infra kubernetes echo hi || true',
             # Check that the provision logs contain the expected error message.
-            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep -A 2 "Pod.*terminated:.*" | grep -A 2 "PodFailed" | grep "StartError"',
+            # busybox has no bash, so the container terminates with a non-zero
+            # exit code while the pod is still Pending, which now fast-fails with
+            # a "terminated with error while pod is still pending" message
+            # carrying the StartError reason (instead of the old PodFailed path).
+            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep "terminated with error while pod is still pending" | grep "StartError"',
         ],
         f'sky down -y {name}',
         timeout=10 * 60,
@@ -2807,7 +2811,7 @@ def test_remote_server_api_login():
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint
-            f'grep -q "endpoint: {endpoint}" {config_path}',
+            f'grep -q "endpoint: {endpoint.rstrip("/")}" {config_path}',
             # Verify the api_server section exists
             f'grep -q "api_server:" {config_path}',
         ],
