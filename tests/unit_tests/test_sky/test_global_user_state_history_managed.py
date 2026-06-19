@@ -69,6 +69,21 @@ def test_history_excludes_managed_when_requested(tmp_path, monkeypatch):
     assert _history_names(exclude_managed_clusters=True) == {'regular'}
 
 
+def test_history_managed_flag_not_reset_on_update(tmp_path, monkeypatch):
+    """add_or_update_cluster is called multiple times during a managed-job
+    launch, and is_managed defaults to False on the later calls. The flag
+    recorded on the first call must not be overwritten, otherwise the managed
+    cluster would leak back into the history view.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('my-job-1', is_managed=True)
+    # Subsequent update with the default is_managed=False must not clear it.
+    _add_cluster('my-job-1', is_managed=False)
+
+    assert _history_names(exclude_managed_clusters=True) == set()
+    assert _history_names(exclude_managed_clusters=False) == {'my-job-1'}
+
+
 def test_history_excludes_managed_after_termination(tmp_path, monkeypatch):
     """The bug scenario: a terminated managed-job cluster must stay hidden.
 

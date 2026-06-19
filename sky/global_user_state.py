@@ -959,7 +959,12 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
-                cluster_history_table.c.is_managed: int(is_managed),
+                # Intentionally do not update is_managed here (mirrors the
+                # clusters table above, which only sets it on insert).
+                # add_or_update_cluster is called multiple times during a
+                # managed-job launch and is_managed defaults to False on
+                # subsequent calls; overwriting it would reset the flag to 0
+                # and leak managed-job clusters into the history view.
                 **creation_info,
             })
         session.execute(do_update_stmt)
