@@ -741,6 +741,7 @@ def get_service_account_tokens(
             'expires_at': token['expires_at'],
             'creator_user_hash': token['creator_user_hash'],
             'service_account_user_id': token['service_account_user_id'],
+            'last_four': token.get('last_four'),
         }
 
         # Add creator display name
@@ -839,7 +840,8 @@ def create_service_account_token(
             token_hash=token_data['token_hash'],
             creator_user_hash=auth_user.id,
             service_account_user_id=service_account_user_id,
-            expires_at=token_data['expires_at'])
+            expires_at=token_data['expires_at'],
+            last_four=token_data['last_four'])
 
         # Return the JWT token only once (never stored in plain text)
         return {
@@ -1044,7 +1046,8 @@ def rotate_service_account_token(
         global_user_state.rotate_service_account_token(
             token_id=token_body.token_id,
             new_token_hash=token_data['token_hash'],
-            new_expires_at=token_data['expires_at'])
+            new_expires_at=token_data['expires_at'],
+            new_last_four=token_data['last_four'])
 
         # Return the new JWT token only once (never stored in plain text)
         return {

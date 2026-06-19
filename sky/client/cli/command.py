@@ -946,6 +946,39 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     return None
 
 
+_UNICODE_DASH_MAP = {
+    '–': '--',  # en dash
+    '—': '--',  # em dash
+    '‒': '-',  # figure dash
+    '‐': '-',  # hyphen
+    '‑': '-',  # non-breaking hyphen
+    '−': '-',  # minus sign
+    '－': '-',  # fullwidth hyphen-minus
+}
+
+
+def _warn_if_unicode_dashes(entrypoint: str) -> None:
+    """Warn user if entrypoint contains unicode dash characters.
+
+    This happens when commands are copy-pasted from rich-text sources
+    (docs, Notion, iOS keyboard) which replace ASCII dashes with
+    typographic variants like em dash or en dash.
+    """
+    found = {ch for ch in entrypoint if ch in _UNICODE_DASH_MAP}
+    if not found:
+        return
+    replacements = ', '.join(
+        f'U+{ord(ch):04X} {repr(ch)} -> {repr(_UNICODE_DASH_MAP[ch])}'
+        for ch in sorted(found))
+    click.secho(
+        f'Warning: The entrypoint contains Unicode dash character(s) '
+        f'({replacements}) that look like regular dashes but are not. '
+        f'This often happens when copying commands from rich-text '
+        f'sources (docs, Notion, iOS). Please retype the dashes manually.',
+        fg='yellow',
+        err=True)
+
+
 # TODO(zhwu): All CLI command handlers should be wrapped with
 # @annotations.client_api so that is_on_api_server is False during
 # YAML parsing and schema validation. For now, we wrap this common
@@ -991,6 +1024,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         raise click.UsageError('Cannot specify both --git-url and --workdir')
 
     entrypoint = ' '.join(entrypoint)
+
+    _warn_if_unicode_dashes(entrypoint)
 
     # Check if entrypoint is a recipe reference (recipes:<name>)
     recipe_yaml = _get_recipe_yaml(entrypoint)

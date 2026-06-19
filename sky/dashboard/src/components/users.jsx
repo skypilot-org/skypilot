@@ -35,6 +35,7 @@ import { sortData } from '@/data/utils';
 import {
   CustomTooltip,
   TimestampWithTooltip,
+  formatFullTimestamp,
   CustomTooltip as Tooltip,
   LastUpdatedTimestamp,
 } from '@/components/utils';
@@ -3170,6 +3171,11 @@ function ServiceAccountTokensView({
                   <TableRow key={token.token_id}>
                     <TableCell className="truncate" title={token.token_name}>
                       {token.token_name}
+                      {token.last_four && (
+                        <span className="ml-2 text-xs text-gray-400 font-mono">
+                          ····{token.last_four}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="truncate">
                       <div className="flex items-center">
@@ -3323,7 +3329,12 @@ function ServiceAccountTokensView({
                       {!token.expires_at ? (
                         'Never'
                       ) : new Date(token.expires_at * 1000) < new Date() ? (
-                        <span className="text-red-600">Expired</span>
+                        <CustomTooltip
+                          content={`Expired on ${formatFullTimestamp(new Date(token.expires_at * 1000))}`}
+                          className="text-sm text-muted-foreground"
+                        >
+                          <span className="text-red-600 border-b border-dotted border-red-400 cursor-help">Expired</span>
+                        </CustomTooltip>
                       ) : (
                         <TimestampWithTooltip
                           date={new Date(token.expires_at * 1000)}

@@ -156,6 +156,7 @@ class TokenService:
             'token_id': token_id,
             'token': full_token,
             'token_hash': token_hash,
+            'last_four': full_token[-4:],
             'creator_user_id': creator_user_id,
             'service_account_user_id': service_account_user_id,
             'token_name': token_name,
