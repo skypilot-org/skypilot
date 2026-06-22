@@ -2551,6 +2551,8 @@ class TestCollectClusterSkyletLog:
         _, kwargs = runner.rsync.call_args
         assert kwargs['source'] == '/home/sky/.sky/skylet.log'
         assert kwargs['target'] == os.path.join(str(tmp_path), 'skylet.log')
+        # Bounded by a total timeout so one stalled node can't hang the dump.
+        assert kwargs['timeout'] == debug_utils._SKYLET_LOG_RSYNC_TIMEOUT
         assert not errors
 
     def test_uses_relocated_runtime_dir(self, tmp_path):

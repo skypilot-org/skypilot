@@ -764,6 +764,13 @@ def _dump_request_id_info(
 # rather than hang the dump waiting to connect.
 _SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT = 10
 
+# Total wall-clock timeout for the skylet-log rsync. Reachability is already
+# gated by the resolve step above (connect_timeout), so this is a backstop
+# for a connected-but-stalled transfer (flaky network, oversized rotated
+# log): generous enough not to trip on a healthy node + small log, tight
+# enough that one bad node can't hang the whole dump.
+_SKYLET_LOG_RSYNC_TIMEOUT = 60
+
 
 def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
     """Resolve the absolute skylet log path on the head node.
@@ -873,7 +880,8 @@ def _collect_cluster_skylet_log(
         runner.rsync(source=remote_path,
                      target=target,
                      up=False,
-                     stream_logs=False)
+                     stream_logs=False,
+                     timeout=_SKYLET_LOG_RSYNC_TIMEOUT)
         logger.debug(f'Collected skylet log for cluster {cluster_name!r}')
     except exceptions.CommandError as e:
         if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
