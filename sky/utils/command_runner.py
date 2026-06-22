@@ -579,7 +579,8 @@ class CommandRunner:
                 # Do not let the backoff wait push us past the deadline.
                 new_remaining = deadline - time.monotonic()
                 if new_remaining <= 0 or sleep_time >= new_remaining:
-                    # The deadline will be exhausted by the time this backoff wait completed; early exit.
+                    # The deadline will be exhausted by the time
+                    # this backoff wait completed; early exit.
                     timed_out = True
                     returncode = 255
                     stdout = ''
