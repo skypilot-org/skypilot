@@ -92,6 +92,18 @@ class RequestStatus(enum.Enum):
         """Statuses of requests that are not finished yet."""
         return [cls.PENDING, cls.WAITING, cls.RUNNING]
 
+    @classmethod
+    def executable_statuses(cls) -> List['RequestStatus']:
+        """Statuses from which a dequeued request may start executing.
+
+        A request is enqueued as PENDING. It may also be re-enqueued while in
+        WAITING -- the state it is parked in while waiting to resume (e.g. a
+        retry backoff or an external continue-condition). In both cases the
+        worker should pick it up and run it. Any other status (RUNNING, a
+        finished status, or CANCELLED) means the request must not be executed.
+        """
+        return [cls.PENDING, cls.WAITING]
+
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,

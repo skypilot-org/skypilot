@@ -176,6 +176,37 @@ async def test_api_cancel_race_condition(isolated_database):
     assert updated.status == requests_lib.RequestStatus.CANCELLED
 
 
+@pytest.mark.asyncio
+async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
+                                                       mock_global_user_state,
+                                                       mock_skypilot_config):
+    """A dequeued WAITING request must execute, not be skipped.
+
+    WAITING is the state a request is parked in while waiting to resume (retry
+    backoff or an external continue-condition). When such a request is
+    re-enqueued and dequeued, the execution wrapper must pick it up and run it
+    just like PENDING. Regression test: the guard previously accepted only
+    PENDING, so a re-enqueued WAITING request was silently dropped and stranded.
+    """
+    req = requests_lib.Request(request_id='waiting-executes',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.WAITING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('waiting-executes',
+                                        ignore_return_value=False)
+
+    # The request ran to completion instead of being skipped while WAITING.
+    updated = requests_lib.get_request('waiting-executes')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.SUCCEEDED
+    assert updated.return_value == 'success'
+
+
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
                               expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""
