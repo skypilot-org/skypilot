@@ -177,7 +177,9 @@ async def test_api_cancel_race_condition(isolated_database):
 
 
 @pytest.mark.asyncio
-async def test_waiting_request_is_executed_not_skipped(mock_fd_operations):
+async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
+                                                       mock_global_user_state,
+                                                       mock_skypilot_config):
     """A dequeued WAITING request must execute, not be skipped.
 
     WAITING is the state a request is parked in while waiting to resume (retry
