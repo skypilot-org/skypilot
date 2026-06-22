@@ -1375,6 +1375,12 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Duration</div>
+        <div className="text-base mt-1">
+          {formatDuration(jobData.job_duration)}
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">
           Requested Resources
         </div>
