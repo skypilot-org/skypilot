@@ -522,6 +522,12 @@ Storage YAML reference
             - read_only: bool; default: false
                 Whether the mount is read-only. When enabled, writes to the
                 mount path will be rejected by the filesystem.
+            - hf_mount_args: list of str (Hugging Face stores only)
+                Extra ``hf-mount`` flags forwarded verbatim to the mount
+                daemon. Each element is one shell token, e.g.
+                ``['--cache-dir', '/mnt/nvme/hf-cache', '--cache-size',
+                '200000000000', '--advanced-writes']``. Ignored by other
+                stores. See the hf-mount README for the full flag list.
           - mount_cached: dict of rclone parameters for MOUNT_CACHED mode.
             Any parameters set here override the defaults from the workload type.
             Available parameters:
