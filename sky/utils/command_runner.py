@@ -577,8 +577,14 @@ class CommandRunner:
             sleep_time = backoff.current_backoff()
             if deadline is not None:
                 # Do not let the backoff wait push us past the deadline.
-                sleep_time = min(sleep_time,
-                                 max(0.0, deadline - time.monotonic()))
+                new_remaining = deadline - time.monotonic()
+                if new_remaining <= 0 or sleep_time >= new_remaining:
+                    # The deadline will be exhausted by the time this backoff wait completed; early exit.
+                    timed_out = True
+                    returncode = 255
+                    stdout = ''
+                    stderr = f'rsync timed out after {timeout} seconds.'
+                    break
             time.sleep(sleep_time)
 
         direction = 'up' if up else 'down'
