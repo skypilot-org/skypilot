@@ -112,8 +112,43 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         return users
 
     def reset_on_startup(self) -> None:
-        """Called on server startup to clean up ephemeral client state."""
-        logger.debug('clearing local API server client directory at '
-                     f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
-        shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
-                      ignore_errors=True)
+        """Called on server startup to clean up ephemeral client state.
+
+        We clear the transient per-request state (uploaded task YAMLs and the
+        legacy non-blob file_mounts upload dirs) so that a freshly started
+        server begins from a clean slate, matching the request DB reset.
+
+        We deliberately preserve ``file_mounts/blobs/``: blobs are
+        content-addressed, atomically committed and may still be referenced by
+        a non-terminal managed job that outlived the server restart. Wiping
+        them here would break job recovery (the controller resolves the blob on
+        relaunch) even though the dir is on persistent storage. Their lifecycle
+        is owned by the reference-aware GC in
+        ``server.cleanup_unreferenced_file_mounts`` instead.
+        """
+        clients_dir = server_common.API_SERVER_CLIENT_DIR.expanduser()
+        logger.debug('clearing transient local API server client state at '
+                     f'{clients_dir} (preserving file_mounts/blobs)')
+        if not clients_dir.exists():
+            return
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            # Uploaded task YAMLs are tied to request ids that do not survive
+            # the restart.
+            shutil.rmtree(user_dir / 'tasks', ignore_errors=True)
+            # Under file_mounts/, keep only the content-addressed blobs dir;
+            # everything else is legacy per-request upload state.
+            file_mounts_dir = user_dir / 'file_mounts'
+            if not file_mounts_dir.is_dir():
+                continue
+            for entry in file_mounts_dir.iterdir():
+                if entry.name == 'blobs':
+                    continue
+                if entry.is_dir():
+                    shutil.rmtree(entry, ignore_errors=True)
+                else:
+                    try:
+                        entry.unlink()
+                    except OSError:
+                        pass
