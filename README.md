@@ -48,7 +48,7 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 -----
 
 :fire: *News* :fire:
-- [Jun 2026] **Announcing SkyPilot Sandboxes**: run untrusted, LLM-generated code on the Kubernetes clusters you already own. [**Learn more**](https://blog.skypilot.co/sandboxes), [**join early access**](https://forms.gle/o4keAryXsVazNjyGA)
+- [Jun 2026] **Announcing SkyPilot Sandboxes**: run untrusted, LLM-generated code on the Kubernetes clusters you already own. [**Learn more**](https://blog.skypilot.co/sandboxes/), [**join early access**](https://forms.gle/o4keAryXsVazNjyGA)
 - [May 2026] **How Multiverse doubled their GPU utilization with SkyPilot**: [**case study**](https://multiversecomputing.com/papers/2x-gpu-utilization-same-hardware-discover-our-efficiency-playbook)
 - [Apr 2026] Introducing **GPU Compass**: One dashboard to browse, compare pricing, and launch across every GPU cloud. Try it at [**gpus.skypilot.co**](https://gpus.skypilot.co).
 - [Apr 2026] **Research-Driven Agents**: Agents read arxiv papers before coding, landed 5 llama.cpp kernel fusions and +15% faster flash attention in ~3 hours for ~$29: [**blog**](https://blog.skypilot.co/research-driven-agents/), [**HackerNews**](https://news.ycombinator.com/item?id=47706141)
