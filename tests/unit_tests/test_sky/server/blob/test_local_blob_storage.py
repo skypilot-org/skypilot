@@ -12,6 +12,11 @@ def _make_client_tree(root: pathlib.Path, user: str, blob_id: str,
     # Transient uploaded task YAML.
     (user_dir / 'tasks').mkdir(parents=True)
     (user_dir / 'tasks' / 'task1.yaml').write_text('name: test')
+    # Transient ephemeral user logs.
+    (user_dir / 'sky_logs').mkdir(parents=True)
+    (user_dir / 'sky_logs' / 'download.log').write_text('some logs')
+    # Stray top-level file (exercises the file-removal branch).
+    (user_dir / 'stray.tmp').write_text('stray')
     file_mounts = user_dir / 'file_mounts'
     # Legacy per-request (non-blob) upload dir + zip.
     (file_mounts / upload_id).mkdir(parents=True)
@@ -42,8 +47,10 @@ def test_reset_on_startup_preserves_blobs(tmp_path):
     # Blob and its coordination dirs survive.
     assert (file_mounts / 'blobs' / blob_id / 'mount.txt').exists()
     assert (file_mounts / 'blobs' / '.locks').is_dir()
-    # Transient per-request state is wiped.
+    # All other transient state is wiped, including future/unknown dirs.
     assert not (user_dir / 'tasks').exists()
+    assert not (user_dir / 'sky_logs').exists()
+    assert not (user_dir / 'stray.tmp').exists()
     assert not (file_mounts / upload_id).exists()
     assert not (file_mounts / f'{upload_id}.zip').exists()
 
