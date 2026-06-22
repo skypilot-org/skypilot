@@ -48,6 +48,8 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 -----
 
 :fire: *News* :fire:
+- [Jun 2026] **Announcing SkyPilot Sandboxes**: run untrusted, LLM-generated code on the Kubernetes clusters you already own. [**Learn more**](https://blog.skypilot.co/sandboxes), [**join early access**](https://forms.gle/o4keAryXsVazNjyGA)
+- [May 2026] **How Multiverse doubled their GPU utilization with SkyPilot**: [**case study**](https://multiversecomputing.com/papers/2x-gpu-utilization-same-hardware-discover-our-efficiency-playbook)
 - [Apr 2026] Introducing **GPU Compass**: One dashboard to browse, compare pricing, and launch across every GPU cloud. Try it at [**gpus.skypilot.co**](https://gpus.skypilot.co).
 - [Apr 2026] **Research-Driven Agents**: Agents read arxiv papers before coding, landed 5 llama.cpp kernel fusions and +15% faster flash attention in ~3 hours for ~$29: [**blog**](https://blog.skypilot.co/research-driven-agents/), [**HackerNews**](https://news.ycombinator.com/item?id=47706141)
 - [Mar 2026] **Scaling Karpathy's Autoresearch**: Autoresearch runs 1 experiment at a time. We gave it 16 GPUs and let it run in parallel: [**blog**](https://blog.skypilot.co/scaling-autoresearch/), [**HackerNews**](https://news.ycombinator.com/item?id=47442435)
@@ -55,8 +57,6 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 - [Mar 2026] **SkyPilot v0.12** released: Slurm Support, Job Groups for RL, Agent Skill, Recipes, Pool Autoscaling for Batch Inference, 7x Data Mounting, and More: [**Release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.12.0)
 - [Mar 2026] **SkyPilot Agent Skills**: GPU access and job management for AI agents: [**docs**](https://docs.skypilot.co/en/latest/getting-started/skill.html)
 - [Jan 2026] **Shopify case study**: Shopify runs all AI training workloads on SkyPilot: [**case study**](https://shopify.engineering/skypilot)
-- [Dec 2025] **SkyPilot v0.11** released: Multi-Cloud Pools, Fast Managed Jobs, Enterprise-Readiness at Large Scale, Programmability. [**Release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.11.0)
-- [Dec 2025] Train **an agent to use Google Search** as a tool with RL on your Kubernetes or clouds: [**blog**](https://blog.skypilot.co/verl-tool-calling/), [**example**](./llm/verl/)
 
 ## Overview
 
