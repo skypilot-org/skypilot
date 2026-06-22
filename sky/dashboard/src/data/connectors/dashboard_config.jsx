@@ -8,14 +8,17 @@ import { apiClient } from '@/data/connectors/client';
 let dashboardConfigCache = null;
 let dashboardConfigPromise = null;
 
-const EMPTY_CONFIG = { externalLinks: [] };
+const EMPTY_CONFIG = {
+  externalLinks: [],
+  disable_config_editor: false,
+};
 
 /**
  * Fetch the admin-configured dashboard settings from the server.
  *
- * Returns an object of the shape { externalLinks: [{ label, regex }] }. On
- * network or parse failure, returns an empty config rather than throwing so
- * the dashboard stays usable when the endpoint is unavailable.
+ * Returns dashboard settings normalized for the UI. On network or parse
+ * failure, returns an empty config rather than throwing so the dashboard stays
+ * usable when the endpoint is unavailable.
  */
 export const getDashboardConfig = async () => {
   if (dashboardConfigCache !== null) {
@@ -46,7 +49,10 @@ export const getDashboardConfig = async () => {
             entry.regex.length > 0
         )
         .map((entry) => ({ label: entry.label, regex: entry.regex }));
-      dashboardConfigCache = { externalLinks };
+      dashboardConfigCache = {
+        externalLinks,
+        disable_config_editor: Boolean(data?.disable_config_editor),
+      };
       return dashboardConfigCache;
     } catch (error) {
       console.debug('Dashboard config fetch failed:', error);

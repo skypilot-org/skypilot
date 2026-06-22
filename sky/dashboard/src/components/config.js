@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
+import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { CircularProgress } from '@mui/material';
 import { SaveIcon } from 'lucide-react';
@@ -28,23 +29,13 @@ export function Config() {
   const [configEditorDisabled, setConfigEditorDisabled] = useState(false);
   const successTimeoutRef = useRef(null);
 
-  const loadDashboardConfig = useCallback(async () => {
-    const response = await apiClient.get('/dashboard_config');
-    if (!response.ok) {
-      throw new Error(
-        `Failed to load dashboard settings: ${response.statusText}`
-      );
-    }
-    return await response.json();
-  }, []);
-
   const loadConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [config, dashboardConfig] = await Promise.all([
         getConfig(),
-        loadDashboardConfig(),
+        getDashboardConfig(),
       ]);
       setConfigEditorDisabled(Boolean(dashboardConfig?.disable_config_editor));
       if (Object.keys(config).length === 0) {
@@ -58,7 +49,7 @@ export function Config() {
     } finally {
       setLoading(false);
     }
-  }, [loadDashboardConfig]);
+  }, []);
 
   useEffect(() => {
     loadConfig();
