@@ -984,7 +984,9 @@ def test_managed_jobs_collector_emits_workspace_user_status_cloud():
         ('ws-a', 'u1', 'AWS', 'ManagedJobStatus.FAILED', 2),
     ]
     with patch('sky.jobs.state.get_status_counts_by_workspace_user_cloud',
-               return_value=rows):
+               return_value=rows), \
+         patch('sky.jobs.state.get_pending_stall_candidates',
+               return_value=[]):
         collector = metrics.ManagedJobsCollector()
         samples = _collect_to_dict(collector)
 
@@ -1005,6 +1007,8 @@ def test_managed_jobs_collector_emits_workspace_user_status_cloud():
 
 def test_managed_jobs_collector_handles_empty_db():
     with patch('sky.jobs.state.get_status_counts_by_workspace_user_cloud',
+               return_value=[]), \
+         patch('sky.jobs.state.get_pending_stall_candidates',
                return_value=[]):
         collector = metrics.ManagedJobsCollector()
         samples = _collect_to_dict(collector)

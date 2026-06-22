@@ -1201,6 +1201,95 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         return [row[0] for row in rows if row[0] is not None]
 
 
+def get_pending_stall_candidates(
+) -> List[Tuple[Optional[str], Optional[str], int, float]]:
+    """Managed jobs stuck with a PENDING task due to a system issue.
+
+    A job is a *stall candidate* when all of the following hold:
+    - It is actively launching, i.e. ``schedule_state`` is LAUNCHING. This is
+      the state the controller is in only *after* it has acquired a launch slot
+      and is driving ``sky.launch`` (see ``scheduler.scheduled_launch``); a
+      launch that makes progress leaves it within seconds (the task moves to
+      STARTING). We deliberately do NOT include ALIVE: a multi-task job waiting
+      for a launch slot between tasks sits in *bare* ALIVE (the slot-wait in
+      ``scheduled_launch`` happens before the LAUNCHING transition), which is a
+      legitimate queue wait we must not alert on and is indistinguishable in the
+      DB from a controller hung in ALIVE. WAITING / INACTIVE (queued) and DONE
+      (terminal) are excluded for the same "not actively launching" reason. (A
+      controller that *dies* in any claimed state is already caught by the
+      FAILED_CONTROLLER liveness check; this detector targets the crash-loop /
+      multiplexed case where the pid looks alive but the launch never lands.)
+    - It still has a task in PENDING (``end_at`` unset).
+    - No task is currently progressing, i.e. no task is in a non-terminal,
+      non-PENDING status (STARTING / RUNNING / RECOVERING / WINDING_DOWN /
+      CANCELLING, or the legacy SUBMITTED). Defining "progressing" as the
+      complement of the terminal set means an unforeseen status reads as
+      progressing and suppresses a false alert rather than causing one. This
+      excludes the normal case where an earlier task of a multi-task DAG is
+      still running while later tasks sit in PENDING.
+
+    Returns one ``(workspace, user_hash, spot_job_id, last_event_ts)`` tuple
+    per candidate, where ``last_event_ts`` is the job's most recent
+    ``job_events.timestamp`` as unix seconds. The caller derives "seconds since
+    last progress" (``now - last_event_ts``) at scrape time so the value stays
+    fresh between cache refreshes; the staleness threshold lives in the alert
+    rule, not here. ``last_event_ts`` advances naturally across task handoffs
+    (a SUCCEEDED event is fresh), so a healthy inter-task gap reads as a small
+    age while a dead/looping controller accrues silence.
+    """
+    terminal_status_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
+    spot_active = sqlalchemy.alias(spot_table)
+    pending_exists = sqlalchemy.exists().where(
+        sqlalchemy.and_(
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+            spot_table.c.status == ManagedJobStatus.PENDING.value,
+            spot_table.c.end_at.is_(None),
+        ))
+    progressing_exists = sqlalchemy.exists().where(
+        sqlalchemy.and_(
+            spot_active.c.spot_job_id == job_info_table.c.spot_job_id,
+            spot_active.c.status.not_in(terminal_status_values),
+            spot_active.c.status != ManagedJobStatus.PENDING.value,
+        ))
+    driving = (job_info_table.c.schedule_state ==
+               ManagedJobScheduleState.LAUNCHING.value)
+
+    # Correlated scalar subquery for each candidate's most-recent event. It is
+    # evaluated only for the rows that pass the driving/pending/progressing
+    # filters below (LAUNCHING is transient and tiny), so it is an index lookup
+    # on job_events(spot_job_id) -- not a full GROUP BY of the whole (30-day
+    # retention) job_events table on every scrape.
+    last_event_ts = sqlalchemy.select(
+        sqlalchemy.func.max(job_events_table.c.timestamp)).where(
+            job_events_table.c.spot_job_id ==
+            job_info_table.c.spot_job_id).scalar_subquery()
+    query = sqlalchemy.select(
+        job_info_table.c.workspace,
+        job_info_table.c.user_hash,
+        job_info_table.c.spot_job_id,
+        last_event_ts.label('last_ts'),
+    ).where(sqlalchemy.and_(driving, pending_exists, ~progressing_exists))
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+
+    result: List[Tuple[Optional[str], Optional[str], int, float]] = []
+    for workspace, user_hash, spot_job_id, last_ts in rows:
+        if last_ts is None:
+            continue
+        # job_events.timestamp comes back as a datetime: UTC-aware on Postgres,
+        # naive (local) on SQLite (which ignores timezone=True). timestamp()
+        # yields consistent UTC-epoch seconds either way (a naive value is read
+        # as local time), matching time.time() in the collector that derives
+        # `now - last_event_ts`.
+        last_unix = last_ts.timestamp()
+        result.append((workspace, user_hash, spot_job_id, last_unix))
+    return result
+
+
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     engine = _db_manager.get_engine()

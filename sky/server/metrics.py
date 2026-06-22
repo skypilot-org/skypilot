@@ -271,6 +271,14 @@ def _label_or_default(value: Optional[str], default: str) -> str:
     return value if value else default
 
 
+# Hard upper bound on rows emitted by sky_managed_jobs_pending_stall_seconds,
+# mirroring _TIME_IN_STATE_MAX_SERIES for clusters: a churn/retry storm could
+# briefly produce many simultaneously-stalled job_id series; capping defends
+# Prometheus's series budget. Oldest (most-stuck, most-alertable) jobs survive
+# the cap.
+_PENDING_STALL_MAX_SERIES = 100
+
+
 class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
@@ -295,18 +303,30 @@ class ManagedJobsCollector:
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
         # List of (workspace, user_hash, cloud, status, count) tuples.
         self._cached_rows: list = []
+        # List of (workspace, user_hash, spot_job_id, last_event_ts) tuples for
+        # jobs stuck with a PENDING task due to a system stall.
+        self._cached_stall_rows: list = []
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
         from sky.jobs import state as managed_job_state
         self._cached_rows = (
             managed_job_state.get_status_counts_by_workspace_user_cloud())
+        self._cached_stall_rows = (
+            managed_job_state.get_pending_stall_candidates())
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
             'sky_managed_jobs_count', ('Current count of managed job tasks by '
                                        'workspace, user, status, and cloud.'),
             labels=['workspace', 'user', 'status', 'cloud'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_pending_stall_seconds',
+            ('Seconds since a job with a PENDING task last made any progress, '
+             'for jobs the scheduler is actively launching (LAUNCHING) but '
+             'where no task is progressing -- a system stall, not a legitimate '
+             'queue or resource wait. Alert on this exceeding a threshold.'),
+            labels=['workspace', 'user', 'job_id'])
 
     def collect(self):
         now = time.time()
@@ -318,6 +338,7 @@ class ManagedJobsCollector:
                     logger.exception('Failed to collect managed jobs metrics')
                 self._last_scrape_time = now
             rows = self._cached_rows
+            stall_rows = self._cached_stall_rows
 
         counts: dict = {}
         for workspace, user_hash, cloud, status, count in rows:
@@ -334,6 +355,25 @@ class ManagedJobsCollector:
         for (workspace, user, status, cloud), count in counts.items():
             metric.add_metric([workspace, user, status, cloud], count)
         yield metric
+
+        # Seconds-since-last-progress per stalled job. Computed against `now`
+        # at scrape time so it stays fresh between cache refreshes (only the
+        # candidate set is cached). Cap the series count (oldest/most-stuck
+        # first) to defend Prometheus's series budget against a churn storm.
+        stall_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_pending_stall_seconds',
+            ('Seconds since a stalled-PENDING job last made progress, by '
+             'workspace, user, and job_id'),
+            labels=['workspace', 'user', 'job_id'])
+        capped = sorted(stall_rows,
+                        key=lambda r: r[3])[:_PENDING_STALL_MAX_SERIES]
+        for workspace, user_hash, spot_job_id, last_event_ts in capped:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            user_label = _label_or_default(user_hash, _NULL_LABEL)
+            stall_metric.add_metric(
+                [ws_label, user_label, str(spot_job_id)],
+                max(0.0, now - last_event_ts))
+        yield stall_metric
 
 
 # Transient statuses we report time-in-state for. UP / STOPPED are steady

@@ -33,9 +33,17 @@ class TestManagedJobsCollector:
 
             families = list(collector.collect())
 
-        assert len(families) == 1
+        # collect() yields the status-count family and the pending-stall family.
+        by_name = {f.name: f for f in families}
+        assert set(by_name) == {
+            'sky_managed_jobs_count',
+            'sky_managed_jobs_pending_stall_seconds',
+        }
+        # No stall candidates were seeded, so that family has no samples.
+        assert list(
+            by_name['sky_managed_jobs_pending_stall_seconds'].samples) == []
 
-        status_family = families[0]
+        status_family = by_name['sky_managed_jobs_count']
         assert status_family.name == 'sky_managed_jobs_count'
         samples = {(s.labels['workspace'], s.labels['user'], s.labels['status'],
                     s.labels['cloud']): s.value for s in status_family.samples}
@@ -85,16 +93,21 @@ class TestManagedJobsCollector:
                 raise RuntimeError('DB error')
             collector._cached_rows = [('ws', 'u', 'AWS', 'RUNNING', 1)]
 
+        def _count_family(families):
+            return next(
+                f for f in families if f.name == 'sky_managed_jobs_count')
+
         with patch.object(collector, '_refresh', side_effect=failing_refresh):
             # First collect fails, should yield empty metrics
             families = list(collector.collect())
-            assert len(families) == 1
-            assert list(families[0].samples) == []
+            assert list(_count_family(families).samples) == []
 
             # Second collect retries (not skipped by zero TTL)
             families = list(collector.collect())
-            assert len(families) == 1
-            samples = {s.labels['status']: s.value for s in families[0].samples}
+            samples = {
+                s.labels['status']: s.value
+                for s in _count_family(families).samples
+            }
             assert samples == {'RUNNING': 1}
 
         assert call_count == 2
@@ -105,6 +118,7 @@ class TestManagedJobsCollector:
         families = list(collector.describe())
         names = [f.name for f in families]
         assert 'sky_managed_jobs_count' in names
+        assert 'sky_managed_jobs_pending_stall_seconds' in names
 
 
 class TestManagedJobsLimitMetrics:
