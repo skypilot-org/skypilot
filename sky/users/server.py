@@ -961,64 +961,31 @@ def update_service_account_role(
             'Only admins can update roles for service accounts owned by other '
             'users.')
 
-    # try:
-    #     # Update service account role
-    #     service_account_user_id = token_info['service_account_user_id']
-    #     # Only admin can grant the admin role (mirrors user_update guard).
-    #     if role_body.role == rbac.RoleName.ADMIN.value:
-    #         caller_roles = permission.permission_service.get_user_roles(
-    #             auth_user.id)
-    #         if rbac.RoleName.ADMIN.value not in caller_roles:
-    #             raise fastapi.HTTPException(
-    #                 status_code=403,
-    #                 detail='Only admin can grant the admin role.')
-    #     permission.permission_service.update_role(service_account_user_id,
-    #                                               role_body.role)
-
-    # try:
-    #     # Update service account role
-    #     service_account_user_id = token_info['service_account_user_id']
-    #     permission.permission_service.update_role(service_account_user_id,
-    #                                               role_body.role)
-
-    #     return {
-    #         'message': f'Service account role updated to {role_body.role}',
-    #         'token_id': role_body.token_id,
-    #         'service_account_user_id': service_account_user_id,
-    #         'new_role': role_body.role
-    #     }
+    # Only admin can grant the admin role (mirrors user_update guard).
+    if role_body.role == rbac.RoleName.ADMIN.value:
+        caller_roles = permission.permission_service.get_user_roles(
+            auth_user.id)
+        if rbac.RoleName.ADMIN.value not in caller_roles:
+            raise fastapi.HTTPException(
+                status_code=403,
+                detail='Only admin can grant the admin role.')
 
     try:
         # Update service account role
         service_account_user_id = token_info['service_account_user_id']
-        # Only admin can grant the admin role (mirrors user_update guard).
-        if role_body.role == rbac.RoleName.ADMIN.value:
-            caller_roles = permission.permission_service.get_user_roles(
-                auth_user.id)
-            if rbac.RoleName.ADMIN.value not in caller_roles:
-                raise fastapi.HTTPException(
-                    status_code=403,
-                    detail='Only admin can grant the admin role.')
         permission.permission_service.update_role(service_account_user_id,
                                                   role_body.role)
-    except fastapi.HTTPException:
-        raise
+
+        return {
+            'message': f'Service account role updated to {role_body.role}',
+            'token_id': role_body.token_id,
+            'service_account_user_id': service_account_user_id,
+            'new_role': role_body.role
+        }
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to update service account role: {e}')
         raise fastapi.HTTPException(
             status_code=500, detail='Failed to update service account role')
-
-    return {
-        'message': f'Service account role updated to {role_body.role}',
-        'token_id': role_body.token_id,
-        'service_account_user_id': service_account_user_id,
-        'new_role': role_body.role
-    }
-
-    # except Exception as e:  # pylint: disable=broad-except
-    #     logger.error(f'Failed to update service account role: {e}')
-    #     raise fastapi.HTTPException(
-    #         status_code=500, detail='Failed to update service account role')
 
 
 @router.post('/service-account-tokens/rotate')
