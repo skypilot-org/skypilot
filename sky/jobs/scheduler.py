@@ -47,6 +47,7 @@ import contextlib
 import os
 import pathlib
 import shutil
+import signal
 import sys
 import typing
 from typing import List, Optional, Set
@@ -191,6 +192,33 @@ def get_alive_controllers() -> Optional[int]:
         if managed_job_utils.controller_process_alive(record, quiet=False):
             alive += 1
     return alive
+
+
+def kill_local_job_controllers(sig: int = signal.SIGTERM) -> int:
+    """SIGTERM all live controller PIDs recorded on this replica.
+
+    Returns:
+        The number of signals delivered.
+    """
+    records = get_controller_process_records()
+    if not records:
+        return 0
+    signaled = 0
+    for record in records:
+        if not managed_job_utils.controller_process_alive(record):
+            continue
+        try:
+            os.kill(record.pid, sig)
+            signaled += 1
+        except ProcessLookupError:
+            # Already gone between the alive-check and the kill — fine.
+            pass
+        except OSError as e:
+            logger.warning(f'Failed to signal controller pid={record.pid}: {e}')
+    if signaled:
+        logger.info(f'Sent {sig.name if hasattr(sig, "name") else sig} to '
+                    f'{signaled} job controller(s)')
+    return signaled
 
 
 def maybe_start_controllers(from_scheduler: bool = False) -> None:
