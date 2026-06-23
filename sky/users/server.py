@@ -967,8 +967,7 @@ def update_service_account_role(
             auth_user.id)
         if rbac.RoleName.ADMIN.value not in caller_roles:
             raise fastapi.HTTPException(
-                status_code=403,
-                detail='Only admin can grant the admin role.')
+                status_code=403, detail='Only admin can grant the admin role.')
 
     try:
         # Update service account role
