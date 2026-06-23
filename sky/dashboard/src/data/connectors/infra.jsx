@@ -7,6 +7,23 @@ import dashboardCache from '@/lib/cache';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
 /**
+ * Returns true iff `nodeData` (a `KubernetesNodeInfo`-shaped object from
+ * the API) should be excluded from free-GPU availability counts — i.e.,
+ * it's not ready, cordoned, or carries at least one taint that the
+ * configured `kubernetes.pod_config.spec.tolerations` does NOT tolerate.
+ * Taints with `tolerated: true` (set by the backend for matching
+ * tolerations) don't suppress availability.
+ */
+function isNodeNotReadyForGpus(nodeData) {
+  const isReady = nodeData['is_ready'] !== false;
+  const isCordoned = nodeData['is_cordoned'] === true;
+  const isTainted = (nodeData['taints'] || []).some(
+    (t) => t && t.tolerated !== true
+  );
+  return !isReady || isCordoned || isTainted;
+}
+
+/**
  * Fast function to get just the list of enabled clouds (without counts).
  * Used for progressive loading - display cloud rows immediately, then overlay counts.
  */
@@ -428,14 +445,7 @@ export async function getContextGPUData(context) {
         const gpuName = nodeData['accelerator_type'] || '-';
         const totalCount = nodeData['total']?.['accelerator_count'] || 0;
         const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-        const isReady = nodeData['is_ready'] !== false;
-        // Check if node is cordoned (defaults to false for backward compatibility)
-        const isCordoned = nodeData['is_cordoned'] === true;
-        // Check if node has taints (defaults to empty for backward compatibility)
-        const taints = nodeData['taints'] || [];
-        const isTainted = taints.length > 0;
-        // Node is considered not ready if it's not ready, cordoned, or tainted
-        const isNodeNotReady = !isReady || isCordoned || isTainted;
+        const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
         // Per-node data - use same field names as original getKubernetesGPUsFromContexts
         perNodeGPUs.push({
@@ -443,9 +453,9 @@ export async function getContextGPUData(context) {
           gpu_name: gpuName,
           gpu_total: totalCount,
           gpu_free: freeCount,
-          is_ready: isReady,
-          is_cordoned: isCordoned,
-          taints: taints,
+          is_ready: nodeData['is_ready'] !== false,
+          is_cordoned: nodeData['is_cordoned'] === true,
+          taints: nodeData['taints'] || [],
           context: context,
           ip_address: nodeData['ip_address'] || null,
           cpu_count: nodeData['cpu_count'] ?? null,
@@ -565,15 +575,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
-          // Check if node is ready (defaults to true for backward compatibility)
-          const isReady = nodeData['is_ready'] !== false;
-          // Check if node is cordoned (defaults to false for backward compatibility)
-          const isCordoned = nodeData['is_cordoned'] === true;
-          // Check if node has taints (defaults to empty for backward compatibility)
-          const taints = nodeData['taints'] || [];
-          const isTainted = taints.length > 0;
-          // Node is considered not ready if it's not ready, cordoned, or tainted
-          const isNodeNotReady = !isReady || isCordoned || isTainted;
+          const isNodeNotReady = isNodeNotReadyForGpus(nodeData);
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {

@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import datetime
 import time
 from unittest import mock
 
@@ -156,6 +157,92 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
+
+
+@pytest.fixture
+def _seed_multi_task_job(_mock_managed_jobs_db_conn):
+    """Seed a multi-task (pipeline) job plus an unrelated terminal job.
+
+    The pipeline job has task 0 SUCCEEDED and task 1 RUNNING, so the job
+    overall is still running. A second single-task FAILED job exists so that
+    filter assertions prove row selection among other jobs, not just against
+    a one-job database. Used to characterize how the row/task-level
+    `statuses` filter behaves on pipelines.
+
+    Returns a dict with 'pipeline_job_id' and 'failed_job_id'.
+    """
+
+    async def mock_callback(status: str):
+        pass
+
+    async def create_jobs():
+        pipeline_job_id = state.set_job_info_without_job_id(
+            name='pipe-status-test',
+            workspace='ws1',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        # Two tasks under one job.
+        state.set_pending(pipeline_job_id,
+                          task_id=0,
+                          task_name='extract',
+                          resources_str='{}',
+                          metadata='{}')
+        state.set_pending(pipeline_job_id,
+                          task_id=1,
+                          task_name='transform',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([pipeline_job_id], '/tmp/dag.yaml',
+                                    '/tmp/user.yaml', '/tmp/env', None, 100)
+        # Task 0 -> SUCCEEDED.
+        await state.set_starting_async(pipeline_job_id, 0, 'run_0', time.time(),
+                                       '{}', {}, mock_callback)
+        await state.set_started_async(pipeline_job_id, 0, time.time(),
+                                      mock_callback)
+        await state.set_succeeded_async(pipeline_job_id, 0, time.time(),
+                                        mock_callback)
+        # Task 1 -> RUNNING (job not done: no scheduler_set_done).
+        await state.set_starting_async(pipeline_job_id, 1, 'run_1', time.time(),
+                                       '{}', {}, mock_callback)
+        await state.set_started_async(pipeline_job_id, 1, time.time(),
+                                      mock_callback)
+
+        # An unrelated single-task job that already FAILED.
+        failed_job_id = state.set_job_info_without_job_id(
+            name='other-failed-job',
+            workspace='ws1',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        state.set_pending(failed_job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([failed_job_id], '/tmp/dag-failed.yaml',
+                                    '/tmp/user-failed.yaml', '/tmp/env-failed',
+                                    None, 100)
+        await state.set_starting_async(failed_job_id, 0, 'run_failed',
+                                       time.time(), '{}', {}, mock_callback)
+        await state.set_started_async(failed_job_id, 0, time.time(),
+                                      mock_callback)
+        await state.set_failed_async(failed_job_id, 0,
+                                     state.ManagedJobStatus.FAILED,
+                                     'Test failure', mock_callback)
+        state.scheduler_set_done(failed_job_id)
+        return {
+            'pipeline_job_id': pipeline_job_id,
+            'failed_job_id': failed_job_id,
+        }
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_jobs())
     finally:
         loop.close()
 
@@ -713,3 +800,338 @@ class TestGetManagedJobsWithFilters:
         # All jobs have workspaces starting with 'ws'
         assert len(jobs) == 5
         assert total == 5
+
+
+class TestGetLatestRecoveryReasons:
+    """Tests for get_latest_recovery_reasons."""
+
+    def test_empty_job_ids(self, _mock_managed_jobs_db_conn):
+        assert state.get_latest_recovery_reasons([]) == {}
+
+    def test_latest_reason_wins_and_filters(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # Job 1: two RECOVERING events -> the latest reason wins.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'older reason',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'OOMKilled (exit code 137)',
+                            timestamp=late)
+        # Job 2: a RUNNING event is ignored; only the RECOVERING reason returns.
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RUNNING,
+                            'Job has recovered',
+                            timestamp=late)
+        state.add_job_event(2,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'preempted',
+                            timestamp=early)
+        # Job 3 has a RECOVERING event but is not requested.
+        state.add_job_event(3,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'unrelated',
+                            timestamp=late)
+        result = state.get_latest_recovery_reasons([1, 2])
+        assert result == {
+            1: 'OOMKilled (exit code 137)',
+            2: 'preempted',
+        }
+
+    def test_empty_reason_skipped(self, _mock_managed_jobs_db_conn):
+        early = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        late = datetime.datetime(2026, 1, 1, 0, 5, 0)
+        # The most recent RECOVERING event has an empty reason -> fall back to
+        # the most recent non-empty one.
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            'real reason',
+                            timestamp=early)
+        state.add_job_event(1,
+                            0,
+                            state.ManagedJobStatus.RECOVERING,
+                            '',
+                            timestamp=late)
+        assert state.get_latest_recovery_reasons([1]) == {1: 'real reason'}
+
+    def test_no_recovering_events_returns_empty(self,
+                                                _mock_managed_jobs_db_conn):
+        state.add_job_event(1, 0, state.ManagedJobStatus.RUNNING, 'running')
+        assert state.get_latest_recovery_reasons([1]) == {}
+
+
+# Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
+# stored as epoch seconds (a sqlalchemy.Float column), matching time.time().
+_T100 = 100.0
+_T200 = 200.0
+_T300 = 300.0
+# Bounds far in the past (_T*, ~1970) and future (~year 2286) relative to the
+# current time, used to exercise NULL submitted_at (pending) handling.
+_FAR_FUTURE = 9_999_999_999.0
+
+
+@pytest.fixture
+def _seed_timed_jobs(_mock_managed_jobs_db_conn):
+    """Seed three RUNNING jobs with explicit, distinct submitted_at times."""
+
+    async def mock_callback(status: str):
+        pass
+
+    async def create_job_states():
+        ids = {}
+        for key, workspace, submit_time in (
+            ('early', 'ws1', _T100),
+            ('mid', 'ws1', _T200),
+            ('late', 'ws2', _T300),
+        ):
+            job_id = state.set_job_info_without_job_id(name=f'job-{key}',
+                                                       workspace=workspace,
+                                                       entrypoint='ep',
+                                                       pool=None,
+                                                       pool_hash=None,
+                                                       user_hash='user1')
+            state.set_pending(job_id,
+                              task_id=0,
+                              task_name='task0',
+                              resources_str='{}',
+                              metadata='{}')
+            state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
+                                        f'/tmp/user-{key}.yaml',
+                                        f'/tmp/env-{key}', None, 100)
+            # submitted_at is written here from the explicit submit_time.
+            await state.set_starting_async(job_id, 0, f'run-{key}', submit_time,
+                                           '{}', {}, mock_callback)
+            await state.set_started_async(job_id, 0, submit_time, mock_callback)
+            ids[key] = job_id
+        return ids
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
+
+
+@pytest.fixture
+def _seed_pending_job(_mock_managed_jobs_db_conn):
+    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    job_id = state.set_job_info_without_job_id(name='job-pending',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    return job_id
+
+
+@pytest.fixture
+def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
+    """Seed a job cancelled while PENDING: terminal, with a NULL submitted_at
+    (it never reached STARTING)."""
+    job_id = state.set_job_info_without_job_id(name='job-cancelled',
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.scheduler_set_waiting([job_id], '/tmp/dag-c.yaml', '/tmp/user-c.yaml',
+                                '/tmp/env-c', None, 100)
+    state.set_pending_cancelled(job_id)
+    return job_id
+
+
+class TestSubmittedAtRangeFilter:
+    """Time-range filter on submitted_at via get_managed_jobs_with_filters."""
+
+    def _submitted_ats(self, jobs):
+        return sorted(job['submitted_at'] for job in jobs)
+
+    def test_submitted_after_excludes_earlier(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T200)
+        # Inclusive lower bound: mid (_T200) and late (_T300) match.
+        assert total == 2
+        assert self._submitted_ats(jobs) == [_T200, _T300]
+
+    def test_submitted_after_boundary_is_inclusive(self, _seed_timed_jobs):
+        # A row exactly at submitted_after is included (>=).
+        jobs, _ = state.get_managed_jobs_with_filters(submitted_after=_T300)
+        assert self._submitted_ats(jobs) == [_T300]
+
+    def test_submitted_before_excludes_later(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T200)
+        # Inclusive upper bound: early (_T100) and mid (_T200) match.
+        assert total == 2
+        assert self._submitted_ats(jobs) == [_T100, _T200]
+
+    def test_submitted_before_boundary_is_inclusive(self, _seed_timed_jobs):
+        jobs, _ = state.get_managed_jobs_with_filters(submitted_before=_T100)
+        assert self._submitted_ats(jobs) == [_T100]
+
+    def test_window_combines_after_and_before(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_T200, submitted_before=_T200)
+        # Only the row exactly at _T200 falls inside [_T200, _T200].
+        assert total == 1
+        assert self._submitted_ats(jobs) == [_T200]
+
+    def test_empty_window_returns_nothing(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_T300 + 1)
+        assert jobs == []
+        assert total == 0
+
+    def test_no_window_returns_all(self, _seed_timed_jobs):
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 3
+        assert self._submitted_ats(jobs) == [_T100, _T200, _T300]
+
+    def test_window_with_other_filters(self, _seed_timed_jobs):
+        # Combine the window with an accessible_workspaces filter: only the
+        # ws1 rows within [_T100, _T200] should match (early, mid).
+        jobs, total = state.get_managed_jobs_with_filters(
+            accessible_workspaces=['ws1'], submitted_before=_T200)
+        assert total == 2
+        assert self._submitted_ats(jobs) == [_T100, _T200]
+
+    def test_status_count_respects_window(self, _seed_timed_jobs):
+        # All three jobs are RUNNING; the window must cut the status counts.
+        counts = state.get_status_count_with_filters(submitted_after=_T200)
+        assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
+
+    # A pending job (NULL submitted_at) is treated as submitted "now", so the
+    # window keeps or drops it the same way it would a job submitted right now.
+    def test_pending_kept_by_past_lower_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+
+    def test_pending_dropped_by_past_upper_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_T300)
+        assert jobs == []
+        assert total == 0
+
+    def test_pending_kept_by_future_upper_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_FAR_FUTURE)
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+
+    def test_pending_dropped_by_future_lower_bound(self, _seed_pending_job):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_after=_FAR_FUTURE)
+        assert jobs == []
+        assert total == 0
+
+    # A terminal job that never got a submitted_at (cancelled/failed before
+    # STARTING) has no submission time, so it is excluded from any window —
+    # it must not be treated as submitted "now" like a still-pending job.
+    def test_terminal_no_submit_present_without_filter(
+            self, _seed_terminal_no_submit):
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['submitted_at'] is None
+        assert jobs[0]['status'].is_terminal()
+
+    def test_terminal_no_submit_excluded_from_lower_bound(
+            self, _seed_terminal_no_submit):
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert jobs == []
+        assert total == 0
+
+    def test_terminal_no_submit_excluded_from_future_upper_bound(
+            self, _seed_terminal_no_submit):
+        jobs, total = state.get_managed_jobs_with_filters(
+            submitted_before=_FAR_FUTURE)
+        assert jobs == []
+        assert total == 0
+
+
+class TestMultiTaskStatusFilterCharacterization:
+    """Pin the CURRENT (row/task-level) behavior of the `statuses` filter on a
+    multi-task (pipeline) job.
+
+    The `statuses` filter matches individual task rows, unlike `skip_finished`,
+    which is job-level. So filtering a pipeline by a terminal status returns a
+    partial view of a job that is still running. These assertions characterize
+    today's behavior; if `statuses` is ever made job-aware, they are expected
+    to change.
+    """
+
+    def test_terminal_status_returns_only_the_finished_task(
+            self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        # --status SUCCEEDED returns only the pipeline's finished task, even
+        # though the job is still running (task 1 is RUNNING). The FAILED job
+        # does not match.
+        jobs, total = state.get_managed_jobs_with_filters(
+            statuses=[state.ManagedJobStatus.SUCCEEDED.value])
+        assert [(j['job_id'], j['task_id']) for j in jobs] == [(pipeline_id, 0)]
+        assert jobs[0]['status'] == state.ManagedJobStatus.SUCCEEDED
+        assert total == 1
+
+    def test_running_status_returns_only_the_running_task(
+            self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        jobs, total = state.get_managed_jobs_with_filters(
+            statuses=[state.ManagedJobStatus.RUNNING.value])
+        assert [(j['job_id'], j['task_id']) for j in jobs] == [(pipeline_id, 1)]
+        assert jobs[0]['status'] == state.ManagedJobStatus.RUNNING
+        assert total == 1
+
+    def test_failed_status_returns_only_the_other_job(self,
+                                                      _seed_multi_task_job):
+        failed_id = _seed_multi_task_job['failed_job_id']
+        jobs, total = state.get_managed_jobs_with_filters(
+            statuses=[state.ManagedJobStatus.FAILED.value])
+        assert [(j['job_id'], j['task_id']) for j in jobs] == [(failed_id, 0)]
+        assert jobs[0]['status'] == state.ManagedJobStatus.FAILED
+        assert total == 1
+
+    def test_both_statuses_return_both_tasks(self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        jobs, total = state.get_managed_jobs_with_filters(statuses=[
+            state.ManagedJobStatus.SUCCEEDED.value,
+            state.ManagedJobStatus.RUNNING.value,
+        ])
+        assert sorted((j['job_id'], j['task_id']) for j in jobs) == [
+            (pipeline_id, 0),
+            (pipeline_id, 1),
+        ]
+        # total counts unique jobs that have a matching task: two matching
+        # task rows, one job.
+        assert total == 1
+
+    def test_skip_finished_is_job_level(self, _seed_multi_task_job):
+        pipeline_id = _seed_multi_task_job['pipeline_job_id']
+        # Contrast: skip_finished is job-level. The still-active pipeline
+        # keeps ALL its tasks, including the finished one, while the FAILED
+        # job is dropped entirely.
+        jobs, total = state.get_managed_jobs_with_filters(skip_finished=True)
+        assert sorted((j['job_id'], j['task_id']) for j in jobs) == [
+            (pipeline_id, 0),
+            (pipeline_id, 1),
+        ]
+        assert {j['status'] for j in jobs} == {
+            state.ManagedJobStatus.SUCCEEDED, state.ManagedJobStatus.RUNNING
+        }
+        assert total == 1

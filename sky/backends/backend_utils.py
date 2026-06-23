@@ -493,7 +493,11 @@ class FileMountHelper(object):
         return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
 
     @classmethod
-    def make_safe_symlink_command(cls, *, source: str, target: str) -> str:
+    def make_safe_symlink_command(cls,
+                                  *,
+                                  source: str,
+                                  target: str,
+                                  sudo_cmd: str = 'sudo') -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
         All intermediate directories of 'source' will be owned by $(whoami),
@@ -505,6 +509,12 @@ class FileMountHelper(object):
         This function is needed because a simple 'ln -s target source' may
         fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
         or may not exist, can end with a slash, or may need sudo access, etc.
+
+        'sudo_cmd' is the command prepended to privileged steps (mkdir, chown,
+        rm, ln); it defaults to 'sudo'. Pass an empty string when the caller
+        already has enough privilege and a sudo binary may be absent -- e.g. a
+        container running as root, or a minimal image without sudo installed --
+        so the command does not depend on sudo being on PATH.
 
         Cases of <target: local> file mounts and their behaviors:
 
@@ -521,7 +531,7 @@ class FileMountHelper(object):
         assert os.path.isabs(source), source
         assert not source.endswith('/') and not target.endswith('/'), (source,
                                                                        target)
-        # Below, use sudo in case the symlink needs sudo access to create.
+        sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
         dir_of_symlink = os.path.dirname(source)
@@ -529,27 +539,27 @@ class FileMountHelper(object):
             # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
             # chown $(whoami) on it so user can use these intermediate dirs
             # (excluding /).
-            f'sudo mkdir -p {dir_of_symlink}',
+            f'{sudo}mkdir -p {dir_of_symlink}',
             # p: path so far
             ('(p=""; '
              f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             'p=${p}/${w}; sudo chown $(whoami) $p; done)')
+             f'p=${{p}}/${{w}}; {sudo}chown $(whoami) $p; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
         #     directory).
         commands += [
             # Error out if source is an existing, non-symlink directory/file.
-            f'((test -L {source} && sudo rm {source} &>/dev/null) || '
+            f'((test -L {source} && {sudo}rm {source} >/dev/null 2>&1) || '
             f'(test ! -e {source} || '
             f'(echo "!!! Failed mounting because path exists ({source})"; '
             'exit 1)))',
         ]
         commands += [
             # Link.
-            f'sudo ln -s {target} {source}',
+            f'{sudo}ln -s {target} {source}',
             # chown.  -h to affect symlinks only.
-            f'sudo chown -h $(whoami) {source}',
+            f'{sudo}chown -h $(whoami) {source}',
         ]
         return ' && '.join(commands)
 
@@ -640,7 +650,7 @@ def get_expirable_clouds(
             # add remote_identity of each context if it exists
             remote_identities: Optional[Union[str, List[Dict[str, str]]]] = None
             for context in contexts:
-                context_remote_identity = skypilot_config.get_effective_region_config(
+                context_remote_identity = skypilot_config.get_effective_workspace_region_config(
                     cloud='kubernetes',
                     region=context,
                     keys=('remote_identity',),
@@ -656,7 +666,7 @@ def get_expirable_clouds(
                         assert isinstance(remote_identities, list)
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
-            global_remote_identity = skypilot_config.get_effective_region_config(
+            global_remote_identity = skypilot_config.get_effective_workspace_region_config(
                 cloud='kubernetes',
                 region=None,
                 keys=('remote_identity',),
@@ -674,7 +684,7 @@ def get_expirable_clouds(
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
         else:
-            remote_identities = skypilot_config.get_effective_region_config(
+            remote_identities = skypilot_config.get_effective_workspace_region_config(
                 cloud=str(cloud).lower(),
                 region=None,
                 keys=('remote_identity',),
@@ -786,7 +796,7 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_effective_region_config(
+    remote_identity_config = skypilot_config.get_effective_workspace_region_config(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('remote_identity',),
@@ -852,7 +862,7 @@ def write_cluster_config(
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_effective_region_config(
+        remote_identity_config = skypilot_config.get_effective_workspace_region_config(
             cloud=cloud_str.lower(),
             region=region.name,
             keys=('remote_identity',),
@@ -2904,6 +2914,32 @@ def _update_cluster_status(
                                                handle.launched_nodes,
                                                node_health)
 
+        # When the per-pod live status doesn't name a cause, recover it from a
+        # durable signal. Two races are covered:
+        # - Eviction (ephemeral-storage / disk / memory pressure) is emitted as
+        #   a kubelet event while the pod can still report Running/Ready and
+        #   pod.status.reason has not caught up -> read the events.
+        # - A run-phase OOMKilled lives in the container's last_state and
+        #   survives the restart, but the Ready condition flips back to True
+        #   once the container is running again, so a snapshot that raced the
+        #   restart misses it -> re-read the pods' current+previous states.
+        # Bounded: only on an abnormal k8s cluster with no status reason.
+        if not status_reason and isinstance(launched_resources.cloud,
+                                            clouds.Kubernetes):
+            try:
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                if ray_config and 'provider' in ray_config:
+                    pod_names = list(node_statuses.keys())
+                    status_reason = (
+                        k8s_instance.get_cluster_failure_reason_from_events(
+                            ray_config['provider'], pod_names) or
+                        k8s_instance.get_cluster_failure_reason_from_pods(
+                            ray_config['provider'], pod_names) or '')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get pod failure reason for '
+                             f'{cluster_name!r}: {e}')
+
         # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
         # be checked before some_nodes_not_stopped, which would otherwise
         # report the misleading "some but not all nodes are stopped" for
@@ -3083,6 +3119,40 @@ def _update_cluster_status(
 
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
+
+    # For Kubernetes, recover an autodown that completed between two refreshes.
+    # On k8s, autostop is implemented as autodown (pod termination); if skylet
+    # deleted the pods before a refresh caught the cluster in AUTOSTOPPING, we
+    # would otherwise record only the generic cleanup event below. Skylet leaves
+    # a durable Event breadcrumb
+    # (kubernetes/instance.py::emit_autostop_event_best_effort) that outlives the
+    # deleted pods, so read it back and attribute the termination to autostop.
+    # nop_if_duplicate keeps the timeline clean in the non-race case where
+    # 'Cluster is autostopping.' was already recorded. Only attempt this when the
+    # cluster was configured with autostop/autodown -- otherwise the breadcrumb
+    # cannot exist and the lookup is pointless.
+    if (record['autostop'] >= 0 and to_terminate and
+            isinstance(launched_resources.cloud, clouds.Kubernetes)):
+        try:
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            if ray_config and 'provider' in ray_config:
+                autostop_event = k8s_instance.get_cluster_autostop_event(
+                    ray_config['provider'],
+                    handle.cluster_name_on_cloud,
+                    since=record['launched_at'])
+                if autostop_event is not None:
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        None,
+                        'Cluster was autodowned (idle timeout).',
+                        global_user_state.ClusterEventType.STATUS_CHANGE,
+                        nop_if_duplicate=True,
+                        transitioned_at=autostop_event.get('transitioned_at'))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug('Failed to record autodown event for '
+                         f'{cluster_name!r}: {e}')
+
     global_user_state.add_cluster_event(
         cluster_name,
         None,

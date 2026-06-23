@@ -41,6 +41,7 @@ Launch a cluster or task.
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
 - `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
+- `--priority` — Priority for this task. Accepts either an integer (from -1000 to 1000, or a string priority class name. Passing "none" clears both.
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--idle-minutes-to-autostop`, `-i` — Automatically stop the cluster after this many minutes of idleness, i.e., no running or pending jobs in the cluster's job queue. Idleness gets reset depending on the ``--wait-for`` flag. Setting this ...
 - `--wait-for` — Determines the condition for resetting the idleness timer. This option works in conjunction with ``--idle-minutes-to-autostop``. Options:   1. ``jobs_and_ssh`` (default): Wait for in-progress jobs an...
@@ -52,6 +53,7 @@ Launch a cluster or task.
 - `--fast` — [Experimental] If the cluster is already up and available, skip provisioning and setup steps.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
+- `--workspace`, `-w` — Workspace to launch into. Shorthand for `--config active_workspace=<name>`.
 
 ### `sky exec`
 
@@ -183,6 +185,7 @@ Show estimated costs for launched clusters.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 - `--all`, `-a` — Show all cluster information.
 - `--days` (default: `30`) — Show clusters from the last N days. Default is 30 days. If set to 0, show all clusters.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## Job Queue Commands
 
@@ -343,6 +346,7 @@ Launch a managed job from a YAML or a command.
 - `--gpus` — Type and number of GPUs to use. Example values: "V100:8", "V100" (short for a count of 1), or "V100:0.5" (fractional counts are supported by the scheduling framework). If a new cluster is being launch...
 - `--instance-type`, `-t` — The instance type to use. If specified, overrides the "resources.instance_type" config. Passing "none" resets the config.
 - `--ports` — Ports to open on the cluster. Accepts a single port (``--ports 8080``), a range (``--ports 8000-8010``), or a comma-separated list (``--ports 8080,9090``). Repeat the flag to specify multiple values (...
+- `--priority` — Priority for this task. Accepts either an integer (from -1000 to 1000, or a string priority class name. Passing "none" clears both.
 - `--async`, `--no-async` — Run the command asynchronously.
 - `--cluster`, `-c` — Alias for --name, the name of the managed job.
 - `--job-recovery` — Recovery strategy to use for managed jobs.
@@ -351,6 +355,7 @@ Launch a managed job from a YAML or a command.
 - `--num-jobs` — Number of jobs to submit.
 - `--git-url` — Git repository URL.
 - `--git-ref` — Git reference (branch, tag, or commit hash) to use.
+- `--workspace`, `-w` — Workspace to submit the managed job into. Shorthand for `--config active_workspace=<name>`.
 - `--yes`, `-y` — Skip confirmation prompt.
 
 ### `sky jobs logs`
@@ -456,7 +461,11 @@ Show statuses of managed jobs.
 - `--verbose`, `-v` — Show all information in full.
 - `--limit`, `-l` (default: `50`) — Number of jobs to show, default is 50, use "-a/--all" to show all jobs.
 - `--refresh`, `-r` — Query the latest statuses, restarting the jobs controller if stopped.
-- `--skip-finished`, `-s` — Show only pending/running jobs' information.
+- `--skip-finished` — Show only pending/running jobs' information.
+- `-s`, `--status` — Filter by status, comma-separated (e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a deprecated alias for --skip-finished.
+- `--since` — Show only jobs submitted within this time window, relative to now (e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. Mutually exclusive with --after.
+- `--after` — Show only jobs submitted at or after this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive with --since.
+- `--before` — Show only jobs submitted at or before this absolute local time (e.g. "2026-01-13" or "2026-01-13 15:30:00").
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
 - `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
@@ -747,6 +756,29 @@ Set up a cluster using SSH targets from a file. If not specified, ~/.sky/ssh_nod
 - `--infra` — Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.
 - `--async` — Run the command asynchronously.
 - `--file`, `-f` — The file containing the SSH targets.
+
+## Workspace Commands
+
+Per-user workspace commands.
+
+### `sky workspace info`
+
+Shows the workspace your next request lands in by default, plus your saved preferred and the workspaces you can access.
+
+**Options:**
+
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
+- `-o`, `--output` (default: `table`) — Output format (default: table). Use "json" for a machine-readable shape.
+
+### `sky workspace use`
+
+Sets (or clears with --clear) your default workspace on the server.
+
+**Options:**
+
+- `NAME` — text
+- `--clear` — Clear the saved preferred workspace.
+- `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 
 ## Other Commands
 

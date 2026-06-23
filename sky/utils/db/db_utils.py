@@ -519,7 +519,7 @@ def _make_asyncpg_creator(dsn: str) -> Callable[[], Any]:
     import asyncpg
 
     async def _connect() -> Any:
-        return await asyncpg.connect(dsn)
+        return await asyncpg.connect(dsn, timeout=15)
 
     return _connect
 

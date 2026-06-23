@@ -21,6 +21,9 @@ const ServiceAccountBadge = () => (
  * @param {string} [props.className] - Additional CSS classes for the container
  * @param {string} [props.linkClassName] - Additional CSS classes for the link
  * @param {boolean} [props.showBadge=true] - Whether to show the SA badge for service accounts
+ * @param {Function} [props.onUserClick] - When provided, clicking the user name
+ *   calls this with (username, userHash) instead of navigating to the users
+ *   page. Used to turn the user into an in-page filter rather than a link.
  */
 export const UserDisplay = ({
   username,
@@ -28,15 +31,32 @@ export const UserDisplay = ({
   className = 'flex items-center gap-1',
   linkClassName = 'text-gray-700 hover:text-blue-600 hover:underline',
   showBadge = true,
+  onUserClick = null,
 }) => {
   const isServiceAcc = isServiceAccount(userHash);
   const userUrl = getUserLink(userHash);
 
   return (
     <div className={className}>
-      <Link href={userUrl} className={linkClassName}>
-        {username}
-      </Link>
+      {onUserClick ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            // Stop the click from bubbling to row-level handlers (e.g. row
+            // expand) since this is an in-cell filter action.
+            e.stopPropagation();
+            onUserClick(username, userHash);
+          }}
+          className={linkClassName}
+          title={`Filter by ${username}`}
+        >
+          {username}
+        </button>
+      ) : (
+        <Link href={userUrl} className={linkClassName}>
+          {username}
+        </Link>
+      )}
       {showBadge && isServiceAcc && <ServiceAccountBadge />}
     </div>
   );
@@ -48,6 +68,7 @@ UserDisplay.propTypes = {
   className: PropTypes.string,
   linkClassName: PropTypes.string,
   showBadge: PropTypes.bool,
+  onUserClick: PropTypes.func,
 };
 
 export default UserDisplay;

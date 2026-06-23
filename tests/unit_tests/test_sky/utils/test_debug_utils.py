@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import posixpath
 import time
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
@@ -10,10 +11,13 @@ import zipfile
 
 import pytest
 
+from sky import exceptions
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
+from sky.skylet import constants as skylet_constants
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
+from sky.utils import status_lib
 
 
 def _make_context(
@@ -21,12 +25,16 @@ def _make_context(
     cluster_names: Optional[Set[str]] = None,
     managed_job_ids: Optional[Set[int]] = None,
     errors: Optional[List[Dict[str, str]]] = None,
+    request_ids_via_job: Optional[Set[str]] = None,
+    request_ids_via_cluster: Optional[Set[str]] = None,
 ) -> debug_utils.DebugDumpContext:
     """Helper to create a DebugDumpContext."""
     return debug_utils.DebugDumpContext(
         request_ids=request_ids or set(),
         cluster_names=cluster_names or set(),
         managed_job_ids=managed_job_ids or set(),
+        request_ids_via_job=request_ids_via_job or set(),
+        request_ids_via_cluster=request_ids_via_cluster or set(),
         errors=errors if errors is not None else [],
     )
 
@@ -780,6 +788,212 @@ class TestPopulateRecentContext:
 
 
 # ---------------------------------------------------------------------------
+# Tests for cross-link cycle prevention via provenance sidecars.
+#
+# Without these guards, a request linked in via a job (e.g. a
+# sky.jobs.launch matched on body.name) would re-seed managed_job_ids
+# with that request's return_value.job_id, dragging every sibling job
+# of a batch launch into the dump. Symmetric story for clusters.
+# ---------------------------------------------------------------------------
+class TestCrossLinkCycleBreak:
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_request_added_via_job_does_not_reseed_managed_jobs(
+            self, mock_get_request):
+        """job → request → job cycle is broken."""
+        # Simulate: req-from-job was added by _get_requests_from_managed_jobs
+        # (e.g. matched on body.name="sb-sweep-8"). Its body.job_id would
+        # point at a SIBLING job (B) that shares the task name with our
+        # seed job A. Without the guard, B would be added to
+        # managed_job_ids.
+        body = SimpleNamespace(job_id=999, job_ids=None)
+        mock_get_request.return_value = _make_request(request_id='req-from-job',
+                                                      request_body=body,
+                                                      name='sky.jobs.launch')
+        ctx = _make_context(
+            request_ids={'req-from-job'},
+            request_ids_via_job={'req-from-job'},
+            managed_job_ids={42},  # original seed job
+        )
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == {42}
+        # The guarded request was never even fetched.
+        mock_get_request.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_request_added_via_cluster_does_not_reseed_clusters(
+            self, mock_get_request):
+        """cluster → request → cluster cycle is broken."""
+        # Simulate: req-from-cluster was added by
+        # _get_requests_from_clusters. Its cluster_name points at a
+        # DIFFERENT cluster than the seed (since the request also
+        # touched another cluster). Without the guard, that other
+        # cluster would be added to cluster_names.
+        mock_get_request.return_value = _make_request(
+            request_id='req-from-cluster', cluster_name='other-cluster')
+        ctx = _make_context(
+            request_ids={'req-from-cluster'},
+            request_ids_via_cluster={'req-from-cluster'},
+            cluster_names={'seed-cluster'},
+        )
+
+        debug_utils._get_clusters_from_requests(ctx)
+
+        assert ctx['cluster_names'] == {'seed-cluster'}
+        mock_get_request.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_unrestricted_request_still_expands_jobs(self, mock_get_request):
+        """A user-seeded request (no provenance tag) still expands."""
+        body = SimpleNamespace(job_id=42, job_ids=None)
+        mock_get_request.return_value = _make_request(request_id='req-seed',
+                                                      request_body=body,
+                                                      name='sky.jobs.launch')
+        # No provenance tag — this came from user input or recent context.
+        ctx = _make_context(request_ids={'req-seed'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert 42 in ctx['managed_job_ids']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_unrestricted_request_still_expands_clusters(
+            self, mock_get_request):
+        """A user-seeded request (no provenance tag) still expands."""
+        mock_get_request.return_value = _make_request(request_id='req-seed',
+                                                      cluster_name='c1')
+        ctx = _make_context(request_ids={'req-seed'})
+
+        debug_utils._get_clusters_from_requests(ctx)
+
+        assert 'c1' in ctx['cluster_names']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_managed_jobs_tags_provenance(self, mock_get_tasks):
+        """Requests added by job-cross-link are tagged."""
+        body = SimpleNamespace(job_id=42,
+                               job_ids=None,
+                               name='task',
+                               all_users=False,
+                               all=False)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1',
+                          request_body=body,
+                          name='sky.jobs.launch'),
+        ]
+        # queue_v2 must not raise — patch it as a no-op.
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                        return_value=([], 0, {}, 0)):
+            ctx = _make_context(managed_job_ids={42})
+            debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-1' in ctx['request_ids']
+        assert 'req-1' in ctx['request_ids_via_job']
+        assert 'req-1' not in ctx['request_ids_via_cluster']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_clusters_tags_provenance(self, mock_get_tasks):
+        """Requests added by cluster-cross-link are tagged."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-1', cluster_name='c1'),
+            _make_request(request_id='req-2', cluster_name='c1'),
+        ]
+        ctx = _make_context(cluster_names={'c1'})
+
+        debug_utils._get_requests_from_clusters(ctx)
+
+        assert ctx['request_ids'] == {'req-1', 'req-2'}
+        assert ctx['request_ids_via_cluster'] == {'req-1', 'req-2'}
+        assert ctx['request_ids_via_job'] == set()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_clusters_does_not_tag_preexisting(
+            self, mock_get_tasks):
+        """A user-seeded request that also matches a cluster scan must
+        not inherit the via_cluster tag, otherwise the user's explicit
+        request would be wrongly skipped by _get_clusters_from_requests."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='user-seeded', cluster_name='c1'),
+            _make_request(request_id='new-from-cluster', cluster_name='c1'),
+        ]
+        # 'user-seeded' was already in request_ids before the helper ran.
+        ctx = _make_context(cluster_names={'c1'}, request_ids={'user-seeded'})
+
+        debug_utils._get_requests_from_clusters(ctx)
+
+        assert ctx['request_ids'] == {'user-seeded', 'new-from-cluster'}
+        # Only the genuinely new one carries the via_cluster tag.
+        assert ctx['request_ids_via_cluster'] == {'new-from-cluster'}
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_requests_from_managed_jobs_does_not_tag_preexisting(
+            self, mock_get_tasks):
+        """Symmetric: a user-seeded request that also matches the
+        managed-job scan must not inherit the via_job tag."""
+        body = SimpleNamespace(job_id=42,
+                               job_ids=None,
+                               name='task',
+                               all_users=False,
+                               all=False)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='user-seeded',
+                          request_body=body,
+                          name='sky.jobs.launch'),
+        ]
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                        return_value=([], 0, {}, 0)):
+            # 'user-seeded' was already in request_ids before the helper ran.
+            ctx = _make_context(managed_job_ids={42},
+                                request_ids={'user-seeded'})
+            debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'user-seeded' in ctx['request_ids']
+        # Pre-existing request was not tagged → still expandable downstream.
+        assert ctx['request_ids_via_job'] == set()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_all_users_cancel_does_not_drag_unrelated_jobs(
+            self, mock_get_tasks, mock_get_request):
+        """A historic `cancel --all-users` request must not pollute the
+        dump.
+
+        Before this fix: `_get_requests_from_managed_jobs` matches the
+        request via body.all_users=True → adds it to request_ids →
+        `_get_managed_jobs_from_requests` reads it back and would
+        normally extract any job_ids from its body. The guard means
+        none of that re-expansion happens.
+        """
+        cancel_body = SimpleNamespace(job_id=None,
+                                      job_ids=None,
+                                      name=None,
+                                      all_users=True,
+                                      all=False)
+        # The cancel request that matched body.all_users in step 1.
+        mock_get_tasks.return_value = [
+            _make_request(request_id='cancel-req',
+                          request_body=cancel_body,
+                          name='sky.jobs.cancel'),
+        ]
+        with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                        return_value=([], 0, {}, 0)):
+            ctx = _make_context(managed_job_ids={1})
+            debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'cancel-req' in ctx['request_ids']
+        assert 'cancel-req' in ctx['request_ids_via_job']
+
+        # Step 2: the cancel request would normally be re-examined here.
+        # It must be skipped because it's tagged via_job.
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == {1}
+        mock_get_request.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Tests for create_debug_dump (end-to-end)
 # ---------------------------------------------------------------------------
 class TestCreateDebugDump:
@@ -1207,6 +1421,8 @@ class TestDebugDumpContext:
         assert ctx['request_ids'] == {'r1', 'r2'}
         assert ctx['cluster_names'] == {'c1'}
         assert ctx['managed_job_ids'] == {1, 2, 3}
+        assert ctx['request_ids_via_job'] == set()
+        assert ctx['request_ids_via_cluster'] == set()
         assert ctx['errors'] == []
 
     def test_context_sets_are_mutable(self):
@@ -2221,3 +2437,323 @@ class TestDumpClusterInfo:
             data = json.load(f)
         assert len(data) == 1
         assert data[0]['request_id'] == 'req-a'
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_up_cluster_collects_skylet_log(self, mock_get_cluster, mock_events,
+                                            mock_requests, tmp_path):
+        """An UP cluster with a handle should rsync the skylet log."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        # Head node resolves the skylet log path against $HOME.
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'live-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.UP,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'live-cluster'}, str(tmp_path), errors)
+
+        # Pulled the skylet log off the head node (runners[0]) into the
+        # cluster dump dir, using the remotely-resolved source path.
+        runner.rsync.assert_called_once()
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/home/sky/.sky/skylet.log'
+        assert kwargs['target'] == str(tmp_path / 'clusters' / 'live-cluster' /
+                                       'skylet.log')
+        assert kwargs['up'] is False
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_stopped_cluster_skips_skylet_log(self, mock_get_cluster,
+                                              mock_events, mock_requests,
+                                              tmp_path):
+        """A STOPPED cluster has no reachable node, so we don't attempt it."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        mock_get_cluster.return_value = {
+            'name': 'stopped-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.STOPPED,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'stopped-cluster'}, str(tmp_path),
+                                       errors)
+
+        handle.get_command_runners.assert_not_called()
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_init_cluster_collects_skylet_log(self, mock_get_cluster,
+                                              mock_events, mock_requests,
+                                              tmp_path):
+        """An INIT (possibly degraded) cluster is still attempted."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'init-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.INIT,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'init-cluster'}, str(tmp_path), errors)
+
+        runner.rsync.assert_called_once()
+        assert not errors
+
+
+class TestCollectClusterSkyletLog:
+    """Tests for the _collect_cluster_skylet_log helper."""
+
+    def test_rsyncs_skylet_log_from_head(self, tmp_path):
+        """Pulls the remotely-resolved skylet log off the first (head) runner."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner, mock.Mock()]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        # Only the head runner (index 0) is used.
+        runner.rsync.assert_called_once()
+        handle.get_command_runners.return_value[1].rsync.assert_not_called()
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/home/sky/.sky/skylet.log'
+        assert kwargs['target'] == os.path.join(str(tmp_path), 'skylet.log')
+        # Bounded by a total timeout so one stalled node can't hang the dump.
+        assert kwargs['timeout'] == debug_utils._SKYLET_LOG_RSYNC_TIMEOUT
+        assert not errors
+
+    def test_uses_relocated_runtime_dir(self, tmp_path):
+        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        path is resolved on the remote node, not from a Python attribute."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/scratch/rt/.sky/skylet.log'
+        assert not errors
+
+    def test_missing_log_is_not_an_error(self, tmp_path):
+        """A not-found rsync (code 23) is silently skipped, not recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            exceptions.RSYNC_FILE_NOT_FOUND_CODE, 'rsync', 'not found', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert not errors
+
+    def test_other_rsync_failure_is_recorded(self, tmp_path):
+        """A non-23 rsync failure is recorded in errors."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'clusters'
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_runners_is_noop(self, tmp_path):
+        """No runners (e.g. headless cluster) is a safe no-op."""
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = []
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert not errors
+
+    def test_get_command_runners_failure_is_recorded(self, tmp_path):
+        """A failure obtaining runners is recorded but does not raise."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('unreachable')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_init_rsync_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, a (non-23) rsync failure is expected and is
+        debug-logged, not recorded as a dump error."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_init_get_runners_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, an unreachable node (no runners yet) is
+        expected and not recorded."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('not up yet')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_up_rsync_failure_is_recorded(self, tmp_path):
+        """For an UP cluster, a (non-23) rsync failure is genuinely worth
+        surfacing and is recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_exception_message_falls_back_to_type_name(self, tmp_path):
+        """A recorded error never has a blank message: an exception whose
+        str() is empty falls back to the exception type name."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['error'] == 'RuntimeError'
+
+
+class TestResolveRemoteSkyletLogPath:
+    """Tests for the _resolve_remote_skylet_log_path helper."""
+
+    def test_returns_resolved_remote_path(self):
+        """Returns the path echoed by the remote shell."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == '/scratch/rt/.sky/skylet.log'
+        _, kwargs = runner.run.call_args
+        # Resolved with source_bashrc to match how skylet is started.
+        assert kwargs['source_bashrc'] is True
+        assert kwargs['require_outputs'] is True
+        # Bounded by a connect timeout so an unreachable node fails fast.
+        assert kwargs['connect_timeout'] == (
+            debug_utils._SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
+
+    def test_takes_last_non_empty_line(self):
+        """bashrc banner/warning lines before the echo are ignored."""
+        runner = mock.Mock()
+        runner.run.return_value = (0,
+                                   'motd banner\n\n/home/sky/.sky/skylet.log\n',
+                                   '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == '/home/sky/.sky/skylet.log'
+
+    def test_falls_back_on_nonzero_returncode(self):
+        """A failed resolution command falls back to ~/.sky/skylet.log."""
+        runner = mock.Mock()
+        runner.run.return_value = (1, '', 'boom')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_falls_back_on_empty_output(self):
+        """Empty stdout falls back to ~/.sky/skylet.log."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '   \n', '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_falls_back_on_exception(self):
+        """A raising runner.run falls back instead of propagating."""
+        runner = mock.Mock()
+        runner.run.side_effect = RuntimeError('unreachable')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)

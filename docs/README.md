@@ -11,7 +11,7 @@ Sphinx docs based on ReadTheDocs.
 ### Install dependencies
 ```bash
 # full setup matching CI in .github/workflows/test-doc-build.yml
-uv pip install --prerelease=allow "azure-cli>=2.65.0"
+uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0"
 uv pip install ".[all]"
 cd docs
 uv pip install -r requirements-docs.txt

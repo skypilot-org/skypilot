@@ -38,6 +38,7 @@ from sky.utils import status_lib
 from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.db import retries as db_retries
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -79,6 +80,12 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('password', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
     sqlalchemy.Column('type', sqlalchemy.Text, server_default=None),
+    # User-set default workspace; null when unset. Resolution and RBAC
+    # validation are handled in sky/workspaces/; this column is the
+    # persisted value only.
+    sqlalchemy.Column('preferred_workspace',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -212,6 +219,13 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # Whether the cluster was launched by a controller (managed job or
+    # service). Mirrors the `is_managed` column on the clusters table so that
+    # history queries (e.g. the dashboard's cost report) can filter out
+    # controller-backed clusters even after they are terminated, since at that
+    # point the clusters table row is gone and the join can no longer supply
+    # the flag.
+    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
 )
 
 
@@ -418,6 +432,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                 )
             result = session.execute(insert_stmnt)
 
@@ -447,6 +462,7 @@ def add_or_update_user(
                         user_table.c.password,
                         user_table.c.created_at,
                         user_table.c.type,
+                        user_table.c.preferred_workspace,
                     )
 
                 result = session.execute(update_stmnt)
@@ -467,6 +483,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -503,6 +520,7 @@ def add_or_update_user(
                     user_table.c.password,
                     user_table.c.created_at,
                     user_table.c.type,
+                    user_table.c.preferred_workspace,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -520,6 +538,7 @@ def add_or_update_user(
                     password=row.password,
                     created_at=row.created_at,
                     user_type=row.type,
+                    preferred_workspace=row.preferred_workspace,
                 )
                 return was_inserted, updated_user
             else:
@@ -541,6 +560,7 @@ def get_user(user_id: str) -> Optional[models.User]:
         password=row.password,
         created_at=row.created_at,
         user_type=row.type,
+        preferred_workspace=row.preferred_workspace,
     )
 
 
@@ -557,6 +577,7 @@ def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     }
 
@@ -575,6 +596,7 @@ def get_user_by_name(username: str) -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -591,6 +613,7 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
             name=row.name,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
 
@@ -615,8 +638,30 @@ def get_all_users() -> List[models.User]:
             password=row.password,
             created_at=row.created_at,
             user_type=row.type,
+            preferred_workspace=row.preferred_workspace,
         ) for row in rows
     ]
+
+
+@db_retries.retry
+@metrics_lib.time_me
+def set_user_preferred_workspace(user_id: str,
+                                 workspace: Optional[str]) -> bool:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    This is the raw DB write; RBAC validation that the user has access to the
+    target workspace MUST be done by the caller in sky/workspaces/ before
+    invoking this. Returns True if a row was updated, False if the user_id
+    does not exist.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.update(user_table).where(
+                user_table.c.id == user_id).values(
+                    preferred_workspace=workspace))
+        session.commit()
+        return result.rowcount > 0
 
 
 @metrics_lib.time_me
@@ -891,6 +936,7 @@ def add_or_update_cluster(cluster_name: str,
             region=region,
             zone=zone,
             node_names=node_names,
+            is_managed=int(is_managed),
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -913,6 +959,12 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
+                # Intentionally do not update is_managed here (mirrors the
+                # clusters table above, which only sets it on insert).
+                # add_or_update_cluster is called multiple times during a
+                # managed-job launch and is_managed defaults to False on
+                # subsequent calls; overwriting it would reset the flag to 0
+                # and leak managed-job clusters into the history view.
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -920,6 +972,7 @@ def add_or_update_cluster(cluster_name: str,
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def add_cluster_event(cluster_name: str,
                       new_status: Optional[status_lib.ClusterStatus],
@@ -1105,6 +1158,53 @@ def get_last_cluster_event_of_type_multiple(
     return {row.cluster_hash: row.reason for row in rows}
 
 
+def get_last_status_change_times(
+        cluster_hashes: Set[str],
+        ending_status: status_lib.ClusterStatus) -> Dict[str, int]:
+    """Latest STATUS_CHANGE.transitioned_at per cluster for an ending_status.
+
+    Returns a mapping from cluster_hash to the epoch-seconds at which that
+    cluster most recently transitioned into ``ending_status``. Clusters
+    with no matching STATUS_CHANGE row are omitted.
+
+    Chunks the ``cluster_hash IN (...)`` predicate by
+    ``_CLUSTER_IN_QUERY_CHUNK_SIZE`` to stay under SQLite's 999-parameter
+    cap (PostgreSQL has no such cap but the chunking is harmless there).
+    """
+    if not cluster_hashes:
+        return {}
+    engine = _db_manager.get_engine()
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, int] = {}
+    with orm.Session(engine) as session:
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
+
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.transitioned_at,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type ==
+                ClusterEventType.STATUS_CHANGE.value,
+                cluster_event_table.c.ending_status == ending_status.value,
+            ).subquery()
+
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.transitioned_at,
+            ).filter(ranked.c.rn == 1).all()
+
+            for row in rows:
+                result[row.cluster_hash] = int(row.transitioned_at)
+    return result
+
+
 def cleanup_cluster_events_with_retention(retention_hours: float,
                                           event_type: ClusterEventType) -> None:
     engine = _db_manager.get_engine()
@@ -1173,7 +1273,7 @@ async def cluster_event_retention_daemon():
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: Literal[False] = False,
     limit: Optional[int] = ...,
 ) -> List[str]:
@@ -1184,7 +1284,7 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: Literal[True],
     limit: Optional[int] = ...,
 ) -> List[Dict[str, Union[str, int]]]:
@@ -1195,17 +1295,18 @@ def get_cluster_events(
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: bool = ...,
     limit: Optional[int] = ...,
 ) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
     ...
 
 
+@db_retries.retry
 def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
-    event_type: ClusterEventType,
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
     include_timestamps: bool = False,
     limit: Optional[int] = None
 ) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
@@ -1216,11 +1317,11 @@ def get_cluster_events(
             is specified.
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
-        event_type: Type of the event.
+        event_type: Event type, or a list of event types to include.
         include_timestamps: If True, returns list of dicts with 'reason' and
             'transitioned_at' fields. If False, returns list of reason strings.
-        limit: If specified, returns at most this many events (most recent).
-            If None, returns all events.
+        limit: If specified, returns at most this many events (most recent),
+            across all the requested event types. If None, returns all events.
 
     Returns:
         If include_timestamps is False: List of reason strings.
@@ -1234,20 +1335,27 @@ def get_cluster_events(
     if cluster_hash is None:
         raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
+    event_types = ([event_type]
+                   if isinstance(event_type, ClusterEventType) else event_type)
+    type_filter = cluster_event_table.c.type.in_(
+        [et.value for et in event_types])
+
     with orm.Session(engine) as session:
         if limit is not None:
             # To get the most recent N events in ASC order, we use a subquery:
             # 1. Get most recent N events (ORDER BY DESC LIMIT N)
             # 2. Re-order them by ASC
-            subquery = session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash, type=event_type.value).order_by(
+            subquery = session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                type_filter).order_by(
                     cluster_event_table.c.transitioned_at.desc()).limit(
                         limit).subquery()
             rows = session.query(subquery).order_by(
                 subquery.c.transitioned_at.asc()).all()
         else:
-            rows = session.query(cluster_event_table).filter_by(
-                cluster_hash=cluster_hash, type=event_type.value).order_by(
+            rows = session.query(cluster_event_table).filter(
+                cluster_event_table.c.cluster_hash == cluster_hash,
+                type_filter).order_by(
                     cluster_event_table.c.transitioned_at.asc()).all()
 
     if include_timestamps:
@@ -1256,6 +1364,50 @@ def get_cluster_events(
             'transitioned_at': row.transitioned_at
         } for row in rows]
     return [row.reason for row in rows]
+
+
+@db_retries.retry
+def get_cluster_events_by_name(
+    cluster_name: str,
+    event_types: List[ClusterEventType],
+    limit: Optional[int] = None,
+) -> List[Dict[str, Union[str, int]]]:
+    """Returns cluster events looked up by the persisted cluster name.
+
+    Unlike get_cluster_events, this filters on the cluster_events ``name``
+    column directly instead of resolving the name to a hash via the clusters
+    table. This means events remain queryable after the cluster row (and its
+    name->hash mapping) has been removed on teardown, which matters for
+    finished managed jobs whose clusters have already been torn down.
+
+    Args:
+        cluster_name: Name of the cluster.
+        event_types: Event types to include.
+        limit: If specified, returns at most this many events (most recent),
+            across all the requested event types.
+
+    Returns:
+        List of dicts with 'reason' and 'transitioned_at' (unix timestamp)
+        fields, ordered from newest to oldest.
+    """
+    if not event_types:
+        return []
+    engine = _db_manager.get_engine()
+    type_values = [event_type.value for event_type in event_types]
+    with orm.Session(engine) as session:
+        query = session.query(
+            cluster_event_table.c.reason,
+            cluster_event_table.c.transitioned_at,
+        ).filter(cluster_event_table.c.name == cluster_name,
+                 cluster_event_table.c.type.in_(type_values)).order_by(
+                     cluster_event_table.c.transitioned_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
+    return [{
+        'reason': row.reason,
+        'transitioned_at': row.transitioned_at,
+    } for row in rows]
 
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
@@ -1309,6 +1461,7 @@ def update_last_use(cluster_name: str):
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
@@ -1357,6 +1510,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
@@ -1467,6 +1621,7 @@ def get_glob_cluster_names(
     return [row.name for row in rows]
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
@@ -1829,6 +1984,7 @@ def _load_storage_mounts_metadata(
     return pickle.loads(record_storage_mounts_metadata)
 
 
+@db_retries.retry
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def get_cluster_from_name(
@@ -2180,7 +2336,8 @@ def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
-        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -2195,6 +2352,9 @@ def get_clusters_from_history(
               specified, rows matching either are returned (logical OR).
               Note that a single cluster name can map to multiple history
               records when a name is reused across launches.
+        exclude_managed_clusters: If True, exclude clusters launched by a
+              controller (managed jobs and services). Rows recorded before the
+              is_managed column existed are treated as not managed.
 
     Returns:
         List of cluster records with history information.
@@ -2264,6 +2424,12 @@ def get_clusters_from_history(
                 cluster_history_table.c.name.in_(cluster_names))
         if identifier_filters:
             query = query.filter(sqlalchemy.or_(*identifier_filters))
+        if exclude_managed_clusters:
+            # Treat NULL (rows predating the is_managed column) as not managed.
+            query = query.filter(
+                sqlalchemy.or_(
+                    cluster_history_table.c.is_managed.is_(None),
+                    cluster_history_table.c.is_managed == int(False)))
         rows = query.all()
 
     usage_intervals_dict = {}
@@ -3017,6 +3183,7 @@ def update_service_account_token_last_used(token_id: str) -> None:
         session.commit()
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def delete_service_account_token(token_id: str) -> bool:
     """Delete a service account token.
@@ -3062,6 +3229,7 @@ def rotate_service_account_token(token_id: str,
         raise ValueError(f'Service account token {token_id} not found.')
 
 
+@db_retries.retry
 @metrics_lib.time_me
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.

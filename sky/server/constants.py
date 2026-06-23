@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 52  # lifecycle hooks: /hook_logs route + tail_hook_logs SDK
+API_VERSION = 55  # WAITING request status
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -59,6 +59,25 @@ MIN_LAZY_REPLICA_HANDLE_API_VERSION = 51
 
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3
+
+# Minimum server API version that exposes /users/me/workspace and runs the
+# server-side launch-path resolver when the client does not specify an
+# active workspace. Older servers don't have the endpoint and fall back to
+# the literal 'default' workspace, so the client must skip features that
+# depend on per-user preferred workspace when talking to such servers.
+MIN_PREFERRED_WORKSPACE_API_VERSION = 53
+
+# Minimum server API version that supports filtering the managed jobs queue by
+# submission time (submitted_after / submitted_before, surfaced as the CLI
+# --since / --after / --before flags). Older servers silently ignore these
+# fields, so the client warns and shows all jobs.
+MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION = 54
+
+# Servers >= this version may report the WAITING request status (a request
+# parked off its worker while waiting for a retry/resume condition). Older
+# clients don't know the value and would crash parsing it, so the server
+# downgrades WAITING to RUNNING on the wire for clients below this version.
+MIN_WAITING_STATUS_API_VERSION = 55
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

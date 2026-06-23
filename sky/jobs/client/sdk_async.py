@@ -135,8 +135,11 @@ async def tail_logs(cluster_name: str,
                     tail: int = 0,
                     output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
+    # mypy cannot pick an overload of sdk.tail_logs when it is passed as a
+    # value to asyncio.to_thread; the runtime call is unambiguous because
+    # preload_content defaults to True.
     return await asyncio.to_thread(
-        sdk.tail_logs,
+        sdk.tail_logs,  # type: ignore[arg-type]
         cluster_name,
         job_id,
         follow,

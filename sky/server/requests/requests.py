@@ -30,12 +30,14 @@ from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
+from sky.skylet import constants as skylet_constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -67,6 +69,7 @@ class RequestStatus(enum.Enum):
     """The status of a request."""
 
     PENDING = 'PENDING'
+    WAITING = 'WAITING'
     RUNNING = 'RUNNING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
@@ -84,14 +87,48 @@ class RequestStatus(enum.Enum):
     def finished_status(cls) -> List['RequestStatus']:
         return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
 
+    @classmethod
+    def active_statuses(cls) -> List['RequestStatus']:
+        """Statuses of requests that are not finished yet."""
+        return [cls.PENDING, cls.WAITING, cls.RUNNING]
+
+    @classmethod
+    def executable_statuses(cls) -> List['RequestStatus']:
+        """Statuses from which a dequeued request may start executing.
+
+        A request is enqueued as PENDING. It may also be re-enqueued while in
+        WAITING -- the state it is parked in while waiting to resume (e.g. a
+        retry backoff or an external continue-condition). In both cases the
+        worker should pick it up and run it. Any other status (RUNNING, a
+        finished status, or CANCELLED) means the request must not be executed.
+        """
+        return [cls.PENDING, cls.WAITING]
+
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,
+    RequestStatus.WAITING: colorama.Fore.YELLOW,
     RequestStatus.RUNNING: colorama.Fore.GREEN,
     RequestStatus.SUCCEEDED: colorama.Fore.GREEN,
     RequestStatus.FAILED: colorama.Fore.RED,
     RequestStatus.CANCELLED: colorama.Fore.WHITE,
 }
+
+
+def _status_value_for_client(status_value: str) -> str:
+    """Map WAITING to RUNNING for clients that predate the WAITING status.
+
+    Older clients parse the status string straight into the RequestStatus enum
+    and crash on an unknown value, so downgrade it to the closest status they
+    understand on the wire.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    if (status_value == RequestStatus.WAITING.value and
+            remote_api_version is not None and remote_api_version <
+            server_constants.MIN_WAITING_STATUS_API_VERSION):
+        return RequestStatus.RUNNING.value
+    return status_value
+
 
 REQUEST_COLUMNS = [
     'request_id',
@@ -208,6 +245,10 @@ class Request:
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
+        # encode() may downgrade WAITING -> RUNNING for clients on an older API
+        # version; that is a wire-only concern. to_row() feeds the database, so
+        # always persist the true status regardless of the request context.
+        payload.status = self.status.value
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -236,7 +277,7 @@ class Request:
             name=self.name,
             entrypoint=self.entrypoint.__name__,
             request_body=self.request_body.model_dump_json(),
-            status=self.status.value,
+            status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
@@ -264,7 +305,7 @@ class Request:
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
-                status=self.status.value,
+                status=_status_value_for_client(self.status.value),
                 return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
@@ -360,7 +401,7 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             request_body=request.request_body.model_dump_json()
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
-            status=request.status.value,
+            status=_status_value_for_client(request.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
@@ -473,12 +514,12 @@ def create_table(cursor, conn):
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'WAITING', 'RUNNING');
     """)
     # Add an index on cluster_name to speed up queries
     # that filter on this column.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'WAITING', 'RUNNING');
     """)
     # Add an index on created_at to speed up queries that sort on this column.
     cursor.execute(f"""\
@@ -578,7 +619,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in storage.query_requests(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            status=RequestStatus.active_statuses(),
             exclude_request_names=[exclude_request_name],
             cluster_names=[cluster_name],
             fields=['request_id']))
@@ -789,6 +830,50 @@ async def create_if_not_exists_async(request: Request) -> bool:
     """
     return await request_storage.get_request_backend(
     ).create_if_not_exists_async(request)
+
+
+def build_internal_daemon_request(
+        daemon: 'daemons.InternalRequestDaemon') -> Request:
+    """Build a fresh `Request` for an internal daemon.
+
+    Captures the current process's `os.environ` via `payloads.RequestBody()`.
+    Status starts at PENDING with no `pid`. The returned object is not yet
+    persisted.
+    """
+    body = payloads.RequestBody()
+    return Request(
+        request_id=daemon.id,
+        name=server_constants.REQUEST_NAME_PREFIX + daemon.name,
+        entrypoint=daemon.run_event,
+        request_body=body,
+        status=RequestStatus.PENDING,
+        created_at=time.time(),
+        schedule_type=ScheduleType.SHORT,
+        user_id=skylet_constants.SKYPILOT_SYSTEM_USER_ID,
+    )
+
+
+async def create_or_refresh_internal_daemon_async(request: Request) -> bool:
+    """Insert or refresh an internal daemon's row.
+
+    Thin module-level wrapper. See
+    `RequestBackend.create_or_refresh_internal_daemon_async` for the
+    contract.
+    """
+    return await request_storage.get_request_backend(
+    ).create_or_refresh_internal_daemon_async(request)
+
+
+async def delete_orphan_internal_daemons_async(
+    internal_daemons: List['daemons.InternalRequestDaemon'],) -> None:
+    """Delete persisted daemon rows whose id is not in `internal_daemons`.
+
+    Thin module-level wrapper. See
+    `RequestBackend.delete_orphan_internal_daemons_async` for the
+    contract.
+    """
+    return await request_storage.get_request_backend(
+    ).delete_orphan_internal_daemons_async(internal_daemons)
 
 
 @dataclasses.dataclass
@@ -1209,6 +1294,57 @@ class SqliteRequestBackend(request_storage.RequestBackend):
                 logger.debug(f'End creating request {request.request_id}')
         return True if row else False
 
+    @init_db_async
+    @asyncio_utils.shield
+    async def create_or_refresh_internal_daemon_async(self,
+                                                      request: Request) -> bool:
+        assert _DB is not None
+        # Try insert first (the dedup primitive: only one concurrent
+        # caller wins the conflict).
+        inserted = await self.create_if_not_exists_async(request)
+        if inserted:
+            return True
+        # Lost the insert race: an existing row remains. UPDATE the
+        # env-bearing columns so the persisted row reflects this
+        # process's `os.environ` (and the matching `name` /
+        # `schedule_type` from the current code). Concurrent UPDATEs
+        # from sibling uvicorn workers in the same process write the
+        # same values; cross-pod UPDATEs from a newer generation win
+        # by virtue of happening last.
+        encoded_body = encoders.pickle_and_encode(request.request_body)
+        await _DB.execute_and_commit_async(
+            f'UPDATE {REQUEST_TABLE} '
+            f'SET request_body=?, name=?, schedule_type=? '
+            f'WHERE request_id=?',
+            (encoded_body, request.name, request.schedule_type.value,
+             request.request_id))
+        return False
+
+    @init_db_async
+    @asyncio_utils.shield
+    async def delete_orphan_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons.InternalRequestDaemon'],
+    ) -> None:
+        assert _DB is not None
+        keep_ids = {d.id for d in internal_daemons}
+        # SQLite has no `is_daemon` column; use the `*-daemon` naming
+        # convention (verified against sky/server/daemons.py).
+        # TODO(cooperc): replace LIKE with a dedicated marker column if
+        # a non-daemon request_id ever ends in `-daemon`.
+        async with _DB.execute_fetchall_async(
+            f'SELECT request_id FROM {REQUEST_TABLE} '
+            f'WHERE request_id LIKE \'%-daemon\'') as rows:
+            existing = [r[0] for r in rows if r[0].endswith('-daemon')]
+        stale_ids = [rid for rid in existing if rid not in keep_ids]
+        if not stale_ids:
+            return
+        id_list_str = ','.join(repr(rid) for rid in stale_ids)
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {REQUEST_TABLE} '
+            f'WHERE request_id IN ({id_list_str})')
+        logger.info(f'Deleted orphan internal daemon rows: {stale_ids}')
+
     @init_db
     def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
         assert _DB is not None
@@ -1287,7 +1423,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_ids = [
                 r.request_id
                 for r in self.query_requests(req_filter=RequestTaskFilter(
-                    status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                    status=RequestStatus.active_statuses(),
                     exclude_request_names=['sky.api_cancel'],
                     user_id=user_id,
                     fields=['request_id']))
@@ -1416,12 +1552,13 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         assert _DB is not None
         with _DB.conn:
             cursor = _DB.conn.cursor()
+            active_values = [s.value for s in RequestStatus.active_statuses()]
+            placeholders = ', '.join('?' * len(active_values))
             cursor.execute(
                 f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
                 f'FROM {REQUEST_TABLE} '
-                f'WHERE status IN (?, ?) '
-                f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
-                (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
+                f'WHERE status IN ({placeholders}) '
+                f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL', active_values)
             return {row[0] for row in cursor.fetchall()}
 
     def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:

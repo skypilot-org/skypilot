@@ -293,6 +293,18 @@ API server SDK
 .. autofunction:: sky.api_info
   :noindex:
 
+``sky.set_preferred_workspace``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.set_preferred_workspace
+  :noindex:
+
+``sky.get_user_workspace``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.get_user_workspace
+  :noindex:
+
 ``sky.api_start``
 ~~~~~~~~~~~~~~~~~
 

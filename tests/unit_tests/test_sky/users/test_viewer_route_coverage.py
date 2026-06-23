@@ -72,6 +72,9 @@ _KNOWN_VIEWER_DENIED: set = {
     # --- Auth writes ---
     ('/api/v1/auth/authorize', 'POST'),
     ('/api/cancel', 'POST'),
+    # Viewers are read-only; they cannot mutate their own preferred
+    # workspace. (The matching GET is in rbac._DEFAULT_VIEWER_ALLOWLIST.)
+    ('/users/me/workspace', 'POST'),
     # --- Managed jobs writes ---
     ('/jobs/launch', 'POST'),
     ('/jobs/cancel', 'POST'),
@@ -88,6 +91,7 @@ _KNOWN_VIEWER_DENIED: set = {
     # --- Users writes (incl. SA token mgmt) ---
     ('/users/create', 'POST'),
     ('/users/update', 'POST'),
+    ('/users/batch_update', 'POST'),
     ('/users/delete', 'POST'),
     ('/users/import', 'POST'),
     ('/users/export', 'GET'),  # password hashes
@@ -100,6 +104,8 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/workspaces/create', 'POST'),
     ('/workspaces/update', 'POST'),
     ('/workspaces/delete', 'POST'),
+    ('/workspaces/batch_add_users', 'POST'),
+    ('/workspaces/batch_remove_users', 'POST'),
     ('/workspaces/config', 'GET'),  # full admin config -> tokens, etc.
     ('/workspaces/config', 'POST'),
     # --- Recipes writes ---
@@ -145,15 +151,81 @@ _KNOWN_VIEWER_DENIED: set = {
 # test ignores these to focus on user-meaningful HTTP verbs.
 _IGNORED_METHODS = {'HEAD', 'OPTIONS'}
 
+# HTTP verbs that appear as keys in an OpenAPI Path Item Object. Used to
+# distinguish operations from sibling keys like ``parameters``/``summary``.
+_HTTP_METHODS = {
+    'GET', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'HEAD', 'PATCH', 'TRACE'
+}
+
+
+def _iter_api_routes(routes, prefix=''):
+    """Recursively yield (full_path, APIRoute) for every leaf route.
+
+    FastAPI >=0.137 reworked router inclusion: ``app.routes`` is now a
+    tree of private ``_IncludedRouter`` wrappers whose child routes and
+    prefix live on ``include_context`` (rather than a flat list of
+    fully-prefixed ``APIRoute``s).  We descend that structure defensively
+    -- every access is a guarded ``getattr`` so the walk degrades to the
+    routes it can reach rather than raising if FastAPI reshapes its
+    internals again.  On older FastAPI the tree is already flat, so the
+    first branch yields everything and the descent is never needed.
+    """
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield prefix + route.path, route
+            continue
+        # FastAPI >=0.137: an included APIRouter is wrapped; its children
+        # and prefix hang off the private include_context.
+        ctx = getattr(route, 'include_context', None)
+        sub_router = getattr(ctx, 'included_router', None)
+        if sub_router is not None:
+            yield from _iter_api_routes(
+                sub_router.routes, prefix + (getattr(ctx, 'prefix', '') or ''))
+            continue
+        # Older FastAPI / Starlette mounts expose children directly.
+        sub_routes = getattr(route, 'routes', None)
+        if sub_routes:
+            yield from _iter_api_routes(
+                sub_routes, prefix + (getattr(route, 'path', '') or ''))
+
 
 def _route_pairs():
-    """Enumerate (path_template, method) for each app route."""
-    for route in server_app.app.routes:
-        if isinstance(route, APIRoute):
+    """Enumerate (path_template, method) for each app route.
+
+    The visible surface is read from the public OpenAPI schema rather than
+    by walking ``app.routes`` directly.  FastAPI >=0.137 reworked router
+    inclusion so that ``app.routes`` is a nested tree of private
+    ``_IncludedRouter`` objects instead of a flat list of fully-prefixed
+    ``APIRoute``s; a sub-router included with ``prefix=`` no longer
+    surfaces its routes at the top level, so the old flat scan silently
+    dropped every prefixed endpoint (``/jobs/*``, ``/serve/*``,
+    ``/users/*``, ...).  ``app.openapi()`` is a documented, version-stable
+    API that flattens router prefixes into full ``{name}`` path templates
+    -- exactly the form ``_fastapi_path_to_casbin`` expects -- and behaves
+    identically on older FastAPI releases.  Keeping it as the primary
+    source means the full security surface stays covered even if FastAPI
+    reshapes its private routing internals yet again.
+    """
+    app = server_app.app
+    seen = set()
+    paths = app.openapi().get('paths') or {}
+    for path, path_item in paths.items():
+        for method in path_item:
+            verb = method.upper()
+            if verb in _HTTP_METHODS and verb not in _IGNORED_METHODS:
+                seen.add((path, verb))
+    # Safety net: routes registered with ``include_in_schema=False`` are
+    # absent from the OpenAPI schema.  The app has none today, but this is
+    # a security-coverage test -- a future hidden route must not silently
+    # escape a viewer decision.  Recurse the router tree to catch hidden
+    # routes at any nesting depth (a top-level-only scan would miss ones
+    # added to a prefixed sub-router under FastAPI >=0.137).
+    for full_path, route in _iter_api_routes(app.routes):
+        if not route.include_in_schema:
             for method in route.methods or set():
-                if method in _IGNORED_METHODS:
-                    continue
-                yield route.path, method
+                if method not in _IGNORED_METHODS:
+                    seen.add((full_path, method))
+    yield from seen
 
 
 def _matches_any(path_template: str, method: str, allowlist: list) -> bool:

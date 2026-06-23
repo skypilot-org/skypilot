@@ -16,6 +16,7 @@ from sky import skypilot_config
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons as server_daemons
+from sky.server.requests import continue_condition as continue_condition_lib
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import process
@@ -173,6 +174,37 @@ async def test_api_cancel_race_condition(isolated_database):
     updated = requests_lib.get_request('race-cancel-before')
     assert updated is not None
     assert updated.status == requests_lib.RequestStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
+                                                       mock_global_user_state,
+                                                       mock_skypilot_config):
+    """A dequeued WAITING request must execute, not be skipped.
+
+    WAITING is the state a request is parked in while waiting to resume (retry
+    backoff or an external continue-condition). When such a request is
+    re-enqueued and dequeued, the execution wrapper must pick it up and run it
+    just like PENDING. Regression test: the guard previously accepted only
+    PENDING, so a re-enqueued WAITING request was silently dropped and stranded.
+    """
+    req = requests_lib.Request(request_id='waiting-executes',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.WAITING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('waiting-executes',
+                                        ignore_return_value=False)
+
+    # The request ran to completion instead of being skipped while WAITING.
+    updated = requests_lib.get_request('waiting-executes')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.SUCCEEDED
+    assert updated.return_value == 'success'
 
 
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
@@ -575,11 +607,22 @@ async def test_request_worker_retry_execution_retryable_error(
 
     monkeypatch.setattr(executor, '_get_queue', mock_get_queue)
 
-    # Mock time.sleep to track calls (but still sleep for very short waits)
+    # Mock time.sleep to track calls (but still sleep for very short waits).
+    # Capture the request status and queue length observed *at the moment*
+    # the backoff sleep happens, to pin the ordering: the request must be
+    # PENDING (not RUNNING) and not yet re-enqueued before we wait.
     sleep_calls = []
+    status_at_sleep = []
+    status_msg_at_sleep = []
+    queue_len_at_sleep = []
 
     def mock_sleep(seconds):
         sleep_calls.append(seconds)
+        observed = requests_lib.get_request(request_id,
+                                            fields=['status', 'status_msg'])
+        status_at_sleep.append(observed.status if observed else None)
+        status_msg_at_sleep.append(observed.status_msg if observed else None)
+        queue_len_at_sleep.append(len(queue_items))
 
     monkeypatch.setattr('time.sleep', mock_sleep)
 
@@ -630,11 +673,34 @@ async def test_request_worker_retry_execution_retryable_error(
     ], (f'Expected first time.sleep call to be 30 seconds, got {sleep_calls[0]}'
        )
 
-    # Verify the request status was reset to PENDING
+    # Verify the status was set to WAITING *before* the backoff wait, and that
+    # the request was not yet re-enqueued at that point. This guards the
+    # failover-safety ordering: a server interrupted mid-wait leaves the
+    # request in WAITING (recoverable) rather than a stuck RUNNING orphan.
+    assert status_at_sleep == [
+        requests_lib.RequestStatus.WAITING
+    ], (f'Expected status to be WAITING at sleep time, got {status_at_sleep}')
+    assert queue_len_at_sleep == [
+        0
+    ], ('Expected request to be re-enqueued only after the wait, but it was '
+        f'already on the queue at sleep time: {queue_len_at_sleep}')
+
+    # The status message during the backoff should surface both the retry
+    # reason (from the exception message) and the wait time.
+    assert len(status_msg_at_sleep) == 1
+    msg = status_msg_at_sleep[0]
+    assert msg is not None
+    assert 'Failed to provision all possible launchable resources' in msg, (
+        f'Expected retry reason in status_msg, got: {msg!r}')
+    assert 'retrying in 30s' in msg, (
+        f'Expected wait time in status_msg, got: {msg!r}')
+
+    # The request stays WAITING through the backoff and re-enqueue; a worker
+    # flips it to RUNNING only when it picks the request back up.
     updated_request = requests_lib.get_request(request_id, fields=['status'])
     assert updated_request is not None
-    assert updated_request.status == requests_lib.RequestStatus.PENDING, (
-        f'Expected request status to be PENDING, got {updated_request.status}')
+    assert updated_request.status == requests_lib.RequestStatus.WAITING, (
+        f'Expected request status to be WAITING, got {updated_request.status}')
 
     # Call process_request - it should pick up the request from the queue
     # and call submit_until_success
@@ -644,6 +710,200 @@ async def test_request_worker_retry_execution_retryable_error(
     assert len(submit_calls) == 1, (
         f'Expected submit_until_success to be called once, got {len(submit_calls)} calls'
     )
+
+
+class _PauseHarness:
+    """Bundles the worker, queue, and request id for pause/watch tests."""
+
+    def __init__(self, worker, request_id, queue_items, sleep_calls):
+        self.worker = worker
+        self.request_id = request_id
+        self.queue_items = queue_items
+        self.sleep_calls = sleep_calls
+
+    def run(self, condition, retry_wait_seconds=30):
+        """Drive handle_task_result with an ExecutionPausedError."""
+        paused_error = exceptions.ExecutionPausedError(
+            'Waiting on external admission.',
+            hint='Will resume when admitted',
+            retry_wait_seconds=retry_wait_seconds,
+            continue_condition=condition)
+        fut = concurrent.futures.Future()
+        fut.set_exception(paused_error)
+        request_element = (self.request_id, False, True)
+        self.worker.handle_task_result(fut, request_element)
+        return request_element
+
+
+@pytest.fixture()
+def pause_harness(isolated_database, monkeypatch):
+    """A RequestWorker wired to an in-memory queue, watching time.sleep."""
+    request_id = 'test-pause-request'
+    request = requests_lib.Request(
+        request_id=request_id,
+        name='test-request',
+        entrypoint=_dummy_entrypoint_for_retry_test,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.RUNNING,
+        created_at=time.time(),
+        user_id='test-user',
+    )
+    asyncio.run(requests_lib.create_if_not_exists_async(request))
+
+    queue_items = []
+    backing = queue_lib.Queue()
+
+    class MockRequestQueue:
+
+        def get(self):
+            try:
+                return backing.get(block=False)
+            except queue_lib.Empty:
+                return None
+
+        def put(self, item):
+            queue_items.append(item)
+            backing.put(item)
+
+    request_queue = MockRequestQueue()
+    monkeypatch.setattr(executor, '_get_queue',
+                        lambda schedule_type: request_queue)
+
+    # Capture (and skip) the fixed fallback sleep so the tests run instantly.
+    sleep_calls = []
+
+    def mock_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr('time.sleep', mock_sleep)
+
+    worker = executor.RequestWorker(
+        schedule_type=requests_lib.ScheduleType.LONG,
+        config=server_config.WorkerConfig(garanteed_parallelism=1,
+                                          burstable_parallelism=0,
+                                          num_db_connections_per_worker=0))
+    return _PauseHarness(worker, request_id, queue_items, sleep_calls)
+
+
+class _RecordingCondition(continue_condition_lib.ContinueCondition):
+    """A ContinueCondition whose wait() returns a fixed verdict.
+
+    Records the wait() arguments so tests can assert the executor
+    drives the condition's interface correctly.
+    """
+
+    def __init__(self, verdict: bool):
+        self._verdict = verdict
+        self.calls = []
+
+    def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+        self.calls.append({
+            'is_cancelled': is_cancelled(),
+            'fallback_wait_seconds': fallback_wait_seconds,
+        })
+        return self._verdict
+
+
+def test_pause_reschedules_when_wait_returns_true(pause_harness):
+    """The executor calls condition.wait() and reschedules when it returns True.
+
+    The wait policy (poll interval, backoff, deadline, fallback) lives in the
+    condition; the executor just acts on the boolean verdict.
+    """
+    condition = _RecordingCondition(verdict=True)
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.queue_items == [request_element]
+    # wait() was given the fallback and a working cancellation check.
+    assert condition.calls == [{
+        'is_cancelled': False,
+        'fallback_wait_seconds': 30
+    }]
+    # During the pause the request is WAITING with a "waiting to resume" msg.
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status', 'status_msg'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+    assert 'waiting to resume' in updated.status_msg
+
+
+def test_pause_dropped_when_wait_returns_false(pause_harness):
+    """A condition.wait() returning False drops the request (no reschedule)."""
+    condition = _RecordingCondition(verdict=False)
+
+    pause_harness.run(condition)
+
+    assert pause_harness.queue_items == []
+
+
+def test_pause_base_condition_does_fixed_fallback_wait(pause_harness):
+    """The base ContinueCondition just waits the fallback, then reschedules."""
+    condition = continue_condition_lib.ContinueCondition()
+
+    request_element = pause_harness.run(condition, retry_wait_seconds=30)
+
+    assert pause_harness.sleep_calls == [30]
+    assert pause_harness.queue_items == [request_element]
+    updated = requests_lib.get_request(pause_harness.request_id,
+                                       fields=['status'])
+    assert updated.status == requests_lib.RequestStatus.WAITING
+
+
+def test_pause_base_condition_dropped_if_cancelled_during_wait(
+        pause_harness, monkeypatch):
+    """The base condition drops the request if it is cancelled while waiting.
+
+    Also exercises the is_cancelled check, which the base wait()
+    consults after the fallback sleep.
+    """
+
+    def cancel_on_sleep(seconds):
+        pause_harness.sleep_calls.append(seconds)
+        with requests_lib.update_request(pause_harness.request_id) as r:
+            r.status = requests_lib.RequestStatus.CANCELLED
+
+    monkeypatch.setattr('time.sleep', cancel_on_sleep)
+
+    pause_harness.run(continue_condition_lib.ContinueCondition())
+
+    assert pause_harness.queue_items == []
+
+
+def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
+    """The freed worker process is accounted for before the pause wait runs.
+
+    The worker process is released the instant the future completes (it raised
+    ExecutionPausedError), so the free-executor gauge must be incremented
+    before the - potentially long-lived - pause wait, not after the request
+    reschedules. Otherwise the gauge under-reports idle executors for the whole
+    duration of the pause.
+
+    This snapshots the gauge's inc() count at the moment condition.wait() is
+    entered; on the old code (increment in a post-wait finally) it would be 0.
+    """
+    gauge = mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(executor.metrics_utils, 'SKY_APISERVER_LONG_EXECUTORS',
+                        gauge)
+
+    inc_count_at_wait = []
+
+    class _GaugeWatchingCondition(continue_condition_lib.ContinueCondition):
+
+        def wait(self, *, is_cancelled, fallback_wait_seconds) -> bool:
+            del is_cancelled, fallback_wait_seconds
+            inc_count_at_wait.append(gauge.inc.call_count)
+            return True
+
+    request_element = pause_harness.run(_GaugeWatchingCondition(),
+                                        retry_wait_seconds=30)
+
+    # The slot was marked free (inc()'d) before the wait began ...
+    assert inc_count_at_wait == [1]
+    # ... and exactly once overall: no lingering post-wait finally double-counts.
+    assert gauge.inc.call_count == 1
+    # Sanity: the request still rescheduled as before.
+    assert pause_harness.queue_items == [request_element]
 
 
 def test_resolve_blob_valid(tmp_path, monkeypatch):
@@ -903,3 +1163,167 @@ def test_idle_worker_survives_sigterm_with_gated_handler():
 
         for i in range(3):
             assert pool.submit(_identity, i).result(timeout=5) == i
+
+
+# ---- Workspace resolution info log -------------------------------------
+#
+# `override_request_env_and_config` writes an INFO-level log when the
+# resolver picks a workspace implicitly (preferred / default-fallback /
+# single-membership) for a resource-creating request. The launch flow
+# streams that log back to the CLI, so the user sees which workspace
+# their cluster / job ended up in.
+#
+# The tests below are unit-level: they stub the resolver + permission
+# check and verify the log gating logic, not the resolver itself
+# (covered in test_resolve_workspace_for_user.py).
+
+
+def _resolution(workspace, source):
+    """Build a fake WorkspaceResolution for tests below."""
+    from sky.workspaces import core as workspaces_core
+    return workspaces_core.WorkspaceResolution(workspace=workspace,
+                                               source=source)
+
+
+@pytest.fixture()
+def resolver_log_deps(monkeypatch, stub_override_request_env_deps):
+    """Pin the resolver gate to ON and stub the resolver itself."""
+    monkeypatch.setattr(
+        'sky.server.requests.executor._should_apply_workspace_resolver',
+        lambda is_daemon, client_api_version: True)
+    return monkeypatch
+
+
+def _run_override(request_name: str, resolution):
+    """Drive override_request_env_and_config with a mocked resolution.
+
+    Returns the list of `logger.info` calls (so tests can assert on the
+    "Using workspace ..." line without depending on log capture).
+    """
+    from sky.workspaces import core as workspaces_core
+    body = payloads.RequestBody(
+        env_vars={
+            constants.USER_ID_ENV_VAR: 'client-user-id',
+            constants.USER_ENV_VAR: 'client-user',
+        })
+    info_calls: List[str] = []
+    with mock.patch.object(workspaces_core,
+                           'resolve_workspace_for_user',
+                           return_value=resolution), \
+         mock.patch.object(executor.logger, 'info',
+                           side_effect=lambda msg, *a, **k: info_calls.append(
+                               msg)):
+        with executor.override_request_env_and_config(
+                body, request_id='not-a-daemon-uuid',
+                request_name=request_name):
+            pass
+    return info_calls
+
+
+def test_resolution_log_fires_for_launch_with_implicit_source(
+        resolver_log_deps):
+    """`sky launch` with no explicit workspace → resolver picks via
+    preferred / default-fallback / single-membership. The user sees
+    "Using workspace 'X' (source: …)" so they know which workspace
+    SkyPilot stamped onto the cluster row.
+
+    The request_name passed to override_request_env_and_config is the
+    name as stored on the task row — `REQUEST_NAME_PREFIX + <enum>`.
+    `prepare_request_async` does the prefixing once at enqueue time."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    matching = [m for m in info_calls if 'Using workspace' in m]
+    assert len(matching) == 1, (
+        f'Expected one resolution-log line, got: {info_calls}')
+    msg = matching[0]
+    assert "'team-a'" in msg
+    assert workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP in msg
+
+
+def test_resolution_log_fires_for_jobs_launch_with_preferred(resolver_log_deps):
+    """Same log path for managed jobs — `sky jobs launch` is also a
+    resource-creating verb (writes job_info.workspace), users need to
+    see which workspace it landed in."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'jobs.launch'),
+        resolution=_resolution('team-b',
+                               workspace_constants.WORKSPACE_SOURCE_PREFERRED))
+    matching = [m for m in info_calls if 'Using workspace' in m]
+    assert len(matching) == 1
+    assert "'team-b'" in matching[0]
+
+
+def test_resolution_log_silent_when_source_default_fallback(resolver_log_deps):
+    """Landing on 'default' via default-fallback is the pre-existing
+    silent behavior — every user without a preferred who has access to
+    'default' lands there. Surfacing that in the log on every launch
+    would clutter the common case while telling the user nothing new
+    (they're already used to landing on 'default').
+
+    Revert check: drop DEFAULT_FALLBACK from
+    `_SILENT_WORKSPACE_RESOLUTION_SOURCES` and this test flips to a
+    log-firing assertion failure."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution(
+            'default', workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK))
+    assert not [m for m in info_calls if 'Using workspace' in m
+               ], (f'DEFAULT_FALLBACK must not log; got: {info_calls}')
+
+
+def test_resolution_log_silent_when_source_explicit(resolver_log_deps):
+    """When `active_workspace` was explicitly set (--workspace flag or
+    a config file), the user already named the workspace — repeating
+    it in the log is noise. EXPLICIT must not trigger the line."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'launch'),
+        resolution=_resolution('team-c',
+                               workspace_constants.WORKSPACE_SOURCE_EXPLICIT))
+    assert not [m for m in info_calls if 'Using workspace' in m
+               ], (f'EXPLICIT source must not log; got: {info_calls}')
+
+
+def test_resolution_log_silent_for_non_resource_creating_request(
+        resolver_log_deps):
+    """`sky status` / `sky queue` etc. resolve the same way but don't
+    persist the workspace onto durable state. Logging there would be
+    noise on commands the user runs frequently. The whitelist
+    (_RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG) is what
+    keeps this scoped — extend it when adding a new resource-creating
+    verb (SERVE_UP, etc.)."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name=(server_constants.REQUEST_NAME_PREFIX + 'status'),
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    assert not [m for m in info_calls if 'Using workspace' in m], (
+        f'`status` must not surface the resolution log; got: {info_calls}')
+
+
+def test_resolution_log_silent_for_bare_launch_without_prefix(
+        resolver_log_deps):
+    """Protocol lock: the runtime `request_name` (read off
+    `request_task.name`) is always the prefixed form
+    (`'sky.launch'`); the raw enum value `'launch'` never reaches
+    `override_request_env_and_config`. If a future refactor drops the
+    prefix in the whitelist, this test would START passing the log
+    line and then break BOTH this case AND production — keep this case
+    locking the prefix in.
+
+    Revert check: drop `REQUEST_NAME_PREFIX +` from the whitelist and
+    this test still passes (no log) but the prefixed tests above flip
+    to failing — the two sides together pin the contract."""
+    from sky.workspaces import constants as workspace_constants
+    info_calls = _run_override(
+        request_name='launch',
+        resolution=_resolution(
+            'team-a', workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP))
+    assert not [m for m in info_calls if 'Using workspace' in m], (
+        f'bare `launch` (without prefix) must not match the whitelist; '
+        f'got: {info_calls}')

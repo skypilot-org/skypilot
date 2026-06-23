@@ -1524,11 +1524,28 @@ def test_volume_env_mount_kubernetes():
                 f's=$(sky jobs launch -y --infra kubernetes {f.name} --env USERNAME=user); echo "$s"; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
             ],
             ' && '.join([
-                'sky jobs cancel -a -y || true', 'sleep 5',
+                'sky jobs cancel -a -y || true',
+                # The managed job's worker cluster is torn down in the
+                # controller's `finally` block, and the controller only sets
+                # schedule_state=DONE after that cleanup completes — so DONE
+                # is a stronger guarantee than the per-task terminal status
+                # (SUCCEEDED/CANCELLED/FAILED) and implies the PVC is no
+                # longer in use. Wait for our job to reach DONE before
+                # deleting the volume.
+                f'for i in $(seq 1 60); do '
+                f'sky jobs queue -v -a --format json 2>/dev/null | '
+                f'python3 -c "'
+                f'import json, sys; '
+                f'jobs = json.load(sys.stdin); '
+                f"m = [j for j in jobs if j.get('job_name') == '{name}-job']; "
+                f"sys.exit(0 if (m and all(j.get('schedule_state') == 'DONE' for j in m)) else 1)"
+                f'" && break; '
+                f'sleep 5; '
+                f'done',
                 f'sky volumes delete {full_pvc_name} -y',
                 f'(vol=$(sky volumes ls | grep "{full_pvc_name}"); '
                 f'if [ -n "$vol" ]; then echo "{full_pvc_name} not deleted" '
-                '&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
+                f'&& exit 1; else echo "{full_pvc_name} deleted"; fi)'
             ]),
         )
         smoke_tests_utils.run_one_test(test)
@@ -2296,9 +2313,9 @@ def test_aws_custom_docker_image_with_motd(image_id):
         # Test image with custom MOTD that can potentially interfere with
         # SSH user/rsync path detection.
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
-        # Test image with PYTHONPATH set and with pyproject.toml.
-        # Update this image periodically, nemo does not support :latest tag.
-        'docker:nvcr.io/nvidia/nemo:25.09',
+        # Verify the NeMo framework image works with SkyPilot. nemo has no
+        # :latest tag, so update this tag periodically.
+        'docker:nvcr.io/nvidia/nemo:26.04.00',
         # Test image with Python 3.12 site-packages as WORKDIR, which causes
         # import failures if CWD is not handled properly. When SkyPilot's Python
         # 3.10 venv runs, it finds Python 3.12 compiled packages (like rpds) in
@@ -2343,7 +2360,11 @@ def test_kubernetes_pod_failure_detection():
         [
             f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y --image-id docker:busybox:latest --infra kubernetes echo hi || true',
             # Check that the provision logs contain the expected error message.
-            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep -A 2 "Pod.*terminated:.*" | grep -A 2 "PodFailed" | grep "StartError"',
+            # busybox has no bash, so the container terminates with a non-zero
+            # exit code while the pod is still Pending, which now fast-fails with
+            # a "terminated with error while pod is still pending" message
+            # carrying the StartError reason (instead of the old PodFailed path).
+            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep "terminated with error while pod is still pending" | grep "StartError"',
         ],
         f'sky down -y {name}',
         timeout=10 * 60,
@@ -2790,7 +2811,7 @@ def test_remote_server_api_login():
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint
-            f'grep -q "endpoint: {endpoint}" {config_path}',
+            f'grep -q "endpoint: {endpoint.rstrip("/")}" {config_path}',
             # Verify the api_server section exists
             f'grep -q "api_server:" {config_path}',
         ],
@@ -2972,7 +2993,7 @@ def test_kubernetes_recovery():
             # Delete head, worker-2 and worker-3
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod {head} {worker2} {worker3}'
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod --wait=false {head} {worker2} {worker3}'
             ),
             # Check launching again
             f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
@@ -2985,7 +3006,7 @@ def test_kubernetes_recovery():
             # Delete all Pods
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod -l ray-cluster-name={name_on_cloud}'
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod --wait=false -l ray-cluster-name={name_on_cloud}'
             ),
             # Check status
             f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
@@ -2993,6 +3014,48 @@ def test_kubernetes_recovery():
         f'sky down -y {name} && {service_cleanup_check} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_stale_pod_cleanup():
+    """Test that sky start cleans up Failed pods before re-creating them.
+
+    When a pod OOMKills, it enters the Failed phase but remains in the K8s
+    API server. A subsequent sky start must delete the stale pod before
+    creating a new one, otherwise it hits a 409 AlreadyExists error.
+
+    Regression test for #9627.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    head_pod = f'{name_on_cloud}-head'
+    test = smoke_tests_utils.Test(
+        'kubernetes_stale_pod_cleanup',
+        [
+            # Launch a cluster with memory limits (2GB is enough to boot
+            # but tight enough to OOM on a large allocation).
+            f'sky launch -y -c {name} --infra kubernetes --cpus 1 --memory 2 '
+            f'--config kubernetes.set_pod_resource_limits=true',
+            # OOM the pod by writing 4GB to tmpfs, exceeding the 2GB limit.
+            f'sky exec {name} -- dd if=/dev/zero of=/dev/shm/oom bs=1M count=4096 || true',
+            # Wait for the pod to enter Failed phase.
+            f'for i in $(seq 1 30); do '
+            f'phase=$(kubectl get pod {head_pod} '
+            f'-o jsonpath=\'{{.status.phase}}\'); '
+            f'echo "attempt $i: phase=$phase"; '
+            f'if [ "$phase" = "Failed" ]; then break; fi; '
+            f'sleep 2; done && '
+            f'test "$phase" = "Failed"',
+            # Refresh state and assert INIT before restart.
+            f'sky status {name} -r | grep INIT',
+            # sky start should clean up the Failed pod and succeed.
+            f'sky start -y {name}',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

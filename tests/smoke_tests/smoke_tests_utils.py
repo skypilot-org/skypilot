@@ -977,13 +977,29 @@ def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,
                              timeout: int = 180,
-                             skip_remote_server_check: bool = False) -> str:
-    """Run the cloud command on the remote cluster for cloud commands."""
+                             skip_remote_server_check: bool = False,
+                             setup_cmd: Optional[str] = None) -> str:
+    """Run the cloud command on the remote cluster for cloud commands.
+
+    Args:
+        setup_cmd: Optional command to prepare the remote cloud-cmd cluster
+            (e.g. installing cloud CLIs into the SkyPilot runtime venv). Only
+            run when `cmd` targets the remote cluster: when the API server is
+            local, `cmd` runs verbatim on the local machine, where the
+            runtime venv does not exist and the local environment is assumed
+            to already have the cloud dependencies.
+    """
     cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
     if not skip_remote_server_check and sky.server.common.is_api_server_local(
     ) and not is_remote_server_test():
         return cmd
     else:
+        if setup_cmd is not None:
+            # Group `cmd` so that a setup failure fails the whole command
+            # instead of falling through to any `||` branches in `cmd`.
+            # Strip trailing semicolons from `cmd` first: `;;` inside the
+            # group is a bash syntax error.
+            cmd = f'{setup_cmd} && {{ {cmd.rstrip().rstrip(";")}; }}'
         cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
         wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
             cluster_name=cluster_name,

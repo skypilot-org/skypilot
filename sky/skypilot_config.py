@@ -394,20 +394,38 @@ def get_effective_region_config(cloud: str,
 
 def get_workspace_cloud(cloud: str,
                         workspace: Optional[str] = None) -> config_utils.Config:
-    """Returns the workspace config."""
-    # TODO(zhwu): Instead of just returning the workspace specific config, we
-    # should return the config that already merges the global config, so that
-    # the caller does not need to manually merge the global config with
-    # the workspace specific config.
+    """Returns the workspace cloud config, deep-merged with global cloud config.
+
+    Workspace-specific values override global values. Fields not set in the
+    workspace block are inherited from the global cloud config. This allows
+    workspaces to override only the fields they need (e.g., namespace)
+    without losing other global settings (e.g., allowed_contexts).
+    """
     if workspace is None:
         workspace = get_active_workspace()
-    clouds = get_nested(keys=(
+
+    # Get workspace-specific cloud overrides
+    workspace_clouds = get_nested(keys=(
         'workspaces',
         workspace,
-    ), default_value=None)
-    if clouds is None:
-        return config_utils.Config()
-    return clouds.get(cloud.lower(), config_utils.Config())
+    ),
+                                  default_value=None)
+    workspace_cloud = None
+    if isinstance(workspace_clouds, dict):
+        ws = workspace_clouds.get(cloud.lower())
+        if isinstance(ws, dict):
+            workspace_cloud = ws
+
+    # Deep-merge workspace cloud config on top of global cloud config.
+    # get_nested internally does deepcopy + _recursive_update.
+    merged = _get_loaded_config().get_nested(
+        keys=(cloud.lower(),),
+        default_value=config_utils.Config(),
+        override_configs={cloud.lower(): workspace_cloud}
+        if workspace_cloud else None)
+    if isinstance(merged, dict):
+        return config_utils.Config(merged)
+    return config_utils.Config()
 
 
 @contextlib.contextmanager
@@ -429,16 +447,45 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
     Raises:
         RuntimeError: If called from a non-main thread.
     """
-    original_workspace = get_active_workspace()
-    if original_workspace == workspace:
+    if get_active_workspace() == workspace:
         # No change, do nothing.
         yield
         return
+    # Capture whether the thread-local attribute was set, NOT the
+    # resolved active_workspace string. The two differ when nothing was
+    # set previously: `get_active_workspace()` falls back to the literal
+    # SKYPILOT_DEFAULT_WORKSPACE ('default'), and unconditionally
+    # restoring to that string would leave the attribute SET to 'default'
+    # — making `is_active_workspace_set()` return True for the next
+    # request handled by the same worker process, which causes the
+    # workspace resolver gate to silently skip and fall back to the
+    # literal 'default' (broken for users without 'default' access).
+    had_workspace = hasattr(_active_workspace_context, 'workspace')
+    prior_value: Optional[str] = None
+    if had_workspace:
+        prior_value = _active_workspace_context.workspace
     _active_workspace_context.workspace = workspace
     logger.debug(f'Set context workspace: {workspace}')
-    yield
-    logger.debug(f'Reset context workspace: {original_workspace}')
-    _active_workspace_context.workspace = original_workspace
+    # try/finally is required: a caller that lets an exception escape the
+    # `with` block would otherwise leak this thread-local workspace to
+    # subsequent callers in the same worker process (ProcessPoolExecutor
+    # reuses workers). For most callers the leak is masked because
+    # `override_skypilot_config` rebinds `_active_workspace_context` to a
+    # fresh `threading.local()` per request, but tightening this here is
+    # the right shape for a contextmanager and removes the implicit
+    # dependency on that downstream reset.
+    try:
+        yield
+    finally:
+        if had_workspace:
+            logger.debug(f'Reset context workspace: {prior_value}')
+            _active_workspace_context.workspace = prior_value
+        else:
+            logger.debug('Reset context workspace: <unset>')
+            try:
+                del _active_workspace_context.workspace
+            except AttributeError:
+                pass
 
 
 def get_active_workspace(force_user_workspace: bool = False) -> str:
@@ -455,6 +502,24 @@ def get_active_workspace(force_user_workspace: bool = False) -> str:
     else:
         logger.debug(f'Got active workspace: {active_workspace}')
     return active_workspace
+
+
+def is_active_workspace_set() -> bool:
+    """Returns True iff active_workspace was explicitly set somewhere.
+
+    Distinguishes "user set active_workspace" from "fell back to the
+    SKYPILOT_DEFAULT_WORKSPACE literal because nothing was set". The two are
+    indistinguishable through `get_active_workspace()` (both return a string)
+    but are different on the wire: the override config sent by the client
+    omits the key entirely when unset. The server-side per-user resolver
+    should only kick in for the unset case — explicit intent (including
+    explicit `'default'`) is respected as-is.
+    """
+    context_workspace = getattr(_active_workspace_context, 'workspace', None)
+    if context_workspace is not None:
+        return True
+    return get_nested(keys=('active_workspace',),
+                      default_value=None) is not None
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -857,6 +922,8 @@ _QUEUE_NAME_KEYS: List[Tuple[str, ...]] = [
     ('kueue', 'local_queue_name'),
 ]
 
+_NAMESPACE_KEYS: List[Tuple[str, ...]] = [('namespace',)]
+
 # Hooks invoked at the end of `update_api_server_config_no_lock`, after the
 # new config has been persisted and reloaded in-process. Plugins use this to
 # invalidate caches that were derived from the config (e.g. a request that
@@ -877,17 +944,27 @@ def register_config_update_hook(fn: Callable[[], None]) -> None:
         _CONFIG_UPDATE_HOOKS.append(fn)
 
 
-def get_effective_queue_name(
+def _get_effective_k8s_config_value(
         cloud: str,
+        property_keys: List[Tuple[str, ...]],
         region: Optional[str] = None,
         workspace: Optional[str] = None,
         override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Returns the effective Kueue local queue name from config.
+    """Generic Kubernetes config-value resolver.
 
-    Supports two equivalent spellings, ``kueue.local_queue_name`` and
-    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
-    takes priority over spelling; within the same scope, ``quota.queue``
-    wins over ``kueue.local_queue_name`` when both are set.
+    Resolution precedence (most specific first):
+
+    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.<property>``
+    2. ``workspaces.<workspace>.<cloud>.<property>``
+    3. ``<cloud>.context_configs.<region>.<property>``
+    4. ``<cloud>.<property>``
+    5. ``None`` — caller is responsible for any default.
+
+    Within a scope, ``property_keys`` are tried in order; the first non-None
+    hit wins. For single-spelling fields pass ``[('namespace',)]``; for
+    multi-spelling fields pass e.g. ``[('quota', 'queue'),
+    ('kueue', 'local_queue_name')]`` to express "quota.queue wins over
+    kueue.local_queue_name when both are set at the same scope".
     """
     if workspace is None:
         workspace = get_active_workspace()
@@ -912,18 +989,59 @@ def get_effective_queue_name(
                                         default_value={},
                                         override_configs=override_configs))
         if region is not None:
-            for queue_keys in _QUEUE_NAME_KEYS:
+            for property_key in property_keys:
                 value = scope_config.get_nested(
-                    keys=(cloud, 'context_configs', region) + queue_keys,
+                    keys=(cloud, 'context_configs', region) + property_key,
                     default_value=None)
                 if value is not None:
                     return value
-        for queue_keys in _QUEUE_NAME_KEYS:
-            value = scope_config.get_nested(keys=(cloud,) + queue_keys,
+        for property_key in property_keys:
+            value = scope_config.get_nested(keys=(cloud,) + property_key,
                                             default_value=None)
             if value is not None:
                 return value
     return None
+
+
+def get_effective_queue_name(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kueue local queue name from config.
+
+    Supports two equivalent spellings, ``kueue.local_queue_name`` and
+    ``quota.queue``. Scope precedence (workspace > global; context > cloud)
+    takes priority over spelling; within the same scope, ``quota.queue``
+    wins over ``kueue.local_queue_name`` when both are set.
+    """
+    return _get_effective_k8s_config_value(cloud=cloud,
+                                           property_keys=_QUEUE_NAME_KEYS,
+                                           region=region,
+                                           workspace=workspace,
+                                           override_configs=override_configs)
+
+
+def get_effective_namespace(
+        cloud: str,
+        region: Optional[str] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Returns the effective Kubernetes namespace from config.
+
+    Resolution precedence, most specific first:
+
+    1. ``workspaces.<workspace>.<cloud>.context_configs.<region>.namespace``
+    2. ``workspaces.<workspace>.<cloud>.namespace``
+    3. ``<cloud>.context_configs.<region>.namespace``
+    4. ``<cloud>.namespace``
+    5. ``None`` — caller is responsible for the kubeconfig-default fallback.
+    """
+    return _get_effective_k8s_config_value(cloud=cloud,
+                                           property_keys=_NAMESPACE_KEYS,
+                                           region=region,
+                                           workspace=workspace,
+                                           override_configs=override_configs)
 
 
 def register_queue_name_key(key: Tuple[str, ...]) -> None:
