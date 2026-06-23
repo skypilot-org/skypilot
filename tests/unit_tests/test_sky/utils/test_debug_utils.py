@@ -11,10 +11,12 @@ import zipfile
 
 import pytest
 
+from sky import clouds
 from sky import exceptions
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
+from sky.utils import command_runner
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 from sky.utils import status_lib
@@ -2757,3 +2759,110 @@ class TestResolveRemoteSkyletLogPath:
         path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
 
         assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+
+class TestCollectClusterKubernetesResources:
+    """Tests for the _collect_cluster_kubernetes_resources helper."""
+
+    def _k8s_handle(self, runners):
+        handle = mock.Mock()
+        handle.launched_resources.cloud = clouds.Kubernetes()
+        handle.cluster_name_on_cloud = 'cluster-abc'
+        handle.get_command_runners.return_value = runners
+        return handle
+
+    def _k8s_runner(self, context, namespace, pod_name):
+        runner = mock.MagicMock(spec=command_runner.KubernetesCommandRunner)
+        runner.context = context
+        runner.namespace = namespace
+        runner.pod_name = pod_name
+        return runner
+
+    def test_non_kubernetes_cluster_is_noop(self, tmp_path):
+        """A cluster on another cloud must not touch the k8s code path."""
+        handle = mock.Mock()
+        handle.launched_resources.cloud = mock.Mock()  # not a Kubernetes cloud
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
+                       ) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'c', str(tmp_path), handle, errors)
+
+        dump.assert_not_called()
+        handle.get_command_runners.assert_not_called()
+        assert not errors
+
+    def test_delegates_with_coordinates_from_runners(self, tmp_path):
+        """Context/namespace are pulled off the k8s runners and passed through;
+        the dump finds the cluster's objects by label, so no pod names needed."""
+        runners = [
+            self._k8s_runner('ctx', 'ns', 'pod-head'),
+            self._k8s_runner('ctx', 'ns', 'pod-worker'),
+        ]
+        handle = self._k8s_handle(runners)
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
+                        return_value=[]) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        dump.assert_called_once_with(context='ctx',
+                                     namespace='ns',
+                                     cluster_name_on_cloud='cluster-abc',
+                                     output_dir=os.path.join(
+                                         str(tmp_path), 'kubernetes'))
+        assert not errors
+
+    def test_provider_errors_are_prefixed_with_cluster(self, tmp_path):
+        """Errors from the provider are re-tagged with component + cluster."""
+        handle = self._k8s_handle([self._k8s_runner('ctx', 'ns', 'pod-head')])
+        provider_errors = [{
+            'resource': 'kubernetes/pods/pod-head',
+            'error': 'boom',
+            'traceback': 'tb',
+        }]
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
+                        return_value=provider_errors):
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        assert errors == [{
+            'component': 'clusters',
+            'resource': 'mycluster/kubernetes/pods/pod-head',
+            'error': 'boom',
+            'traceback': 'tb',
+        }]
+
+    def test_get_command_runners_failure_is_recorded(self, tmp_path):
+        """A k8s cluster whose runners can't be built records one error."""
+        handle = self._k8s_handle([])
+        handle.get_command_runners.side_effect = RuntimeError('unreachable')
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
+                       ) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        dump.assert_not_called()
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'mycluster/kubernetes'
+        assert errors[0]['component'] == 'clusters'
+
+    def test_no_kubernetes_runners_is_noop(self, tmp_path):
+        """A k8s-cloud handle whose runners aren't KubernetesCommandRunners
+        (e.g. cluster info unavailable) is skipped without error."""
+        handle = self._k8s_handle([mock.Mock()])  # plain runner, wrong type
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
+                       ) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        dump.assert_not_called()
+        assert not errors

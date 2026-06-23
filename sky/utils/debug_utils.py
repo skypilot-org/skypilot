@@ -15,6 +15,7 @@ import zipfile
 
 import sky
 from sky import check as sky_check
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -23,11 +24,13 @@ from sky.backends import backend_utils
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core as managed_jobs_core
+from sky.provision.kubernetes import debug as kubernetes_debug
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants as skylet_constants
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
@@ -894,6 +897,86 @@ def _collect_cluster_skylet_log(
             f'Failed to collect skylet log for cluster {cluster_name}', e)
 
 
+def _collect_cluster_kubernetes_resources(
+        cluster_name: str,
+        cluster_dir: str,
+        handle: Any,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Snapshot a Kubernetes cluster's related k8s objects into the dump.
+
+    For clusters on Kubernetes, capture the pods, their events, the resources
+    SkyPilot created (Services, etc.), and any Kueue Workload -- the same things
+    you'd reach for with ``kubectl get -o yaml`` when debugging. No-op for
+    clusters on other clouds.
+
+    Unlike the skylet log (which is rsynced off a reachable node and so only
+    works on UP clusters), these come from the kube API server, which answers
+    even when the cluster is broken -- pod events on a failed launch are exactly
+    what we want -- so the caller doesn't gate this on cluster status.
+
+    Best-effort: every failure is recorded in ``errors`` and never aborts the
+    dump.
+    """
+    launched_resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(launched_resources, 'cloud', None)
+    if not isinstance(cloud, clouds.Kubernetes):
+        logger.debug(f'Cluster {cluster_name!r} is not on Kubernetes; '
+                     f'skipping k8s resource dump')
+        return
+
+    # Resolve the cluster's k8s context + namespace from its command runners.
+    # For a Kubernetes cluster every runner is a KubernetesCommandRunner
+    # carrying its pod's (context, namespace); they're cluster-wide identical,
+    # so runners[0] suffices. (The dump finds the cluster's objects by the
+    # skypilot-cluster-name label, so we don't need the individual pod names.)
+    # This reuses the request-scoped cache populated by the skylet-log
+    # collection, so it's a cheap call here.
+    try:
+        runners = handle.get_command_runners()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get command runners for cluster '
+                       f'{cluster_name}: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/kubernetes',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
+        return
+
+    # Typed as Any (like ``handle``/``runners``): the runner's k8s coordinates
+    # are assigned via nested tuple-unpacking in KubernetesCommandRunner, which
+    # mypy can't see across this module's skipped import.
+    k8s_runners: List[Any] = [
+        r for r in runners
+        if isinstance(r, command_runner.KubernetesCommandRunner)
+    ]
+    if not k8s_runners:
+        logger.debug(f'No Kubernetes command runners for cluster '
+                     f'{cluster_name!r}; skipping k8s resource dump')
+        return
+
+    context = k8s_runners[0].context
+    namespace = k8s_runners[0].namespace
+    output_dir = os.path.join(cluster_dir, 'kubernetes')
+
+    k8s_errors = kubernetes_debug.dump_cluster_resources(
+        context=context,
+        namespace=namespace,
+        cluster_name_on_cloud=handle.cluster_name_on_cloud,
+        output_dir=output_dir)
+
+    if errors is not None:
+        for err in k8s_errors:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/{err["resource"]}',
+                'error': err['error'],
+                'traceback': err['traceback'],
+            })
+
+
 def _dump_cluster_info(cluster_names: Set[str],
                        dump_dir: str,
                        errors: Optional[List[Dict[str, str]]] = None) -> None:
@@ -1007,6 +1090,14 @@ def _dump_cluster_info(cluster_names: Set[str],
         else:
             logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
                          f'(status={status})')
+
+        # For Kubernetes clusters, also snapshot the related k8s objects (pods,
+        # events, Services, Kueue Workload, ...). Gated only on having a handle,
+        # not on status: these come from the kube API server, so they're
+        # reachable -- and most useful -- even when the cluster isn't UP.
+        if handle is not None:
+            _collect_cluster_kubernetes_resources(cluster_name, cluster_dir,
+                                                  handle, errors)
 
     logger.debug('Exiting _dump_cluster_info')
 
