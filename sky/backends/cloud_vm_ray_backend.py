@@ -4667,7 +4667,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     (job.job_id, job.metadata) for job in response.jobs
                 ]
                 used_grpc = True
-            except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
+            except Exception as e:  # pylint: disable=broad-except
+                # Best-effort: any gRPC/channel failure (including a tunnel
+                # RuntimeError raised by get_grpc_channel) should fall back to
+                # the SSH path below rather than propagate.
                 logger.debug('gRPC job metadata fetch failed, falling back to '
                              f'SSH: {e}')
         if not used_grpc:

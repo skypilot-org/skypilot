@@ -233,8 +233,12 @@ class JobLogLinkScanEvent(SkyletEvent):
                 continue
             harvested = self._harvested.get(job_id, [])
             offset = self._offsets.get(job_id, 0)
+            # Stop once enough URLs are harvested, or once the remaining byte
+            # budget is tiny: a small trailing read may contain no newline,
+            # which would never advance the offset and would re-read the same
+            # bytes every tick.
             if (len(harvested) >= log_links.DEFAULT_CANDIDATE_CAP or
-                    offset >= self._MAX_SCAN_BYTES):
+                    self._MAX_SCAN_BYTES - offset < 1024):
                 continue
             run_log = os.path.join(os.path.expanduser(log_dir), 'run.log')
             try:
