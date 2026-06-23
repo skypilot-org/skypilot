@@ -3,6 +3,7 @@ import pathlib
 
 from sky.jobs.client.sdk import cancel
 from sky.jobs.client.sdk import dashboard
+from sky.jobs.client.sdk import describe
 from sky.jobs.client.sdk import download_logs
 from sky.jobs.client.sdk import download_logs_streaming
 from sky.jobs.client.sdk import launch
@@ -39,6 +40,7 @@ __all__ = [
     'ManagedJobStatus',
     # Core
     'cancel',
+    'describe',
     'launch',
     'queue',
     'queue_v2',

@@ -281,6 +281,51 @@ def queue_v2(
     return server_common.get_request_id(response=response)
 
 
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def describe(
+    job_id: int,
+    refresh: bool = False,
+    all_users: bool = True,
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
+    """Gets detailed information for a single managed job.
+
+    A thin convenience wrapper over :func:`queue_v2` that filters to a single
+    job id. It requests all fields (``fields=None``) rather than the trimmed
+    set the list view uses, so the heavy per-job fields the list omits for
+    performance are included: the original (unexpanded) user YAML, the
+    entrypoint, and the metadata blob carrying the workdir git commit recorded
+    at submission time. No dedicated server endpoint is required.
+
+    Please refer to sky.cli.job_describe for documentation.
+
+    Args:
+        job_id: ID of the managed job to describe.
+        refresh: Whether to restart the jobs controller if it is stopped.
+        all_users: Whether to look the job up across all users (within the
+            caller's accessible workspaces). Defaults to True, mirroring
+            ``sky status <cluster>``: when a specific job id is named the owner
+            filter is dropped so the lookup succeeds regardless of submitter.
+
+    Returns:
+        The request ID of the queue request.
+
+    Request Returns:
+        The same structure as :func:`queue_v2`, filtered to the single job: a
+        tuple of ``(job_records, total, status_counts, total_no_filter)``.
+        ``job_records`` is an empty list if no job with ``job_id`` is found.
+
+    Request Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+          does not exist.
+    """
+    # fields=None: fetch every field. The server selects all columns it knows
+    # (so this is forward/backward compatible — an explicit list could name a
+    # field an older server lacks), and ManagedJobRecord ignores extras.
+    return queue_v2(refresh=refresh, all_users=all_users, job_ids=[job_id])
+
+
 # Deprecated. Please use queue_v2 instead for better performance.
 # In https://github.com/skypilot-org/skypilot/pull/7695, the `queue` function
 # is updated to return new typed data for performance improvement if the API

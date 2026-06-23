@@ -6291,6 +6291,134 @@ def jobs_queue(verbose: bool,
             f'--all to show all managed jobs) {colorama.Style.RESET_ALL} ')
 
 
+def _prettify_managed_job_yaml(raw_yaml: str) -> str:
+    """Re-format a stored managed-job YAML for display and re-submission.
+
+    The stored YAML is the user-specified config re-serialized by PyYAML, which
+    renders multi-line ``run``/``setup`` blocks as folded single-quote scalars
+    (ugly but valid). It may also carry an internal ``_metadata`` block in the
+    fallback path where a task has no source YAML (``Task._to_yaml_config``);
+    that field is internal-only and ``from_yaml_config`` reads it back on
+    re-launch, which would leak a stale ``git_commit`` into the reproduced job.
+    Mirror what the dashboard does (``formatJobYaml``): parse each document,
+    drop ``_metadata``, and re-dump with literal block style so the result
+    reads like the original and can be fed straight back into
+    ``sky jobs launch``. Returns the raw string unchanged if it cannot be
+    parsed.
+    """
+
+    class _BlockStyleDumper(yaml.SafeDumper):
+        pass
+
+    def _str_representer(dumper, data):
+        # Use block literal style for any multi-line string so `run`/`setup`
+        # render as `|` blocks instead of folded single-quote scalars.
+        style = '|' if '\n' in data else None
+        return dumper.represent_scalar('tag:yaml.org,2002:str',
+                                       data,
+                                       style=style)
+
+    _BlockStyleDumper.add_representer(str, _str_representer)
+
+    try:
+        docs = list(yaml_utils.safe_load_all(raw_yaml))
+    except yaml.YAMLError:
+        return raw_yaml.rstrip('\n')
+    cleaned = []
+    for doc in docs:
+        if isinstance(doc, dict):
+            doc = {k: v for k, v in doc.items() if k != '_metadata'}
+        cleaned.append(doc)
+    return yaml.dump_all(cleaned,
+                         Dumper=_BlockStyleDumper,
+                         sort_keys=False,
+                         default_flow_style=False).rstrip('\n')
+
+
+@jobs.command('describe', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('job_id', type=int, required=True)
+@click.option('--yaml',
+              'yaml_only',
+              is_flag=True,
+              default=False,
+              help='Print only the original task YAML to stdout, so it can be '
+              'redirected to a file and re-submitted with `sky jobs launch`.')
+@click.option(
+    '--refresh',
+    '-r',
+    is_flag=True,
+    default=False,
+    help='Query the latest status, restarting the jobs controller if stopped.')
+@flags.output_format_option()
+@usage_lib.entrypoint
+def jobs_describe(job_id: int,
+                  yaml_only: bool,
+                  refresh: bool,
+                  output_format: str = 'table'):
+    """Show the details of a managed job.
+
+    Shows everything recorded for a single managed job, including the original
+    (unexpanded) task YAML, the entrypoint command, and the workdir git commit
+    captured at submission time. This lets you inspect and reproduce a job from
+    the CLI without opening the dashboard.
+
+    To reproduce a job, dump its YAML and relaunch it:
+
+    .. code-block:: bash
+
+      sky jobs describe 576 --yaml > job.yaml
+      sky jobs launch job.yaml
+
+    Use ``--yaml`` to print only the task YAML, or ``-o json`` for the full
+    record as JSON.
+    """
+    if yaml_only and output_format == flags.OUTPUT_FORMAT_JSON:
+        raise click.UsageError(
+            '`--yaml` and `--output json` are mutually exclusive.')
+
+    # Look the job up across all users (within accessible workspaces), mirroring
+    # `sky status <cluster>`: when a specific entity is named, the owner filter
+    # is dropped so the lookup succeeds regardless of who submitted it.
+    request_id = managed_jobs.describe(job_id=job_id,
+                                       refresh=refresh,
+                                       all_users=True)
+    # describe wraps queue_v2, which returns
+    # (records, total, status_counts, total_no_filter). The request streams
+    # server-side log lines (e.g. "Job status: RUNNING") as it refreshes; send
+    # them to a throwaway stream so they never mix into --yaml / -o json
+    # stdout, which must stay clean for redirection.
+    null_stream = io.StringIO()
+    with rich_utils.client_status('[cyan]Fetching managed job[/]'):
+        records, _, _, _ = sdk.stream_and_get(request_id,
+                                              output_stream=null_stream)
+    if not records:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Managed job {job_id} not found.')
+
+    if yaml_only:
+        user_yaml = records[0].user_yaml
+        if not user_yaml:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'No task YAML was recorded for managed job {job_id}.')
+        click.echo(_prettify_managed_job_yaml(user_yaml))
+        return
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([r.model_dump(mode='json') for r in records], indent=2))
+        return
+
+    pretty_yaml = (_prettify_managed_job_yaml(records[0].user_yaml)
+                   if records[0].user_yaml else None)
+    click.echo(
+        table_utils.format_managed_job_details(records, user_yaml=pretty_yaml))
+    click.echo(f'\n{colorama.Style.DIM}To get just the task YAML:\n'
+               f'  sky jobs describe {job_id} --yaml\n'
+               f'{colorama.Style.RESET_ALL}')
+
+
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.option('--name',

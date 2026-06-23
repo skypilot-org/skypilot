@@ -45,6 +45,74 @@ def format_job_queue(jobs: List[responses.ClusterJobRecord]):
     return job_table
 
 
+def format_managed_job_details(records: List[responses.ManagedJobRecord],
+                               user_yaml: Optional[str] = None) -> str:
+    """Format a single managed job's details for display.
+
+    Renders job-level metadata (status, resources, entrypoint, git commit,
+    etc.) followed by the original task YAML, similar to ``kubectl describe``.
+    Mirrors the dashboard's job detail view (two resource lines — requested vs.
+    used — plus external links). ``records`` is the queue result filtered to
+    one job; a pipeline has one record per task that all share the same user
+    YAML.
+
+    Args:
+        records: the per-task records for a single job.
+        user_yaml: the task YAML to show. Falls back to the raw stored YAML on
+            the record; callers should pass a display-formatted version.
+    """
+    primary = records[0]
+    if user_yaml is None:
+        user_yaml = primary.user_yaml
+
+    git_commit = (primary.metadata or {}).get('git_commit')
+
+    status_str = primary.status.colored_str() if primary.status else '-'
+    duration = log_utils.readable_time_duration(primary.start_at,
+                                                primary.end_at,
+                                                absolute=True)
+    recoveries = ('-'
+                  if primary.recovery_count is None else primary.recovery_count)
+    # Two resource lines, matching the dashboard: what the user asked for, and
+    # what the cluster actually ran (empty once a terminal job's handle is
+    # gone).
+    requested = primary.resources or '-'
+    used = (primary.cluster_resources_full or primary.cluster_resources or '-')
+
+    rows = [
+        ('Name', primary.job_name or '-'),
+        ('Status', status_str),
+        ('User', primary.user_name or '-'),
+        ('Workspace', primary.workspace or '-'),
+        ('Pool', primary.pool or '-'),
+        ('Submitted', log_utils.readable_time_duration(primary.submitted_at)),
+        ('Duration', duration or '-'),
+        ('Recoveries', recoveries),
+        ('Requested', requested),
+        ('Resources', used),
+        ('Infra', primary.infra or '-'),
+        ('Entrypoint', primary.entrypoint or '-'),
+    ]
+    # Only show git commit / failure / links when present (like the dashboard),
+    # rather than padding the view with empty '-' rows.
+    if git_commit:
+        rows.append(('Git commit', git_commit))
+    if primary.failure_reason:
+        rows.append(('Failure', primary.failure_reason))
+    if primary.links:
+        links_str = ', '.join(
+            f'{label}: {url}' for label, url in primary.links.items())
+        rows.append(('Links', links_str))
+
+    width = max(len(key) for key, _ in rows)
+    lines = [f'Managed job {primary.job_id}', '']
+    lines += [f'  {key.ljust(width)}   {value}' for key, value in rows]
+
+    if user_yaml:
+        lines += ['', 'Task YAML', '-' * 50, user_yaml.rstrip('\n')]
+    return '\n'.join(lines)
+
+
 def format_storage_table(storages: List[responses.StorageRecord],
                          show_all: bool = False) -> str:
     """Format the storage table for display.
