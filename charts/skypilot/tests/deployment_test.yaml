@@ -191,6 +191,50 @@ tests:
               fieldRef:
                 fieldPath: metadata.uid
 
+  - it: should honor configurable maxSurge/maxUnavailable including explicit 0
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+      apiService.rollingUpdate.maxSurge: 0
+      apiService.rollingUpdate.maxUnavailable: 1
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 1
+
+  - it: should support percentage strings for maxSurge/maxUnavailable
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+      apiService.rollingUpdate.maxSurge: 25%
+      apiService.rollingUpdate.maxUnavailable: 50%
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 25%
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 50%
+
+  - it: should fall back to defaults when rollingUpdate is null
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: false
+      apiService.rollingUpdate: null
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+
   - it: should fail RollingUpdate strategy without external database
     set:
       apiService.upgradeStrategy: RollingUpdate

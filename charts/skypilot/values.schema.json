@@ -192,6 +192,26 @@
                 "resources": {
                     "type": "object"
                 },
+                "rollingUpdate": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "maxSurge": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        },
+                        "maxUnavailable": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        }
+                    }
+                },
                 "serveServerLog": {
                     "type": "boolean"
                 },
@@ -236,26 +256,6 @@
                 },
                 "upgradeStrategy": {
                     "type": "string"
-                },
-                "rollingUpdate": {
-                    "type": [
-                        "object",
-                        "null"
-                    ],
-                    "properties": {
-                        "maxSurge": {
-                            "type": [
-                                "integer",
-                                "string"
-                            ]
-                        },
-                        "maxUnavailable": {
-                            "type": [
-                                "integer",
-                                "string"
-                            ]
-                        }
-                    }
                 }
             }
         },

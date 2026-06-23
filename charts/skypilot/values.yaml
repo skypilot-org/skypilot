@@ -47,8 +47,11 @@ apiService:
   # cannot be scheduled and the rollout stalls; set maxSurge: 0 and
   # maxUnavailable: 1 to roll in place without surging. Values may be integers
   # or percentage strings (e.g. "25%").
+  # @schema type: [object, null]
   rollingUpdate:
+    # @schema type: [integer, string]
     maxSurge: 1
+    # @schema type: [integer, string]
     maxUnavailable: 0
   # Deprecated: use other auth methods instead.
   # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
