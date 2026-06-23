@@ -445,6 +445,42 @@ def get_log_dir_for_job(job_id: int) -> Optional[str]:
 
 
 @init_db
+def update_job_metadata(job_id: int, updates: Dict[str, Any]) -> None:
+    """Merge ``updates`` into the job's ``metadata`` JSON.
+
+    Read-modify-write under the per-job lock so concurrent writers (e.g. the
+    log-link scan event and a status update) do not clobber each other. No-op if
+    the job row does not exist, so this is safe to call from any node -- a
+    worker node's local DB has no row for the job.
+    """
+    assert _DB is not None
+    if not updates:
+        return
+    with filelock.FileLock(_get_lock_path(job_id)):
+        row = _DB.cursor.execute('SELECT metadata FROM jobs WHERE job_id=(?)',
+                                 (job_id,)).fetchone()
+        if row is None:
+            return
+        metadata = json.loads(row[0]) if row[0] else {}
+        metadata.update(updates)
+        _DB.cursor.execute('UPDATE jobs SET metadata=(?) WHERE job_id=(?)',
+                           (json.dumps(metadata), job_id))
+        _DB.conn.commit()
+
+
+@init_db
+def get_nonterminal_job_log_dirs() -> Dict[int, Optional[str]]:
+    """Return a ``{job_id: log_dir}`` map for all non-terminal jobs.
+
+    Used by the skylet log-link scan event to find each running job's run.log.
+    """
+    assert _DB is not None
+    jobs = _get_jobs(user_hash=None,
+                     status_list=JobStatus.nonterminal_statuses())
+    return {job['job_id']: get_log_dir_for_job(job['job_id']) for job in jobs}
+
+
+@init_db
 def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
     """Setting the status of the job in the database."""
     assert _DB is not None

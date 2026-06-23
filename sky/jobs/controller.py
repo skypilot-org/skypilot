@@ -49,6 +49,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import log_links
 from sky.utils import status_lib
 from sky.utils import ux_utils
 from sky.utils.plugin_extensions import ExternalClusterFailure
@@ -67,6 +68,13 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
+
+# Live external-link polling cadence/cap. A matching URL is printed early in a
+# run, so we attempt extraction roughly once a minute and give up after a
+# bounded number of tries; the terminal-state log scan is the guarantee. This
+# bounds SSH round-trips on non-gRPC clusters (one job-queue read per attempt).
+_LIVE_LINK_POLL_EVERY = 4  # ~1 attempt per 4 status polls (~60s)
+_LIVE_LINK_MAX_ATTEMPTS = 30  # give up live updates after ~30 attempts
 
 
 async def create_background_task(coro: typing.Coroutine) -> None:
@@ -295,6 +303,10 @@ class JobController:
             # completes.
             managed_job_state.set_local_log_file(self._job_id, task_id,
                                                  local_log_file)
+            # Scan the complete downloaded log for external links and persist
+            # them. The full log on local disk is the definitive source, so a
+            # link surfaces even if the user never streamed it.
+            self._extract_and_store_log_links(task_id, local_log_file)
 
         log_file = None
         if managed_job_runtime.is_registered():
@@ -316,6 +328,88 @@ class JobController:
                 f'task {task_id}')
 
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
+    def _extract_and_store_log_links(self, task_id: Optional[int],
+                                     local_log_file: str) -> None:
+        """Scan a downloaded job log for external links and persist them.
+
+        Runs once per downloaded log (on every terminal-state and on-demand
+        download). Matching against the live ``dashboard.external_links`` config
+        happens here, in one place; the result is merged into ``spot.links``,
+        which the dashboard renders. Best-effort: never let it break the log
+        download path.
+        """
+        if task_id is None:
+            return
+        try:
+            patterns = log_links.get_patterns()
+            if not patterns:
+                return
+            if not local_log_file or not os.path.exists(local_log_file):
+                return
+            with open(local_log_file, 'r', encoding='utf-8',
+                      errors='replace') as f:
+                links = log_links.extract_links_from_lines(f, patterns)
+            if links:
+                managed_job_state.update_links(self._job_id, task_id, links)
+                logger.debug(f'Extracted external links from log: {links}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                'Failed to extract external links from log file '
+                f'{local_log_file}: {common_utils.format_exception(e)}')
+
+    async def _update_live_log_links(self, task_id: Optional[int],
+                                     cluster_name: Optional[str],
+                                     job_id_on_pool_cluster: Optional[int],
+                                     found_labels: Set[str]) -> bool:
+        """Best-effort: surface external links from a running job's logs.
+
+        Reads candidate URLs harvested by the worker's skylet from job metadata
+        and matches them against the configured patterns here (one matcher, live
+        config), merging matches into ``spot.links``. The terminal-state scan is
+        the definitive backstop, so this only makes links appear sooner; any
+        failure is swallowed.
+
+        Returns True when there is nothing left to do (every configured pattern
+        has matched, or none are configured), so the caller can stop polling.
+        """
+        if task_id is None or cluster_name is None:
+            return True
+        try:
+            patterns = log_links.get_patterns()
+            if not patterns:
+                return True
+            if len(found_labels) >= len(patterns):
+                return True
+            handle = await asyncio.to_thread(
+                global_user_state.get_handle_from_cluster_name, cluster_name)
+            if handle is None:
+                return False
+            job_ids = ([job_id_on_pool_cluster]
+                       if job_id_on_pool_cluster is not None else None)
+            metadata_by_job = await asyncio.to_thread(
+                self._backend.get_job_metadata, handle, job_ids)
+            candidates: List[str] = []
+            for meta in metadata_by_job.values():
+                urls = meta.get(log_links.EXTRACTED_URLS_METADATA_KEY)
+                if isinstance(urls, list):
+                    candidates.extend(urls)
+            if candidates:
+                new_links = {
+                    label: url
+                    for label, url in log_links.match_links(
+                        candidates, patterns).items()
+                    if label not in found_labels
+                }
+                if new_links:
+                    await managed_job_state.update_links_async(
+                        self._job_id, task_id, new_links)
+                    found_labels.update(new_links.keys())
+            return len(found_labels) >= len(patterns)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug('Failed to update live external links: '
+                         f'{common_utils.format_exception(e)}')
+            return False
 
     async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
         if cluster_name is None:
@@ -757,6 +851,12 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
+        # External-link labels already surfaced for this task, so we stop
+        # polling the worker's metadata once every pattern has matched.
+        live_link_labels: Set[str] = set()
+        live_link_done = False
+        live_link_attempts = 0
+        live_link_poll_counter = 0
 
         while True:
             # Get job status (skip on first iteration if forcing recovery)
@@ -797,6 +897,21 @@ class JobController:
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
                         f'Traceback: {traceback.format_exc()}')
                     # Fall through to recovery logic below
+
+                # While the job is running, surface external links harvested
+                # from its logs (best-effort; the terminal-state scan is the
+                # guarantee). Throttled and capped so a job that never prints a
+                # matching URL does not trigger a job-queue read on every poll
+                # (which is an SSH round-trip on non-gRPC clusters).
+                if (job_status is not None and not job_status.is_terminal() and
+                        not live_link_done and
+                        live_link_attempts < _LIVE_LINK_MAX_ATTEMPTS):
+                    live_link_poll_counter += 1
+                    if live_link_poll_counter % _LIVE_LINK_POLL_EVERY == 1:
+                        live_link_attempts += 1
+                        live_link_done = await self._update_live_log_links(
+                            task_id, cluster_name, job_id_on_pool_cluster,
+                            live_link_labels)
 
             # When job status check fails, we need to retry to avoid false alarm
             # for job failure, as it could be a transient error for

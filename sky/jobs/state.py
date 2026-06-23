@@ -3118,6 +3118,38 @@ async def update_links_async(job_id: int, task_id: int,
             # Transaction commits automatically when exiting the context
 
 
+@db_retries.retry
+def update_links(job_id: int, task_id: Optional[int], links: Dict[str,
+                                                                  str]) -> None:
+    """Synchronous version of update_links_async.
+
+    Merges ``links`` into the existing ``spot.links`` JSON for the given task.
+    Used by the controller's terminal-state log scan, which runs in a worker
+    thread (no running event loop) via ``asyncio.to_thread``.
+    """
+    if task_id is None or not links:
+        return
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        select_query = sqlalchemy.select(spot_table.c.links).where(
+            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                            spot_table.c.task_id == task_id))
+        # Row-level locking for PostgreSQL; SQLite relies on database-level
+        # write locking. Mirrors update_links_async.
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
+            select_query = select_query.with_for_update()
+        existing_links_row = session.execute(select_query).fetchone()
+        existing_links = {}
+        if existing_links_row and existing_links_row[0]:
+            existing_links = existing_links_row[0]
+        existing_links.update(links)
+        session.query(spot_table).filter(
+            sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                            spot_table.c.task_id == task_id)).update(
+                                {spot_table.c.links: existing_links})
+        session.commit()
+
+
 async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
     states."""
