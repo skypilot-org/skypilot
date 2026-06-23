@@ -177,7 +177,9 @@ kubernetes_dependencies = [
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in
 # a few places.
-AZURE_CLI = 'azure-cli>=2.65.0'
+# Cap <2.87.0: 2.87.0 pulls azure-mgmt-storage 25.0.0, whose TypeSpec models
+# break our Azure storage code (storage-account create and key listing).
+AZURE_CLI = 'azure-cli>=2.65.0,<2.87.0'
 
 cloud_dependencies: Dict[str, List[str]] = {
     'aws': aws_dependencies,
@@ -217,6 +219,15 @@ cloud_dependencies: Dict[str, List[str]] = {
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'coreweave': aws_dependencies + kubernetes_dependencies,
+    # Hugging Face Buckets require huggingface_hub>=1.5 (first version with
+    # the full buckets API: create_bucket / bucket_info / sync_bucket /
+    # batch_bucket_files / list_bucket_tree / download_bucket_files).
+    # 1.9+ drops Python 3.9 support, so pin to <1.9 there while letting
+    # Python 3.10+ install the latest.
+    'huggingface': [
+        'huggingface_hub>=1.5; python_version>="3.10"',
+        'huggingface_hub>=1.5,<1.9; python_version<"3.10"',
+    ],
     'scp': local_ray,
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,

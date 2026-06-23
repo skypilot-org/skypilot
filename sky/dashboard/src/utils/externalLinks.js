@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { stripAnsiCodes } from '@/components/utils';
 import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 
 // Built-in URL patterns that ship with SkyPilot. Admin-configured patterns
@@ -68,7 +69,18 @@ export const extractLinksFromLogs = (logLines, patterns, existingMatches) => {
       break;
     }
 
-    const tokens = line.split(/[\s"'<>()[\]{},;]+/);
+    // Plugins can feed arbitrary arrays through `onLogLines`; skip
+    // non-string entries instead of letting one bad element throw and
+    // take down the page.
+    if (typeof line !== 'string') {
+      continue;
+    }
+
+    // Strip ANSI escape codes so color/reset sequences adjacent to a URL
+    // do not leak into the matched token. Lines from the OSS streamer are
+    // already stripped (this is a no-op); raw buffers forwarded by log
+    // plugins are not.
+    const tokens = stripAnsiCodes(line).split(/[\s"'<>()[\]{},;]+/);
     for (const token of tokens) {
       const cleanToken = token.replace(/[.,:;!?]+$/, '');
       if (!cleanToken) continue;
@@ -117,6 +129,59 @@ export const useCustomUrlPatterns = () => {
   }, []);
 
   return patterns;
+};
+
+/**
+ * React hook that owns external-link extraction from log lines.
+ *
+ * Returns `extractedLinks` (an accumulated label -> url map) and
+ * `scanLines`, a stable callback that accepts either an array of log
+ * lines or a raw newline-separated buffer and scans it against the
+ * merged built-in + admin-configured URL patterns. Matches accumulate
+ * across calls so they survive tab switches, re-renders, and streaming
+ * buffer resets; the most recent lines are re-scanned when the
+ * admin-configured patterns finish loading.
+ *
+ * `scanLines` being a stable callback makes it usable both by the OSS
+ * log streamer effects and as a slot-context callback for dashboard
+ * plugins that own a logs panel and forward their own lines.
+ *
+ * @returns {{extractedLinks: Object<string, string>,
+ *            scanLines: (lines: string[]|string) => void}}
+ */
+export const useLogLinkExtractor = () => {
+  const urlPatterns = useCustomUrlPatterns();
+  const [extractedLinks, setExtractedLinks] = useState({});
+  const extractedLinksRef = useRef({});
+  const urlPatternsRef = useRef(urlPatterns);
+  const lastLinesRef = useRef(null);
+
+  const scanLines = useCallback((lines) => {
+    const lineArray = typeof lines === 'string' ? lines.split('\n') : lines;
+    if (!Array.isArray(lineArray) || lineArray.length === 0) {
+      return;
+    }
+    lastLinesRef.current = lineArray;
+    const prev = extractedLinksRef.current;
+    const next = extractLinksFromLogs(lineArray, urlPatternsRef.current, prev);
+    // Matches only ever accumulate, so a size change means new links.
+    if (Object.keys(next).length !== Object.keys(prev).length) {
+      extractedLinksRef.current = next;
+      setExtractedLinks(next);
+    }
+  }, []);
+
+  useEffect(() => {
+    urlPatternsRef.current = urlPatterns;
+    // Admin patterns load asynchronously; re-scan the most recent lines
+    // so links matching late-arriving patterns are not missed when the
+    // stream has already gone quiet (e.g. a finished job).
+    if (lastLinesRef.current) {
+      scanLines(lastLinesRef.current);
+    }
+  }, [urlPatterns, scanLines]);
+
+  return { extractedLinks, scanLines };
 };
 
 /**

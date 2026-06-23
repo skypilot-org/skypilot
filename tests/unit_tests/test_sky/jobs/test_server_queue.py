@@ -225,10 +225,21 @@ class TestQueue:
             # Match fake_get_workspaces so queue_v2 sees the same workspace set
             return set(fake_get_workspaces().keys())
 
-        def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
-                               workspace_match, name_match, pool_match, page,
-                               limit, user_hashes, statuses, fields, sort_by,
-                               sort_order):
+        def fake_get_job_table(skip_finished,
+                               accessible_workspaces,
+                               job_ids,
+                               workspace_match,
+                               name_match,
+                               pool_match,
+                               page,
+                               limit,
+                               user_hashes,
+                               statuses,
+                               fields,
+                               sort_by,
+                               sort_order,
+                               submitted_after=None,
+                               submitted_before=None):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
@@ -244,6 +255,8 @@ class TestQueue:
                 'fields': fields,
                 'sort_by': sort_by,
                 'sort_order': sort_order,
+                'submitted_after': submitted_after,
+                'submitted_before': submitted_before,
             }
 
         def fake_load_managed_job_queue(payload):
@@ -677,7 +690,9 @@ class TestDumpManagedJobQueue:
                                                page,
                                                limit,
                                                sort_by=None,
-                                               sort_order=None):
+                                               sort_order=None,
+                                               submitted_after=None,
+                                               submitted_before=None):
             # Apply pre-filters aligned with utils.get_managed_job_queue
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,
@@ -693,11 +708,16 @@ class TestDumpManagedJobQueue:
                                                         statuses=statuses)
             return filtered, total
 
-        def fake_get_status_count_with_filters(fields, job_ids,
+        def fake_get_status_count_with_filters(fields,
+                                               job_ids,
                                                accessible_workspaces,
-                                               workspace_match, name_match,
-                                               pool_match, user_hashes,
-                                               skip_finished):
+                                               workspace_match,
+                                               name_match,
+                                               pool_match,
+                                               user_hashes,
+                                               skip_finished,
+                                               submitted_after=None,
+                                               submitted_before=None):
             # Compute status counts after applying non-paginated filters
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,

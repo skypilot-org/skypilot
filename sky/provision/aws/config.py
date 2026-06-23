@@ -501,12 +501,14 @@ def _usable_subnets(
                 '(2) does not assign public IPs (`map_public_ip_on_launch` '
                 'is False).')
         elif _are_user_subnets_pruned(subnets):
-            _skypilot_log_error_and_exit_for_failover(
-                f'MISMATCH between specified subnets and Availability Zones! '
-                'The following Availability Zones were specified in the '
-                f'`provider section`: {azs}. The following subnets '
-                f'have no matching availability zone: '
-                f'{list(_get_pruned_subnets(subnets))}.')
+            # User-specified subnets may span multiple AZs. After filtering
+            # to the chosen AZ, some subnets are naturally excluded — this
+            # is expected and not a mismatch. Only log for debugging.
+            logger.debug(f'Subnets not in chosen AZ {azs}: '
+                         f'{list(_get_pruned_subnets(subnets))}')
+            # Update the baseline so downstream checks (e.g., VPC dedup)
+            # don't treat AZ-reduced count as a pruning error.
+            user_specified_subnets = subnets
 
     # Use subnets in only one VPC, so that _configure_security_groups only
     # needs to create a security group in this one VPC. Otherwise, we'd need

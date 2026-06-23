@@ -8,14 +8,123 @@ import pytest
 from sky import clouds
 from sky import exceptions as sky_exceptions
 from sky import resources
+from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
+from sky.provision import common as provision_common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
+from sky.utils import subprocess_utils
 
 
 def _remove_colorama_escape_codes(error_output):
     return [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in error_output]
+
+
+def _make_provision_config(count):
+    """A minimal ProvisionConfig sufficient to drive _create_pods."""
+    return provision_common.ProvisionConfig(
+        provider_config={'timeout': 10},
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{}]
+            },
+        },
+        count=count,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+
+
+def _fake_pod(name):
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod.status.phase = 'Pending'
+    return pod
+
+
+def _patch_create_pods_k8s_boundary(monkeypatch, existing_pods, head_name):
+    """Stub the Kubernetes-touching calls _create_pods makes.
+
+    Leaves the to_start_count arithmetic and per-pod skip logic to run for
+    real, so the idempotency contract is what's actually exercised.
+    """
+
+    def fake_filter_pods(namespace, context, tags, phases):
+        # Only the Pending/Running query returns existing pods; the
+        # Terminating and Failed/Succeeded cleanup queries return nothing.
+        if 'Pending' in phases:
+            return dict(existing_pods)
+        return {}
+
+    monkeypatch.setattr(kubernetes_utils, 'get_namespace_from_config',
+                        lambda *a, **k: 'ns')
+    monkeypatch.setattr(kubernetes_utils, 'get_context_from_config',
+                        lambda *a, **k: 'ctx')
+    monkeypatch.setattr(kubernetes_utils, 'filter_pods', fake_filter_pods)
+    monkeypatch.setattr(instance, '_get_head_pod_name', lambda pods: head_name)
+    monkeypatch.setattr(kubernetes_utils, 'check_nvidia_runtime_class',
+                        lambda *a, **k: False)
+    monkeypatch.setattr(instance, '_wait_for_pods_to_schedule',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(instance, '_wait_for_pods_to_run', lambda *a, **k: None)
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+
+
+def test_create_pods_is_idempotent_when_all_pods_exist(monkeypatch):
+    """Relaunching with all pods already present must create nothing.
+
+    This pins the reattach-safety contract that lets a paused launch resume
+    onto the pods it already created: _create_pods computes to_start_count == 0
+    and issues no create_namespaced_pod calls, returning the existing head.
+    """
+    cluster_on_cloud = 'test-cluster-abc'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {
+        head_name: _fake_pod(head_name),
+        f'{cluster_on_cloud}-worker1': _fake_pod(f'{cluster_on_cloud}-worker1'),
+    }
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+
+    core_api = mock.MagicMock()
+    monkeypatch.setattr(kubernetes, 'core_api', lambda *a, **k: core_api)
+
+    # run_in_parallel drives the per-index create thread; run it inline so the
+    # head/worker skip logic actually executes.
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+
+    config = _make_provision_config(count=2)
+    record = instance._create_pods('us', cluster_on_cloud, cluster_on_cloud,
+                                   config)
+
+    core_api.create_namespaced_pod.assert_not_called()
+    assert record.created_instance_ids == []
+    assert record.head_instance_id == head_name
+
+
+def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
+    """More running+pending pods than requested trips the leak guard."""
+    cluster_on_cloud = 'test-cluster-xyz'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {
+        head_name: _fake_pod(head_name),
+        f'{cluster_on_cloud}-worker1': _fake_pod(f'{cluster_on_cloud}-worker1'),
+        f'{cluster_on_cloud}-worker2': _fake_pod(f'{cluster_on_cloud}-worker2'),
+    }
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+
+    config = _make_provision_config(count=2)
+    with pytest.raises(RuntimeError, match='resource leak'):
+        instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
 
 
 def test_out_of_cpus(monkeypatch):
@@ -416,6 +525,8 @@ def test_pod_termination_reason_start_error(monkeypatch):
     pod = mock.MagicMock()
     pod.metadata.name = 'test-pod'
     pod.status.start_time = now
+    pod.status.reason = None
+    pod.status.message = None
 
     # Ready condition showing PodFailed
     ready_condition = mock.MagicMock()
@@ -511,6 +622,8 @@ def test_pod_termination_reason_null_finished_at(monkeypatch):
     pod = mock.MagicMock()
     pod.metadata.name = 'test-pod'
     pod.status.start_time = now
+    pod.status.reason = None
+    pod.status.message = None
 
     # Ready condition
     ready_condition = mock.MagicMock()
@@ -1316,10 +1429,11 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
 
     @staticmethod
     def _make_pending_pod(name: str, cluster_name_on_cloud: str):
-        """Build a pod that is Pending with no container_statuses.
+        """Build a pod that is Pending and not yet bound by the scheduler.
 
-        This represents a pod that has not yet been scheduled — the loop
-        should keep waiting for it.
+        This represents a pod that has not yet been scheduled — no
+        spec.node_name and no PodScheduled=True condition — so the loop
+        should keep waiting for it (and eventually time out).
         """
         from sky.provision import constants as prov_constants
         pod = mock.MagicMock()
@@ -1329,6 +1443,12 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         }
         pod.status.phase = 'Pending'
         pod.status.container_statuses = None
+        # The scheduler has not bound this pod: no node assignment and no
+        # PodScheduled=True condition. Set explicitly so the MagicMock does
+        # not auto-create truthy attributes that _pod_is_scheduled would
+        # misread as "bound".
+        pod.spec.node_name = None
+        pod.status.conditions = []
         return pod
 
     def _setup(self, monkeypatch, autoscaler_type, autoscale_detected):
@@ -1596,6 +1716,183 @@ class TestWaitForPodsToScheduleAutoscaleTimeout:
         assert kwargs['nop_if_duplicate'] is True
 
 
+class TestWaitForPodsToScheduleBoundPod:
+    """Tests that _wait_for_pods_to_schedule treats a pod as scheduled once
+    the kube-scheduler has bound it to a node, even before the kubelet has
+    populated status.container_statuses.
+
+    Regression: the previous implementation decided a pod was scheduled by
+    checking ``container_statuses is not None``. container_statuses is
+    populated by the kubelet only after it picks the pod up and starts the
+    sandbox, which can lag the scheduler binding when the control plane is
+    slow to propagate the binding to the kubelet. At the provision_timeout
+    deadline a fully bound pod (PodScheduled True / spec.node_name set) could
+    still have container_statuses == None and be wrongly reported as out of
+    resources. The function must instead hand off to _wait_for_pods_to_run.
+    """
+
+    @staticmethod
+    def _make_node(name: str, cluster_name_on_cloud: str):
+        from sky.provision import constants as prov_constants
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        return node
+
+    @staticmethod
+    def _make_bound_pending_pod(name: str,
+                                cluster_name_on_cloud: str,
+                                node_name=None,
+                                pod_scheduled_condition: bool = False):
+        """A Pending pod that the scheduler has bound but the kubelet has not
+        yet picked up: container_statuses / host_ip / start_time are still
+        None. Binding is expressed via spec.node_name and/or a PodScheduled
+        condition.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        pod.status.phase = 'Pending'
+        # The kubelet has not populated any of these yet.
+        pod.status.container_statuses = None
+        pod.status.host_ip = None
+        pod.status.start_time = None
+        # The scheduler has bound the pod.
+        pod.spec.node_name = node_name
+        if pod_scheduled_condition:
+            cond = mock.MagicMock()
+            cond.type = 'PodScheduled'
+            cond.status = 'True'
+            pod.status.conditions = [cond]
+        else:
+            pod.status.conditions = []
+        return pod
+
+    @staticmethod
+    def _make_unbound_pending_pod(name: str, cluster_name_on_cloud: str):
+        """A Pending pod the scheduler has NOT bound: no node_name and no
+        PodScheduled=True condition. This pod is genuinely unschedulable and
+        must keep the loop waiting until the timeout.
+        """
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+        }
+        pod.status.phase = 'Pending'
+        pod.status.container_statuses = None
+        pod.status.host_ip = None
+        pod.status.start_time = None
+        pod.spec.node_name = None
+        pod.status.conditions = []
+        return pod
+
+    @staticmethod
+    def _wire_common_mocks(monkeypatch, pod, autoscaler_type=None):
+        """Mock config lookup, core_api, autoscale detection and the
+        error-surfacing path. Returns the raise_errors marker mock."""
+
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            if keys == ('autoscaler',):
+                return autoscaler_type
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        pods_list = mock.MagicMock()
+        pods_list.items = [pod]
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.return_value = pods_list
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        monkeypatch.setattr(instance, '_cluster_had_autoscale_event',
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(instance, '_cluster_maybe_autoscaling',
+                            lambda *a, **kw: False)
+
+        raise_errors = mock.MagicMock(
+            side_effect=config_lib.KubernetesError('simulated-timeout'))
+        monkeypatch.setattr(instance, '_raise_pod_scheduling_errors',
+                            raise_errors)
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        return raise_errors
+
+    @pytest.mark.parametrize('node_name, pod_scheduled_condition', [
+        ('node-1', False),
+        (None, True),
+        ('node-1', True),
+    ])
+    def test_bound_pending_pod_without_container_statuses_returns(
+            self, monkeypatch, node_name, pod_scheduled_condition):
+        """The regression case: a bound but not-yet-picked-up pod (no
+        container_statuses / host_ip) must be treated as scheduled, so the
+        function returns promptly without raising — handing off to
+        _wait_for_pods_to_run."""
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_bound_pending_pod(
+            'pod-0',
+            cluster_name_on_cloud,
+            node_name=node_name,
+            pod_scheduled_condition=pod_scheduled_condition)
+        raise_errors = self._wire_common_mocks(monkeypatch, pod)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        # A positive timeout; the function must return well before it without
+        # raising because the pod is bound.
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=30,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert not raise_errors.called, (
+            'A bound pod (scheduler placed it) must not trigger the '
+            'out-of-resources error path even though the kubelet has not '
+            'populated container_statuses yet.')
+
+    def test_unbound_pending_pod_times_out_and_raises(self, monkeypatch):
+        """A genuinely unschedulable pod (no node_name, no PodScheduled=True)
+        must keep the loop waiting and eventually raise once the timeout
+        elapses."""
+        cluster_name_on_cloud = 'my-cluster'
+        pod = self._make_unbound_pending_pod('pod-0', cluster_name_on_cloud)
+        # No autoscaler configured, so the timeout is not bumped to the
+        # autoscaler minimum and stays at the tiny value below.
+        raise_errors = self._wire_common_mocks(monkeypatch,
+                                               pod,
+                                               autoscaler_type=None)
+
+        node = self._make_node('pod-0', cluster_name_on_cloud)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='simulated-timeout'):
+            instance._wait_for_pods_to_schedule(
+                namespace='ns',
+                context='test-context',
+                new_nodes=[node],
+                timeout=1,
+                cluster_name='cn',
+                create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert raise_errors.called, (
+            'An unbound (unschedulable) pod must drive the timeout/error '
+            'path.')
+
+
 # ---------------------------------------------------------------------------
 # Helpers and tests for _condensed_pod_reason()
 # ---------------------------------------------------------------------------
@@ -1615,6 +1912,10 @@ def _make_mock_pod(phase='Failed',
     pod.status.conditions = conditions or []
     pod.status.container_statuses = container_statuses or []
     pod.status.init_container_statuses = init_container_statuses or []
+    # A real pod has no pod-level kubelet reason unless evicted/preempted;
+    # leave it unset so condition/container-derived reasons are exercised.
+    pod.status.reason = None
+    pod.status.message = None
     return pod
 
 
@@ -2514,7 +2815,8 @@ class TestInspectPodStatusTierIntegration:
     def test_pending_pod_container_creating_does_not_raise(self, monkeypatch):
         """phase=Pending, ContainerCreating: tier-1 returns None, tier-2/3
         consulted, no raise. Smoke check that the happy in-flight case still
-        loops."""
+        loops. With no container-status reason and no event, the pending reason
+        defaults to 'container creation' so the spinner shows useful detail."""
         pod = self._make_pod(
             phase='Pending',
             container_statuses=[
@@ -2529,9 +2831,60 @@ class TestInspectPodStatusTierIntegration:
             c for c in add_event.call_args_list if c.kwargs.get('event_type') is
             instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
         ]
-        # Bare 'Launching' status text is skipped per the existing guard at
-        # instance.py:845. So no LAUNCH_PROGRESS row.
-        assert lp_calls == []
+        # The reason defaults to 'container creation', so a LAUNCH_PROGRESS row
+        # is emitted with the enriched 'Launching (...)' status text.
+        assert len(lp_calls) == 1
+        assert ('Launching (1 pod(s) pending due to container creation)'
+                in lp_calls[0].kwargs['reason'])
+
+    def test_pending_pod_bound_no_container_statuses_defaults_reason(
+            self, monkeypatch):
+        """A freshly-bound pod the kubelet has not picked up yet sits Pending
+        with container_statuses == None, host_ip == None, and no events. The
+        pending reason must default to 'container creation' so the spinner shows
+        'Launching (1 pod(s) pending due to container creation)' instead of a
+        bare 'Launching' during the kubelet-pickup window. We assert on the
+        LAUNCH_PROGRESS reason, whose value is the spinner status text."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=None,
+        )
+        pod.status.host_ip = None
+        # No events → tier-2 and tier-3 return None, so the default kicks in.
+        monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **kw: [])
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert len(lp_calls) == 1
+        assert ('Launching (1 pod(s) pending due to container creation)'
+                in lp_calls[0].kwargs['reason'])
+
+    def test_pending_pod_not_scheduled_does_not_default_reason(
+            self, monkeypatch):
+        """A Pending pod the scheduler has NOT bound yet (no spec.node_name,
+        no PodScheduled=True) with no determinable reason must NOT be labeled
+        'container creation' -- it is still waiting for capacity, not creating
+        a container. _inspect_pod_status returns (False, None), so no
+        LAUNCH_PROGRESS row is emitted and the spinner stays a bare
+        'Launching'."""
+        pod = self._make_pod(
+            phase='Pending',
+            container_statuses=None,
+        )
+        pod.status.host_ip = None
+        # Not bound: no node assignment and no PodScheduled=True condition.
+        pod.spec.node_name = None
+        pod.status.conditions = []
+        # No events → tier-2 and tier-3 return None.
+        monkeypatch.setattr(instance, '_get_pod_events', lambda *a, **kw: [])
+        add_event = self._drive_one_iteration(monkeypatch, pod)
+        lp_calls = [
+            c for c in add_event.call_args_list if c.kwargs.get('event_type') is
+            instance.global_user_state.ClusterEventType.LAUNCH_PROGRESS
+        ]
+        assert not lp_calls
 
 
 class TestCheckInitContainersEnrichedRaise:
@@ -2952,3 +3305,231 @@ class TestInspectPodStatusInitContainerReason:
         assert len(pending_logs) == 1
         assert 'init container' in pending_logs[0]
         assert 'Pulling image' not in pending_logs[0]
+
+
+class TestConfigureRuntimeClass:
+    """Tests for _configure_runtime_class.
+
+    A falsy runtimeClassName (e.g. '' or None from a
+    kubernetes.pod_config override) means the user explicitly disabled
+    the runtime class. It must be stripped from ALL pods: the
+    Kubernetes API rejects an empty string with 'resource name may not
+    be empty', so leaving it on CPU-only pods breaks their creation.
+    """
+
+    def _pod_spec(self, runtime_class_name=...):
+        spec = {'containers': [{'name': 'c'}]}
+        if runtime_class_name is not ...:
+            spec['runtimeClassName'] = runtime_class_name
+        return {'spec': spec}
+
+    def test_cpu_pod_empty_string_override_is_stripped(self):
+        pod_spec = self._pod_spec(runtime_class_name='')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=False)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_cpu_pod_none_override_is_stripped(self):
+        pod_spec = self._pod_spec(runtime_class_name=None)
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=False,
+                                          needs_gpus_nvidia=False)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_gpu_pod_falsy_override_not_replaced_with_nvidia(self):
+        pod_spec = self._pod_spec(runtime_class_name='')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_gpu_pod_gets_nvidia_when_runtime_exists(self):
+        pod_spec = self._pod_spec()
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=True)
+        assert pod_spec['spec']['runtimeClassName'] == 'nvidia'
+
+    def test_gpu_pod_unchanged_when_runtime_missing(self):
+        pod_spec = self._pod_spec()
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=False,
+                                          needs_gpus_nvidia=True)
+        assert 'runtimeClassName' not in pod_spec['spec']
+
+    def test_user_custom_runtime_class_is_preserved(self):
+        pod_spec = self._pod_spec(runtime_class_name='sysbox-runc')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=True)
+        assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'
+
+    def test_cpu_pod_custom_runtime_class_is_preserved(self):
+        pod_spec = self._pod_spec(runtime_class_name='sysbox-runc')
+        instance._configure_runtime_class(pod_spec,
+                                          nvidia_runtime_exists=True,
+                                          needs_gpus_nvidia=False)
+        assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'
+
+
+# ---------- Pod creation 409 "object is being deleted" handling ----------
+
+
+class TestCreatePodFinalizerHandling:
+    """Recovery path for the 409 ``object is being deleted`` error:
+
+    ``_create_namespaced_pod_with_retries`` force-removes the terminating pod
+    (strip Kueue finalizer + force-delete grace=0), then recreates it.
+    """
+
+    _DELETING_MSG = ('object is being deleted: pods "t-reco-head" already '
+                     'exists')
+
+    def _conflict_exc(self):
+        import json
+        return _make_api_exception(409,
+                                   'Conflict',
+                                   body=json.dumps(
+                                       {'message': self._DELETING_MSG}))
+
+    def test_strips_kueue_finalizer_then_recreates(self, monkeypatch):
+        """Kueue case: strip the finalizer, force-delete (grace 0), recreate."""
+        conflict = self._conflict_exc()
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        stuck_pod = mock.MagicMock()
+        stuck_pod.metadata.finalizers = [
+            'kueue.x-k8s.io/managed', 'example.com/other'
+        ]
+
+        core_api_mock = mock.MagicMock()
+        # 1: initial create 409s; 2: create after force-removing the old pod
+        # succeeds.
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = stuck_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # JSON patch (list body), not strategic-merge (which no-ops on the
+        # finalizers list); keeps the unrelated finalizer, drops only Kueue's.
+        patch_call = core_api_mock.patch_namespaced_pod.call_args
+        assert patch_call.args[2] == [{
+            'op': 'replace',
+            'path': '/metadata/finalizers',
+            'value': ['example.com/other']
+        }]
+        # Removing the finalizer alone leaves the pod lingering for its grace
+        # period, so it must also be force-deleted (grace 0) before recreating.
+        assert any(
+            c.kwargs.get('grace_period_seconds') == 0
+            for c in core_api_mock.delete_namespaced_pod.call_args_list)
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_force_delete_without_finalizer_then_recreates(self, monkeypatch):
+        """Non-Kueue case: no finalizer to strip; force-delete (grace 0) then
+
+        recreate. The pod is read (to check finalizers) but never patched.
+        """
+        conflict = self._conflict_exc()
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        plain_pod = mock.MagicMock()
+        plain_pod.metadata.finalizers = None
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = plain_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # No Kueue finalizer, so no patch; still force-deleted (grace 0).
+        core_api_mock.patch_namespaced_pod.assert_not_called()
+        assert any(
+            c.kwargs.get('grace_period_seconds') == 0
+            for c in core_api_mock.delete_namespaced_pod.call_args_list)
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_pod_gc_d_between_read_and_patch(self, monkeypatch):
+        """If the pod is GC'd between read and finalizer-patch, the 404 on the
+
+        patch is the success state (pod gone) — return (skipping the redundant
+        force-delete) and let the caller recreate, rather than raising.
+        """
+        conflict = self._conflict_exc()
+        not_found = _make_api_exception(404, 'Not Found')
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        stuck_pod = mock.MagicMock()
+        stuck_pod.metadata.finalizers = ['kueue.x-k8s.io/managed']
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = stuck_pod
+        core_api_mock.patch_namespaced_pod.side_effect = not_found
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # 404 on patch => pod already gone => skip force-delete, just recreate.
+        core_api_mock.delete_namespaced_pod.assert_not_called()
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_asserts_pod_is_terminating(self, monkeypatch):
+        """The helper is only valid for a terminating pod; if the read returns a
+
+        live pod (no deletionTimestamp), the precondition assert fires rather
+        than force-deleting a healthy pod.
+        """
+        conflict = self._conflict_exc()
+        live_pod = mock.MagicMock()
+        live_pod.metadata.deletion_timestamp = None  # not terminating
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = conflict
+        core_api_mock.read_namespaced_pod.return_value = live_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        with pytest.raises(AssertionError):
+            instance._create_namespaced_pod_with_retries(
+                'default', pod_spec, None)
+        # Must not have touched the live pod.
+        core_api_mock.patch_namespaced_pod.assert_not_called()
+        core_api_mock.delete_namespaced_pod.assert_not_called()

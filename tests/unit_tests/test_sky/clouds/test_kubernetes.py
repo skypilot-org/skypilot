@@ -488,11 +488,16 @@ class TestKubernetesAllIncludesInCluster(unittest.TestCase):
            'get_current_kube_config_context_name')
     @patch('sky.provision.kubernetes.utils.is_incluster_config_available')
     @patch('sky.adaptors.kubernetes.in_cluster_context_name')
-    def test_no_kubeconfig_fallback_unaffected_by_env(
-            self, mock_in_cluster_name, mock_is_incluster, mock_current,
-            mock_get_nested, mock_get_workspace, mock_get_all_contexts):
-        """The "no kubeconfig -> in-cluster" fallback is independent of
-        the filter env var: the filter only applies to the `'all'` path.
+    def test_no_kubeconfig_fallback_respects_env(self, mock_in_cluster_name,
+                                                 mock_is_incluster,
+                                                 mock_current, mock_get_nested,
+                                                 mock_get_workspace,
+                                                 mock_get_all_contexts):
+        """The "no kubeconfig -> in-cluster" fallback also honors the filter
+        env var: with it false the in-cluster context is not surfaced, even
+        when it is the only derived context. Without an explicit
+        `allowed_contexts` list the contexts are derived, so the same
+        exclusion that applies to the `'all'` path applies here.
         """
         mock_get_all_contexts.return_value = ['in-cluster']
         mock_get_workspace.return_value.get.return_value = None
@@ -503,6 +508,29 @@ class TestKubernetesAllIncludesInCluster(unittest.TestCase):
 
         with patch.dict(os.environ, {self.ENV_VAR: 'false'}, clear=False):
             result = kubernetes.Kubernetes.existing_allowed_contexts()
+
+        self.assertEqual(result, [])
+
+    @patch('sky.provision.kubernetes.utils.get_all_kube_context_names')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.skypilot_config.get_nested')
+    @patch('sky.provision.kubernetes.utils.'
+           'get_current_kube_config_context_name')
+    @patch('sky.provision.kubernetes.utils.is_incluster_config_available')
+    @patch('sky.adaptors.kubernetes.in_cluster_context_name')
+    def test_no_kubeconfig_fallback_default_keeps_in_cluster(
+            self, mock_in_cluster_name, mock_is_incluster, mock_current,
+            mock_get_nested, mock_get_workspace, mock_get_all_contexts):
+        """The fallback keeps in-cluster by default (env unset) so existing
+        single-cluster deployments are unaffected."""
+        mock_get_all_contexts.return_value = ['in-cluster']
+        mock_get_workspace.return_value.get.return_value = None
+        mock_get_nested.return_value = None
+        mock_current.return_value = None
+        mock_is_incluster.return_value = True
+        mock_in_cluster_name.return_value = 'in-cluster'
+
+        result = kubernetes.Kubernetes.existing_allowed_contexts()
 
         self.assertEqual(result, ['in-cluster'])
 
@@ -4082,6 +4110,23 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
             result,
             (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
              None))
+
+
+class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
+    """`_check_single_context` forwards the cloud key to `check_credentials`.
+
+    Ensures `sky check` resolves the credential-probe namespace under
+    the calling cloud's config key (``kubernetes`` vs ``ssh``) instead
+    of always querying the kubeconfig context default.
+    """
+
+    @patch('sky.provision.kubernetes.utils.check_credentials')
+    def test_forwards_kubernetes_cloud_key(self, mock_check_credentials):
+        mock_check_credentials.return_value = (True, None)
+        kubernetes.Kubernetes._check_single_context('some-ctx')
+        mock_check_credentials.assert_called_once_with('some-ctx',
+                                                       run_optional_checks=True,
+                                                       cloud='kubernetes')
 
 
 if __name__ == '__main__':

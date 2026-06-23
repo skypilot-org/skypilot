@@ -1168,7 +1168,7 @@ may cause GET /api/get being sent to a restarted API server.
 ### `sky.stream_and_get`
 
 ```python
-sky.stream_and_get(request_id: Optional[server_common.RequestId[T]] = None, log_path: Optional[str] = None, tail: Optional[int] = None, follow: bool = True, output_stream: Optional['io.TextIOBase'] = None) -> Optional[T]
+sky.stream_and_get(request_id: Optional[server_common.RequestId[T]] = None, log_path: Optional[str] = None, tail: Optional[int] = None, follow: bool = True, output_stream: Optional['io.TextIOBase'] = None, relay_rich_status: bool = False) -> Optional[T]
 ```
 
 Streams the logs of a request or a log file and gets the final result.
@@ -1187,6 +1187,11 @@ prefix of the full request id.
     follow: Whether to follow the logs.
     output_stream: The output stream to write to. If None, print to the
         console.
+    relay_rich_status: If True, forward encoded rich-status control payloads
+        verbatim to the output instead of rendering a local spinner. Used by
+        the managed jobs controller to preserve provisioning spinner codes
+        in its per-job log. See
+        :func:`sky.utils.rich_utils.decode_rich_status`.
 
 **Returns:**
     The ``Request Returns`` of the specified request. See the documentation
@@ -1206,6 +1211,65 @@ sky.workspaces() -> server_common.RequestId[Dict[str, Any]]
 ```
 
 Gets the workspaces.
+
+### `sky.set_preferred_workspace`
+
+```python
+sky.set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]
+```
+
+Sets (or clears with None) the user's preferred workspace.
+
+**Args:**
+    preferred: workspace name to set as default, or None to clear.
+
+**Returns:**
+    ``{'preferred': <new value>}`` echoing what was set. Callers that
+    need the resolved workspace + accessible list should follow up
+    with :func:`get_user_workspace`. Raises if the server rejects
+    the change (workspace does not exist, or user lacks permission
+    to it).
+
+### `sky.get_user_workspace`
+
+```python
+sky.get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]
+```
+
+Returns workspace state for the calling user.
+
+Mirrors the launch-path precedence — if the caller has an explicit
+``active_workspace``, the server returns that with ``source='explicit'``;
+otherwise the resolver runs (preferred / default-fallback /
+single-membership).
+
+**Args:**
+    requested: explicit active workspace to ask about. ``None`` (the
+        default) — the SDK reads your locally-configured
+        ``active_workspace`` (the value `skypilot_config` merges
+        from ``~/.sky/config.yaml`` + ``./.sky.yaml`` + any
+        ``--config active_workspace=X`` override) and forwards it
+        on the wire as ``?requested=``. Pass a non-None value to
+        query the resolver as if ``active_workspace`` were that
+        value, without changing your local config — useful for
+        previewing "what would land if I switched to X".
+
+**Returns:**
+    ``{workspace, source, note, preferred, accessible}``.
+
+    * ``workspace``: the workspace the launch path would pick. Can
+      be ``None`` when the resolver couldn't pick (no access /
+      ambiguous / explicit ``requested`` rejected by RBAC); the
+      reason is then in ``note``.
+    * ``source``: one of ``WORKSPACE_SOURCE_*`` on success, ``None``
+      when ``workspace`` is ``None``.
+    * ``note``: optional message — drift on success
+      (``preferred 'team-x' not accessible``) or the resolver error
+      when ``workspace`` is ``None``.
+    * ``preferred``: the persisted preferred workspace (``None`` if
+      unset).
+    * ``accessible``: sorted list of workspaces the user can launch
+      into.
 
 ## Other Functions
 
@@ -1406,7 +1470,7 @@ as managed jobs or services.
 ### `sky.stream_response`
 
 ```python
-sky.stream_response(request_id: Optional[server_common.RequestId[T]], response: 'requests.Response', output_stream: Optional['io.TextIOBase'] = None, resumable: bool = False, get_result: bool = True) -> Optional[T]
+sky.stream_response(request_id: Optional[server_common.RequestId[T]], response: 'requests.Response', output_stream: Optional['io.TextIOBase'] = None, resumable: bool = False, get_result: bool = True, relay_rich_status: bool = False) -> Optional[T]
 ```
 
 Streams the response to the console.
@@ -1424,6 +1488,9 @@ Streams the response to the console.
     get_result: Whether to get the result of the request. This will
         typically be set to False for `--no-follow` flags as requests may
         continue to run for long periods of time without further streaming.
+    relay_rich_status: If True, forward encoded rich-status control payloads
+        verbatim to the output instead of rendering a local spinner. See
+        :func:`sky.utils.rich_utils.decode_rich_status`.
 
 ### `sky.tail_autostop_logs`
 

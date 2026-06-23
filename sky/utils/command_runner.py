@@ -23,6 +23,7 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.server import clean_env as clean_env_module
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import auth_utils
@@ -455,7 +456,8 @@ class CommandRunner:
             stream_logs: bool = True,
             max_retry: int = 1,
             prefix_command: Optional[str] = None,
-            get_remote_home_dir: Callable[[], str] = lambda: '~') -> None:
+            get_remote_home_dir: Callable[[], str] = lambda: '~',
+            timeout: Optional[int] = None) -> None:
         """Builds the rsync command."""
         # Build command.
         rsync_command = []
@@ -530,20 +532,68 @@ class CommandRunner:
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
+        # `timeout`, when set, bounds the total wall-clock time of the rsync
+        # including all retries and backoff waits, rather than each individual
+        # attempt. This guarantees the call returns within `timeout` seconds
+        # even if a connection hangs, which matters for callers that rsync
+        # across many clusters (e.g. the debug dump).
+        deadline = (time.monotonic() + timeout) if timeout is not None else None
+        timed_out = False
         while max_retry >= 0:
-            returncode, stdout, stderr = log_lib.run_with_log(
-                command,
-                log_path=log_path,
-                stream_logs=stream_logs,
-                shell=True,
-                require_outputs=True)
+            attempt_timeout: Optional[int] = None
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    # The deadline is exhausted before this attempt could run.
+                    # Set the outputs to reflect the timeout so the post-loop
+                    # error handling has defined (and accurate) values.
+                    timed_out = True
+                    returncode = 255
+                    stdout = ''
+                    stderr = f'rsync timed out after {timeout} seconds.'
+                    break
+                # run_with_log expects an int; clamp to >=1 so we never pass 0,
+                # which would disable the timeout.
+                attempt_timeout = max(1, int(remaining))
+            try:
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    command,
+                    log_path=log_path,
+                    stream_logs=stream_logs,
+                    shell=True,
+                    require_outputs=True,
+                    timeout=attempt_timeout)
+            except subprocess.TimeoutExpired:
+                # run_with_log already terminated the rsync process tree. The
+                # attempt consumed the remaining budget, so the overall
+                # deadline is exhausted; stop instead of retrying.
+                timed_out = True
+                returncode = 255
+                stdout = ''
+                stderr = f'rsync timed out after {timeout} seconds.'
+                break
             if returncode == 0:
                 break
             max_retry -= 1
-            time.sleep(backoff.current_backoff())
+            sleep_time = backoff.current_backoff()
+            if deadline is not None:
+                # Do not let the backoff wait push us past the deadline.
+                new_remaining = deadline - time.monotonic()
+                if new_remaining <= 0 or sleep_time >= new_remaining:
+                    # The deadline will be exhausted by the time
+                    # this backoff wait completed; early exit.
+                    timed_out = True
+                    returncode = 255
+                    stdout = ''
+                    stderr = f'rsync timed out after {timeout} seconds.'
+                    break
+            time.sleep(sleep_time)
 
         direction = 'up' if up else 'down'
+        timeout_hint = (f'rsync timed out after {timeout} seconds. '
+                        if timed_out else '')
         error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     f'{timeout_hint}'
                      'Ensure that the network is stable, then retry.')
 
         subprocess_utils.handle_returncode(returncode,
@@ -652,6 +702,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -664,6 +715,10 @@ class CommandRunner:
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            timeout: Optional total timeout in seconds for the rsync, including
+              all retries and backoff waits. If exceeded, the rsync is
+              terminated and treated as a failure. None means no timeout
+              (default).
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -679,6 +734,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         """Rsync files related to the job driver execution.
 
@@ -694,6 +750,8 @@ class CommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: Maximum retry attempts.
+            timeout: Optional total timeout in seconds for the rsync, including
+              all retries and backoff waits. None means no timeout (default).
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -703,7 +761,8 @@ class CommandRunner:
                           up=up,
                           log_path=log_path,
                           stream_logs=stream_logs,
-                          max_retry=max_retry)
+                          max_retry=max_retry,
+                          timeout=timeout)
 
     def rsync_setup(
         self,
@@ -714,6 +773,7 @@ class CommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         """Rsync files for setting up the SkyPilot runtime on the cluster.
 
@@ -728,6 +788,8 @@ class CommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: Maximum retry attempts.
+            timeout: Optional total timeout in seconds for the rsync, including
+              all retries and backoff waits. None means no timeout (default).
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -737,7 +799,8 @@ class CommandRunner:
                           up=up,
                           log_path=log_path,
                           stream_logs=stream_logs,
-                          max_retry=max_retry)
+                          max_retry=max_retry,
+                          timeout=timeout)
 
     @classmethod
     def make_runner_list(
@@ -1363,6 +1426,7 @@ class SSHCommandRunner(CommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
         get_remote_home_dir: Callable[[], str] = lambda: '~',
+        timeout: Optional[int] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1377,6 +1441,8 @@ class SSHCommandRunner(CommandRunner):
               This value should be non-negative.
             get_remote_home_dir: A callable that returns the remote home
               directory. Defaults to '~'.
+            timeout: Optional total timeout in seconds for the rsync, including
+              all retries and backoff waits. None means no timeout (default).
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -1404,7 +1470,8 @@ class SSHCommandRunner(CommandRunner):
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry,
-                    get_remote_home_dir=get_remote_home_dir)
+                    get_remote_home_dir=get_remote_home_dir,
+                    timeout=timeout)
 
 
 class KubernetesCommandRunner(CommandRunner):
@@ -1620,14 +1687,64 @@ class KubernetesCommandRunner(CommandRunner):
             # immediately at EOF, making it impossible to detect
             # disconnection.
             kwargs.setdefault('stdin', subprocess.PIPE)
-        return log_lib.run_with_log(' '.join(command),
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable=executable,
-                                    **kwargs)
+        result = log_lib.run_with_log(' '.join(command),
+                                      log_path,
+                                      require_outputs=require_outputs,
+                                      stream_logs=stream_logs,
+                                      process_stream=process_stream,
+                                      shell=True,
+                                      executable=executable,
+                                      **kwargs)
+        # When `kubectl exec` fails because the target pod is already gone
+        # (e.g. it was OOMKilled), the bare kubectl error ("cannot exec into a
+        # container in a completed pod") hides the real cause. Enrich stderr
+        # with the pod's termination reason so callers (setup/run failure
+        # messages) surface OOMKilled etc. Only possible when outputs were
+        # captured.
+        if require_outputs and isinstance(result, tuple):
+            returncode, stdout, stderr = result
+            if returncode != 0:
+                diagnosis = self._diagnose_dead_pod(stderr)
+                if diagnosis is not None:
+                    stderr = f'{stderr}\n{diagnosis}'
+            return returncode, stdout, stderr
+        return result
+
+    # kubectl exec/attach errors that indicate the target pod is terminal (and
+    # so its container exit reason is worth surfacing). Matched case-
+    # insensitively against stderr. Kept specific to kubectl phrasings to avoid
+    # firing on ordinary command failures (e.g. "command not found", exit 127).
+    _POD_GONE_EXEC_SIGNATURES = (
+        'cannot exec into a container in a completed pod',
+        'current phase is failed',
+        'current phase is succeeded',
+        'unable to upgrade connection',
+        'container not found',
+    )
+
+    def _diagnose_dead_pod(self, stderr: str) -> Optional[str]:
+        """Return a termination reason for this runner's pod if `stderr`
+        indicates the exec target pod is gone, else None.
+
+        Purely additive diagnostics; never raises. Skipped for deployment
+        targets, where ``pod_name`` does not identify a specific live pod.
+        """
+        if self.deployment is not None:
+            return None
+        lowered = stderr.lower()
+        if not any(sig in lowered for sig in self._POD_GONE_EXEC_SIGNATURES):
+            return None
+        try:
+            # In-function import: `sky.provision.kubernetes` imports `instance`,
+            # which imports this module at top level, so a module-level import
+            # here forms a circular dependency. By call time the package is
+            # fully initialized.
+            # pylint: disable-next=import-outside-toplevel
+            from sky.provision.kubernetes import utils as kubernetes_utils
+            return kubernetes_utils.diagnose_terminated_pod(
+                self.context, self.namespace, self.pod_name)
+        except Exception:  # pylint: disable=broad-except
+            return None
 
     @timeline.event
     def rsync(
@@ -1640,6 +1757,7 @@ class KubernetesCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1652,6 +1770,8 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            timeout: Optional total timeout in seconds for the rsync, including
+              all retries and backoff waits. None means no timeout (default).
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -1684,7 +1804,8 @@ class KubernetesCommandRunner(CommandRunner):
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
-            get_remote_home_dir=self.get_remote_home_dir)
+            get_remote_home_dir=self.get_remote_home_dir,
+            timeout=timeout)
 
 
 class LocalProcessCommandRunner(CommandRunner):
@@ -1713,7 +1834,25 @@ class LocalProcessCommandRunner(CommandRunner):
             skip_num_lines: int = 0,
             run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Use subprocess to run the command."""
+        """Use subprocess to run the command.
+
+        Unlike the SSH/Slurm runners, this spawns the command in-process via
+        subprocess.Popen — so without intervention the child inherits the
+        caller's os.environ. Inside an API-server worker that environ may have
+        been mutated mid-request by override_request_env_and_config, which is
+        how SKYPILOT_API_SERVER_ENDPOINT and other client-side SKYPILOT_-
+        prefixed vars used to leak into long-lived consolidation-mode
+        controllers. We pass an explicit `env` to subprocess.Popen so the child
+        bash (and everything it spawns: scheduler, nohup controller) starts
+        from the server's pre-pollution snapshot. controller_envs that the
+        caller wants on top are already prepended to the run script as
+        `export` lines, so they layer in correctly.
+
+        In non-API-server contexts (e.g. a Slurm skylet running locally on
+        a Slurm node) no snapshot has been captured;
+        get_clean_server_env() returns None and subprocess.Popen falls
+        back to inheriting os.environ — which is the right default there.
+        """
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
         command_str = self._get_command_to_run(
@@ -1756,6 +1895,7 @@ class LocalProcessCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
+                                    env=clean_env_module.get_clean_server_env(),
                                     **kwargs)
 
     @timeline.event
@@ -1769,6 +1909,7 @@ class LocalProcessCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         """Use rsync to sync the source to the target."""
         self._rsync(source,
@@ -1778,7 +1919,8 @@ class LocalProcessCommandRunner(CommandRunner):
                     rsh_option=None,
                     log_path=log_path,
                     stream_logs=stream_logs,
-                    max_retry=max_retry)
+                    max_retry=max_retry,
+                    timeout=timeout)
 
 
 class SlurmCommandRunner(SSHCommandRunner):
@@ -1853,6 +1995,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         """Rsyncs files via srun, either to host or into container.
 
@@ -1865,6 +2008,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             log_path: Path for rsync logs.
             stream_logs: Whether to stream logs.
             max_retry: Maximum retry attempts.
+            timeout: Optional total timeout in seconds for the rsync, including
+                all retries and backoff waits. None means no timeout (default).
         """
         ssh_command = ' '.join(
             self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
@@ -1902,7 +2047,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                         log_path=log_path,
                         stream_logs=stream_logs,
                         max_retry=max_retry,
-                        get_remote_home_dir=lambda: remote_home_dir)
+                        get_remote_home_dir=lambda: remote_home_dir,
+                        timeout=timeout)
         finally:
             try:
                 os.unlink(rsh_script_path)
@@ -1960,6 +2106,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         # Default: run in container if container_args set, otherwise on host
         in_container = self.container_args is not None
@@ -1969,7 +2116,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              in_container=in_container,
                              log_path=log_path,
                              stream_logs=stream_logs,
-                             max_retry=max_retry)
+                             max_retry=max_retry,
+                             timeout=timeout)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -2012,6 +2160,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         # Host only: driver runs on host and uses srun internally.
         self._rsync_via_srun(source=source,
@@ -2020,7 +2169,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              in_container=False,
                              log_path=log_path,
                              stream_logs=stream_logs,
-                             max_retry=max_retry)
+                             max_retry=max_retry,
+                             timeout=timeout)
 
     def rsync_setup(
         self,
@@ -2031,6 +2181,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        timeout: Optional[int] = None,
     ) -> None:
         # Both host and container: ensure environment is consistent.
         self._rsync_via_srun(source=source,
@@ -2039,7 +2190,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              in_container=False,
                              log_path=log_path,
                              stream_logs=stream_logs,
-                             max_retry=max_retry)
+                             max_retry=max_retry,
+                             timeout=timeout)
         if self.container_args is not None:
             self._rsync_via_srun(source=source,
                                  target=target,
@@ -2047,4 +2199,5 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                                  in_container=True,
                                  log_path=log_path,
                                  stream_logs=stream_logs,
-                                 max_retry=max_retry)
+                                 max_retry=max_retry,
+                                 timeout=timeout)

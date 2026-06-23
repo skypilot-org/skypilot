@@ -112,8 +112,48 @@ class LocalFilesystemBlobStorage(bs.BlobStorage):
         return users
 
     def reset_on_startup(self) -> None:
-        """Called on server startup to clean up ephemeral client state."""
-        logger.debug('clearing local API server client directory at '
-                     f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
-        shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
-                      ignore_errors=True)
+        """Called on server startup to clean up ephemeral client state.
+
+        Everything under each client dir is transient per-request state
+        (uploaded task YAMLs, ephemeral user logs in ``sky_logs``, legacy
+        non-blob file mount uploads, ...) and is wiped so a freshly started
+        server begins from a clean slate, matching the request DB reset.
+
+        The sole exception is ``file_mounts/blobs/``: blobs are
+        content-addressed, atomically committed and may still be referenced by
+        a non-terminal managed job that outlived the restart (the job
+        controller resolves the blob on relaunch). Wiping them would break job
+        recovery even though they live on persistent storage; their lifecycle
+        is owned by the reference-aware GC in
+        ``server.cleanup_unreferenced_file_mounts``.
+
+        We preserve via an allowlist (keep only ``file_mounts/blobs``) rather
+        than enumerating what to delete, so any future transient directory is
+        cleaned up by default.
+        """
+        clients_dir = server_common.API_SERVER_CLIENT_DIR.expanduser()
+        logger.debug('clearing transient local API server client state at '
+                     f'{clients_dir} (preserving file_mounts/blobs)')
+        if not clients_dir.exists():
+            return
+
+        def _remove(path: pathlib.Path) -> None:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            for entry in user_dir.iterdir():
+                if entry.name == 'file_mounts' and entry.is_dir():
+                    # Preserve only the content-addressed blobs within.
+                    for fm_entry in entry.iterdir():
+                        if fm_entry.name != 'blobs':
+                            _remove(fm_entry)
+                else:
+                    _remove(entry)

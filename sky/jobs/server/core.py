@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+import datetime
 import ipaddress
 import os
 import pathlib
@@ -262,6 +263,8 @@ class _DefaultManagedJobRunner:
         fields: Optional[List[str]],
         sort_by: Optional[str],
         sort_order: Optional[str],
+        submitted_after: Optional[float],
+        submitted_before: Optional[float],
     ) -> Tuple[List[Dict[str, Any]], int,
                'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
                                                                         int]]:
@@ -282,7 +285,7 @@ class _DefaultManagedJobRunner:
             code = managed_job_utils.ManagedJobCodeGen.get_job_table(
                 skip_finished, accessible_workspaces, job_ids, workspace_match,
                 name_match, pool_match, page, limit, user_hashes, statuses,
-                fields, sort_by, sort_order)
+                fields, sort_by, sort_order, submitted_after, submitted_before)
         with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
             returncode, job_table_payload, stderr = backend.run_on_head(
                 handle,
@@ -385,10 +388,15 @@ def _consolidated_launch(
     run_script = '\n'.join(env_cmds + [run_script])
     # Dump script for high availability recovery.
     assert job_ids is not None, 'job_ids not set'
-    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs')
+    log_dir = os.path.expanduser(
+        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs'))
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
+    # a clean server env on the subprocess by default to keep per-request
+    # env pollution from leaking into the long-lived controller process
+    # tree. See LocalProcessCommandRunner.run for details.
     backend.run_on_head(local_handle, run_script, log_path=log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
@@ -434,11 +442,14 @@ def _maybe_submit_job_locally(
         is_batch = any(
             t.metadata.get('batch_coordinator', False) for t in dag.tasks)
         assert dag.name is not None, 'dag must have a name'
+        # Read the resolver-set thread-local directly. `force_user_workspace`
+        # would drop back to the literal 'default' for users who never set
+        # `active_workspace` server-side, which breaks users without
+        # access to the 'default' workspace.
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
-                workspace=skypilot_config.get_active_workspace(
-                    force_user_workspace=True),
+                workspace=skypilot_config.get_active_workspace(),
                 entrypoint=common_utils.get_current_command(),
                 pool=pool,
                 pool_hash=pool_hash,
@@ -556,7 +567,12 @@ def _submit_remotely(controller: controller_utils.Controllers,
     backend = backend_utils.get_backend_from_handle(local_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
+    # `_ensure_controller_up` has already entered AND exited its own
+    # `local_active_workspace_ctx`, so the thread-local here is the
+    # outer (resolver-set) workspace. See the consolidation-mode
+    # counterpart in `_maybe_submit_job_locally` for why
+    # `force_user_workspace` is not used.
+    workspace = skypilot_config.get_active_workspace()
     entrypoint = common_utils.get_current_command()
     pool_hash = serve_state.get_service_hash(pool) if pool else None
     user_hash = common_utils.get_user_hash()
@@ -1243,13 +1259,15 @@ def queue_v2_api(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
         name_match, pool_match, page, limit, statuses, fields, sort_by,
-        sort_order)
+        sort_order, submitted_after, submitted_before)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -1270,6 +1288,8 @@ def queue_v2(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1367,6 +1387,8 @@ def queue_v2(
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
                 sort_by=sort_by,
                 sort_order=sort_order,
+                submitted_after=submitted_after,
+                submitted_before=submitted_before,
             )
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
@@ -1394,6 +1416,8 @@ def queue_v2(
          fields=fields,
          sort_by=sort_by,
          sort_order=sort_order,
+         submitted_after=submitted_after,
+         submitted_before=submitted_before,
      )
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
@@ -1565,6 +1589,15 @@ def tail_logs(name: Optional[str],
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    # A non-positive tail (0 or -1) is the established "all lines" sentinel
+    # (e.g. `sky jobs logs --tail 0`, and the dashboard log-download button
+    # which posts tail=0). Normalize it to None at this single server-side
+    # entry point so downstream tailing -- the OSS backward-seek reader, which
+    # asserts tail > 0, and any log-runtime plugin -- does not have to
+    # special-case it. Without this, tail=0 reaches the backward-seek read and
+    # raises AssertionError, producing an empty log download.
+    if tail is not None and tail <= 0:
+        tail = None
     # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
@@ -1824,11 +1857,47 @@ def pool_sync_down_logs(
                                pool=True)
 
 
+def _get_job_cluster_names(job_id: int,
+                           task_id: Optional[int] = None) -> List[str]:
+    """Reconstruct the underlying cluster name(s) for a managed job.
+
+    Mirrors the derivation used by the controller (see ``jobs/controller.py``):
+    a non-pool task's cluster is named deterministically from the *task* name
+    (``task.name``) and the job id. The task name is the right key here: for a
+    multi-task pipeline the job-level (DAG) name is shared across tasks, but
+    each task launches its own cluster named from ``task.name``
+    (``dag_utils`` sets ``task.name = f'{dag.name}-{task_id}'``). Pool tasks are
+    skipped, since their cluster is shared across jobs and its events are not
+    attributable to a single job.
+
+    Returns a de-duplicated list of cluster names (a multi-task pipeline uses
+    one cluster per task).
+    """
+    cluster_names: List[str] = []
+    for task in managed_job_state.get_managed_job_tasks(job_id):
+        if task_id is not None and task.get('task_id') != task_id:
+            continue
+        if task.get('pool') is not None:
+            continue
+        # 'task_name' is the per-task name (spot.task_name); 'job_name' is the
+        # job-level/DAG name, which is shared across a pipeline's tasks and so
+        # would reconstruct the wrong cluster name for multi-task jobs.
+        task_name = task.get('task_name')
+        if not task_name:
+            continue
+        cluster_names.append(
+            managed_job_utils.generate_managed_job_cluster_name(
+                task_name, job_id))
+    # De-duplicate while preserving order.
+    return list(dict.fromkeys(cluster_names))
+
+
 @usage_lib.entrypoint
 def get_job_events(
     job_id: int,
     task_id: Optional[int] = None,
     limit: Optional[int] = 10,
+    include_cluster_events: bool = False,
 ) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
@@ -1836,10 +1905,69 @@ def get_job_events(
         job_id: The job ID to get task events for.
         task_id: Optional task ID to filter by.
         limit: Optional limit on number of task events to return (default 10).
+        include_cluster_events: When True, merge launch-progress events from
+            the job's underlying cluster (e.g. image pulling) into the
+            timeline so provisioning milestones between STARTING and RUNNING
+            are visible.
 
     Returns:
-        List of task event records.
+        List of task event records, ordered newest first.
     """
-    return managed_job_state.get_job_events(job_id=job_id,
-                                            task_id=task_id,
-                                            limit=limit)
+    events = managed_job_state.get_job_events(job_id=job_id,
+                                              task_id=task_id,
+                                              limit=limit)
+    if not include_cluster_events:
+        return events
+
+    try:
+        cluster_names = _get_job_cluster_names(job_id, task_id)
+    except Exception as e:  # pylint: disable=broad-except
+        # The merge is best-effort: never fail the job-events request because
+        # the cluster name(s) could not be reconstructed.
+        logger.debug(f'Failed to resolve cluster name(s) for job {job_id}: {e}')
+        return events
+
+    # STATUS_CHANGE carries the launch/setup milestone sequence (provisioning,
+    # runtime setup, file-mount syncing, ...); LAUNCH_PROGRESS carries the
+    # finer-grained sub-status (e.g. pods pending due to image pulling).
+    event_types = [
+        global_user_state.ClusterEventType.STATUS_CHANGE,
+        global_user_state.ClusterEventType.LAUNCH_PROGRESS,
+    ]
+    cluster_events: List[Dict[str, Any]] = []
+    for cluster_name in cluster_names:
+        try:
+            cluster_events.extend(
+                global_user_state.get_cluster_events_by_name(cluster_name,
+                                                             event_types,
+                                                             limit=limit))
+        except Exception as e:  # pylint: disable=broad-except
+            # Best-effort: skip a cluster whose events cannot be read.
+            logger.debug(f'Failed to read cluster events for job {job_id} '
+                         f'(cluster {cluster_name!r}): {e}')
+
+    # Match the timezone of the existing job-event timestamps so the merged
+    # cluster events serialize consistently. Postgres returns tz-aware
+    # datetimes while SQLite returns naive ones; mixing the two in one list
+    # makes the client interpret some timestamps in the wrong timezone.
+    # transitioned_at is a UTC epoch, so fromtimestamp(tz=...) yields the
+    # correct instant in whichever timezone the job events use.
+    tz = events[0]['timestamp'].tzinfo if events else None
+    for cluster_event in cluster_events:
+        events.append({
+            'spot_job_id': job_id,
+            'task_id': None,
+            # These happen while the job is launching its cluster.
+            'new_status': managed_job_state.ManagedJobStatus.STARTING,
+            'code': None,
+            'reason': cluster_event['reason'],
+            'timestamp': datetime.datetime.fromtimestamp(
+                cluster_event['transitioned_at'], tz=tz),
+        })
+
+    # Every event's 'timestamp' is a datetime (job events from the DB, cluster
+    # events converted above). datetime.timestamp() gives a comparable epoch.
+    events.sort(key=lambda event: event['timestamp'].timestamp(), reverse=True)
+    if limit is not None:
+        events = events[:limit]
+    return events

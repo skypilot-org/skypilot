@@ -157,6 +157,19 @@ class RequestBody(BasePayload):
     override_skypilot_config_path: Optional[str] = None
     # Blob ID for uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
+    # The client's API_VERSION as captured server-side from the
+    # `X-SkyPilot-API-Version` request header in `prepare_request_async`
+    # (the FastAPI dispatch context, where the `_remote_api_version`
+    # ContextVar set by APIVersionMiddleware is visible). The field
+    # exists because the worker process that later runs the request
+    # cannot see that ContextVar — it crosses a process boundary via
+    # the persisted request body. Clients themselves do NOT populate
+    # this field; the server fills it in from the wire header so any
+    # client that already sets the header (Python SDK already does; the
+    # dashboard apiClient also sets it) gets the right value without
+    # client-specific code. `None` means the request arrived without
+    # the header — i.e. an old client.
+    client_api_version: Optional[int] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -190,6 +203,7 @@ class RequestBody(BasePayload):
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
         kwargs.pop('file_mounts_blob_id')
+        kwargs.pop('client_api_version', None)
         return kwargs
 
     @property
@@ -478,6 +492,12 @@ class UserImportBody(RequestBody):
     csv_content: str
 
 
+class UserBatchUpdateBody(RequestBody):
+    """The request body for the user batch update endpoint."""
+    user_ids: List[str]
+    role: str
+
+
 class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
@@ -622,6 +642,9 @@ class JobsQueueV2Body(RequestBody):
     # Sorting parameters, added in ManagedJobsService v14.
     sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
     sort_order: Optional[str] = None  # 'asc' or 'desc'
+    # Time-range filter on submitted_at (epoch seconds).
+    submitted_after: Optional[float] = None
+    submitted_before: Optional[float] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -914,6 +937,18 @@ class DeleteWorkspaceBody(RequestBody):
     workspace_name: str
 
 
+class WorkspaceBatchAddUsersBody(RequestBody):
+    """The request body for adding users to multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
+class WorkspaceBatchRemoveUsersBody(RequestBody):
+    """The request body for removing users from multiple workspaces."""
+    workspace_names: List[str]
+    user_ids: List[str]
+
+
 class UpdateConfigBody(RequestBody):
     """The request body for updating the entire SkyPilot configuration."""
     config: Dict[str, Any]
@@ -922,6 +957,16 @@ class UpdateConfigBody(RequestBody):
 class GetConfigBody(RequestBody):
     """The request body for getting the entire SkyPilot configuration."""
     pass
+
+
+class UserPreferredWorkspaceBody(RequestBody):
+    """Request body for POST /users/me/workspace.
+
+    `preferred` is the workspace name to set as the user's default, or None
+    to clear the preference. RBAC is validated server-side in
+    sky/workspaces/core.set_user_preferred_workspace().
+    """
+    preferred: Optional[str] = None
 
 
 class CostReportBody(RequestBody):
@@ -938,6 +983,10 @@ class CostReportBody(RequestBody):
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False
+    # Exclude clusters launched by a controller (managed jobs and services).
+    # Used by the dashboard so that clusters backing managed jobs do not show
+    # up in the cluster history view.
+    exclude_managed_clusters: bool = False
 
 
 class CreateDebugDumpBody(RequestBody):
@@ -984,7 +1033,13 @@ class ClusterEventsBody(RequestBody):
     """The request body for the cluster events endpoint."""
     cluster_name: Optional[str] = None
     cluster_hash: Optional[str] = None
-    event_type: str  # 'STATUS_CHANGE' or 'DEBUG'
+    # Event type to retrieve (e.g. 'STATUS_CHANGE' or 'DEBUG'). Multiple types
+    # may be requested as a comma-separated string (e.g.
+    # 'STATUS_CHANGE,LAUNCH_PROGRESS'); results are merged by timestamp.
+    # TODO: consider replacing this with a typed `event_types: List[str]`
+    # field (mapping a single `event_type` to `[event_type]` for back-compat)
+    # so callers don't have to encode the list as a comma-separated string.
+    event_type: str
     include_timestamps: bool = False
     limit: Optional[
         int] = None  # If specified, returns at most this many events
@@ -995,6 +1050,11 @@ class GetJobEventsBody(RequestBody):
     job_id: int
     task_id: Optional[int] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
+    # When True, merge in launch-progress events from the job's underlying
+    # cluster (e.g. image pulling) so the timeline shows provisioning
+    # milestones between STARTING and RUNNING. Defaults to False to keep the
+    # response backward compatible for callers that only want status events.
+    include_cluster_events: bool = False
 
 
 # =============================================================================

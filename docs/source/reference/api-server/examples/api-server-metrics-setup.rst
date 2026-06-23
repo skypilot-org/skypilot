@@ -61,14 +61,60 @@ You can access Grafana at the ``/grafana`` endpoint:
 Metrics exposed
 ---------------
 
-The endpoint ``/grafana`` on the SkyPilot API server exposes the following metrics in standard Prometheus format:
+The endpoint ``/metrics`` on the SkyPilot API server exposes Prometheus-format
+metrics covering:
 
-* API Server uptime
-* Requests per second grouped by HTTP status code
-* Request duration grouped by percentile
-* Requests per second grouped by endpoint path
+* API server health — request rate, latency, queue wait time, per-worker memory.
+* Cluster inventory by workspace, user, status, cloud, and kind
+  (``cluster`` / ``managed_job`` / ``controller``) — counts and GPU
+  occupancy by accelerator model. Filter ``kind="cluster"`` to avoid
+  overlap with managed-job clusters; sum across kinds for total
+  resource usage.
+* Managed jobs by workspace, user, status, and cloud (all statuses
+  including terminal; use ``delta(...)`` over a window for per-period
+  success/failure rate).
 
-You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>` to directly export GPU memory, utilization and power consumption.
+You can also :ref:`setup GPU metric collection <api-server-gpu-metrics-setup>`
+to directly export GPU memory, utilization and power consumption from
+each compute cluster.
+
+Forward metrics to an OpenTelemetry-based backend
+-------------------------------------------------
+
+If your observability stack is built on OpenTelemetry (Datadog,
+Honeycomb, GCP Cloud Monitoring, Tempo + Mimir, etc.) rather than
+vanilla Prometheus, deploy an `OpenTelemetry Collector
+<https://opentelemetry.io/docs/collector/>`__ as a bridge: its
+`Prometheus receiver
+<https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/prometheusreceiver>`__
+scrapes SkyPilot's endpoints and an OTLP exporter forwards downstream.
+
+The only SkyPilot-specific part is the scrape config — point it at the
+API server Service (``<release>-api-service.<namespace>.svc`` on the
+metrics port, 9090 by default), and give ``/gpu-metrics`` a
+``scrape_timeout`` larger than the API server's per-context federation
+budget (20 s):
+
+.. code-block:: yaml
+
+   receivers:
+     prometheus:
+       config:
+         scrape_configs:
+           - job_name: skypilot-api
+             metrics_path: /metrics
+             static_configs:
+               - targets: ['<release>-api-service.<namespace>.svc:9090']
+           - job_name: skypilot-gpu
+             metrics_path: /gpu-metrics
+             scrape_timeout: 25s   # must exceed the 20s per-context budget
+             static_configs:
+               - targets: ['<release>-api-service.<namespace>.svc:9090']
+
+Configure the processors, OTLP exporter, pipelines, and Collector
+deployment mode per the `Collector configuration docs
+<https://opentelemetry.io/docs/collector/configuration/>`__ — those are
+generic OpenTelemetry concerns.
 
 Using existing Prometheus / Grafana
 -----------------------------------

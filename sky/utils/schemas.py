@@ -812,6 +812,15 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            # Hugging Face stores only: extra ``hf-mount``
+                            # flags forwarded verbatim to the daemon. Each
+                            # element is one shell token.
+                            'hf_mount_args': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            },
                         },
                     },
                 },
@@ -907,6 +916,12 @@ def get_service_schema():
                         'timeout_seconds': {
                             'type': 'number',
                         },
+                        'endpoint_probe_interval_seconds': {
+                            'type': 'number',
+                        },
+                        'consecutive_failure_threshold_timeout': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -922,6 +937,16 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'load_balancer': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'stream_timeout_seconds': {
+                        'type': 'number',
+                    },
+                },
             },
             'pool': {
                 'type': 'object',
@@ -1557,6 +1582,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+    'namespace': {
+        'type': 'string',
+    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -2385,6 +2413,7 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
+                        **_REMOTE_IDENTITY_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -2398,6 +2427,8 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
+                        'remote_identity':
+                            (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                     },
                     'additionalProperties': False,
                 },
@@ -2434,6 +2465,9 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
+                        },
+                        'namespace': {
+                            'type': 'string',
                         },
                         'kueue': {
                             'type': 'object',
@@ -2475,6 +2509,9 @@ def get_config_schema():
                                 'additionalProperties':
                                     _allow_additional_properties(),
                                 'properties': {
+                                    'namespace': {
+                                        'type': 'string',
+                                    },
                                     'kueue': {
                                         'type': 'object',
                                         'required': [],
@@ -2499,10 +2536,12 @@ def get_config_schema():
                                         },
                                     },
                                     **_extra_kubernetes_properties,
+                                    **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                                 },
                             },
                         },
                         **_extra_kubernetes_properties,
+                        **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                     },
                     # On the server, plugins have registered
                     # their properties via
