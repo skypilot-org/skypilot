@@ -265,6 +265,59 @@ class TestOuterLoopExceptionHandling:
         suicide.assert_not_called()
 
 
+class TestBecomeLeaderOrdering:
+    """The recovery signal file must exist BEFORE the lock is acquired.
+
+    During a rolling update we block on acquire() while the old API server
+    still holds the lock. If the gate file is missing in that window, a
+    controller started on this replica would be invisible to the old
+    server's update_managed_jobs_statuses, which could mark the job
+    FAILED_CONTROLLER. The signal file gates controller starts, so it must
+    be touched up-front, not after we win the lock.
+    """
+
+    def test_signal_file_touched_before_lock_acquire(self, tmp_path,
+                                                     monkeypatch):
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        lock.is_locked.return_value = False
+        thread._lock = lock
+
+        order = []
+
+        def on_acquire(*args, **kwargs):
+            # The gate file must already be in place by the time we start
+            # blocking on acquire — that is the whole point of the fix.
+            assert signal_file.exists(), (
+                'signal file must be touched before acquiring the lock')
+            order.append('acquire')
+
+        lock.acquire.side_effect = on_acquire
+
+        def recovery_and_stop():
+            order.append('recovery')
+            # Raise to skip the infinite event loop that follows recovery.
+            raise RuntimeError('stop before event loop')
+
+        with mock.patch.object(mjrt.managed_job_utils,
+                               'ha_recovery_for_consolidation_mode',
+                               side_effect=recovery_and_stop):
+            with pytest.raises(RuntimeError, match='stop before event loop'):
+                thread._become_leader_and_run()
+
+        # Recovery runs only after the lock is acquired.
+        assert order == ['acquire', 'recovery']
+        # The finally block removes the gate file even when recovery fails.
+        assert not signal_file.exists()
+
+
 class TestStart:
     """`start_managed_job_refresh_daemon` honors consolidation mode."""
 

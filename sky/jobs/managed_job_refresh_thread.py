@@ -70,18 +70,24 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
     def _become_leader_and_run(self) -> None:
         assert self._lock is not None
 
-        if not self._lock.is_locked():
-            logger.info(f'Acquiring the consolidation mode lock: {self._lock}')
-            self._lock.acquire()
-            logger.info('Consolidation mode lock acquired')
-
-        # Touch signal file only after we hold the lock: standby
-        # replicas blocked on acquire() must not leave it lying around
-        # — update_managed_jobs_statuses early-returns when it exists.
+        # Touch the signal file BEFORE acquiring the lock: new controllers
+        # must not be started until recovery has run. During a rolling
+        # update we block on acquire() while the old API server still holds
+        # the lock; if a controller were started on this replica in that
+        # window, the old server's update_managed_jobs_statuses wouldn't see
+        # its process and could mark the job FAILED_CONTROLLER. The signal
+        # file makes update_managed_jobs_statuses and the scheduler's
+        # controller-start path early-return until recovery completes.
         signal_file = pathlib.Path(
             constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
         signal_file.touch()
         try:
+            if not self._lock.is_locked():
+                logger.info(
+                    f'Acquiring the consolidation mode lock: {self._lock}')
+                self._lock.acquire()
+                logger.info('Consolidation mode lock acquired')
+
             managed_job_utils.ha_recovery_for_consolidation_mode()
         finally:
             signal_file.unlink(missing_ok=True)
