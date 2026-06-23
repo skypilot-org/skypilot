@@ -960,7 +960,7 @@ def update_service_account_role(
             detail='You can only update roles for your own service accounts. '
             'Only admins can update roles for service accounts owned by other '
             'users.')
-    
+
     try:
         # Update service account role
         service_account_user_id = token_info['service_account_user_id']
