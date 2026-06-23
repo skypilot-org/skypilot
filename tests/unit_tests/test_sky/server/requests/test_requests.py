@@ -1840,6 +1840,31 @@ async def test_get_requests_with_prefix(isolated_database, test_async):
         assert req.status_msg is None
 
 
+def _raising_encoder(value):
+    raise RuntimeError('encoder boom')
+
+
+def _dummy_for_encoder_test():
+    return None
+
+
+def test_set_return_value_swallows_encoder_failure():
+    """Encoder failure must not propagate; return_value drops to None."""
+    req = requests.Request(
+        request_id='encoder-failure',
+        name='test',
+        entrypoint=_dummy_for_encoder_test,
+        request_body=payloads.RequestBody(),
+        status=RequestStatus.RUNNING,
+        created_at=0.0,
+        user_id='u',
+    )
+    with mock.patch('sky.server.requests.serializers.encoders.get_encoder',
+                    return_value=_raising_encoder):
+        req.set_return_value({'some': 'unencodable'})
+    assert req.return_value is None
+
+
 def test_waiting_status_ordering_and_color():
     """WAITING sits between PENDING and RUNNING and has a color mapping."""
     from sky.server.requests.requests import _STATUS_TO_COLOR

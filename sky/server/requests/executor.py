@@ -643,6 +643,30 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
+# Set by _request_execution_wrapper; read by _gated_sigterm_handler.
+_in_request_execution: bool = False
+
+
+def _gated_sigterm_handler(signum: int,
+                           frame: Optional['types.FrameType']) -> None:
+    """Raise KeyboardInterrupt only while actively executing a request.
+
+    SIGTERM landing on an idle worker (blocked in
+    concurrent.futures._process_worker's call_queue.get) would escape
+    _process_worker unhandled and break the entire pool. Swallow it; the
+    cancellation path already targets the worker by pid, so a stray SIGTERM
+    on an idle worker just means we lost the race with the request finishing.
+    """
+    del signum, frame
+    if _in_request_execution:
+        raise KeyboardInterrupt
+    # logger isn't async-signal-safe (re-entrant lock); use os.write.
+    try:
+        os.write(2, b'SIGTERM received while worker idle; ignored.\n')
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -664,7 +688,7 @@ def _request_execution_wrapper(request_id: str,
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
     if threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGTERM, _sigterm_handler)
+        signal.signal(signal.SIGTERM, _gated_sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 
@@ -698,7 +722,11 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    # Set _in_request_execution inside the try so `finally` always clears it,
+    # even if a SIGTERM lands before any wrapper code runs.
+    global _in_request_execution  # pylint: disable=global-statement
     try:
+        _in_request_execution = True
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
         # the try block to ensure we have the KeyboardInterrupt handling.
@@ -790,6 +818,7 @@ def _request_execution_wrapper(request_id: str,
         _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
+        _in_request_execution = False
         _restore_output()
         try:
             # Capture the peak RSS before GC.
