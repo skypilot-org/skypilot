@@ -45,6 +45,21 @@ from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
+
+def _entrypoint_name(entrypoint: Optional[Callable]) -> str:
+    """Get a human-readable name for a request entrypoint.
+
+    The entrypoint may be a ``functools.partial`` (e.g. the ``/down`` endpoint
+    uses ``functools.partial(core.down, ...)``), which has no ``__name__``;
+    fall back to the wrapped function's name in that case.
+    """
+    if entrypoint is None:
+        return ''
+    if isinstance(entrypoint, functools.partial):
+        entrypoint = entrypoint.func
+    return getattr(entrypoint, '__name__', '')
+
+
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
@@ -275,7 +290,7 @@ class Request:
         return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
-            entrypoint=self.entrypoint.__name__,
+            entrypoint=_entrypoint_name(self.entrypoint),
             request_body=self.request_body.model_dump_json(),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
@@ -396,8 +411,7 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__
-            if request.entrypoint is not None else '',
+            entrypoint=_entrypoint_name(request.entrypoint),
             request_body=request.request_body.model_dump_json()
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
