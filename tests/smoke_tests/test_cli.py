@@ -250,8 +250,14 @@ def test_debug_dump_recent(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'debug_dump_recent',
         [
-            # Create a debug dump with --recent-minutes (no clusters/jobs needed)
-            'sky debug-dump --recent-minutes 60 --output /tmp/test_debug_dump_recent.zip',
+            # Any positive value works for --recent-minutes: the server always
+            # injects a handful of system daemon request IDs into every dump
+            # regardless of the time window, so request_count > 0 is always
+            # satisfied. We use 5 rather than 60 because on a shared CI server
+            # that runs tests continuously, a 60-minute window collects
+            # thousands of user requests and takes 5+ minutes to zip up,
+            # blowing the per-command timeout.
+            'sky debug-dump --recent-minutes 5 --output /tmp/test_debug_dump_recent.zip',
             # Verify the zip file was created and is a valid zip
             'test -f /tmp/test_debug_dump_recent.zip',
             's=$(unzip -l /tmp/test_debug_dump_recent.zip) && echo "$s" && '
@@ -286,7 +292,9 @@ def test_debug_dump_recent(generic_cloud: str):
         ],
         teardown='rm -f /tmp/test_debug_dump_recent.zip && '
         'rm -rf /tmp/test_debug_dump_recent',
-        timeout=2 * 60,
+        # On shared staging servers the dump collects active managed jobs via
+        # controller SSH, which takes several minutes. 10 minutes is safe.
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
