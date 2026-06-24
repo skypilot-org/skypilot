@@ -345,7 +345,7 @@ class Request:
             raise
 
     @staticmethod
-    def _decode_entrypoint(encoded_entrypoint: str) -> Optional[Callable]:
+    def _decode_entrypoint(encoded_entrypoint: str) -> Callable:
         """Unpickle the entrypoint, tolerating an unresolvable reference.
 
         The entrypoint is a server-side callable that is pickled by reference
