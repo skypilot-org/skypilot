@@ -13,8 +13,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
-                    Set, Tuple)
+from typing import (Any, Callable, Dict, Generator, List, NamedTuple, NoReturn,
+                    Optional, Set, Tuple)
 import uuid
 
 import anyio
@@ -46,7 +46,7 @@ from sky.utils.db import db_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _unresolved_entrypoint(*args, **kwargs):
+def _unresolved_entrypoint(*args: Any, **kwargs: Any) -> NoReturn:
     """Placeholder for a request entrypoint that could not be unpickled.
 
     Used by ``Request.decode`` when the encoded entrypoint references a symbol
@@ -345,7 +345,7 @@ class Request:
             raise
 
     @staticmethod
-    def _decode_entrypoint(encoded_entrypoint: str) -> Callable:
+    def _decode_entrypoint(encoded_entrypoint: str) -> Optional[Callable]:
         """Unpickle the entrypoint, tolerating an unresolvable reference.
 
         The entrypoint is a server-side callable that is pickled by reference
