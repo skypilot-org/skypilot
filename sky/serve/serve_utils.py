@@ -2159,9 +2159,8 @@ class ServeCodeGen:
         # 300-second CONTROLLER_SETUP_TIMEOUT. Bake OVERRIDE_CONSOLIDATION_MODE
         # into the shell command so the subprocess always sees the correct mode.
         if is_consolidation_mode(pool):
-            cmd = (
-                f'export {skylet_constants.OVERRIDE_CONSOLIDATION_MODE}=true; '
-                + cmd)
+            cmd = (f'export {skylet_constants.OVERRIDE_CONSOLIDATION_MODE}'
+                   f'=true; {cmd}')
         return cmd
 
     @classmethod
