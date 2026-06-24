@@ -1,0 +1,157 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: imageregistry_test
+templates:
+  - templates/api-deployment.yaml
+  - templates/oauth2-proxy-deployment.yaml
+  - templates/oauth2-proxy-redis.yaml
+tests:
+  # Test API service imageRegistry
+  - it: should use component imageRegistry for API service when set
+    template: templates/api-deployment.yaml
+    set:
+      apiService.imageRegistry: "harbor.example.com/docker-hub-proxy"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^harbor\.example\.com/docker-hub-proxy/berkeleyskypilot/skypilot-nightly
+
+  - it: should use default image for API service when component imageRegistry not set
+    template: templates/api-deployment.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^berkeleyskypilot/skypilot-nightly
+
+  # Test global.imageRegistry takes priority over component imageRegistry
+  - it: should use global imageRegistry over component imageRegistry for API service
+    template: templates/api-deployment.yaml
+    set:
+      global.imageRegistry: "global.registry.com"
+      apiService.imageRegistry: "component.registry.com"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^global\.registry\.com/berkeleyskypilot/skypilot-nightly
+
+  # Test GCP credentials imageRegistry
+  - it: should use component imageRegistry for GCP init container when set
+    template: templates/api-deployment.yaml
+    set:
+      gcpCredentials.enabled: true
+      gcpCredentials.projectId: "test-project"
+      gcpCredentials.imageRegistry: "harbor.example.com/gcr-proxy"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "setup-gcp-credentials")].image
+          pattern: ^harbor\.example\.com/gcr-proxy/google/cloud-sdk
+
+  - it: should use default GCP image when component imageRegistry not set
+    template: templates/api-deployment.yaml
+    set:
+      gcpCredentials.enabled: true
+      gcpCredentials.projectId: "test-project"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "setup-gcp-credentials")].image
+          pattern: ^google/cloud-sdk
+
+  # Test OAuth2 proxy imageRegistry (on ingress)
+  - it: should use component imageRegistry for OAuth2 proxy when set
+    template: templates/oauth2-proxy-deployment.yaml
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.imageRegistry: "harbor.example.com/quay-proxy"
+      ingress.oauth2-proxy.oidc-issuer-url: "https://okta.example.com"
+      ingress.oauth2-proxy.client-id: "test-client"
+      ingress.oauth2-proxy.client-secret: "test-secret"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^harbor\.example\.com/quay-proxy/oauth2-proxy/oauth2-proxy
+
+  - it: should use default OAuth2 proxy image when component imageRegistry not set
+    template: templates/oauth2-proxy-deployment.yaml
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://okta.example.com"
+      ingress.oauth2-proxy.client-id: "test-client"
+      ingress.oauth2-proxy.client-secret: "test-secret"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^quay\.io/oauth2-proxy/oauth2-proxy
+
+  # Test Redis imageRegistry (for OAuth2 proxy session storage)
+  - it: should use component imageRegistry for Redis when set
+    template: templates/oauth2-proxy-redis.yaml
+    documentIndex: 0
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.redis-imageRegistry: "harbor.example.com/docker-proxy"
+      ingress.oauth2-proxy.oidc-issuer-url: "https://okta.example.com"
+      ingress.oauth2-proxy.client-id: "test-client"
+      ingress.oauth2-proxy.client-secret: "test-secret"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^harbor\.example\.com/docker-proxy/redis
+
+  - it: should use default Redis image when component imageRegistry not set
+    template: templates/oauth2-proxy-redis.yaml
+    documentIndex: 0
+    set:
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://okta.example.com"
+      ingress.oauth2-proxy.client-id: "test-client"
+      ingress.oauth2-proxy.client-secret: "test-secret"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^redis
+
+  # Test auth.oauth (OAuth2 on API server side)
+  - it: should use component imageRegistry for OAuth2 proxy on API server when set
+    template: templates/oauth2-proxy-deployment.yaml
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.imageRegistry: "harbor.example.com/quay-proxy"
+      auth.oauth.oidc-issuer-url: "https://okta.example.com"
+      auth.oauth.client-id: "test-client"
+      auth.oauth.client-secret: "test-secret"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^harbor\.example\.com/quay-proxy/oauth2-proxy/oauth2-proxy
+
+  - it: should use component imageRegistry for Redis on API server OAuth when set
+    template: templates/oauth2-proxy-redis.yaml
+    documentIndex: 0
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.redis-imageRegistry: "harbor.example.com/docker-proxy"
+      auth.oauth.oidc-issuer-url: "https://okta.example.com"
+      auth.oauth.client-id: "test-client"
+      auth.oauth.client-secret: "test-secret"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^harbor\.example\.com/docker-proxy/redis
+
+  # Test that global.imageRegistry applies to all components
+  - it: should apply global imageRegistry to all images
+    template: templates/api-deployment.yaml
+    set:
+      global.imageRegistry: "global.registry.com"
+      gcpCredentials.enabled: true
+      gcpCredentials.projectId: "test-project"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^global\.registry\.com/berkeleyskypilot/skypilot-nightly
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "setup-gcp-credentials")].image
+          pattern: ^global\.registry\.com/google/cloud-sdk
