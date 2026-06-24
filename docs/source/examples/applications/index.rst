@@ -12,6 +12,7 @@ AI Applications
    RedisVL Vector Search <redisvl-vector-search>
    SAM3 Video Segmentation <sam3-video-segmentation>
    Streamlit Web Apps <streamlit>
+   Coding Agent <opencode-coding-agent>
    Tabby: Coding Assistant <tabby>
    LocalGPT: Chat with PDF <localgpt>
    Stable Diffusion <stable_diffusion>
