@@ -144,6 +144,16 @@ html[data-theme="dark"] {
     line-height: 1; /* Adjust line height to ensure vertical alignment */
 }
 
+/* External sidebar links flagged as new: the theme renders its external-link
+   icon via the same ::after pseudo-element (nav.bd-links li>a.reference.external:after,
+   which out-specifies .new-item::after), so re-assert the badge at higher
+   specificity to replace the icon. */
+nav.bd-links li > a.reference.external.new-item::after {
+    content: "New";
+    font: 12px/1 var(--pst-font-family-base);
+    margin-left: 6px;
+}
+
 .navbar {
   --bs-navbar-nav-link-padding-x: 1rem;
 }

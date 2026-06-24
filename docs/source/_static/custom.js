@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l2 > a', text: 'Agents' },
         { selector: '.toctree-l2 > a', text: 'Sandboxes' },
         { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot Endpoints' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
