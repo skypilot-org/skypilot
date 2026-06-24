@@ -266,10 +266,15 @@ CONDA_INSTALLATION_COMMANDS = (
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
-    # If conda was not installed and the image is a docker image,
-    # we deactivate any active conda environment we set.
-    # Caller should replace {is_custom_docker} with either true or false.
-    'if [ "{is_custom_docker}" = "true" ]; then '
+    # Deactivate the base env we just activated when either (a) the image is a
+    # custom docker image (it likely manages its own env), or (b) the user
+    # disabled conda auto-activation via `provision.conda_auto_activate: false`.
+    # Otherwise base stays active in this chained provisioning shell and leaks
+    # into the Ray runtime (and therefore into user setup/run jobs), where it
+    # becomes the implicit target of `uv`/`pip`.
+    # Caller should replace {is_custom_docker} / {conda_auto_activate}.
+    'if [ "{is_custom_docker}" = "true" ] || '
+    '[ "{conda_auto_activate}" = "false" ]; then '
     'conda deactivate;'
     'fi;'
     '}; '

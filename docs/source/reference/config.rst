@@ -65,6 +65,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
     :ref:`install_conda <config-yaml-provision-install-conda>`: false
+    :ref:`conda_auto_activate <config-yaml-provision-conda-auto-activate>`: false
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -712,6 +713,32 @@ Example:
   Default SkyPilot images often come with conda preinstalled.
   To fully avoid installing conda, use a custom Docker image that does not have conda preinstalled
   along with ``install_conda: false``.
+
+.. _config-yaml-provision-conda-auto-activate:
+
+``provision.conda_auto_activate``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to auto-activate the conda ``base`` environment on the remote cluster (optional).
+
+By default, SkyPilot auto-activates the conda ``base`` environment on clusters that do not
+use a custom Docker image. This is convenient for conda-based workflows, but it also makes
+``base`` the implicit target of ``uv`` and ``pip`` commands run in setup/run scripts and
+interactive shells, which is undesirable for workflows that manage their own environments
+(e.g. ``uv``-first projects).
+
+When set to ``false``, conda is still installed (unless ``install_conda: false``), but the
+``base`` environment is not auto-activated, so tools like ``uv`` and ``pip`` no longer
+resolve to it implicitly.
+
+Default: ``true`` (``false`` when a custom Docker image is used).
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    conda_auto_activate: false
 
 .. _config-yaml-aws:
 
