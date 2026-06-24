@@ -5,7 +5,7 @@ import random
 import shlex
 import textwrap
 import typing
-from typing import Optional
+from typing import List, Optional
 
 from sky import exceptions
 from sky import skypilot_config
@@ -391,7 +391,8 @@ def get_hf_mount_cmd(hf_id: str,
                      read_only: bool = False,
                      token_file: Optional[str] = None,
                      mode: str = 'bucket',
-                     revision: Optional[str] = None) -> str:
+                     revision: Optional[str] = None,
+                     extra_args: Optional[List[str]] = None) -> str:
     """Returns a command to mount an HF Bucket/repo via ``hf-mount``.
 
     Uses the FUSE backend (``--fuse``). hf-mount defaults to NFS, but the
@@ -414,6 +415,12 @@ def get_hf_mount_cmd(hf_id: str,
         mode: One of ``'bucket'`` (read-write) or ``'repo'`` (read-only).
         revision: Optional git revision for repo mounts (e.g. ``'main'`` or
             a tag/commit). Ignored for buckets.
+        extra_args: Extra ``hf-mount`` flags forwarded verbatim to the backend
+            daemon (e.g. ``['--cache-dir', '/mnt/nvme/hf-cache', '--cache-size',
+            '200000000000']``). Each element is one shell token and is quoted
+            individually. They are injected as backend-passthrough options
+            (alongside ``--token-file`` / ``--read-only``), before the
+            ``bucket``/``repo`` subcommand.
     """
     if mode not in ('bucket', 'repo'):
         raise ValueError(
@@ -436,6 +443,10 @@ def get_hf_mount_cmd(hf_id: str,
     if read_only and mode == 'bucket':
         # ``hf-mount`` repos are always read-only, no flag needed.
         backend_flags += ' --read-only'
+    if extra_args:
+        # Forwarded verbatim to the backend daemon. Quote each token so paths
+        # with spaces or shell metacharacters survive.
+        backend_flags += ''.join(f' {shlex.quote(a)}' for a in extra_args)
     extra = ''
     if mode == 'repo' and revision:
         extra = f' --revision {shlex.quote(revision)}'

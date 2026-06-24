@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import posixpath
 import time
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
@@ -10,10 +11,13 @@ import zipfile
 
 import pytest
 
+from sky import exceptions
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
+from sky.skylet import constants as skylet_constants
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
+from sky.utils import status_lib
 
 
 def _make_context(
@@ -2433,3 +2437,323 @@ class TestDumpClusterInfo:
             data = json.load(f)
         assert len(data) == 1
         assert data[0]['request_id'] == 'req-a'
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_up_cluster_collects_skylet_log(self, mock_get_cluster, mock_events,
+                                            mock_requests, tmp_path):
+        """An UP cluster with a handle should rsync the skylet log."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        # Head node resolves the skylet log path against $HOME.
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'live-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.UP,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'live-cluster'}, str(tmp_path), errors)
+
+        # Pulled the skylet log off the head node (runners[0]) into the
+        # cluster dump dir, using the remotely-resolved source path.
+        runner.rsync.assert_called_once()
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/home/sky/.sky/skylet.log'
+        assert kwargs['target'] == str(tmp_path / 'clusters' / 'live-cluster' /
+                                       'skylet.log')
+        assert kwargs['up'] is False
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_stopped_cluster_skips_skylet_log(self, mock_get_cluster,
+                                              mock_events, mock_requests,
+                                              tmp_path):
+        """A STOPPED cluster has no reachable node, so we don't attempt it."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        mock_get_cluster.return_value = {
+            'name': 'stopped-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.STOPPED,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'stopped-cluster'}, str(tmp_path),
+                                       errors)
+
+        handle.get_command_runners.assert_not_called()
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_init_cluster_collects_skylet_log(self, mock_get_cluster,
+                                              mock_events, mock_requests,
+                                              tmp_path):
+        """An INIT (possibly degraded) cluster is still attempted."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'init-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.INIT,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'init-cluster'}, str(tmp_path), errors)
+
+        runner.rsync.assert_called_once()
+        assert not errors
+
+
+class TestCollectClusterSkyletLog:
+    """Tests for the _collect_cluster_skylet_log helper."""
+
+    def test_rsyncs_skylet_log_from_head(self, tmp_path):
+        """Pulls the remotely-resolved skylet log off the first (head) runner."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner, mock.Mock()]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        # Only the head runner (index 0) is used.
+        runner.rsync.assert_called_once()
+        handle.get_command_runners.return_value[1].rsync.assert_not_called()
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/home/sky/.sky/skylet.log'
+        assert kwargs['target'] == os.path.join(str(tmp_path), 'skylet.log')
+        # Bounded by a total timeout so one stalled node can't hang the dump.
+        assert kwargs['timeout'] == debug_utils._SKYLET_LOG_RSYNC_TIMEOUT
+        assert not errors
+
+    def test_uses_relocated_runtime_dir(self, tmp_path):
+        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        path is resolved on the remote node, not from a Python attribute."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/scratch/rt/.sky/skylet.log'
+        assert not errors
+
+    def test_missing_log_is_not_an_error(self, tmp_path):
+        """A not-found rsync (code 23) is silently skipped, not recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            exceptions.RSYNC_FILE_NOT_FOUND_CODE, 'rsync', 'not found', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert not errors
+
+    def test_other_rsync_failure_is_recorded(self, tmp_path):
+        """A non-23 rsync failure is recorded in errors."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'clusters'
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_runners_is_noop(self, tmp_path):
+        """No runners (e.g. headless cluster) is a safe no-op."""
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = []
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert not errors
+
+    def test_get_command_runners_failure_is_recorded(self, tmp_path):
+        """A failure obtaining runners is recorded but does not raise."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('unreachable')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_init_rsync_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, a (non-23) rsync failure is expected and is
+        debug-logged, not recorded as a dump error."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_init_get_runners_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, an unreachable node (no runners yet) is
+        expected and not recorded."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('not up yet')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_up_rsync_failure_is_recorded(self, tmp_path):
+        """For an UP cluster, a (non-23) rsync failure is genuinely worth
+        surfacing and is recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_exception_message_falls_back_to_type_name(self, tmp_path):
+        """A recorded error never has a blank message: an exception whose
+        str() is empty falls back to the exception type name."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['error'] == 'RuntimeError'
+
+
+class TestResolveRemoteSkyletLogPath:
+    """Tests for the _resolve_remote_skylet_log_path helper."""
+
+    def test_returns_resolved_remote_path(self):
+        """Returns the path echoed by the remote shell."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == '/scratch/rt/.sky/skylet.log'
+        _, kwargs = runner.run.call_args
+        # Resolved with source_bashrc to match how skylet is started.
+        assert kwargs['source_bashrc'] is True
+        assert kwargs['require_outputs'] is True
+        # Bounded by a connect timeout so an unreachable node fails fast.
+        assert kwargs['connect_timeout'] == (
+            debug_utils._SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
+
+    def test_takes_last_non_empty_line(self):
+        """bashrc banner/warning lines before the echo are ignored."""
+        runner = mock.Mock()
+        runner.run.return_value = (0,
+                                   'motd banner\n\n/home/sky/.sky/skylet.log\n',
+                                   '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == '/home/sky/.sky/skylet.log'
+
+    def test_falls_back_on_nonzero_returncode(self):
+        """A failed resolution command falls back to ~/.sky/skylet.log."""
+        runner = mock.Mock()
+        runner.run.return_value = (1, '', 'boom')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_falls_back_on_empty_output(self):
+        """Empty stdout falls back to ~/.sky/skylet.log."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '   \n', '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_falls_back_on_exception(self):
+        """A raising runner.run falls back instead of propagating."""
+        runner = mock.Mock()
+        runner.run.side_effect = RuntimeError('unreachable')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)

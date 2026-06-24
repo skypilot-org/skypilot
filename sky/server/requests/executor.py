@@ -28,7 +28,7 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
 
 import psutil
 import setproctitle
@@ -40,6 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import clean_env as clean_env_module
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -161,7 +162,8 @@ class RequestQueue:
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
-def executor_initializer(proc_group: str):
+def executor_initializer(proc_group: str,
+                         clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     # Load plugins for executor process.
@@ -170,6 +172,13 @@ def executor_initializer(proc_group: str):
     # Same rationale as in sky.server.uvicorn.Server.run: reap this
     # executor's prometheus multiproc files when it exits.
     metrics_lib.register_multiproc_cleanup_atexit()
+    # The main API server process captures its env at startup and forwards
+    # it via initargs (see RequestWorker.run). Adopt that snapshot directly
+    # so the worker doesn't depend on its own spawn-time os.environ, which
+    # for a lazy-spawned burst worker could reflect a coroutine-path
+    # request mid-pollution in the main process.
+    if clean_env is not None:
+        clean_env_module.set_clean_server_env(clean_env)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -318,11 +327,6 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
-            # Set PENDING before the wait, not after: during the backoff the
-            # request is parked waiting to be rescheduled, so PENDING is its
-            # accurate state and lets a request-recovery mechanism re-enqueue
-            # it if the server is interrupted mid-wait. It is not put back on
-            # the queue until after the wait, so no worker picks it up early.
             request_id, _, _ = request_element
             # Clamp to avoid ValueError from time.sleep() on a negative wait.
             retry_wait_seconds = max(0, e.retry_wait_seconds)
@@ -341,9 +345,10 @@ class RequestWorker:
                             f'retrying in {retry_wait_seconds}s')
             status_msg = (f'{reason} ({retry_suffix})'
                           if reason else retry_suffix.capitalize())
+            # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.PENDING
+                request_task.status = api_requests.RequestStatus.WAITING
                 request_task.status_msg = status_msg
             try:
                 if condition is not None:
@@ -381,11 +386,14 @@ class RequestWorker:
         # the overhead of forking a new process for each request, which can be
         # about 1s delay.
         try:
+            # Pass the main process's clean env snapshot so workers (incl.
+            # lazy-spawned burst workers) record the same pre-pollution env
+            # regardless of when they spawn.
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group,))
+                initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
@@ -635,6 +643,30 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
+# Set by _request_execution_wrapper; read by _gated_sigterm_handler.
+_in_request_execution: bool = False
+
+
+def _gated_sigterm_handler(signum: int,
+                           frame: Optional['types.FrameType']) -> None:
+    """Raise KeyboardInterrupt only while actively executing a request.
+
+    SIGTERM landing on an idle worker (blocked in
+    concurrent.futures._process_worker's call_queue.get) would escape
+    _process_worker unhandled and break the entire pool. Swallow it; the
+    cancellation path already targets the worker by pid, so a stray SIGTERM
+    on an idle worker just means we lost the race with the request finishing.
+    """
+    del signum, frame
+    if _in_request_execution:
+        raise KeyboardInterrupt
+    # logger isn't async-signal-safe (re-entrant lock); use os.write.
+    try:
+        os.write(2, b'SIGTERM received while worker idle; ignored.\n')
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -656,7 +688,7 @@ def _request_execution_wrapper(request_id: str,
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
     if threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGTERM, _sigterm_handler)
+        signal.signal(signal.SIGTERM, _gated_sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 
@@ -690,15 +722,21 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    # Set _in_request_execution inside the try so `finally` always clears it,
+    # even if a SIGTERM lands before any wrapper code runs.
+    global _in_request_execution  # pylint: disable=global-statement
     try:
+        _in_request_execution = True
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
         # the try block to ensure we have the KeyboardInterrupt handling.
         with api_requests.update_request(request_id) as request_task:
             assert request_task is not None, request_id
-            if request_task.status != api_requests.RequestStatus.PENDING:
-                logger.debug(f'Request is already {request_task.status.value}, '
-                             f'skipping execution')
+            if (request_task.status
+                    not in api_requests.RequestStatus.executable_statuses()):
+                logger.warning(
+                    f'Request is already {request_task.status.value}, '
+                    f'skipping execution')
                 return
             log_path = request_task.log_path
             request_task.pid = pid
@@ -780,6 +818,7 @@ def _request_execution_wrapper(request_id: str,
         _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
+        _in_request_execution = False
         _restore_output()
         try:
             # Capture the peak RSS before GC.

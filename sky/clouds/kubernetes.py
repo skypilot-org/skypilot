@@ -1,5 +1,6 @@
 """Kubernetes."""
 import concurrent.futures
+import fnmatch
 import math
 import os
 import re
@@ -800,9 +801,13 @@ class Kubernetes(clouds.Cloud):
             override_configs=resources.cluster_config_overrides)
 
         if isinstance(remote_identity, dict):
-            # If remote_identity is a dict, use the service account for the
-            # current context
-            k8s_service_account_name = remote_identity.get(context, None)
+            # If remote_identity is a dict, match the current context against
+            # patterns using fnmatch (consistent with AWS/GCP behavior).
+            k8s_service_account_name = None
+            for pattern, sa_name in remote_identity.items():
+                if fnmatch.fnmatchcase(context, str(pattern)):
+                    k8s_service_account_name = sa_name
+                    break
             if k8s_service_account_name is None:
                 err_msg = (f'Context {context!r} not found in '
                            'remote identities from config.yaml')

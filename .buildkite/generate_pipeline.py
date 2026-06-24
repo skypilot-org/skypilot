@@ -25,7 +25,9 @@ import argparse
 import collections
 import os
 import re
+import shlex
 import subprocess
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -124,7 +126,7 @@ def _parse_args(args: Optional[str] = None):
     :return: (list_of_clouds, k_pattern)
     """
     if args:
-        args_list = args.split()
+        args_list = shlex.split(args)
     else:
         args_list = []
     parser = argparse.ArgumentParser(
@@ -154,7 +156,10 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--dependency', nargs='?', const='', default='all')
     parser.add_argument('--concurrency', type=int)
 
-    parsed_args, _ = parser.parse_known_args(args_list)
+    # pytest_native: args the generate_pipeline parser does not recognise
+    # (e.g. --no-resource-heavy).  They are conftest-registered pytest flags
+    # and must be forwarded to `pytest --collect-only` unchanged.
+    parsed_args, pytest_native = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
     # TODO(zpoint): get default clouds from the conftest.py
@@ -177,19 +182,21 @@ def _parse_args(args: Optional[str] = None):
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
 
-    extra_args = []
+    # Each entry is a single shell token so that shlex.join() can safely
+    # quote the list when it is passed to pytest --collect-only.
+    extra_args: List[str] = []
     if parsed_args.remote_server:
         extra_args.append('--remote-server')
     if parsed_args.base_branch:
-        extra_args.append(f'--base-branch {parsed_args.base_branch}')
+        extra_args.extend(['--base-branch', parsed_args.base_branch])
     if parsed_args.controller_cloud:
-        extra_args.append(f'--controller-cloud {parsed_args.controller_cloud}')
+        extra_args.extend(['--controller-cloud', parsed_args.controller_cloud])
     if parsed_args.postgres:
         extra_args.append('--postgres')
     if parsed_args.helm_version:
-        extra_args.append(f'--helm-version {parsed_args.helm_version}')
+        extra_args.extend(['--helm-version', parsed_args.helm_version])
     if parsed_args.helm_package:
-        extra_args.append(f'--helm-package {parsed_args.helm_package}')
+        extra_args.extend(['--helm-package', parsed_args.helm_package])
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
     if parsed_args.serve_consolidation:
@@ -197,18 +204,30 @@ def _parse_args(args: Optional[str] = None):
     if parsed_args.grpc:
         extra_args.append('--grpc')
     if parsed_args.env_file:
-        extra_args.append(f'--env-file {parsed_args.env_file}')
+        extra_args.extend(['--env-file', parsed_args.env_file])
     if parsed_args.plugin_yaml:
-        extra_args.append(f'--plugin-yaml {parsed_args.plugin_yaml}')
+        extra_args.extend(['--plugin-yaml', parsed_args.plugin_yaml])
     if parsed_args.submodule_base_branch:
-        extra_args.append(
-            f'--submodule-base-branch {parsed_args.submodule_base_branch}')
+        extra_args.extend(
+            ['--submodule-base-branch', parsed_args.submodule_base_branch])
     if parsed_args.dependency != 'all':
-        space = ' ' if parsed_args.dependency else ''
-        extra_args.append(f'--dependency{space}{parsed_args.dependency}')
+        if parsed_args.dependency:
+            extra_args.extend(['--dependency', parsed_args.dependency])
+        else:
+            extra_args.append('--dependency')
+    # Cloud flags are conftest-registered; include them in extra_args so that
+    # they reach `pytest --collect-only` (some marks depend on which clouds
+    # are active).  They are already captured in default_clouds_to_run for
+    # Buildkite-step generation; adding them here is intentional duplication.
+    for cloud in all_clouds_in_smoke_tests:
+        if getattr(parsed_args, cloud, False):
+            extra_args.append(f'--{cloud}')
+    if parsed_args.generic_cloud:
+        extra_args.append(f'--generic-cloud {parsed_args.generic_cloud}')
 
     return (default_clouds_to_run, parsed_args.k, extra_args,
-            parsed_args.concurrency, parsed_args.env_file is not None)
+            parsed_args.concurrency, parsed_args.env_file
+            is not None, pytest_native)
 
 
 def _extract_marked_tests(
@@ -236,6 +255,19 @@ def _extract_marked_tests(
     # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # Exit code 5 means "no tests collected" — normal when a file has no
+    # matching tests for the requested clouds.  Any other non-zero code is a
+    # real error (e.g. unrecognised arguments, import failure) that would
+    # silently produce 0 matches and generate an empty pipeline.  Fail loudly
+    # so the build is visibly broken rather than a noop.
+    if output.returncode not in (0, 5):
+        print(
+            f'ERROR: pytest collection failed (exit {output.returncode}) '
+            f'for {file_path}:\n'
+            f'STDOUT:\n{output.stdout}\n'
+            f'STDERR:\n{output.stderr}',
+            file=sys.stderr)
+        sys.exit(output.returncode)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
 
@@ -331,9 +363,17 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
-    (default_clouds_to_run, k_value, extra_args, concurrency,
-     has_env_file) = _parse_args(args)
-    function_cloud_map = _extract_marked_tests(test_file, args,
+    (default_clouds_to_run, k_value, extra_args, concurrency, has_env_file,
+     pytest_native) = _parse_args(args)
+    # Pass a clean arg string: extra_args (conftest-registered flags extracted
+    # from the generate_pipeline parser) + pytest_native (conftest-registered
+    # flags the generate_pipeline parser did not recognise).
+    # This excludes generate_pipeline-only flags (--concurrency,
+    # --submodule-base-branch, --dependency, --generic-cloud, --base-branch)
+    # that are not in older pinned conftests and would cause
+    # `pytest --collect-only` to exit with code 4, silently collecting 0 tests.
+    pytest_collect_args = shlex.join(extra_args + list(pytest_native))
+    function_cloud_map = _extract_marked_tests(test_file, pytest_collect_args,
                                                default_clouds_to_run, k_value,
                                                extra_args)
     concurrency_limit = None
@@ -392,31 +432,39 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
 def _dump_pipeline_to_file(yaml_file_path: str,
                            pipelines: List[Dict[str, Any]],
                            trigger_command: str,
-                           extra_env: Optional[Dict[str, str]] = None):
+                           extra_env: Optional[Dict[str, str]] = None) -> int:
+    """Write the generated steps to a pipeline file; return the step count.
+
+    main() always generates more than one pipeline file (e.g. release and
+    quick-tests-core).  A `-k`/file filter often matches tests in only one of
+    them, so an individual file legitimately ending up with 0 steps is not an
+    error -- it is skipped here, and main() fails loudly only if *every* file
+    is empty (the genuine "matched nothing anywhere" misconfiguration).
+    """
     default_env = {
         'LOG_TO_STDOUT': '1',
         'SKYPILOT_DISABLE_USAGE_COLLECTION': '1'
     }
     if extra_env:
         default_env.update(extra_env)
+    all_steps = []
+    for pipeline in pipelines:
+        all_steps.extend(pipeline['steps'])
+
+    if not all_steps:
+        # Buildkite rejects pipelines with empty step groups, so skip writing
+        # this file. main() decides whether 0 steps overall is fatal.
+        print(f'No matching tests for {yaml_file_path}, skipping.')
+        return 0
+
     with open(yaml_file_path, 'w', encoding='utf-8') as file:
         file.write(GENERATED_FILE_HEAD)
-        all_steps = []
-        for pipeline in pipelines:
-            all_steps.extend(pipeline['steps'])
-
         # Extract key from trigger command, keeping only valid characters
         key = re.sub(r'[^a-zA-Z0-9_\-:]', '',
                      re.match(r'^[^ ]*', trigger_command).group(0))
         # Generate formatted group name from key
         group_name = ' '.join(
             word.capitalize() for word in re.split(r'[-_]', key))
-
-        if not all_steps:
-            # Skip empty groups — Buildkite rejects pipelines with
-            # empty step groups.
-            print(f'No matching tests for {yaml_file_path}, skipping.')
-            return
 
         grouped_steps = [{
             'group': group_name,
@@ -431,9 +479,11 @@ def _dump_pipeline_to_file(yaml_file_path: str,
 
         final_pipeline = {'steps': grouped_steps, 'env': default_env}
         yaml.dump(final_pipeline, file, default_flow_style=False)
+    return len(all_steps)
 
 
-def _convert_release(test_files: List[str], args: str, trigger_command: str):
+def _convert_release(test_files: List[str], args: str,
+                     trigger_command: str) -> int:
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -442,8 +492,8 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
-                           trigger_command)
+    return _dump_pipeline_to_file(yaml_file_path, output_file_pipelines,
+                                  trigger_command)
 
 
 def _rest_request(url: str,
@@ -488,7 +538,7 @@ def _get_latest_pypi_version():
 
 
 def _convert_quick_tests_core(test_files: List[str], args: str,
-                              trigger_command: str):
+                              trigger_command: str) -> int:
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     base_branch = '--base-branch' in args
     base_branches = []
@@ -515,10 +565,11 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
             pipeline = _generate_pipeline(test_file, args)
             output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
-    _dump_pipeline_to_file(yaml_file_path,
-                           output_file_pipelines,
-                           trigger_command,
-                           extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
+    return _dump_pipeline_to_file(
+        yaml_file_path,
+        output_file_pipelines,
+        trigger_command,
+        extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
 @click.command()
@@ -562,8 +613,25 @@ def main(args: str, file_pattern: str):
             release_files.append(test_file)
 
     print(f'trigger_command: {trigger_command}')
-    _convert_release(release_files, args, trigger_command)
-    _convert_quick_tests_core(quick_tests_core_files, args, trigger_command)
+    total_steps = 0
+    total_steps += _convert_release(release_files, args, trigger_command)
+    total_steps += _convert_quick_tests_core(quick_tests_core_files, args,
+                                             trigger_command)
+
+    if total_steps == 0:
+        # Every generated pipeline file was empty: pytest --collect-only matched
+        # no tests anywhere.  This is almost always a misconfiguration (wrong
+        # cloud filter, unrecognised ARGS flag, missing env file, a typo'd -k)
+        # rather than a legitimate "nothing to run".  Fail loudly so the empty
+        # pipeline is not uploaded as a vacuous success that posts a false
+        # "passed" status while running zero tests.
+        print(
+            'ERROR: No pipeline steps generated for any pipeline file. '
+            'pytest --collect-only matched 0 tests across all test files. '
+            'Check that ARGS point to valid tests and that the env-file (if '
+            'any) is reachable.',
+            file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

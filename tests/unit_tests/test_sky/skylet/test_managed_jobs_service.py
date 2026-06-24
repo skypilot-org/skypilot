@@ -329,6 +329,8 @@ class TestGetJobTable:
         assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
         )
         assert target_job.resources == '{}'
+        # The job was never launched (no persisted infra), so the cached
+        # resources fallback does not apply and '-' is shown.
         assert target_job.cluster_resources == '-'
         assert target_job.cluster_resources_full == '-'
         assert target_job.cloud == '-'
@@ -391,6 +393,8 @@ class TestGetJobTable:
         assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
         )
         assert target_job.resources == '{}'
+        # The job was never launched (no persisted infra), so the cached
+        # resources fallback does not apply and '-' is shown.
         assert target_job.cluster_resources == '-'
         assert target_job.cluster_resources_full == '-'
         assert target_job.cloud == '-'

@@ -2379,7 +2379,11 @@ def test_kubernetes_pod_failure_detection():
         [
             f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y --image-id docker:busybox:latest --infra kubernetes echo hi || true',
             # Check that the provision logs contain the expected error message.
-            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep -A 2 "Pod.*terminated:.*" | grep -A 2 "PodFailed" | grep "StartError"',
+            # busybox has no bash, so the container terminates with a non-zero
+            # exit code while the pod is still Pending, which now fast-fails with
+            # a "terminated with error while pod is still pending" message
+            # carrying the StartError reason (instead of the old PodFailed path).
+            f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep "terminated with error while pod is still pending" | grep "StartError"',
         ],
         f'sky down -y {name}',
         timeout=10 * 60,
@@ -2826,7 +2830,7 @@ def test_remote_server_api_login():
             # Echo the config file content to see what was written
             f'echo "Config file content after sky api login:" && cat {config_path}',
             # Verify the config file is updated with the endpoint
-            f'grep -q "endpoint: {endpoint}" {config_path}',
+            f'grep -q "endpoint: {endpoint.rstrip("/")}" {config_path}',
             # Verify the api_server section exists
             f'grep -q "api_server:" {config_path}',
         ],
@@ -3008,7 +3012,7 @@ def test_kubernetes_recovery():
             # Delete head, worker-2 and worker-3
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod {head} {worker2} {worker3}'
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod --wait=false {head} {worker2} {worker3}'
             ),
             # Check launching again
             f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
@@ -3021,7 +3025,7 @@ def test_kubernetes_recovery():
             # Delete all Pods
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod -l ray-cluster-name={name_on_cloud}'
+                f'kubectl get pod -l ray-cluster-name={name_on_cloud} && kubectl delete pod --wait=false -l ray-cluster-name={name_on_cloud}'
             ),
             # Check status
             f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',

@@ -30,6 +30,7 @@ from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
@@ -68,6 +69,7 @@ class RequestStatus(enum.Enum):
     """The status of a request."""
 
     PENDING = 'PENDING'
+    WAITING = 'WAITING'
     RUNNING = 'RUNNING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
@@ -85,14 +87,48 @@ class RequestStatus(enum.Enum):
     def finished_status(cls) -> List['RequestStatus']:
         return [cls.SUCCEEDED, cls.FAILED, cls.CANCELLED]
 
+    @classmethod
+    def active_statuses(cls) -> List['RequestStatus']:
+        """Statuses of requests that are not finished yet."""
+        return [cls.PENDING, cls.WAITING, cls.RUNNING]
+
+    @classmethod
+    def executable_statuses(cls) -> List['RequestStatus']:
+        """Statuses from which a dequeued request may start executing.
+
+        A request is enqueued as PENDING. It may also be re-enqueued while in
+        WAITING -- the state it is parked in while waiting to resume (e.g. a
+        retry backoff or an external continue-condition). In both cases the
+        worker should pick it up and run it. Any other status (RUNNING, a
+        finished status, or CANCELLED) means the request must not be executed.
+        """
+        return [cls.PENDING, cls.WAITING]
+
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,
+    RequestStatus.WAITING: colorama.Fore.YELLOW,
     RequestStatus.RUNNING: colorama.Fore.GREEN,
     RequestStatus.SUCCEEDED: colorama.Fore.GREEN,
     RequestStatus.FAILED: colorama.Fore.RED,
     RequestStatus.CANCELLED: colorama.Fore.WHITE,
 }
+
+
+def _status_value_for_client(status_value: str) -> str:
+    """Map WAITING to RUNNING for clients that predate the WAITING status.
+
+    Older clients parse the status string straight into the RequestStatus enum
+    and crash on an unknown value, so downgrade it to the closest status they
+    understand on the wire.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    if (status_value == RequestStatus.WAITING.value and
+            remote_api_version is not None and remote_api_version <
+            server_constants.MIN_WAITING_STATUS_API_VERSION):
+        return RequestStatus.RUNNING.value
+    return status_value
+
 
 REQUEST_COLUMNS = [
     'request_id',
@@ -180,8 +216,23 @@ class Request:
         }
 
     def set_return_value(self, return_value: Any) -> None:
-        """Set the return value."""
-        self.return_value = encoders.get_encoder(self.name)(return_value)
+        """Set the encoded return value.
+
+        On encoder failure, drop to None. An exception here would escape the
+        wrapper's else-block (outside its try/except) and leave the row stuck
+        in RUNNING with the worker pid populated — enabling the
+        SIGTERM-to-idle-worker pool break. All return-value serializers
+        already guard `if return_value is not None`, so None persists as JSON
+        `null`.
+        """
+        encoder = encoders.get_encoder(self.name)
+        try:
+            self.return_value = encoder(return_value)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Encoder for request {self.request_id} ({self.name}) '
+                f'failed; storing None: {common_utils.format_exception(e)}')
+            self.return_value = None
 
     def get_return_value(self) -> Any:
         """Get the return value."""
@@ -194,6 +245,10 @@ class Request:
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
+        # encode() may downgrade WAITING -> RUNNING for clients on an older API
+        # version; that is a wire-only concern. to_row() feeds the database, so
+        # always persist the true status regardless of the request context.
+        payload.status = self.status.value
         row = []
         for k in REQUEST_COLUMNS:
             row.append(getattr(payload, k))
@@ -222,7 +277,7 @@ class Request:
             name=self.name,
             entrypoint=self.entrypoint.__name__,
             request_body=self.request_body.model_dump_json(),
-            status=self.status.value,
+            status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
@@ -250,7 +305,7 @@ class Request:
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
-                status=self.status.value,
+                status=_status_value_for_client(self.status.value),
                 return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
@@ -346,7 +401,7 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             request_body=request.request_body.model_dump_json()
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
-            status=request.status.value,
+            status=_status_value_for_client(request.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
             pid=None,
@@ -459,12 +514,12 @@ def create_table(cursor, conn):
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS status_name_idx ON {REQUEST_TABLE} (status, name) WHERE status IN ('PENDING', 'WAITING', 'RUNNING');
     """)
     # Add an index on cluster_name to speed up queries
     # that filter on this column.
     cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'RUNNING');
+        CREATE INDEX IF NOT EXISTS cluster_name_idx ON {REQUEST_TABLE} ({COL_CLUSTER_NAME}) WHERE status IN ('PENDING', 'WAITING', 'RUNNING');
     """)
     # Add an index on created_at to speed up queries that sort on this column.
     cursor.execute(f"""\
@@ -564,7 +619,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id
         for request_task in storage.query_requests(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            status=RequestStatus.active_statuses(),
             exclude_request_names=[exclude_request_name],
             cluster_names=[cluster_name],
             fields=['request_id']))
@@ -1368,7 +1423,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_ids = [
                 r.request_id
                 for r in self.query_requests(req_filter=RequestTaskFilter(
-                    status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                    status=RequestStatus.active_statuses(),
                     exclude_request_names=['sky.api_cancel'],
                     user_id=user_id,
                     fields=['request_id']))
@@ -1497,12 +1552,13 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         assert _DB is not None
         with _DB.conn:
             cursor = _DB.conn.cursor()
+            active_values = [s.value for s in RequestStatus.active_statuses()]
+            placeholders = ', '.join('?' * len(active_values))
             cursor.execute(
                 f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
                 f'FROM {REQUEST_TABLE} '
-                f'WHERE status IN (?, ?) '
-                f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
-                (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
+                f'WHERE status IN ({placeholders}) '
+                f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL', active_values)
             return {row[0] for row in cursor.fetchall()}
 
     def get_shutdown_active_requests(self) -> List[Tuple[str, str]]:

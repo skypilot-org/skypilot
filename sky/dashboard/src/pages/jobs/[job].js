@@ -1375,6 +1375,12 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Duration</div>
+        <div className="text-base mt-1">
+          {formatDuration(jobData.job_duration)}
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">
           Requested Resources
         </div>
@@ -1638,7 +1644,7 @@ function JobDetailsContent({
                 </div>
 
                 {isYamlExpanded && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                  <div>
                     {(() => {
                       const yamlDocs = formatJobYaml(jobData.dag_yaml);
                       // Build JobGroup header with name and execution

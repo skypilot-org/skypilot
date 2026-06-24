@@ -815,6 +815,15 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            # Hugging Face stores only: extra ``hf-mount``
+                            # flags forwarded verbatim to the daemon. Each
+                            # element is one shell token.
+                            'hf_mount_args': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            },
                         },
                     },
                 },

@@ -1046,11 +1046,15 @@ def set_pending_cancelled(job_id: int):
     engine = _db_manager.get_engine()
     count = 0
     with orm.Session(engine) as session:
-        # Subquery to get the spot_job_ids that match the joined condition
-        subquery = session.query(spot_table.c.job_id).join(
-            job_info_table,
-            spot_table.c.spot_job_id == job_info_table.c.spot_job_id
-        ).filter(
+        # Subquery to get the spot_job_ids that match the joined condition.
+        # Build it as a select() construct (rather than Query.subquery()) so it
+        # can be passed directly to in_() without SQLAlchemy emitting a
+        # "Coercing Subquery object into a select()" warning.
+        subquery = sqlalchemy.select(spot_table.c.job_id).select_from(
+            spot_table.join(
+                job_info_table,
+                spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+        ).where(
             spot_table.c.spot_job_id == job_id,
             spot_table.c.status == ManagedJobStatus.PENDING.value,
             # Note: it's possible that a WAITING job actually needs to be
@@ -1063,7 +1067,7 @@ def set_pending_cancelled(job_id: int):
                 job_info_table.c.schedule_state ==
                 ManagedJobScheduleState.INACTIVE.value,
             ),
-        ).subquery()
+        )
 
         count = session.query(spot_table).filter(
             spot_table.c.job_id.in_(subquery)).update(
@@ -1995,6 +1999,32 @@ def scheduler_set_waiting(job_ids: List[int],
                 job_info_table.c.spot_job_id.in_(job_ids),)).update(updates)
         session.commit()
         assert updated_count == len(job_ids), (job_ids, updated_count)
+
+
+@db_retries.retry
+def set_job_dag_yaml_content(job_id: int,
+                             dag_yaml_content: str,
+                             priority: Optional[int] = None,
+                             priority_class: Optional[str] = None) -> None:
+    """Overwrite a managed job's persisted DAG YAML (and optional priority).
+
+    Lets the persisted job spec be updated out of band after submission. A
+    running controller picks the new spec up on its next recovery (it
+    re-reads the DAG before each recovery attempt); a brand-new controller or
+    a fresh launch reads it directly.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        updates: Dict[Any, Any] = {
+            job_info_table.c.dag_yaml_content: dag_yaml_content,
+        }
+        if priority is not None:
+            updates[job_info_table.c.priority] = priority
+        if priority_class is not None:
+            updates[job_info_table.c.priority_class] = priority_class
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update(updates)
+        session.commit()
 
 
 def get_job_file_contents(job_id: int) -> Dict[str, Optional[str]]:
