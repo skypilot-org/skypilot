@@ -6,6 +6,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import datetime
+import functools
 import hashlib
 import html
 import json
@@ -1867,7 +1868,12 @@ async def down(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_DOWN,
         request_body=down_body,
-        func=core.user_initiated_down,
+        # Use functools.partial(core.down, ...) rather than a dedicated
+        # core.user_initiated_down wrapper so the entrypoint pickled into the
+        # request record references core.down -- a symbol older clients have.
+        # A wrapper that only exists on newer servers fails to unpickle on
+        # older clients in Request.decode(). See #9916.
+        func=functools.partial(core.down, user_initiated=True),
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=down_body.cluster_name,
         auth_user=request.state.auth_user,
