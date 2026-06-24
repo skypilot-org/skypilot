@@ -157,7 +157,6 @@ def start_controller() -> None:
 
     This requires that the env file is already set up.
     """
-    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
@@ -168,7 +167,15 @@ def start_controller() -> None:
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
-    run_cmd = (f'{activate_python_env_cmd}'
+    # Bake IS_SKYPILOT_JOB_CONTROLLER into the shell command rather than
+    # mutating os.environ. Setting os.environ here was harmless before
+    # PR #9731 (the daemon ran in a child process with its own isolated env),
+    # but after #9731 the daemon runs as a main-process thread — the mutation
+    # leaks permanently into the API server's os.environ and causes
+    # serve_utils.is_consolidation_mode() to return True for all serve
+    # requests, even when serve consolidation mode is not configured.
+    run_cmd = (f'export {constants.OVERRIDE_CONSOLIDATION_MODE}=true; '
+               f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
 
     logger.info(f'Running controller with command: {run_cmd}')
