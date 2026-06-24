@@ -643,4 +643,9 @@ If you encounter the "Max number of services reached" error, you can increase th
 .. toctree::
    :hidden:
 
-   Serving Guides <user-guides>
+   autoscaling
+   update
+   auth
+   spot-policy
+   https
+   serve-high-availability
