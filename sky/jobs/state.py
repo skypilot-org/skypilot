@@ -2445,6 +2445,52 @@ def get_pending_jobs_count_by_pool(pool: str) -> int:
         return result[0] if result else 0
 
 
+def get_nonterminal_jobs_count_by_pool(pool: str) -> int:
+    """Get the count of non-terminal jobs in a pool.
+
+    A non-terminal job is one that each needs or already holds a pool worker —
+    i.e. the desired number of replicas for the pool. Counts distinct
+    spot_job_id (per logical job, not per task). This is the aggregate (count)
+    analogue of get_nonterminal_job_ids_by_pool: it mirrors that helper's
+    predicate and join, returning a count instead of the id list.
+
+    Includes every non-terminal status (PENDING, STARTING, RUNNING, RECOVERING,
+    etc.); excludes the terminal statuses (SUCCEEDED, the FAILED* family,
+    CANCELLED). RUNNING is deliberately included: in
+    QueueLengthAutoscaler._generate_scaling_decisions the target is compared
+    against the current replica count, which itself includes the workers busy
+    with RUNNING jobs, so the target must reflect total worker occupancy (one
+    worker per non-terminal job), not just the queued backlog. Counting only
+    PENDING would under-provision whenever a new job arrives while existing
+    workers are busy, and would drain toward zero as the scheduler eagerly
+    moves a job PENDING -> RUNNING onto the first available worker.
+
+    Args:
+        pool: The pool name
+
+    Returns:
+        The number of distinct non-terminal jobs in the pool
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        # Mirror get_nonterminal_job_ids_by_pool's predicate + join, aggregated.
+        query = sqlalchemy.select(
+            sqlalchemy.func.count(  # pylint: disable=not-callable
+                spot_table.c.spot_job_id.distinct())).select_from(
+                    spot_table.outerjoin(
+                        job_info_table, spot_table.c.spot_job_id ==
+                        job_info_table.c.spot_job_id)).where(
+                            sqlalchemy.and_(
+                                ~spot_table.c.status.in_([
+                                    status.value for status in
+                                    ManagedJobStatus.terminal_statuses()
+                                ]),
+                                job_info_table.c.pool == pool,
+                            ))
+        result = session.execute(query).fetchone()
+        return result[0] if result else 0
+
+
 def get_nonterminal_job_ids_by_pool(pool: str,
                                     cluster_name: Optional[str] = None
                                    ) -> List[int]:
