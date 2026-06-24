@@ -1,12 +1,14 @@
 """Debug dump utilities for troubleshooting SkyPilot issues."""
 import collections
 import datetime
+import hashlib
 import json
 import logging
 import os
 import pathlib
 import platform
 import posixpath
+import re
 import shutil
 import time
 import traceback
@@ -897,17 +899,66 @@ def _collect_cluster_skylet_log(
             f'Failed to collect skylet log for cluster {cluster_name}', e)
 
 
+def _kube_coordinates_for_handle(
+        handle: Any) -> Optional[Tuple[Optional[str], str]]:
+    """Resolve a cluster handle's (kube context, namespace), or None.
+
+    Returns None for clusters that aren't on Kubernetes (or whose runners can't
+    be resolved). For a Kubernetes cluster every command runner is a
+    KubernetesCommandRunner carrying its pod's (context, namespace); they're
+    cluster-wide identical, so runners[0] suffices. get_command_runners()
+    rebuilds from the cached cluster_info (no live API call), so this is cheap
+    and safe even when the context is defunct.
+    """
+    launched_resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(launched_resources, 'cloud', None)
+    if not isinstance(cloud, clouds.Kubernetes):
+        return None
+
+    runners = handle.get_command_runners()
+    # Typed as Any (like ``handle``/``runners``): the runner's k8s coordinates
+    # are assigned via nested tuple-unpacking in KubernetesCommandRunner, which
+    # mypy can't see across this module's skipped import.
+    k8s_runners: List[Any] = [
+        r for r in runners
+        if isinstance(r, command_runner.KubernetesCommandRunner)
+    ]
+    if not k8s_runners:
+        return None
+    return k8s_runners[0].context, k8s_runners[0].namespace
+
+
+def _sanitize_context_name(context: Optional[str]) -> str:
+    """Map a kube context to a filesystem-safe directory name.
+
+    The in-cluster context (``None``) maps to ``in-cluster``. Otherwise we
+    replace path/colon/whitespace chars and append a short hash of the raw name
+    so two contexts that sanitize to the same string don't collide.
+    """
+    if context is None:
+        return 'in-cluster'
+    safe = re.sub(r'[^A-Za-z0-9._-]', '_', context)
+    digest = hashlib.sha1(context.encode('utf-8')).hexdigest()[:8]
+    return f'{safe}-{digest}'
+
+
 def _collect_cluster_kubernetes_resources(
         cluster_name: str,
         cluster_dir: str,
         handle: Any,
         errors: Optional[List[Dict[str, str]]] = None) -> None:
-    """Snapshot a Kubernetes cluster's related k8s objects into the dump.
+    """Snapshot a Kubernetes cluster's per-cluster k8s objects into the dump.
 
     For clusters on Kubernetes, capture the pods, their events, the resources
-    SkyPilot created (Services, etc.), and any Kueue Workload -- the same things
-    you'd reach for with ``kubectl get -o yaml`` when debugging. No-op for
-    clusters on other clouds.
+    SkyPilot created (Services, etc.), and this cluster's Kueue Workload -- the
+    same things you'd reach for with ``kubectl get -o yaml`` when debugging.
+    No-op for clusters on other clouds.
+
+    These calls are all namespace-scoped, so they work under SkyPilot's minimal
+    (namespace-only) RBAC. Cluster-WIDE objects shared across SkyPilot clusters
+    (GPU-metrics pods, the Kueue quota config) are collected once per context by
+    ``_dump_kube_contexts_info`` instead; we drop a ``context.json`` here so a
+    reader can find them.
 
     Unlike the skylet log (which is rsynced off a reachable node and so only
     works on UP clusters), these come from the kube API server, which answers
@@ -917,22 +968,8 @@ def _collect_cluster_kubernetes_resources(
     Best-effort: every failure is recorded in ``errors`` and never aborts the
     dump.
     """
-    launched_resources = getattr(handle, 'launched_resources', None)
-    cloud = getattr(launched_resources, 'cloud', None)
-    if not isinstance(cloud, clouds.Kubernetes):
-        logger.debug(f'Cluster {cluster_name!r} is not on Kubernetes; '
-                     f'skipping k8s resource dump')
-        return
-
-    # Resolve the cluster's k8s context + namespace from its command runners.
-    # For a Kubernetes cluster every runner is a KubernetesCommandRunner
-    # carrying its pod's (context, namespace); they're cluster-wide identical,
-    # so runners[0] suffices. (The dump finds the cluster's objects by the
-    # skypilot-cluster-name label, so we don't need the individual pod names.)
-    # This reuses the request-scoped cache populated by the skylet-log
-    # collection, so it's a cheap call here.
     try:
-        runners = handle.get_command_runners()
+        coords = _kube_coordinates_for_handle(handle)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get command runners for cluster '
                        f'{cluster_name}: {e}')
@@ -945,20 +982,13 @@ def _collect_cluster_kubernetes_resources(
             })
         return
 
-    # Typed as Any (like ``handle``/``runners``): the runner's k8s coordinates
-    # are assigned via nested tuple-unpacking in KubernetesCommandRunner, which
-    # mypy can't see across this module's skipped import.
-    k8s_runners: List[Any] = [
-        r for r in runners
-        if isinstance(r, command_runner.KubernetesCommandRunner)
-    ]
-    if not k8s_runners:
-        logger.debug(f'No Kubernetes command runners for cluster '
-                     f'{cluster_name!r}; skipping k8s resource dump')
+    if coords is None:
+        logger.debug(
+            f'Cluster {cluster_name!r} is not on Kubernetes (or has no '
+            f'k8s runners); skipping k8s resource dump')
         return
 
-    context = k8s_runners[0].context
-    namespace = k8s_runners[0].namespace
+    context, namespace = coords
     output_dir = os.path.join(cluster_dir, 'kubernetes')
 
     k8s_errors = kubernetes_debug.dump_cluster_resources(
@@ -966,6 +996,27 @@ def _collect_cluster_kubernetes_resources(
         namespace=namespace,
         cluster_name_on_cloud=handle.cluster_name_on_cloud,
         output_dir=output_dir)
+
+    # Drop a mapping file pointing at the per-context dump of this cluster's
+    # cluster-wide objects. Best-effort -- never let it abort the dump.
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, 'context.json'),
+                  'w',
+                  encoding='utf-8') as f:
+            json.dump(
+                {
+                    'context': context,
+                    'namespace': namespace,
+                    'cluster_name_on_cloud': handle.cluster_name_on_cloud,
+                    'context_dir': f'kubernetes_contexts/'
+                                   f'{_sanitize_context_name(context)}',
+                },
+                f,
+                indent=2,
+                default=str)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to write context.json for {cluster_name!r}: {e}')
 
     if errors is not None:
         for err in k8s_errors:
@@ -975,6 +1026,86 @@ def _collect_cluster_kubernetes_resources(
                 'error': err['error'],
                 'traceback': err['traceback'],
             })
+
+
+def _dump_kube_contexts_info(
+        cluster_names: Set[str],
+        dump_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Dump cluster-WIDE k8s objects once per unique kube context.
+
+    The GPU-metrics pods (Prometheus server, DCGM exporter) and the non-Workload
+    Kueue objects (ClusterQueues / LocalQueues / ResourceFlavors / Topologies)
+    are shared across all SkyPilot clusters on a kube context -- fetching them
+    per cluster would re-fetch identical objects N times. So we dedup the dumped
+    clusters down to their unique contexts and fetch each once into
+    ``kubernetes_contexts/<sanitized-context>/``.
+
+    Robustness (tenants can have defunct contexts that time out): every call is
+    5s-bounded, the per-context fetch fast-fails on the first connection error,
+    and contexts are fetched in parallel -- so N dead contexts cost ~5s, not
+    ~5s*calls*N. Best-effort: errors are recorded, never aborts the dump.
+    """
+    if not cluster_names:
+        return
+
+    # Dedup the dumped clusters down to their unique kube contexts. Keyed by a
+    # sentinel for the in-cluster (None) context so it dedups too.
+    contexts: Dict[Any, Optional[str]] = {}
+    for cluster_name in cluster_names:
+        try:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name)
+            handle = cluster_record.get('handle') if cluster_record else None
+            if handle is None:
+                continue
+            coords = _kube_coordinates_for_handle(handle)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to resolve kube context for cluster '
+                         f'{cluster_name!r}: {e}')
+            continue
+        if coords is None:
+            continue
+        context = coords[0]
+        contexts.setdefault('__in_cluster__' if context is None else context,
+                            context)
+
+    if not contexts:
+        return
+
+    contexts_root = os.path.join(dump_dir, 'kubernetes_contexts')
+    os.makedirs(contexts_root, exist_ok=True)
+
+    def _dump_one(context: Optional[str]) -> List[Dict[str, str]]:
+        # run_in_parallel re-raises the first exception, so swallow everything
+        # into the returned error list.
+        try:
+            output_dir = os.path.join(contexts_root,
+                                      _sanitize_context_name(context))
+            return kubernetes_debug.dump_context_resources(
+                context=context, output_dir=output_dir)
+        except Exception as e:  # pylint: disable=broad-except
+            return [{
+                'resource': 'kubernetes_contexts',
+                'error': str(e),
+                'traceback': _full_traceback(),
+            }]
+
+    unique_contexts = list(contexts.values())
+    num_threads = min(len(unique_contexts), 8)
+    results = subprocess_utils.run_in_parallel(_dump_one, unique_contexts,
+                                               num_threads)
+
+    if errors is not None:
+        for context, ctx_errors in zip(unique_contexts, results):
+            sanitized = _sanitize_context_name(context)
+            for err in ctx_errors:
+                errors.append({
+                    'component': 'kubernetes_contexts',
+                    'resource': f'{sanitized}/{err["resource"]}',
+                    'error': err['error'],
+                    'traceback': err['traceback'],
+                })
 
 
 def _dump_cluster_info(cluster_names: Set[str],
@@ -1374,6 +1505,12 @@ def _build_debug_dump(
     _dump_cluster_info(debug_dump_context['cluster_names'],
                        dump_dir,
                        errors=errors)
+    # Cluster-wide k8s objects (GPU-metrics pods, Kueue quota config), fetched
+    # once per unique kube context across the dumped clusters rather than per
+    # cluster. Must run after _dump_cluster_info so it dedups the same clusters.
+    _dump_kube_contexts_info(debug_dump_context['cluster_names'],
+                             dump_dir,
+                             errors=errors)
     _dump_managed_job_info(debug_dump_context['managed_job_ids'],
                            dump_dir,
                            errors=errors)

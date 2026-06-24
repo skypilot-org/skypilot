@@ -17,6 +17,10 @@ class _FakeApiException(Exception):
         super().__init__(f'status={status}')
 
 
+class _FakeMaxRetryError(Exception):
+    """Stand-in for urllib3's MaxRetryError (a connection/timeout failure)."""
+
+
 def _obj(marker):
     """A fake k8s model object; sanitize_for_serialization keys off _marker."""
     return SimpleNamespace(_marker=marker)
@@ -45,6 +49,16 @@ def _events(*involved_pod_names):
     ])
 
 
+def _all_ns_pods(*ns_name_pairs):
+    """A fake cluster-wide pod list (for list_pod_for_all_namespaces); each item
+    is a (namespace, name) pair."""
+    return SimpleNamespace(items=[
+        SimpleNamespace(_marker='pod',
+                        metadata=SimpleNamespace(namespace=ns, name=name))
+        for ns, name in ns_name_pairs
+    ])
+
+
 @pytest.fixture
 def k8s_apis(monkeypatch):
     """Patch every kubernetes adaptor call the module makes.
@@ -54,6 +68,7 @@ def k8s_apis(monkeypatch):
     """
     core = mock.MagicMock()
     core.list_namespaced_pod.return_value = _pods()
+    core.list_pod_for_all_namespaces.return_value = _all_ns_pods()
     core.list_namespaced_event.return_value = _events()
     core.list_namespaced_service.return_value = _list()
     core.list_namespaced_persistent_volume_claim.return_value = _list()
@@ -97,6 +112,8 @@ def k8s_apis(monkeypatch):
                         lambda *a, **k: api_client)
     monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                         lambda: _FakeApiException)
+    monkeypatch.setattr('sky.adaptors.kubernetes.max_retry_error',
+                        lambda: _FakeMaxRetryError)
 
     return SimpleNamespace(core=core,
                            apps=apps,
@@ -107,10 +124,16 @@ def k8s_apis(monkeypatch):
 
 
 def _run(tmp_path):
+    """Run the per-cluster (namespace-scoped) dump."""
     return debug.dump_cluster_resources(context='ctx',
                                         namespace='ns',
                                         cluster_name_on_cloud='cluster-abc',
                                         output_dir=str(tmp_path))
+
+
+def _run_context(tmp_path):
+    """Run the per-context (cluster-wide) dump."""
+    return debug.dump_context_resources(context='ctx', output_dir=str(tmp_path))
 
 
 def test_dumps_pods_with_type_meta(tmp_path, k8s_apis):
@@ -198,6 +221,67 @@ def test_empty_resource_kinds_are_skipped(tmp_path, k8s_apis):
     assert not (tmp_path / 'kueue').exists()
 
 
+def test_per_cluster_makes_no_cluster_scoped_calls(tmp_path, k8s_apis):
+    """RBAC invariant: the per-cluster dump must stay namespace-scoped so it
+    works under SkyPilot's minimal (namespace-only) RBAC -- it must never make a
+    cluster-wide call (those live only in the per-context path)."""
+    # A cluster that uses Kueue exercises the custom-object path too.
+    k8s_apis.core.list_namespaced_pod.return_value = _pods('c-head', kueue=True)
+    k8s_apis.kueue_items['workloads'] = [{'metadata': {'name': 'wl'}}]
+
+    _run(tmp_path)
+
+    k8s_apis.core.list_pod_for_all_namespaces.assert_not_called()
+    k8s_apis.custom.list_cluster_custom_object.assert_not_called()
+
+
+def test_context_gpu_metrics_pods_dumped(tmp_path, k8s_apis):
+    """The metrics Prometheus server (skypilot ns) and DCGM exporter (any ns, by
+    name substring) are captured under gpu_metrics/ from one cluster-wide list;
+    the chart's kube-state-metrics and unrelated pods are excluded."""
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('skypilot', 'skypilot-prometheus-server-abc123'),
+        ('skypilot', 'skypilot-prometheus-kube-state-metrics-xyz'),
+        ('gpu-operator', 'nvidia-dcgm-exporter-9q2lp'),
+        ('default', 'some-unrelated-pod'),
+    )
+
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    gdir = tmp_path / 'gpu_metrics'
+    prom = yaml_utils.read_yaml(str(gdir / 'prometheus-server.yaml'))
+    assert (prom['apiVersion'], prom['kind']) == ('v1', 'Pod')
+    dcgm = yaml_utils.read_yaml(str(gdir / 'dcgm-exporter.yaml'))
+    assert (dcgm['apiVersion'], dcgm['kind']) == ('v1', 'Pod')
+    # Only the two matched kinds are written (KSM + unrelated pods excluded).
+    assert sorted(p.name for p in gdir.iterdir()) == [
+        'dcgm-exporter.yaml', 'prometheus-server.yaml'
+    ]
+
+
+def test_context_gpu_metrics_absent_produces_no_dir(tmp_path, k8s_apis):
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('default', 'unrelated-pod'))
+
+    _run_context(tmp_path)
+
+    assert not (tmp_path / 'gpu_metrics').exists()
+
+
+def test_context_empty_writes_only_reachable_marker(tmp_path, k8s_apis):
+    # No GPU-metrics pods, no Kueue objects -> a reachable-but-bare context
+    # writes no resource dirs, but still drops a context.json marker (so the
+    # context stays visible in the dump even though the zip omits empty dirs).
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    assert not (tmp_path / 'gpu_metrics').exists()
+    assert not (tmp_path / 'kueue').exists()
+    marker = yaml_utils.read_yaml(str(tmp_path / 'context.json'))
+    assert marker == {'context': 'ctx', 'reachable': True}
+
+
 def test_secret_values_are_redacted(tmp_path, k8s_apis):
     k8s_apis.core.list_namespaced_secret.return_value = _list('secret')
     # The real sanitize_for_serialization would surface the secret's data,
@@ -262,10 +346,10 @@ def test_kueue_workload_dumped_scoped_to_cluster(tmp_path, k8s_apis):
     assert wl_calls[0].kwargs['field_selector'] == 'metadata.name=cluster-abc'
 
 
-def test_kueue_dumps_queues_flavors_and_topologies(tmp_path, k8s_apis):
-    """Beyond the Workload, the namespace's LocalQueues and the cluster-scoped
-    ClusterQueues/ResourceFlavors/Topologies are captured under kueue/."""
-    k8s_apis.core.list_namespaced_pod.return_value = _pods('c-head', kueue=True)
+def test_context_dumps_queues_flavors_and_topologies(tmp_path, k8s_apis):
+    """The cluster-wide Kueue config -- LocalQueues, ClusterQueues,
+    ResourceFlavors, Topologies -- is captured once per context under kueue/,
+    all via the cluster-scoped list endpoint."""
     k8s_apis.kueue_items.update({
         'localqueues': [{
             'metadata': {
@@ -289,7 +373,7 @@ def test_kueue_dumps_queues_flavors_and_topologies(tmp_path, k8s_apis):
         }],
     })
 
-    errors = _run(tmp_path)
+    errors = _run_context(tmp_path)
 
     assert not errors
     kdir = tmp_path / 'kueue'
@@ -313,12 +397,80 @@ def test_kueue_dumps_queues_flavors_and_topologies(tmp_path, k8s_apis):
             'name': 'rack'
         }
     }
-    # Cluster-scoped kinds are fetched via the cluster (not namespaced) API.
+    # Every kind -- including the namespaced LocalQueue -- is fetched via the
+    # cluster-scoped (not namespaced) API, so one call per kind covers all
+    # namespaces; the per-context path makes no namespaced custom-object calls.
     cluster_plurals = {
         c.kwargs['plural']
         for c in k8s_apis.custom.list_cluster_custom_object.call_args_list
     }
-    assert {'clusterqueues', 'resourceflavors', 'topologies'} <= cluster_plurals
+    assert {'localqueues', 'clusterqueues', 'resourceflavors', 'topologies'
+           } <= cluster_plurals
+    # 'workloads' is per-cluster, never fetched here.
+    assert 'workloads' not in cluster_plurals
+    k8s_apis.custom.list_namespaced_custom_object.assert_not_called()
+
+
+def test_context_kueue_uses_cluster_scoped_probe_and_falls_back(
+        tmp_path, k8s_apis):
+    """The per-context Kueue version probe is cluster-scoped (clusterqueues) and
+    falls back v1beta2 -> v1beta1, keeping the per-context path off the
+    namespaced API entirely."""
+    k8s_apis.kueue_items['clusterqueues'] = [{'metadata': {'name': 'cq'}}]
+
+    def _cluster(*args, **kwargs):
+        del args
+        if kwargs['version'] == 'v1beta2':
+            raise _FakeApiException(status=404)
+        return {'items': list(k8s_apis.kueue_items.get(kwargs['plural'], []))}
+
+    k8s_apis.custom.list_cluster_custom_object.side_effect = _cluster
+
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    assert (tmp_path / 'kueue' / 'clusterqueues.yaml').exists()
+    # The probe is the cluster-scoped clusterqueues list, tried newest-first.
+    probe_versions = [
+        c.kwargs['version']
+        for c in k8s_apis.custom.list_cluster_custom_object.call_args_list
+        if c.kwargs['plural'] == 'clusterqueues'
+    ]
+    assert probe_versions[:2] == ['v1beta2', 'v1beta1']
+    k8s_apis.custom.list_namespaced_custom_object.assert_not_called()
+
+
+def test_context_kueue_non_404_failure_is_recorded(tmp_path, k8s_apis):
+    # A non-404 on the cluster-scoped probe is recorded under the 'kueue'
+    # resource (context-relative, no 'kubernetes/' prefix).
+    k8s_apis.custom.list_cluster_custom_object.side_effect = (_FakeApiException(
+        status=500))
+
+    errors = _run_context(tmp_path)
+
+    assert len(errors) == 1
+    assert errors[0]['resource'] == 'kueue'
+
+
+def test_context_broken_skips_kueue(tmp_path, k8s_apis):
+    """A defunct context (connection/timeout on the first cluster-wide call)
+    fast-fails: it records the failure and skips the remaining cluster-wide
+    calls rather than stacking timeouts."""
+    k8s_apis.core.list_pod_for_all_namespaces.side_effect = _FakeMaxRetryError(
+        'connection refused')
+
+    errors = _run_context(tmp_path)
+
+    # The reachability failure is recorded against gpu_metrics...
+    assert len(errors) == 1
+    assert errors[0]['resource'] == 'gpu_metrics'
+    # ...and the Kueue calls are skipped entirely (no stacked timeouts).
+    k8s_apis.custom.list_cluster_custom_object.assert_not_called()
+    assert not (tmp_path / 'kueue').exists()
+    # The marker still records the context as unreachable, so a defunct context
+    # is visible in the dump rather than silently absent.
+    marker = yaml_utils.read_yaml(str(tmp_path / 'context.json'))
+    assert marker == {'context': 'ctx', 'reachable': False}
 
 
 def test_kueue_falls_back_to_older_version(tmp_path, k8s_apis):
@@ -397,13 +549,38 @@ def test_kueue_skipped_when_cluster_not_using_kueue(tmp_path, k8s_apis):
 
 
 def test_pod_list_failure_is_recorded(tmp_path, k8s_apis):
+    # A non-connection error (e.g. a transient/unexpected failure) is recorded,
+    # but the context is still reachable, so the dump continues for everything
+    # else (labeled resources, Kueue).
     k8s_apis.core.list_namespaced_pod.side_effect = RuntimeError('boom')
 
     errors = _run(tmp_path)
 
-    # The pod-list failure is recorded; the dump still continues for everything
-    # else (labeled resources, Kueue).
     pod_errs = [e for e in errors if e['resource'] == 'kubernetes/pods']
     assert len(pod_errs) == 1
     assert pod_errs[0]['error'] == 'boom'
     assert 'traceback' in pod_errs[0]
+    # The dump continued past pods (labeled-resource sweep was attempted).
+    k8s_apis.core.list_namespaced_service.assert_called()
+
+
+def test_defunct_context_fast_fails_per_cluster(tmp_path, k8s_apis):
+    """If the pod list -- the first call -- can't even connect, the context is
+    defunct; the per-cluster dump must bail immediately rather than stack one
+    timeout per remaining call (services, deployments, ... Kueue)."""
+    k8s_apis.core.list_namespaced_pod.side_effect = _FakeMaxRetryError(
+        'connection timed out')
+
+    errors = _run(tmp_path)
+
+    # The connection failure is recorded against pods...
+    assert len(errors) == 1
+    assert errors[0]['resource'] == 'kubernetes/pods'
+    # ...and none of the cluster's other calls are attempted (no stacked
+    # timeouts), so nothing else is written.
+    k8s_apis.core.list_namespaced_service.assert_not_called()
+    k8s_apis.apps.list_namespaced_deployment.assert_not_called()
+    k8s_apis.core.list_namespaced_event.assert_not_called()
+    k8s_apis.custom.list_namespaced_custom_object.assert_not_called()
+    assert not (tmp_path / 'services.yaml').exists()
+    assert not (tmp_path / 'kueue').exists()

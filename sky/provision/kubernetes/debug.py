@@ -1,18 +1,26 @@
-"""Best-effort collection of a cluster's Kubernetes resources for debug dumps.
+"""Best-effort collection of Kubernetes resources for debug dumps.
 
 When the API server dumps a cluster that runs on Kubernetes, we also snapshot
-the related k8s objects -- the pods, their events, the Services/Deployments/etc.
-SkyPilot creates during instance creation, and (if Kueue is in use) the gang
-Workload -- so an operator can inspect the cluster the way they would with
-``kubectl get -o yaml``, without needing kubectl access to the user's cluster.
+the related k8s objects so an operator can inspect them like
+``kubectl get -o yaml`` without needing kubectl access to the user's cluster.
+There are two entry points, split by scope:
+
+- ``dump_cluster_resources`` -- a single SkyPilot cluster's own resources (pods,
+  events, the Services/Deployments/etc. it created, and its 1:1 Kueue Workload).
+  Namespace-scoped, so it works even under minimal (namespace-only) RBAC.
+- ``dump_context_resources`` -- the cluster-WIDE infra that is *not* tied to any
+  one SkyPilot cluster (GPU-metrics pods, the non-Workload Kueue objects). The
+  caller fetches this once per unique kube context, not once per cluster. These
+  are cluster-wide API calls, so they need broader RBAC and are best-effort.
 
 This module is intentionally provider-specific and self-contained: the generic
-dump path (``sky.utils.debug_utils``) discovers a cluster's k8s coordinates from
-its command runners and delegates the actual API queries here. Every query is
-best-effort -- a failure is recorded and returned, never raised, so one missing
-or inaccessible object can't abort the surrounding dump.
+dump path (``sky.utils.debug_utils``) discovers the k8s coordinates and
+delegates the API queries here. Every query is best-effort -- a failure is
+recorded and returned, never raised, so one missing or inaccessible object
+can't abort the surrounding dump.
 """
 import functools
+import json
 import os
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -32,7 +40,8 @@ logger = sky_logging.init_logger(__name__)
 # Kueue CRD group + the versions to try newest-first for the custom objects
 # API. Kueue is currently on v1beta2 (was v1beta1); trying newest-first lets us
 # work across the Kueue versions OSS users run. An unserved version 404s and we
-# fall through; prepend 'v1' here when Kueue graduates. See _dump_kueue_objects.
+# fall through; prepend 'v1' here when Kueue graduates. See
+# _resolve_kueue_version.
 _KUEUE_GROUP = 'kueue.x-k8s.io'
 _KUEUE_VERSIONS = ('v1beta2', 'v1beta1')
 _KUEUE_WORKLOADS_PLURAL = 'workloads'
@@ -42,6 +51,18 @@ _KUEUE_WORKLOADS_PLURAL = 'workloads'
 # using-Kueue cluster can transiently lack (creation race, GC, pod-integration
 # off).
 _KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
+
+# GPU-metrics observability pods, useful for debugging a cluster's GPU metrics
+# (see the API server GPU-metrics setup docs). These are cluster-wide infra, not
+# per-SkyPilot-cluster, so they're dumped whenever present. The metrics
+# Prometheus is installed as helm release `skypilot-prometheus` in the
+# `skypilot` namespace, so its server pods are named `skypilot-prometheus-server
+# -*` (the prefix excludes the chart's kube-state-metrics pod). DCGM exporter's
+# namespace varies by installer, so it's matched by name substring. Both are
+# found in a single cluster-wide pod list (see _dump_gpu_metrics_pods).
+_GPU_METRICS_NAMESPACE = 'skypilot'
+_PROMETHEUS_SERVER_NAME_PREFIX = 'skypilot-prometheus-server'
+_DCGM_EXPORTER_NAME_SUBSTR = 'dcgm-exporter'
 
 # Keys in a serialized Secret whose values must never leave the cluster.
 _SECRET_REDACTED_KEYS = ('data', 'stringData')
@@ -57,21 +78,23 @@ _REDACTED = '<redacted>'
 def dump_cluster_resources(context: Optional[str], namespace: str,
                            cluster_name_on_cloud: str,
                            output_dir: str) -> List[Dict[str, str]]:
-    """Snapshot a Kubernetes cluster's related resources into ``output_dir``.
+    """Snapshot a SkyPilot cluster's *own* Kubernetes resources into output_dir.
 
-    Writes (best-effort, skipping anything that doesn't exist)::
+    Per-cluster and entirely namespace-scoped (works under minimal RBAC). Writes
+    (best-effort, skipping anything that doesn't exist)::
 
         <output_dir>/
           pods/<pod>.yaml      # full pod spec + status
           events/<pod>.yaml    # events involving each pod
           services.yaml        # resources carrying the skypilot-cluster-name
           deployments.yaml     #   label -- i.e. what SkyPilot created during
-          ...                  #   instance creation
-          kueue/               # Kueue objects, if Kueue is in use:
-            workloads.yaml     #   this cluster's Workload(s)
-            localqueues.yaml   #   the namespace's LocalQueues
-            clusterqueues.yaml #   cluster-scoped quota config (+flavors,
-            ...                #   topologies)
+          ...                  #   instance creation (PVCs, ConfigMaps,
+          secrets.yaml         #   Secrets [redacted], Ingresses)
+          kueue/workloads.yaml # this cluster's Kueue Workload, if it uses Kueue
+
+    Cluster-WIDE k8s info (GPU-metrics pods, the non-Workload Kueue objects) is
+    not tied to one cluster; it's collected once per kube context by
+    ``dump_context_resources``, not here.
 
     Args:
         context: kube context the cluster lives in (None = current context).
@@ -97,24 +120,92 @@ def dump_cluster_resources(context: Optional[str], namespace: str,
     def to_dict(obj: Any) -> Dict[str, Any]:
         return _strip_managed_fields(api_client.sanitize_for_serialization(obj))
 
-    pods = _dump_pods(context, namespace, cluster_name_on_cloud, output_dir,
-                      to_dict, errors)
+    pods, reachable = _dump_pods(context, namespace, cluster_name_on_cloud,
+                                 output_dir, to_dict, errors)
+    if not reachable:
+        # The context is defunct (the pod list couldn't connect). Skip the
+        # remaining per-cluster calls rather than stacking one timeout each.
+        return errors
     _dump_labeled_resources(context, namespace, cluster_name_on_cloud,
                             output_dir, to_dict, errors)
-    # Only dump Kueue objects if this cluster is actually using Kueue -- its
-    # pods carry the queue-name label, which is the same signal Kueue uses to
-    # decide whether to manage a pod, so the two conditions coincide. (A
-    # using-Kueue cluster can transiently lack a Workload, so the label -- not
-    # the Workload -- is the reliable signal.) Caveat: a cluster with Kueue's
-    # non-default manageJobsWithoutQueueName=true would have even its unlabeled
-    # pods managed by Kueue; this gate would then skip Kueue for a cluster it
-    # does affect. We accept that to avoid noise in the common case.
+    # Only dump the Workload if this cluster is actually using Kueue -- its pods
+    # carry the queue-name label, which is the same signal Kueue uses to decide
+    # whether to manage a pod, so the two conditions coincide. (A using-Kueue
+    # cluster can transiently lack a Workload, so the label -- not the Workload
+    # -- is the reliable signal.) Caveat: a cluster with Kueue's non-default
+    # manageJobsWithoutQueueName=true would have even its unlabeled pods managed
+    # by Kueue; this gate would then skip it. We accept that to avoid noise in
+    # the common case.
     uses_kueue = any(
         _KUEUE_QUEUE_NAME_LABEL in (getattr(pod.metadata, 'labels', None) or {})
         for pod in pods)
     if uses_kueue:
-        _dump_kueue_objects(context, namespace, cluster_name_on_cloud,
-                            output_dir, errors)
+        _dump_workload(context, namespace, cluster_name_on_cloud, output_dir,
+                       errors)
+    return errors
+
+
+def dump_context_resources(context: Optional[str],
+                           output_dir: str) -> List[Dict[str, str]]:
+    """Snapshot cluster-WIDE k8s infra for a kube context into output_dir.
+
+    These objects are shared by every SkyPilot cluster on the context, so the
+    caller fetches them once per unique context (not per cluster). Writes
+    (best-effort)::
+
+        <output_dir>/
+          context.json         # always: {context, reachable} -- so even a
+                               # bare or unreachable context stays visible
+          gpu_metrics/         # if present:
+            prometheus-server.yaml
+            dcgm-exporter.yaml
+          kueue/               # if Kueue is installed on the context:
+            localqueues.yaml  clusterqueues.yaml
+            resourceflavors.yaml  topologies.yaml
+
+    These are cluster-wide API calls (``list_pod_for_all_namespaces`` /
+    cluster-scoped custom-object lists), so they need broader RBAC than the
+    per-cluster path and are best-effort. The first call doubles as a
+    reachability gate: a connection/timeout error means the context is defunct,
+    so we record it and skip the rest (see ``_dump_gpu_metrics_pods``) rather
+    than stacking timeouts.
+
+    Returns error records with ``resource`` relative to ``output_dir`` (e.g.
+    ``gpu_metrics/prometheus-server``) for the caller to prefix with the
+    context.
+    """
+    errors: List[Dict[str, str]] = []
+    os.makedirs(output_dir, exist_ok=True)
+
+    api_client = kubernetes.api_client(context)
+
+    def to_dict(obj: Any) -> Dict[str, Any]:
+        return _strip_managed_fields(api_client.sanitize_for_serialization(obj))
+
+    reachable = _dump_gpu_metrics_pods(context, output_dir, to_dict, errors)
+    # If the context's first cluster-wide call failed to even connect, it's
+    # defunct -- skip the Kueue calls too rather than racking up more timeouts.
+    if reachable:
+        _dump_kueue_cluster_objects(context, output_dir, errors)
+
+    # Always drop a marker recording the context + whether it was reachable.
+    # Without it, a reachable context with no cluster-wide infra (or an
+    # unreachable one) leaves an empty dir, which the dump's zip omits -- so a
+    # reader couldn't tell "checked, nothing here" from "never checked". The
+    # marker guarantees every context the dump touched is visible.
+    try:
+        with open(os.path.join(output_dir, 'context.json'),
+                  'w',
+                  encoding='utf-8') as f:
+            json.dump({
+                'context': context,
+                'reachable': reachable
+            },
+                      f,
+                      indent=2,
+                      default=str)
+    except OSError as e:
+        _record_error(errors, 'context.json', e)
     return errors
 
 
@@ -126,6 +217,30 @@ def _record_error(errors: List[Dict[str, str]], resource: str,
         'error': str(e),
         'traceback': traceback.format_exc(),
     })
+
+
+def _fail_fast(api: Any) -> Any:
+    """Disable urllib3 connection retries on a freshly-built k8s client.
+
+    ``_request_timeout`` bounds a single connect attempt, but urllib3 retries a
+    failed connection ~3x by default -- so against a defunct context each call
+    takes ~4x the timeout (~20s for a 5s timeout), and the per-cluster path
+    stacks several such calls into minutes. These are best-effort diagnostic
+    reads where a connection failure should fail fast, not be retried, so we set
+    retries=0 on the client's connection pool (debug-only -- real API calls keep
+    their retries). Mutating ``connection_pool_kw`` takes effect because the
+    per-host pool is created lazily on the first request. Best-effort: if the
+    client internals differ, we leave retries as-is rather than crash.
+
+    Returns ``api`` for call-site chaining, e.g.
+    ``_fail_fast(kubernetes.core_api(context))``.
+    """
+    client = getattr(api, 'api_client', api)
+    try:
+        client.rest_client.pool_manager.connection_pool_kw['retries'] = 0
+    except AttributeError:
+        pass
+    return api
 
 
 def _write_yaml(path: str, obj: Any) -> None:
@@ -167,7 +282,7 @@ def _with_type_meta(obj_dict: Dict[str, Any], api_version: str,
 def _dump_pods(context: Optional[str], namespace: str,
                cluster_name_on_cloud: str, output_dir: str,
                to_dict: Callable[[Any], Dict[str, Any]],
-               errors: List[Dict[str, str]]) -> List[Any]:
+               errors: List[Dict[str, str]]) -> Tuple[List[Any], bool]:
     """Dump the cluster's pods (spec/status) and the events involving them.
 
     Both come from a single ``list`` call each -- pods by the
@@ -176,20 +291,30 @@ def _dump_pods(context: Optional[str], namespace: str,
     rather than one (or two) per pod. List items carry no TypeMeta, so
     apiVersion/kind are stamped back on (see _with_type_meta).
 
-    Returns the pod objects (so the caller can inspect their labels, e.g. to
-    decide whether the cluster is using Kueue).
+    Returns ``(pods, reachable)``. ``pods`` lets the caller inspect labels (e.g.
+    to decide whether the cluster is using Kueue). ``reachable`` is False only
+    when the pod list -- the first call against the context -- failed to even
+    connect (a defunct context); the caller uses it to skip this cluster's
+    remaining calls rather than stacking timeouts. Any other failure (e.g. RBAC)
+    leaves ``reachable`` True so the rest of the dump still proceeds.
     """
-    core = kubernetes.core_api(context)
+    core = _fail_fast(kubernetes.core_api(context))
     label_selector = (f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}='
                       f'{cluster_name_on_cloud}')
 
-    # Pods: one list call by label gets the head + all workers.
+    # Pods: one list call by label gets the head + all workers. This is the
+    # first call against the context, so it doubles as the reachability gate.
     pods = []
     try:
         pods = core.list_namespaced_pod(
             namespace,
             label_selector=label_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error() as e:
+        # Couldn't connect -- the context is defunct. Signal the caller to skip
+        # this cluster's remaining calls rather than stack timeouts.
+        _record_error(errors, 'kubernetes/pods', e)
+        return [], False
     except Exception as e:  # pylint: disable=broad-except
         _record_error(errors, 'kubernetes/pods', e)
     if pods:
@@ -205,7 +330,7 @@ def _dump_pods(context: Optional[str], namespace: str,
     # be one call per pod.
     pod_names = {pod.metadata.name for pod in pods}
     if not pod_names:
-        return pods
+        return pods, True
     try:
         events = core.list_namespaced_event(
             namespace,
@@ -213,7 +338,7 @@ def _dump_pods(context: Optional[str], namespace: str,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except Exception as e:  # pylint: disable=broad-except
         _record_error(errors, 'kubernetes/events', e)
-        return pods
+        return pods, True
 
     events_by_pod: Dict[str, List[Any]] = {}
     for event in events:
@@ -227,7 +352,7 @@ def _dump_pods(context: Optional[str], namespace: str,
             _write_yaml(os.path.join(events_dir, f'{name}.yaml'), [
                 _with_type_meta(to_dict(ev), 'v1', 'Event') for ev in pod_events
             ])
-    return pods
+    return pods, True
 
 
 def _dump_labeled_resources(context: Optional[str], namespace: str,
@@ -242,7 +367,7 @@ def _dump_labeled_resources(context: Optional[str], namespace: str,
     """
     label_selector = (f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}='
                       f'{cluster_name_on_cloud}')
-    core = kubernetes.core_api(context)
+    core = _fail_fast(kubernetes.core_api(context))
 
     # (filename, apiVersion, kind, lister) for the kinds SkyPilot may create.
     # Listing a kind we didn't create just returns an empty list, so an
@@ -255,11 +380,11 @@ def _dump_labeled_resources(context: Optional[str], namespace: str,
             namespace,
             label_selector=label_selector,
             _request_timeout=kubernetes.API_TIMEOUT).items),
-        ('deployments.yaml', 'apps/v1', 'Deployment',
-         lambda: kubernetes.apps_api(context).list_namespaced_deployment(
-             namespace,
-             label_selector=label_selector,
-             _request_timeout=kubernetes.API_TIMEOUT).items),
+        ('deployments.yaml', 'apps/v1', 'Deployment', lambda: _fail_fast(
+            kubernetes.apps_api(context)).list_namespaced_deployment(
+                namespace,
+                label_selector=label_selector,
+                _request_timeout=kubernetes.API_TIMEOUT).items),
         ('persistent_volume_claims.yaml', 'v1', 'PersistentVolumeClaim',
          lambda: core.list_namespaced_persistent_volume_claim(
              namespace,
@@ -271,10 +396,11 @@ def _dump_labeled_resources(context: Optional[str], namespace: str,
                                                  _request_timeout=kubernetes.
                                                  API_TIMEOUT).items),
         ('ingresses.yaml', 'networking.k8s.io/v1', 'Ingress',
-         lambda: kubernetes.networking_api(context).list_namespaced_ingress(
-             namespace,
-             label_selector=label_selector,
-             _request_timeout=kubernetes.API_TIMEOUT).items),
+         lambda: _fail_fast(kubernetes.networking_api(context)).
+         list_namespaced_ingress(namespace,
+                                 label_selector=label_selector,
+                                 _request_timeout=kubernetes.API_TIMEOUT).items
+        ),
     ]
     # TODO(ishan): serialization is all-or-nothing per kind -- if to_dict throws
     # on one item, the whole <kind>.yaml is dropped (recorded as a single
@@ -320,98 +446,179 @@ def _dump_labeled_resources(context: Optional[str], namespace: str,
         _record_error(errors, 'kubernetes/secrets', e)
 
 
-def _resolve_kueue_version(api: Any, namespace: str,
-                           errors: List[Dict[str, str]]) -> Optional[str]:
+def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
+                           to_dict: Callable[[Any], Dict[str, Any]],
+                           errors: List[Dict[str, str]]) -> bool:
+    """Dump the GPU-metrics observability pods, if present.
+
+    Into ``<output_dir>/gpu_metrics/``:
+      - prometheus-server: the metrics Prometheus server pod (helm release
+        ``skypilot-prometheus`` in the ``skypilot`` namespace).
+      - dcgm-exporter: the DCGM exporter pods, matched by name substring across
+        all namespaces (the namespace varies by installer).
+
+    These are cluster-wide infra (not per-SkyPilot-cluster), so they're dumped
+    whenever present -- an absent component just yields no file. Both are found
+    from a single cluster-wide pod list (DCGM's namespace varies, so it can't be
+    scoped, and we reuse that list for Prometheus too). Best-effort.
+
+    Returns whether the context was *reachable*: False if the (first
+    cluster-wide) list call timed out / couldn't connect -- the caller uses this
+    to skip further cluster-wide calls on a defunct context. A reachable context
+    that errors for another reason (e.g. RBAC 403) still returns True.
+    """
+    core = _fail_fast(kubernetes.core_api(context))
+    try:
+        all_pods = core.list_pod_for_all_namespaces(
+            _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error() as e:
+        # Couldn't connect -- the context is likely defunct. Signal the caller
+        # to skip the remaining cluster-wide calls rather than stack timeouts.
+        _record_error(errors, 'gpu_metrics', e)
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        # Reachable, but the call failed (e.g. RBAC 403); record and continue.
+        _record_error(errors, 'gpu_metrics', e)
+        return True
+
+    prom_pods = [
+        p for p in all_pods
+        if p.metadata.namespace == _GPU_METRICS_NAMESPACE and
+        p.metadata.name.startswith(_PROMETHEUS_SERVER_NAME_PREFIX)
+    ]
+    dcgm_pods = [
+        p for p in all_pods if _DCGM_EXPORTER_NAME_SUBSTR in p.metadata.name
+    ]
+    out_dir = os.path.join(output_dir, 'gpu_metrics')
+    for filename, matched in [('prometheus-server.yaml', prom_pods),
+                              ('dcgm-exporter.yaml', dcgm_pods)]:
+        if matched:
+            os.makedirs(out_dir, exist_ok=True)
+            _write_yaml(
+                os.path.join(out_dir, filename),
+                [_with_type_meta(to_dict(p), 'v1', 'Pod') for p in matched])
+    return True
+
+
+def _resolve_kueue_version(probe: Callable[[str],
+                                           None], errors: List[Dict[str, str]],
+                           error_resource: str) -> Optional[str]:
     """Return the newest Kueue CRD version the cluster serves, or None.
 
-    Probes the workloads CRD with _KUEUE_VERSIONS newest-first. A 404 means that
-    version isn't served, so we try the next; if every version 404s the CRD
-    isn't installed at all -- the cluster doesn't use Kueue -- and we return
-    None so the caller skips silently. A non-404 failure is recorded.
+    ``probe(version)`` makes a cheap list call for that version and raises on
+    failure; the per-cluster caller probes the namespaced ``workloads`` plural,
+    the per-context caller probes the cluster-scoped ``clusterqueues`` plural --
+    so each stays within its RBAC scope. We try _KUEUE_VERSIONS newest-first: a
+    404 means that version isn't served, so we try the next; if every version
+    404s the CRD isn't installed -- Kueue isn't in use -- and we return None so
+    the caller skips silently. A non-404 failure is recorded under
+    ``error_resource``.
     """
     for version in _KUEUE_VERSIONS:
         try:
-            api.list_namespaced_custom_object(
-                group=_KUEUE_GROUP,
-                version=version,
-                namespace=namespace,
-                plural=_KUEUE_WORKLOADS_PLURAL,
-                limit=1,
-                _request_timeout=kubernetes.API_TIMEOUT)
+            probe(version)
             return version
         except kubernetes.api_exception() as e:
             if e.status == 404:
                 continue
-            _record_error(errors, 'kubernetes/kueue/workloads', e)
+            _record_error(errors, error_resource, e)
             return None
         except Exception as e:  # pylint: disable=broad-except
-            _record_error(errors, 'kubernetes/kueue/workloads', e)
+            _record_error(errors, error_resource, e)
             return None
     return None
 
 
-def _dump_kueue_objects(context: Optional[str], namespace: str,
-                        cluster_name_on_cloud: str, output_dir: str,
-                        errors: List[Dict[str, str]]) -> None:
-    """Dump the Kueue objects relevant to this cluster, if Kueue is in use.
+def _dump_workload(context: Optional[str], namespace: str,
+                   cluster_name_on_cloud: str, output_dir: str,
+                   errors: List[Dict[str, str]]) -> None:
+    """Dump this cluster's Kueue Workload (1:1, named cluster_name_on_cloud).
 
-    Into ``<output_dir>/kueue/``:
-      - workloads: this cluster's Workload(s), by the pod-group label.
-      - localqueues: the namespace's LocalQueues (the queues it can submit to).
-      - clusterqueues/resourceflavors/topologies: cluster-scoped quota config,
-        dumped whole -- admission/preemption depends on the full picture (e.g.
-        borrowing across ClusterQueues), and these carry no per-cluster label.
-
-    The custom objects API returns plain dicts, so no serialization is needed.
-    The served CRD version is resolved once (see _resolve_kueue_version); if
-    Kueue isn't installed we skip everything.
+    Kueue names the pod-group Workload after the group, which SkyPilot sets to
+    the cluster's on-cloud name -- so the Workload's metadata.name *is*
+    cluster_name_on_cloud, and we select it by name (a field selector returns an
+    empty list, not a 404, when absent). Namespace-scoped, so it stays within
+    the per-cluster RBAC scope. The cluster-wide Kueue config (queues, flavors,
+    topologies) is dumped once per context by ``_dump_kueue_cluster_objects``.
     """
-    api = kubernetes.custom_objects_api(context)
-    version = _resolve_kueue_version(api, namespace, errors)
+    api = _fail_fast(kubernetes.custom_objects_api(context))
+
+    def _probe(version: str) -> None:
+        api.list_namespaced_custom_object(
+            group=_KUEUE_GROUP,
+            version=version,
+            namespace=namespace,
+            plural=_KUEUE_WORKLOADS_PLURAL,
+            limit=1,
+            _request_timeout=kubernetes.API_TIMEOUT)
+
+    version = _resolve_kueue_version(_probe, errors,
+                                     'kubernetes/kueue/workloads')
     if version is None:
-        logger.debug('Kueue CRDs not served; cluster is not using Kueue, '
-                     'skipping.')
+        logger.debug('Kueue CRDs not served; skipping Workload.')
         return
+    try:
+        response = api.list_namespaced_custom_object(
+            group=_KUEUE_GROUP,
+            version=version,
+            namespace=namespace,
+            plural=_KUEUE_WORKLOADS_PLURAL,
+            field_selector=f'metadata.name={cluster_name_on_cloud}',
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'kubernetes/kueue/workloads', e)
+        return
+    items = response.get('items', []) if isinstance(response, dict) else []
+    if items:
+        kueue_dir = os.path.join(output_dir, 'kueue')
+        os.makedirs(kueue_dir, exist_ok=True)
+        _write_yaml(os.path.join(kueue_dir, 'workloads.yaml'),
+                    [_strip_managed_fields(item) for item in items])
 
-    # The Workload's name is the cluster's on-cloud name (Kueue names the
-    # pod-group Workload after the group); it carries no per-cluster label, so
-    # select it by name -- a field selector returns an empty list (not a 404)
-    # when absent.
-    workload_selector = f'metadata.name={cluster_name_on_cloud}'
-    kueue_dir = os.path.join(output_dir, 'kueue')
 
-    # (filename, lister). The Workload is scoped to this cluster by name;
-    # LocalQueues to the namespace; the rest are cluster-scoped (listed whole).
-    # A CRD a given Kueue version doesn't serve 404s and is skipped.
-    list_namespaced = functools.partial(api.list_namespaced_custom_object,
-                                        group=_KUEUE_GROUP,
-                                        version=version,
-                                        namespace=namespace,
-                                        _request_timeout=kubernetes.API_TIMEOUT)
+def _dump_kueue_cluster_objects(context: Optional[str], output_dir: str,
+                                errors: List[Dict[str, str]]) -> None:
+    """Dump a context's cluster-WIDE Kueue config (not tied to one cluster).
+
+    Into ``<output_dir>/kueue/``: LocalQueues, ClusterQueues, ResourceFlavors,
+    Topologies -- the shared quota picture admission/preemption depends on. All
+    via the cluster-scoped list endpoint, which returns objects across every
+    namespace (including for the namespaced LocalQueue). Needs cluster-wide
+    RBAC; best-effort. The served CRD version is resolved once via a
+    cluster-scoped probe.
+    """
+    api = _fail_fast(kubernetes.custom_objects_api(context))
+
+    def _probe(version: str) -> None:
+        api.list_cluster_custom_object(group=_KUEUE_GROUP,
+                                       version=version,
+                                       plural='clusterqueues',
+                                       limit=1,
+                                       _request_timeout=kubernetes.API_TIMEOUT)
+
+    version = _resolve_kueue_version(_probe, errors, 'kueue')
+    if version is None:
+        logger.debug('Kueue CRDs not served on context; skipping.')
+        return
     list_cluster = functools.partial(api.list_cluster_custom_object,
                                      group=_KUEUE_GROUP,
                                      version=version,
                                      _request_timeout=kubernetes.API_TIMEOUT)
-    listers: List[Tuple[str, Callable[[], Any]]] = [
-        ('workloads.yaml', lambda: list_namespaced(
-            plural='workloads', field_selector=workload_selector)),
-        ('localqueues.yaml', lambda: list_namespaced(plural='localqueues')),
-        ('clusterqueues.yaml', lambda: list_cluster(plural='clusterqueues')),
-        ('resourceflavors.yaml',
-         lambda: list_cluster(plural='resourceflavors')),
-        ('topologies.yaml', lambda: list_cluster(plural='topologies')),
-    ]
-    for filename, lister in listers:
+    kueue_dir = os.path.join(output_dir, 'kueue')
+    for filename, plural in [('localqueues.yaml', 'localqueues'),
+                             ('clusterqueues.yaml', 'clusterqueues'),
+                             ('resourceflavors.yaml', 'resourceflavors'),
+                             ('topologies.yaml', 'topologies')]:
         try:
-            response = lister()
+            response = list_cluster(plural=plural)
         except kubernetes.api_exception() as e:
             if e.status == 404:
                 # This CRD isn't served at the resolved version; skip it.
                 continue
-            _record_error(errors, f'kubernetes/kueue/{filename}', e)
+            _record_error(errors, f'kueue/{filename}', e)
             continue
         except Exception as e:  # pylint: disable=broad-except
-            _record_error(errors, f'kubernetes/kueue/{filename}', e)
+            _record_error(errors, f'kueue/{filename}', e)
             continue
 
         # Custom-object items are already dicts (no to_dict), so strip
