@@ -856,13 +856,6 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
         logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
 
 
-def user_initiated_down(cluster_name: str,
-                        purge: bool = False,
-                        graceful: bool = False,
-                        graceful_timeout: Optional[int] = None) -> None:
-    down(cluster_name, purge, graceful, graceful_timeout, user_initiated=True)
-
-
 @usage_lib.entrypoint
 def down(cluster_name: str,
          purge: bool = False,
