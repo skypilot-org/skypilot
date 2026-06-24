@@ -1028,49 +1028,44 @@ def _collect_cluster_kubernetes_resources(
             })
 
 
-def _dump_kube_contexts_info(
-        cluster_names: Set[str],
-        dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None) -> None:
-    """Dump cluster-WIDE k8s objects once per unique kube context.
+def _dump_kube_contexts_info(dump_dir: str,
+                             errors: Optional[List[Dict[str,
+                                                        str]]] = None) -> None:
+    """Dump cluster-WIDE k8s objects once per allowed kube context.
 
     The GPU-metrics pods (Prometheus server, DCGM exporter) and the non-Workload
     Kueue objects (ClusterQueues / LocalQueues / ResourceFlavors / Topologies)
-    are shared across all SkyPilot clusters on a kube context -- fetching them
-    per cluster would re-fetch identical objects N times. So we dedup the dumped
-    clusters down to their unique contexts and fetch each once into
-    ``kubernetes_contexts/<sanitized-context>/``.
+    are shared across all SkyPilot clusters on a kube context, so we fetch them
+    once per context into ``kubernetes_contexts/<sanitized-context>/``.
+
+    Source of truth is ``Kubernetes.existing_allowed_contexts()`` -- the same
+    set ``sky check`` uses -- *not* contexts derived from the dumped clusters. A
+    context with no SkyPilot clusters (e.g. a freshly onboarded tenant) is still
+    scraped, so its GPU-metrics / Kueue config can be debugged before anything
+    runs there. ``None`` in the list means in-cluster auth (see
+    _sanitize_context_name).
 
     Robustness (tenants can have defunct contexts that time out): every call is
     5s-bounded, the per-context fetch fast-fails on the first connection error,
     and contexts are fetched in parallel -- so N dead contexts cost ~5s, not
     ~5s*calls*N. Best-effort: errors are recorded, never aborts the dump.
     """
-    if not cluster_names:
+    try:
+        contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to list allowed Kubernetes contexts: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'kubernetes_contexts',
+                'resource': 'allowed_contexts',
+                'error': str(e),
+                'traceback': _full_traceback(),
+            })
         return
 
-    # Dedup the dumped clusters down to their unique kube contexts. Keyed by a
-    # sentinel for the in-cluster (None) context so it dedups too.
-    contexts: Dict[Any, Optional[str]] = {}
-    for cluster_name in cluster_names:
-        try:
-            cluster_record = global_user_state.get_cluster_from_name(
-                cluster_name)
-            handle = cluster_record.get('handle') if cluster_record else None
-            if handle is None:
-                continue
-            coords = _kube_coordinates_for_handle(handle)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to resolve kube context for cluster '
-                         f'{cluster_name!r}: {e}')
-            continue
-        if coords is None:
-            continue
-        context = coords[0]
-        contexts.setdefault('__in_cluster__' if context is None else context,
-                            context)
-
-    if not contexts:
+    # Dedupe defensively while preserving order (None = in-cluster is allowed).
+    unique_contexts = list(dict.fromkeys(contexts))
+    if not unique_contexts:
         return
 
     contexts_root = os.path.join(dump_dir, 'kubernetes_contexts')
@@ -1091,7 +1086,6 @@ def _dump_kube_contexts_info(
                 'traceback': _full_traceback(),
             }]
 
-    unique_contexts = list(contexts.values())
     num_threads = min(len(unique_contexts), 8)
     results = subprocess_utils.run_in_parallel(_dump_one, unique_contexts,
                                                num_threads)
@@ -1506,11 +1500,9 @@ def _build_debug_dump(
                        dump_dir,
                        errors=errors)
     # Cluster-wide k8s objects (GPU-metrics pods, Kueue quota config), fetched
-    # once per unique kube context across the dumped clusters rather than per
-    # cluster. Must run after _dump_cluster_info so it dedups the same clusters.
-    _dump_kube_contexts_info(debug_dump_context['cluster_names'],
-                             dump_dir,
-                             errors=errors)
+    # once per allowed kube context (source of truth: existing_allowed_contexts,
+    # so a context with no SkyPilot clusters is still captured).
+    _dump_kube_contexts_info(dump_dir, errors=errors)
     _dump_managed_job_info(debug_dump_context['managed_job_ids'],
                            dump_dir,
                            errors=errors)

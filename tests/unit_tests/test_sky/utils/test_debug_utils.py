@@ -2902,87 +2902,63 @@ class TestSanitizeContextName:
 
 
 class TestDumpKubeContextsInfo:
-    """Tests for _dump_kube_contexts_info (per-context cluster-wide dump)."""
+    """Tests for _dump_kube_contexts_info.
 
-    def _k8s_record(self, context, namespace='ns'):
-        runner = mock.MagicMock(spec=command_runner.KubernetesCommandRunner)
-        runner.context = context
-        runner.namespace = namespace
-        handle = mock.Mock()
-        handle.launched_resources.cloud = clouds.Kubernetes()
-        handle.get_command_runners.return_value = [runner]
-        return {'handle': handle}
+    Source of truth is Kubernetes.existing_allowed_contexts() (not the dumped
+    clusters), so these patch that classmethod.
+    """
 
-    def _non_k8s_record(self):
-        handle = mock.Mock()
-        handle.launched_resources.cloud = mock.Mock()  # not Kubernetes
-        return {'handle': handle}
+    @staticmethod
+    def _patch_allowed(contexts):
+        return mock.patch.object(debug_utils.clouds.Kubernetes,
+                                 'existing_allowed_contexts',
+                                 return_value=contexts)
 
-    def test_dedups_clusters_to_unique_contexts(self, tmp_path):
-        """Two clusters on the same context => the context is fetched once."""
-        records = {
-            'c1': self._k8s_record('ctx-a'),
-            'c2': self._k8s_record('ctx-a'),
-        }
+    def test_dumps_each_allowed_context(self, tmp_path):
         errors: List[Dict[str, str]] = []
-        with mock.patch.object(debug_utils.global_user_state,
-                               'get_cluster_from_name',
-                               side_effect=lambda n: records[n]), \
+        with self._patch_allowed(['ctx-a', 'ctx-b']), \
              mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
                         return_value=[]) as dump:
-            debug_utils._dump_kube_contexts_info({'c1', 'c2'}, str(tmp_path),
-                                                 errors)
-
-        dump.assert_called_once()
-        assert dump.call_args.kwargs['context'] == 'ctx-a'
-        assert not errors
-
-    def test_distinct_contexts_each_fetched(self, tmp_path):
-        records = {
-            'c1': self._k8s_record('ctx-a'),
-            'c2': self._k8s_record('ctx-b'),
-        }
-        errors: List[Dict[str, str]] = []
-        with mock.patch.object(debug_utils.global_user_state,
-                               'get_cluster_from_name',
-                               side_effect=lambda n: records[n]), \
-             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
-                        return_value=[]) as dump:
-            debug_utils._dump_kube_contexts_info({'c1', 'c2'}, str(tmp_path),
-                                                 errors)
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
 
         fetched = {c.kwargs['context'] for c in dump.call_args_list}
         assert fetched == {'ctx-a', 'ctx-b'}
-
-    def test_non_kubernetes_clusters_are_skipped(self, tmp_path):
-        records = {'c1': self._non_k8s_record()}
-        errors: List[Dict[str, str]] = []
-        with mock.patch.object(debug_utils.global_user_state,
-                               'get_cluster_from_name',
-                               side_effect=lambda n: records[n]), \
-             mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
-                       ) as dump:
-            debug_utils._dump_kube_contexts_info({'c1'}, str(tmp_path), errors)
-
-        dump.assert_not_called()
-        # No k8s contexts => the kubernetes_contexts/ dir isn't created.
-        assert not (tmp_path / 'kubernetes_contexts').exists()
         assert not errors
 
-    def test_in_cluster_context_maps_to_single_dir(self, tmp_path):
-        """A None (in-cluster) context dedups and writes into 'in-cluster'."""
-        records = {
-            'c1': self._k8s_record(None),
-            'c2': self._k8s_record(None),
-        }
+    def test_allowed_context_with_no_clusters_is_still_dumped(self, tmp_path):
+        """The whole point of Ask #1: a context in allowed_contexts is scraped
+        even with zero SkyPilot clusters on it (fresh-onboarding case). No
+        cluster state is consulted at all."""
         errors: List[Dict[str, str]] = []
-        with mock.patch.object(debug_utils.global_user_state,
-                               'get_cluster_from_name',
-                               side_effect=lambda n: records[n]), \
+        with self._patch_allowed(['ctx-fresh']), \
+             mock.patch.object(debug_utils.global_user_state,
+                               'get_cluster_from_name') as get_cluster, \
              mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
                         return_value=[]) as dump:
-            debug_utils._dump_kube_contexts_info({'c1', 'c2'}, str(tmp_path),
-                                                 errors)
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_called_once()
+        assert dump.call_args.kwargs['context'] == 'ctx-fresh'
+        # The per-context path no longer derives contexts from clusters.
+        get_cluster.assert_not_called()
+
+    def test_dedupes_repeated_contexts(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-a', 'ctx-a']), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=[]) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_called_once()
+        assert dump.call_args.kwargs['context'] == 'ctx-a'
+
+    def test_in_cluster_none_maps_to_in_cluster_dir(self, tmp_path):
+        """existing_allowed_contexts returns None for in-cluster auth."""
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed([None]), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=[]) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
 
         dump.assert_called_once()
         assert dump.call_args.kwargs['context'] is None
@@ -2990,19 +2966,16 @@ class TestDumpKubeContextsInfo:
             os.path.join('kubernetes_contexts', 'in-cluster'))
 
     def test_provider_errors_are_prefixed_with_context(self, tmp_path):
-        records = {'c1': self._k8s_record('ctx-a')}
         provider_errors = [{
             'resource': 'gpu_metrics',
             'error': 'forbidden',
             'traceback': 'tb',
         }]
         errors: List[Dict[str, str]] = []
-        with mock.patch.object(debug_utils.global_user_state,
-                               'get_cluster_from_name',
-                               side_effect=lambda n: records[n]), \
+        with self._patch_allowed(['ctx-a']), \
              mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
                         return_value=provider_errors):
-            debug_utils._dump_kube_contexts_info({'c1'}, str(tmp_path), errors)
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
 
         assert len(errors) == 1
         assert errors[0]['component'] == 'kubernetes_contexts'
@@ -3014,10 +2987,6 @@ class TestDumpKubeContextsInfo:
     def test_one_broken_context_does_not_abort_others(self, tmp_path):
         """run_in_parallel re-raises the first exception; the per-context task
         must swallow it so a broken context can't abort the others' dumps."""
-        records = {
-            'good': self._k8s_record('ctx-good'),
-            'bad': self._k8s_record('ctx-bad'),
-        }
 
         def _dump(context, output_dir):
             del output_dir
@@ -3026,13 +2995,10 @@ class TestDumpKubeContextsInfo:
             return []
 
         errors: List[Dict[str, str]] = []
-        with mock.patch.object(debug_utils.global_user_state,
-                               'get_cluster_from_name',
-                               side_effect=lambda n: records[n]), \
+        with self._patch_allowed(['ctx-good', 'ctx-bad']), \
              mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
                         side_effect=_dump):
-            debug_utils._dump_kube_contexts_info({'good', 'bad'}, str(tmp_path),
-                                                 errors)
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
 
         # The bad context's failure is recorded, the good one still ran.
         assert len(errors) == 1
@@ -3040,10 +3006,26 @@ class TestDumpKubeContextsInfo:
         assert errors[0]['resource'].startswith('ctx-bad-')
         assert 'timed out' in errors[0]['error']
 
-    def test_empty_cluster_names_is_noop(self, tmp_path):
+    def test_no_allowed_contexts_is_noop(self, tmp_path):
         errors: List[Dict[str, str]] = []
-        with mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
+        with self._patch_allowed([]), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
                        ) as dump:
-            debug_utils._dump_kube_contexts_info(set(), str(tmp_path), errors)
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
         dump.assert_not_called()
+        assert not (tmp_path / 'kubernetes_contexts').exists()
         assert not errors
+
+    def test_allowed_contexts_lookup_failure_is_recorded(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with mock.patch.object(debug_utils.clouds.Kubernetes,
+                               'existing_allowed_contexts',
+                               side_effect=RuntimeError('kubeconfig boom')), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
+                       ) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_not_called()
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'allowed_contexts'
+        assert 'boom' in errors[0]['error']
