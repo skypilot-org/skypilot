@@ -2150,7 +2150,18 @@ class ServeCodeGen:
             f'{service_name!r}, {job_id}, **kwargs)',
             'print(msg, end="", flush=True)'
         ]
-        return cls._build(code)
+        cmd = cls._build(code)
+        # When running in consolidation mode, the codegen subprocess inherits
+        # SKYPILOT_GLOBAL_CONFIG pointing to the client override config, which
+        # lacks serve.controller.consolidation_mode=true. The subprocess would
+        # then read the server config from the client override path and
+        # incorrectly conclude it is NOT in consolidation mode, causing a
+        # 300-second CONTROLLER_SETUP_TIMEOUT. Bake OVERRIDE_CONSOLIDATION_MODE
+        # into the shell command so the subprocess always sees the correct mode.
+        if is_consolidation_mode(pool):
+            cmd = (f'export {skylet_constants.OVERRIDE_CONSOLIDATION_MODE}'
+                   f'=true; {cmd}')
+        return cmd
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,

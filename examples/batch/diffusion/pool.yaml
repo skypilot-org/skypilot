@@ -11,4 +11,8 @@ setup: |
   uv venv .venv
   source .venv/bin/activate
   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-  uv pip install diffusers transformers accelerate safetensors huggingface_hub
+  # transformers must stay <5.10: the cu124 index tops out at torch 2.6.0,
+  # while transformers 5.10.x references torch.float8_e8m0fnu (torch >= 2.7)
+  # at import time, crashing `from diffusers import StableDiffusionPipeline`.
+  # See https://github.com/huggingface/transformers/issues/46389.
+  uv pip install diffusers 'transformers<5.10' accelerate safetensors huggingface_hub

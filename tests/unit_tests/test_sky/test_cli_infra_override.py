@@ -276,5 +276,40 @@ class TestCliInfraOverride(unittest.TestCase):
         # effectively removing the region constraint and allowing any GCP region.
 
 
+class TestCliPriorityOverride(unittest.TestCase):
+    """Tests for the --priority CLI flag override parsing."""
+
+    def test_integer_priority_sets_priority_and_clears_class(self):
+        """An integer value sets priority and clears priority_class."""
+        for value, expected in [('100', 100), ('-50', -50), ('0', 0),
+                                ('  42 ', 42)]:
+            with self.subTest(value=value):
+                params = command._parse_override_params(priority=value)
+                self.assertEqual(params['priority'], expected)
+                self.assertIsNone(params['priority_class'])
+
+    def test_string_priority_sets_class_and_clears_priority(self):
+        """A non-integer value sets priority_class and clears priority."""
+        for value in ['high', 'low', '4.5', 'high-priority']:
+            with self.subTest(value=value):
+                params = command._parse_override_params(priority=value)
+                self.assertEqual(params['priority_class'], value)
+                self.assertIsNone(params['priority'])
+
+    def test_none_resets_both(self):
+        """Passing 'none' (any case) clears both priority and class."""
+        for value in ['none', 'None', 'NONE']:
+            with self.subTest(value=value):
+                params = command._parse_override_params(priority=value)
+                self.assertIsNone(params['priority'])
+                self.assertIsNone(params['priority_class'])
+
+    def test_unset_priority_adds_nothing(self):
+        """Not passing --priority leaves both keys out of the override."""
+        params = command._parse_override_params()
+        self.assertNotIn('priority', params)
+        self.assertNotIn('priority_class', params)
+
+
 if __name__ == '__main__':
     unittest.main()

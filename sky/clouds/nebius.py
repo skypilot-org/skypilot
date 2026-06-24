@@ -313,14 +313,14 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        if (resources.image_id is None or
-                resources.extract_docker_image() is not None):
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is None:
             image_id = default_image_family
         else:
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                image_id = resources.image_id[region.name]
+                image_id = cloud_image_id[region.name]
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',

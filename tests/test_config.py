@@ -1410,6 +1410,313 @@ def test_get_effective_queue_name_workspace_override(monkeypatch,
         override_configs=cloud_level_override) == 'override-queue'
 
 
+def test_get_effective_namespace(monkeypatch, tmp_path) -> None:
+    """Full precedence matrix across all four resolver layers."""
+    with open(tmp_path / 'namespace.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            namespace: global-default-namespace
+            context_configs:
+                contextA:
+                    namespace: contextA-global-namespace
+                contextB:
+                    # No namespace set; falls through to `kubernetes.namespace`.
+                    kueue:
+                        local_queue_name: contextB-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    context_configs:
+                        contextA:
+                            namespace: workspaceA-contextA-namespace
+                        contextB:
+                            namespace: workspaceA-contextB-namespace
+            workspaceB:
+                kubernetes:
+                    # Workspace declared but sets no namespace overrides.
+                    allowed_contexts: ['contextA']
+            workspaceC:
+                kubernetes:
+                    # Workspace-level shorthand; no per-context override.
+                    namespace: workspaceC-shorthand-namespace
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'namespace.yaml')
+    skypilot_config.reload_config()
+
+    # Layer 1: workspace per-context wins over every lower layer.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceA') == 'workspaceA-contextA-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceA') == 'workspaceA-contextB-namespace'
+
+    # Layer 2: workspace cloud-level shorthand wins over the global
+    # per-context (layer 3) and global cloud-level (layer 4) layers, and
+    # applies regardless of which context the launch targets.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceC') == 'workspaceC-shorthand-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceC') == 'workspaceC-shorthand-namespace'
+
+    # Layer 3: global per-context wins when no workspace layer matches.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceB') == 'contextA-global-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='default') == 'contextA-global-namespace'
+
+    # Layer 4: global cloud-level when no per-context override exists.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceB') == 'global-default-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', workspace='default') == 'global-default-namespace'
+
+    # No layer matches: returns None (aws has no config in this fixture).
+    assert skypilot_config.get_effective_namespace(
+        cloud='aws', workspace='workspaceA') is None
+
+
+def test_get_effective_namespace_no_config(monkeypatch, tmp_path) -> None:
+    """Returns None when `namespace` is unset at every layer."""
+    with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            allowed_contexts: ['contextA']
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'empty.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA', workspace='default') is None
+    assert skypilot_config.get_effective_namespace(cloud='kubernetes',
+                                                   workspace='default') is None
+
+
+def test_get_effective_namespace_override_configs(monkeypatch,
+                                                  tmp_path) -> None:
+    """Cloud-level `override_configs` apply inside workspace scope.
+
+    Regression mirror of `test_get_effective_queue_name_workspace_override`.
+    """
+    with open(tmp_path / 'override.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            namespace: global-namespace
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    context_configs:
+                        contextA:
+                            namespace: workspaceA-contextA-namespace
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'override.yaml')
+    skypilot_config.reload_config()
+
+    cloud_level_override = {'kubernetes': {'namespace': 'override-namespace',}}
+
+    # Override replaces the global namespace when no per-context value exists.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        workspace='default',
+        override_configs=cloud_level_override) == 'override-namespace'
+
+    # Per-context value wins over a cloud-level override (more specific).
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=cloud_level_override
+    ) == 'workspaceA-contextA-namespace'
+
+    # Override applies for an unknown workspace (falls through to global).
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        workspace='nonexistent-ws',
+        override_configs=cloud_level_override) == 'override-namespace'
+
+
+def test_get_effective_k8s_config_value_returns_none_when_unset(
+        monkeypatch, tmp_path) -> None:
+    """No matching key at any scope -> None."""
+    with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
+        f.write('kubernetes:\n  context_configs:\n    contextA: {}\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'empty.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=[('namespace',)],
+        region='contextA',
+        workspace='default') is None
+
+
+def test_get_effective_k8s_config_value_property_key_priority(
+        monkeypatch, tmp_path) -> None:
+    """Within a scope, ``property_keys`` order is priority (first hit wins).
+
+    Drives the queue-name semantics: ``quota.queue`` wins over
+    ``kueue.local_queue_name`` because it appears first in the list.
+    Generalised here so the contract is exercised independently of any
+    wrapper.
+    """
+    with open(tmp_path / 'priority.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            primary: from-primary
+            secondary: from-secondary
+            context_configs:
+                contextA:
+                    secondary: contextA-from-secondary
+                contextB:
+                    primary: contextB-from-primary
+                    secondary: contextB-from-secondary
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'priority.yaml')
+    skypilot_config.reload_config()
+
+    keys = [('primary',), ('secondary',)]
+
+    # Cloud-level: both set, `primary` wins.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        workspace='default') == 'from-primary'
+    # Per-context where only `secondary` is set: falls through to it.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='default') == 'contextA-from-secondary'
+    # Per-context where both are set: `primary` wins.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextB',
+        workspace='default') == 'contextB-from-primary'
+    # Reversed order changes the winner.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=[('secondary',), ('primary',)],
+        region='contextB',
+        workspace='default') == 'contextB-from-secondary'
+
+
+def test_get_effective_k8s_config_value_full_precedence_matrix(
+        monkeypatch, tmp_path) -> None:
+    """Full precedence: ws per-context > ws cloud > global per-context > global cloud.
+
+    Uses a custom property name to verify the precedence machinery lives in
+    the shared helper, not in the namespace/queue wrappers.
+    """
+    with open(tmp_path / 'matrix.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            myfield: global-cloud
+            context_configs:
+                contextA:
+                    myfield: global-context
+                contextB: {}
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    myfield: ws-cloud
+                    context_configs:
+                        contextA:
+                            myfield: ws-context
+            workspaceB:
+                kubernetes:
+                    myfield: wsB-cloud
+            workspaceC: {}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'matrix.yaml')
+    skypilot_config.reload_config()
+
+    keys = [('myfield',)]
+
+    # Layer 1: ws per-context wins everything.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='workspaceA') == 'ws-context'
+    # Layer 2: ws cloud wins when ws has no per-context override.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextB',
+        workspace='workspaceA') == 'ws-cloud'
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        workspace='workspaceB') == 'wsB-cloud'
+    # Layer 3: global per-context when ws has no override at any layer.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='workspaceC') == 'global-context'
+    # Layer 4: global cloud as final fallback.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextB',
+        workspace='workspaceC') == 'global-cloud'
+
+
+def test_get_effective_k8s_config_value_override_configs_at_workspace_scope(
+        monkeypatch, tmp_path) -> None:
+    """Cloud-level ``override_configs`` apply inside the workspace scope.
+
+    Mirrors ``test_get_effective_queue_name_workspace_override`` but on the
+    shared helper directly: the override has no ``workspaces`` section, so
+    it must be merged at the *workspace* depth (replacing the workspace's
+    cloud-level value), not at config-root.
+    """
+    with open(tmp_path / 'override.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            myfield: global-cloud
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    myfield: ws-cloud
+                    context_configs:
+                        contextA:
+                            myfield: ws-context
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'override.yaml')
+    skypilot_config.reload_config()
+
+    keys = [('myfield',)]
+    cloud_override = {'kubernetes': {'myfield': 'override-value'}}
+
+    # Cloud-level override replaces the workspace's cloud-level value.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        workspace='workspaceA',
+        override_configs=cloud_override) == 'override-value'
+    # Per-context value at the workspace scope still wins (more specific).
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=cloud_override) == 'ws-context'
+
+
 def _make_config(d: dict) -> config_utils.Config:
     """Helper to build a Config from a plain dict."""
     cfg = config_utils.Config()

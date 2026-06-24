@@ -105,11 +105,14 @@ class TestUpdateFields:
         updated_fields, _ = jobs_utils._update_fields(fields)
         # These are _NON_DB_FIELDS and should be removed
         assert 'cluster_resources' not in updated_fields
-        assert 'cloud' not in updated_fields
         assert 'user_name' not in updated_fields
         assert 'details' not in updated_fields
         # But job_id should remain
         assert 'job_id' in updated_fields
+        # 'cloud' is a non-DB handle field, but because a cluster handle is
+        # required here it is re-added as a DB column for the cached infra
+        # fallback (see _update_fields).
+        assert 'cloud' in updated_fields
 
     def test_cluster_handle_required_false_when_no_handle_fields(self):
         """Test that cluster_handle_required is False when no cluster handle fields."""
@@ -161,10 +164,38 @@ class TestUpdateFields:
         # Always added
         assert 'status' in updated_fields
         assert 'job_id' in updated_fields
-        # Cloud should be removed (non-DB field)
-        assert 'cloud' not in updated_fields
+        # 'cloud' is re-added as a DB column for the cached infra fallback
+        # since a cluster handle is required.
+        assert 'cloud' in updated_fields
         # Should be true due to cloud
         assert cluster_handle_required is True
+
+    def test_adds_cached_infra_fields_when_handle_required(self):
+        """Cached infra/resources fields are re-added for the fallback.
+
+        When a cluster handle is required, the last-cached infra columns
+        ('cloud'/'region'/'zone') and the requested 'resources' string must be
+        selected from the DB so get_managed_job_queue can fall back to them for
+        finished jobs whose cluster handle is gone.
+        """
+        fields = ['job_id', 'cluster_resources']
+        updated_fields, cluster_handle_required = jobs_utils._update_fields(
+            fields)
+        assert cluster_handle_required is True
+        # cluster_resources itself is a non-DB field and is removed.
+        assert 'cluster_resources' not in updated_fields
+        # The DB-backed fallback fields are present.
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            assert field in updated_fields
+
+    def test_does_not_add_cached_infra_fields_when_handle_not_required(self):
+        """Fallback fields are not force-added when no handle is required."""
+        fields = ['job_id', 'status']
+        updated_fields, cluster_handle_required = jobs_utils._update_fields(
+            fields)
+        assert cluster_handle_required is False
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            assert field not in updated_fields
 
 
 class TestGetManagedJobQueue:
@@ -312,6 +343,80 @@ class TestGetManagedJobQueue:
         # For finished job: duration = end_at - (last_recovered_at - job_duration)
         expected_duration = (current_time - 50) - (current_time - 200 - 50)
         assert job['job_duration'] == expected_duration
+
+    def test_finished_job_falls_back_to_cached_infra(self, monkeypatch):
+        """A finished job with no live handle shows last-cached infra/resources.
+
+        When the cluster handle is gone (e.g. the job finished and the cluster
+        was torn down), infra/resources should fall back to the values
+        persisted in the jobs DB instead of a bare '-'.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                cloud='AWS',
+                region='us-east-1',
+                zone='us-east-1a',
+                resources='1x[Spot]A100:8',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cloud'] == 'AWS'
+        assert job['region'] == 'us-east-1'
+        assert job['zone'] == 'us-east-1a'
+        assert job['infra'] == 'AWS (us-east-1a)'
+        assert job['cluster_resources'] == '1x[Spot]A100:8'
+        assert job['cluster_resources_full'] == '1x[Spot]A100:8'
+
+    def test_finished_job_without_cached_infra_shows_dash(self, monkeypatch):
+        """Legacy finished jobs without persisted infra still show '-'."""
+        jobs = [
+            self._make_test_job(
+                1, status=managed_job_state.ManagedJobStatus.SUCCEEDED)
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cloud'] == '-'
+        assert job['region'] == '-'
+        assert job['zone'] == '-'
+        assert job['infra'] == '-'
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+
+    def test_unlaunched_job_does_not_show_requested_resources(
+            self, monkeypatch):
+        """A job that never launched does not show requested resources.
+
+        The cached resources fallback only applies when the job was actually
+        launched (infra persisted); a PENDING job with a requested resources
+        string should still show '-' for cluster resources.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.PENDING,
+                resources='1x[CPU:1+]',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+        assert job['infra'] == '-'
 
     def test_status_converted_to_string(self, monkeypatch):
         """Test that status is converted from enum to string."""
@@ -980,3 +1085,239 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         # Single task should show '0' not '0-0'
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
+
+
+class TestFormatJobDetails:
+    """Tests for _format_job_details (the 'details' column)."""
+
+    def _details(self,
+                 *,
+                 schedule_state='ALIVE',
+                 failure_reason=None,
+                 status='RECOVERING',
+                 recovery_reason=None,
+                 cloud=None):
+        job = {
+            'schedule_state': schedule_state,
+            'failure_reason': failure_reason,
+            'status': status,
+            'cloud': cloud,
+        }
+        jobs_utils._format_job_details(job=job,
+                                       highest_blocking_priority=0,
+                                       recovery_reason=recovery_reason)
+        return job['details']
+
+    def test_recovery_reason_surfaced(self):
+        assert self._details(
+            recovery_reason='podX is not ready (OOMKilled (exit code 137))'
+        ) == 'Recovering: podX is not ready (OOMKilled (exit code 137))'
+
+    def test_recovery_reason_multiline_collapsed(self):
+        # Multi-line pod-termination reasons must render as a single line.
+        multiline = ('Cluster is abnormal because head is not ready '
+                     '(Terminated unexpectedly.\nLast known state: PodFailed.\n'
+                     'Container errors: OOMKilled). Transitioned to INIT.')
+        result = self._details(recovery_reason=multiline)
+        assert '\n' not in result
+        assert result == (
+            'Recovering: Cluster is abnormal because head is not ready '
+            '(Terminated unexpectedly. Last known state: PodFailed. '
+            'Container errors: OOMKilled). Transitioned to INIT.')
+
+    def test_no_recovery_reason_is_none(self):
+        assert self._details(recovery_reason=None) is None
+
+    def test_failure_reason_takes_precedence_over_recovery(self):
+        # A terminal failure_reason should win over a (stale) recovery reason.
+        assert self._details(failure_reason='boom',
+                             recovery_reason='ignored') == 'Failure: boom'
+
+    def test_backoff_state_takes_precedence_over_recovery(self):
+        assert self._details(
+            schedule_state='ALIVE_BACKOFF',
+            recovery_reason='ignored') == 'In backoff, waiting for resources'
+
+    def test_recovery_reason_oom_appends_hint_on_kubernetes(self):
+        result = self._details(cloud='Kubernetes',
+                               recovery_reason='podX OOMKilled (exit code 137)')
+        assert result.startswith('Recovering: podX OOMKilled (exit code 137)')
+        assert 'resources.memory' in result
+
+    def test_recovery_reason_ephemeral_appends_hint_on_kubernetes(self):
+        result = self._details(
+            cloud='Kubernetes',
+            recovery_reason='Evicted: Pod ephemeral local storage usage '
+            'exceeds the total limit of containers 2Gi.')
+        assert 'resources.ephemeral_storage' in result
+
+    def test_recovery_reason_no_hint_on_non_kubernetes(self):
+        # A non-k8s reason containing a matched word ('Insufficient') must not
+        # be decorated with a Kubernetes hint.
+        result = self._details(cloud='AWS',
+                               recovery_reason='Insufficient capacity')
+        assert result == 'Recovering: Insufficient capacity'
+
+    def test_recovery_reason_no_hint_when_cloud_unknown(self):
+        # No cloud info -> surface the reason without a (possibly wrong) hint.
+        result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
+        assert result == 'Recovering: podX OOMKilled (exit code 137)'
+
+
+class TestReadProvisionStatusFromLog:
+    """Tests for relaying the provisioning spinner from the controller log."""
+
+    @staticmethod
+    def _status_line(control, msg=''):
+        from sky.utils import message_utils
+        return message_utils.encode_payload(control.encode(msg))
+
+    def test_missing_file_returns_inputs(self, tmp_path):
+        path = str(tmp_path / 'missing.log')
+        pos, msg = jobs_utils.read_provision_status_from_log(path, 0, 'prev')
+        assert pos == 0
+        assert msg == 'prev'
+
+    def test_reads_latest_spinner_message_incrementally(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text('a plain provisioning log line\n' +
+                        self._status_line(rich_utils.Control.INIT, 'Launching'))
+
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+        assert pos > 0
+
+        # Append an UPDATE; only the newly appended bytes should be read.
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(
+                self._status_line(rich_utils.Control.UPDATE,
+                                  'Preparing SkyPilot runtime (1/3)'))
+        pos2, msg2 = jobs_utils.read_provision_status_from_log(
+            str(path), pos, msg)
+        assert msg2 == 'Preparing SkyPilot runtime (1/3)'
+        assert pos2 > pos
+
+    def test_stop_control_clears_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.EXIT))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg is None
+
+    def test_partial_trailing_line_is_not_consumed(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        full = self._status_line(rich_utils.Control.INIT, 'Launching')
+        # Write a complete payload plus a partial (no trailing newline) one.
+        partial = self._status_line(rich_utils.Control.UPDATE,
+                                    'half').rstrip('\n')
+        path.write_text(full + partial)
+
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+        # Complete the partial line; the next read should pick it up.
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('\n')
+        _, msg2 = jobs_utils.read_provision_status_from_log(str(path), pos, msg)
+        assert msg2 == 'half'
+
+    def test_start_does_not_revert_to_stale_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        # A nested status enter emits UPDATE(nested) then START(original); the
+        # START carries the stale init message, so it must not overwrite the
+        # live UPDATE text.
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.UPDATE,
+                              'Preparing SkyPilot runtime (1/3)') +
+            self._status_line(rich_utils.Control.START, 'Launching'))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Preparing SkyPilot runtime (1/3)'
+
+    def test_stop_keeps_message(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        # STOP only pauses the spinner; it must not clear the message.
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.STOP))
+        _, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Launching'
+
+    def test_truncated_log_resets_offset(self, tmp_path):
+        from sky.utils import rich_utils
+        path = tmp_path / 'controller.log'
+        path.write_text(
+            self._status_line(rich_utils.Control.INIT, 'Launching') +
+            self._status_line(rich_utils.Control.UPDATE, 'Preparing'))
+        pos, msg = jobs_utils.read_provision_status_from_log(str(path), 0, None)
+        assert msg == 'Preparing'
+        assert pos > 0
+
+        # Recreate (truncate) the log; the saved offset now points past EOF.
+        path.write_text(self._status_line(rich_utils.Control.INIT, 'Relaunch'))
+        _, msg2 = jobs_utils.read_provision_status_from_log(str(path), pos, msg)
+        assert msg2 == 'Relaunch'
+
+
+class TestProvisionStatusHeadline:
+    """Tests for extracting the blue headline from a provisioning message."""
+
+    def test_extracts_blue_headline_and_drops_hint(self):
+        msg = ('[bold cyan]Preparing SkyPilot runtime (1/3)[/]  '
+               '[dim]View logs at: ~/sky_logs/x/provision.log[/]')
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Preparing SkyPilot runtime (1/3)')
+
+    def test_headline_without_hint(self):
+        msg = '[bold cyan]Launching[/]'
+        assert jobs_utils._provision_status_headline(msg) == 'Launching'
+
+    def test_returns_none_when_not_blue(self):
+        # No [bold cyan] wrapper: nothing should be displayed.
+        assert jobs_utils._provision_status_headline('Launching') is None
+
+    def test_nested_markup_is_preserved(self):
+        # Nested markup inside the headline must not be truncated at the first
+        # closing tag, and the trailing dim hint is still dropped.
+        msg = '[bold cyan]Doing [bold]X[/] now[/]  [dim]hint[/]'
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Doing [bold]X[/] now')
+
+    def test_extracts_headline_from_real_spinner_message(self):
+        # Regression: real spinner messages append the log hint with raw ANSI
+        # (colorama) codes, not rich `[dim]...[/]` markup, so the headline does
+        # not end the string. The headline must still be extracted (otherwise
+        # the provisioning detail under "Waiting for task to start" vanishes).
+        from sky.utils import ux_utils
+        msg = ux_utils.spinner_message('Preparing SkyPilot runtime (1/3)',
+                                       log_path='~/sky_logs/x/provision.log')
+        assert msg != '[bold cyan]Preparing SkyPilot runtime (1/3)[/]'
+        assert (jobs_utils._provision_status_headline(msg) ==
+                'Preparing SkyPilot runtime (1/3)')
+
+    def test_extracts_headline_with_provision_hint(self):
+        # The provision-log hint variant (sky logs --provision <cluster>) also
+        # appends an ANSI-colored, bold-wrapped hint after the headline.
+        from sky.utils import ux_utils
+        msg = ux_utils.spinner_message('Launching', cluster_name='my-cluster')
+        assert jobs_utils._provision_status_headline(msg) == 'Launching'
+
+
+class TestIsRelayedStatusPayloadLine:
+    """Tests for hiding relayed rich-status payloads from --controller logs."""
+
+    def test_payload_line_detected(self):
+        from sky.utils import message_utils
+        from sky.utils import rich_utils
+        line = message_utils.encode_payload(
+            rich_utils.Control.UPDATE.encode('Preparing'))
+        assert jobs_utils._is_relayed_status_payload_line(line) is True
+
+    def test_plain_log_line_not_detected(self):
+        assert jobs_utils._is_relayed_status_payload_line(
+            'Preparing SkyPilot runtime (1/3)\n') is False

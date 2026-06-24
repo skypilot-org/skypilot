@@ -5,7 +5,7 @@ import random
 import shlex
 import textwrap
 import typing
-from typing import Optional
+from typing import List, Optional
 
 from sky import exceptions
 from sky import skypilot_config
@@ -44,6 +44,21 @@ _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
 # https://github.com/rclone/rclone/releases
 RCLONE_VERSION = 'v1.68.2'
+
+# https://github.com/huggingface/hf-mount/releases - mounts HF Buckets /
+# repos via FUSE or NFS. We default to the FUSE backend since (a) SkyPilot
+# already ensures FUSE is set up on every image that supports MOUNT-mode
+# storage (gcsfuse, blobfuse2, rclone mount, goofys all rely on it) and
+# (b) hf-mount's NFS backend requires the host kernel to support NFS client
+# mounts, which is not universally true on Kubernetes nodes.
+#
+# Note: the published v0.6.5 Linux binaries are linked against glibc >= 2.34,
+# so this requires an image with glibc 2.34+ (e.g. Ubuntu 22.04). On the
+# default SkyPilot k8s image (Ubuntu 20.04, glibc 2.31) users must specify
+# ``image_id: docker:mirror.gcr.io/ubuntu:22.04`` (or similar) in resources.
+HF_MOUNT_VERSION = 'v0.6.5'
+HF_MOUNT_REPO = 'huggingface/hf-mount'
+HF_MOUNT_TOKEN_FILE = '~/.cache/huggingface/token'
 
 # A wrapper for goofys to choose the logging mechanism based on environment.
 _GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
@@ -100,6 +115,7 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
                                  mount_path: str,
                                  _bucket_sub_path: Optional[str] = None,
                                  endpoint_url: Optional[str] = None,
+                                 region: Optional[str] = None,
                                  cred_env: str = '',
                                  rclone_extra_flags: str = '',
                                  goofys_extra_flags: str = '',
@@ -116,6 +132,9 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
         _bucket_sub_path: Optional sub-path within the bucket.
         endpoint_url: S3-compatible endpoint URL. If None, uses the
             default AWS S3 endpoint.
+        region: SigV4 signing region. If None, goofys defaults to
+            'us-east-1'. Required for providers that validate the signing
+            region against a region-specific endpoint (e.g. OCI).
         cred_env: Credential environment variable prefix string
             (e.g., 'AWS_SHARED_CREDENTIALS_FILE=... AWS_PROFILE=... ').
         rclone_extra_flags: Extra flags for rclone mount command
@@ -141,6 +160,10 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
     if endpoint_url:
         rclone_extra_flags += f'--s3-endpoint {endpoint_url} '
         goofys_extra_flags += f'--endpoint {endpoint_url} '
+
+    if region:
+        rclone_extra_flags += f'--s3-region {region} '
+        goofys_extra_flags += f'--region {region} '
 
     if read_only:
         rclone_extra_flags += '--read-only '
@@ -221,6 +244,38 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
         read_only=read_only)
 
 
+def get_oci_s3_mount_cmd(oci_s3_credentials_path: str,
+                         oci_s3_profile_name: str,
+                         bucket_name: str,
+                         endpoint_url: str,
+                         mount_path: str,
+                         region: Optional[str] = None,
+                         _bucket_sub_path: Optional[str] = None,
+                         read_only: bool = False) -> str:
+    """Returns a command to mount an OCI bucket via the S3-compatible API.
+
+    OCI validates the SigV4 signing region against the region-specific
+    endpoint, so the region must be passed explicitly; goofys would
+    otherwise default to 'us-east-1' and be rejected. OCI also returns 501
+    for uploads using aws-chunked content encoding, which goofys's AWS SDK
+    enables by default to carry a trailing checksum; AWS_REQUEST_CHECKSUM_
+    CALCULATION=when_required disables it so writes are sent as plain PUTs.
+    """
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={oci_s3_credentials_path} '
+                f'AWS_PROFILE={oci_s3_profile_name} '
+                'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
+                'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required')
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        region=region,
+        cred_env=cred_env,
+        rclone_extra_flags='--s3-force-path-style=true',
+        read_only=read_only)
+
+
 def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                            vastdata_profile_name: str,
                            bucket_name: str,
@@ -276,6 +331,146 @@ def get_gcs_mount_cmd(bucket_name: str,
                  f'--rename-dir-limit {_RENAME_DIR_LIMIT} '
                  f'{bucket_sub_path_arg}'
                  f'{bucket_name} {mount_path}')
+    return mount_cmd
+
+
+def get_hf_mount_install_cmd() -> str:
+    """Returns a command to install ``hf-mount`` for HF Bucket / repo mounts.
+
+    Installs ``hf-mount`` (the user-facing CLI) and ``hf-mount-fuse`` (the
+    FUSE backend binary) to ``/usr/local/bin``. We use the FUSE backend
+    because SkyPilot's mount-mode storage already assumes a FUSE-capable
+    host, and FUSE support is more ubiquitous on Kubernetes nodes than
+    kernel NFS-client support.
+
+    Also installs ``fuse3`` on Linux hosts that don't already have it, via
+    the reusable :data:`FUSE3_INSTALL_CMD`. On macOS the binary relies on
+    macFUSE, which the operator must install manually.
+    """
+    base_url = (f'https://github.com/{HF_MOUNT_REPO}/releases/download/'
+                f'{HF_MOUNT_VERSION}')
+    # pylint: disable=line-too-long
+    install_cmd = (
+        # hf-mount's FUSE backend needs libfuse3 (provides fusermount3).
+        # ``FUSE3_INSTALL_CMD`` is already used by rclone/blobfuse2 mounts
+        # and is a no-op if fuse3 is already installed.
+        f'{FUSE3_INSTALL_CMD} && '
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ]; then '
+        '  ARCH_TAG="aarch64"; '
+        'elif [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_TAG="arm64"; '
+        'else '
+        '  ARCH_TAG="x86_64"; '
+        'fi && '
+        'OS=$(uname -s | tr "[:upper:]" "[:lower:]") && '
+        'if [ "$OS" = "darwin" ]; then '
+        '  PLATFORM="apple-darwin"; '
+        'else '
+        '  PLATFORM="linux"; '
+        'fi && '
+        f'sudo curl -fsSL {base_url}/hf-mount-${{ARCH_TAG}}-${{PLATFORM}} '
+        '-o /usr/local/bin/hf-mount && '
+        f'sudo curl -fsSL {base_url}/hf-mount-fuse-${{ARCH_TAG}}-${{PLATFORM}} '
+        '-o /usr/local/bin/hf-mount-fuse && '
+        'sudo chmod +x /usr/local/bin/hf-mount /usr/local/bin/hf-mount-fuse')
+    return install_cmd
+
+
+def get_hf_mount_version_check_cmd() -> str:
+    """Returns a command that succeeds iff the installed hf-mount matches."""
+    # ``hf-mount --version`` prints e.g. ``hf-mount 0.6.5``.
+    version = HF_MOUNT_VERSION.lstrip('v')
+    # ``-F``: match the version literally (the ``.`` separators are not regex).
+    return f'hf-mount --version 2>/dev/null | grep -qF "{version}"'
+
+
+def get_hf_mount_cmd(hf_id: str,
+                     mount_path: str,
+                     _bucket_sub_path: Optional[str] = None,
+                     read_only: bool = False,
+                     token_file: Optional[str] = None,
+                     mode: str = 'bucket',
+                     revision: Optional[str] = None,
+                     extra_args: Optional[List[str]] = None) -> str:
+    """Returns a command to mount an HF Bucket/repo via ``hf-mount``.
+
+    Uses the FUSE backend (``--fuse``). hf-mount defaults to NFS, but the
+    NFS backend requires host-kernel NFS-client support, which isn't
+    guaranteed on k8s nodes. FUSE is already a hard requirement for every
+    other MOUNT-mode storage in SkyPilot.
+
+    Args:
+        hf_id: HF identifier. For buckets this is ``namespace/name``; for
+            repos this is ``namespace/repo`` (or ``datasets/ns/repo``,
+            ``spaces/ns/repo``).
+        mount_path: Local path to mount at.
+        _bucket_sub_path: Optional sub-path within the bucket/repo.
+            ``hf-mount`` accepts this by appending it to the id.
+        read_only: Whether to mount as read-only. Repos are always mounted
+            read-only regardless of this flag.
+        token_file: Path to a file containing the HF token. Defaults to the
+            standard ``huggingface_hub`` location. ``hf-mount`` re-reads this
+            file on every request, which supports credential rotation.
+        mode: One of ``'bucket'`` (read-write) or ``'repo'`` (read-only).
+        revision: Optional git revision for repo mounts (e.g. ``'main'`` or
+            a tag/commit). Ignored for buckets.
+        extra_args: Extra ``hf-mount`` flags forwarded verbatim to the backend
+            daemon (e.g. ``['--cache-dir', '/mnt/nvme/hf-cache', '--cache-size',
+            '200000000000']``). Each element is one shell token and is quoted
+            individually. They are injected as backend-passthrough options
+            (alongside ``--token-file`` / ``--read-only``), before the
+            ``bucket``/``repo`` subcommand.
+    """
+    if mode not in ('bucket', 'repo'):
+        raise ValueError(
+            f'hf-mount mode must be "bucket" or "repo", got {mode!r}.')
+    if token_file is None:
+        token_file = HF_MOUNT_TOKEN_FILE
+    arg = hf_id
+    if _bucket_sub_path:
+        arg = f'{hf_id}/{_bucket_sub_path}'
+    # Backend-specific flags for the daemon launched by ``hf-mount start``.
+    # These must come *after* ``start`` and *before* any backend-passthrough
+    # args (``--token-file`` etc.), because ``hf-mount start`` uses clap's
+    # "trailing var args" to forward unrecognized options to the backend
+    # binary. Once clap sees an argument it doesn't recognize (e.g.
+    # ``--token-file``), it stops option-parsing and forwards everything
+    # else verbatim, so a late ``--fuse`` would silently fall through as a
+    # backend arg and the daemon would default to NFS.
+    flags = ' --fuse'
+    backend_flags = ''
+    if read_only and mode == 'bucket':
+        # ``hf-mount`` repos are always read-only, no flag needed.
+        backend_flags += ' --read-only'
+    if extra_args:
+        # Forwarded verbatim to the backend daemon. Quote each token so paths
+        # with spaces or shell metacharacters survive.
+        backend_flags += ''.join(f' {shlex.quote(a)}' for a in extra_args)
+    extra = ''
+    if mode == 'repo' and revision:
+        extra = f' --revision {shlex.quote(revision)}'
+    # ``hf-mount start`` detaches into a background daemon and returns
+    # quickly. The daemon logs to ``~/.hf-mount/logs/`` and records its PID
+    # in ``~/.hf-mount/pids/``.
+    # Expand a leading ``~/`` to ``$HOME/`` in Python so we don't have to
+    # invoke ``eval`` on the remote host. ``token_file`` is a SkyPilot-
+    # controlled path (defaults to ``HF_MOUNT_TOKEN_FILE``); we still
+    # quote the literal suffix to defend against unexpected characters.
+    if token_file.startswith('~/'):
+        suffix = token_file[2:]
+        token_file_expr = f'"$HOME"/{shlex.quote(suffix)}'
+    else:
+        token_file_expr = shlex.quote(token_file)
+    token_file_cmd = (f'TOKEN_FILE={token_file_expr}; '
+                      'TOKEN_FILE_ARG=""; '
+                      'if [ -f "$TOKEN_FILE" ]; then '
+                      'TOKEN_FILE_ARG="--token-file $TOKEN_FILE"; '
+                      'fi; ')
+    mount_cmd = (f'{token_file_cmd}'
+                 f'hf-mount start{flags} $TOKEN_FILE_ARG'
+                 f'{backend_flags} '
+                 f'{mode} {shlex.quote(arg)} {shlex.quote(mount_path)}{extra}')
     return mount_cmd
 
 
@@ -621,6 +816,8 @@ def _get_mount_binary(mount_cmd: str) -> str:
         return 'gcsfuse'
     elif 'blobfuse2' in mount_cmd:
         return 'blobfuse2'
+    elif 'hf-mount' in mount_cmd:
+        return 'hf-mount'
     else:
         assert 'rclone' in mount_cmd
         return 'rclone'
@@ -744,6 +941,22 @@ def get_mounting_script(
                     fi
                 else
                     echo "Rclone log directory $RCLONE_LOG_DIR not found"
+                fi
+            elif [ "$MOUNT_BINARY" = "hf-mount" ]; then
+                echo "Looking for hf-mount log files..."
+                # hf-mount writes logs under ~/.hf-mount/logs/.
+                HF_MOUNT_LOG_DIR="$HOME/.hf-mount/logs"
+                if [ -d "$HF_MOUNT_LOG_DIR" ]; then
+                    HF_MOUNT_LOGS=$(ls -t "$HF_MOUNT_LOG_DIR"/*.log 2>/dev/null | head -1)
+                    if [ -n "$HF_MOUNT_LOGS" ]; then
+                        echo "=== hf-mount log file contents ==="
+                        tail -50 "$HF_MOUNT_LOGS"
+                        echo "=== End of hf-mount log file ==="
+                    else
+                        echo "No hf-mount log file found in $HF_MOUNT_LOG_DIR"
+                    fi
+                else
+                    echo "hf-mount log directory $HF_MOUNT_LOG_DIR not found"
                 fi
             fi
             # TODO(kevin): Print logs from blobfuse2, etc too for observability.

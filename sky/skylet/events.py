@@ -418,6 +418,17 @@ class StopEvent(SkyletEvent):
         if autostop_config.down:
             operation_fn = provision_lib.terminate_instances
 
+        # For Kubernetes autodown, leave a durable Event breadcrumb on the
+        # cluster before deleting the pods. The pod can finish autodowning
+        # between two server-side status refreshes, in which case the refresh
+        # never observes the AUTOSTOPPING state; the server reads this event
+        # back to still attribute the termination to autostop. Best-effort.
+        if autostop_config.down and isinstance(cloud, clouds.Kubernetes):
+            # pylint: disable=import-outside-toplevel
+            from sky.provision.kubernetes import instance as k8s_instance
+            k8s_instance.emit_autostop_event_best_effort(
+                cluster_config['provider'], cluster_name_on_cloud)
+
         if is_cluster_multinode:
             logger.info('Terminating worker nodes first.')
             operation_fn(provider_name=provider_name,

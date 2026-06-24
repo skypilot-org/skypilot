@@ -158,7 +158,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '37'  # log_lib.tail_logs supports tail_offset.
+SKYLET_VERSION = '38'  # managed job table supports submitted_at time-range.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -551,6 +551,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'quota'),
     ('kubernetes', 'remote_identity'),
     ('kubernetes', 'enable_docker'),
+    ('kubernetes', 'set_pod_resource_limits'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
     ('gcp', 'vpc_name'),
@@ -762,4 +763,4 @@ SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
 MAX_NODE_NAME_LINEAGE = 10
 
 # Clouds that provide storage only (no compute).
-STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata', 'huggingface']

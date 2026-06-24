@@ -182,6 +182,73 @@ def test_ray_basic(generic_cloud: str) -> None:
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test ray helper on externally-managed (PEP 668) Python ----------
+# Regression test for the Ray helper (~/sky_templates/ray/start_cluster)
+# crashing on bring-your-own images whose system Python is externally managed
+# (PEP 668). We use a real public RL training image (slimerl/slime) which has
+# exactly the properties that trigger the original failure:
+#   - based on Ubuntu 24.04, so the system Python is externally managed
+#     (PEP 668) and uv refuses to modify it by default;
+#   - Ray is already installed into that system Python (no virtualenv).
+# In this environment the helper's first `uv pip install` fails (no venv) and
+# the `--system` fallback used to fail too, crashing cluster startup even
+# though the required Ray was already present. The fix sets
+# UV_BREAK_SYSTEM_PACKAGES on the `--system` fallback so it succeeds.
+#
+# This test FAILS before the fix (the `--system` fallback exits non-zero,
+# `set -e` aborts start_cluster, the job ends as FAILED) and PASSES after it.
+#
+# Note: this is a large CUDA image, hence resource_heavy and a generous
+# timeout. No GPU is requested -- the bug is purely in the install step.
+@pytest.mark.no_vast  # Custom docker image_id not supported
+@pytest.mark.no_fluidstack  # Custom docker image_id not supported
+@pytest.mark.no_hyperbolic  # Custom docker image_id not supported
+@pytest.mark.no_seeweb  # Custom docker image_id not supported
+@pytest.mark.resource_heavy
+def test_ray_externally_managed_python(generic_cloud: str) -> None:
+    name = smoke_tests_utils.get_cluster_name()
+
+    yaml_content = """\
+resources:
+  cpus: 4+
+  # A real RL training image based on Ubuntu 24.04 (externally-managed,
+  # PEP 668 system Python) with Ray preinstalled and no virtualenv -- the
+  # conditions that trigger the original failure. Pinned to a stable release
+  # tag (not `latest`) for reproducibility.
+  image_id: docker:slimerl/slime:v0.3.0
+
+num_nodes: 1
+
+run: |
+  set -e
+  ~/sky_templates/ray/start_cluster
+  ~/sky_templates/ray/stop_cluster
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_file_path = f.name
+
+    test = smoke_tests_utils.Test(
+        'ray_externally_managed_python',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
+            f'sky logs {name} 1 --status',
+            # Before the fix the `--system` fallback fails on this image's
+            # externally-managed Python and start_cluster aborts; these
+            # markers only appear once the helper succeeds (after the fix).
+            f'outputs=$(sky logs {name} 1); echo "$outputs" && '
+            f'echo "$outputs" | grep "Head node started successfully" && '
+            f'echo "$outputs" | grep "SUCCEEDED"',
+        ],
+        f'sky down -y {name}; rm {yaml_file_path}',
+        timeout=40 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test NeMo RL ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet

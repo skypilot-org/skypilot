@@ -533,6 +533,45 @@ class TestPostgresLock:
 
         assert 'shared' in str(exc_info.value).lower()
 
+    def test_is_session_alive_not_acquired(self):
+        """is_session_alive returns False if the lock was never acquired."""
+        lock = locks.PostgresLock('test_lock')
+        assert lock.is_session_alive() is False
+
+    def test_is_session_alive_no_connection(self):
+        """is_session_alive returns False if the conn handle is missing."""
+        lock = locks.PostgresLock('test_lock')
+        lock._acquired = True
+        lock._connection = None
+        assert lock.is_session_alive() is False
+
+    def test_is_session_alive_success(self, mock_connection):
+        """is_session_alive returns True when SELECT 1 succeeds."""
+        connection, cursor = mock_connection
+        cursor.fetchone.return_value = [1]
+        lock = locks.PostgresLock('test_lock')
+        lock._acquired = True
+        lock._connection = connection
+        assert lock.is_session_alive() is True
+        cursor.execute.assert_called_with('SELECT 1')
+        cursor.close.assert_called_once()
+
+    def test_is_session_alive_probe_raises(self, mock_connection):
+        """is_session_alive returns False on any probe exception.
+
+        This is the silent-conn-loss path the daemon thread relies on:
+        the lock thinks it still has the PG session locally, but the
+        server-side session is gone (idle timeout, RDS restart,
+        pg_terminate_backend, network partition).  The next SELECT 1
+        surfaces the failure.
+        """
+        connection, cursor = mock_connection
+        cursor.execute.side_effect = Exception('connection lost')
+        lock = locks.PostgresLock('test_lock')
+        lock._acquired = True
+        lock._connection = connection
+        assert lock.is_session_alive() is False
+
     @mock.patch.object(locks.PostgresLock, '_get_connection')
     def test_postgres_lock_shared_non_blocking(self, mock_get_connection,
                                                mock_connection):

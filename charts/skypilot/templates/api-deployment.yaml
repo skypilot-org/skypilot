@@ -14,11 +14,14 @@ spec:
   {{- if and .Values.storage.enabled (ne .Values.storage.accessMode "ReadWriteMany") }}
   {{- fail "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)." }}
   {{- end }}
+  {{- $rollingUpdate := .Values.apiService.rollingUpdate | default (dict) }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      {{- /* dig (not `default`) so an explicit 0 is honored — Go templates treat
+             0 as empty, which would silently fall back to the default. */}}
+      maxSurge: {{ dig "maxSurge" 1 $rollingUpdate }}
+      maxUnavailable: {{ dig "maxUnavailable" 0 $rollingUpdate }}
   {{- else }}
   strategy:
     type: Recreate
@@ -270,15 +273,47 @@ spec:
           # developer can drive `sky api start` / `sky api stop` via kubectl exec.
           exec tail -f /dev/null
           {{- else }}
+          # Optional log mirror: when $SKYPILOT_SERVER_LOG_MIRROR_DIR is set,
+          # also write server stdout/stderr to a per-pod, per-boot file under
+          # <dir>/<HOSTNAME>/server-<UTC_ISO>.log. Survives local logrotate
+          # (copytruncate) and pod restarts; placing $HOSTNAME in the path
+          # keeps replicas from clobbering each other when the dir is shared
+          # (RWX) storage. Mirroring is opportunistic — if directory creation
+          # fails (RO mount, permissions, NFS blip) we log a warning and
+          # carry on rather than crash-loop the API server pod.
+          # Resolve mirror sink first so both the serveServerLog=true and the
+          # =false branch can use it.
+          SKYPILOT_LOG_MIRROR_FILE=""
+          if [ -n "${SKYPILOT_SERVER_LOG_MIRROR_DIR:-}" ]; then
+            SKYPILOT_LOG_MIRROR_PER_POD_DIR="${SKYPILOT_SERVER_LOG_MIRROR_DIR}/${HOSTNAME:-unknown}"
+            if mkdir -p "$SKYPILOT_LOG_MIRROR_PER_POD_DIR"; then
+              SKYPILOT_LOG_MIRROR_FILE="${SKYPILOT_LOG_MIRROR_PER_POD_DIR}/server-$(date -u +%Y%m%dT%H%M%SZ).log"
+            else
+              echo "warning: failed to create log mirror directory $SKYPILOT_LOG_MIRROR_PER_POD_DIR; mirroring disabled" >&2
+            fi
+          fi
           {{- if .Values.apiService.serveServerLog }}
           mkdir -p /root/.sky/api_server
           # Use a FIFO instead of a pipe so that exec replaces the shell,
           # allowing tini to send SIGTERM directly to the API server process
           rm -f /tmp/skylog && mkfifo /tmp/skylog
-          tee -a /root/.sky/api_server/server.log < /tmp/skylog &
+          if [ -n "$SKYPILOT_LOG_MIRROR_FILE" ]; then
+            tee -a /root/.sky/api_server/server.log "$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog &
+          else
+            tee -a /root/.sky/api_server/server.log < /tmp/skylog &
+          fi
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
           {{- else }}
-          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+          if [ -n "$SKYPILOT_LOG_MIRROR_FILE" ]; then
+            # Mirror without local server.log. Still route through a FIFO so
+            # tee can fan out; tee's stdout inherits the container's stdout,
+            # so k8s pod logs continue to work just like the no-mirror case.
+            rm -f /tmp/skylog && mkfifo /tmp/skylog
+            tee -a "$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog &
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
+          else
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+          fi
           {{- end }}
           {{- end }}
         ports:

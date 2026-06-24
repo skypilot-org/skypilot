@@ -21,7 +21,7 @@ import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 
 function useVolumeDetails({ volumeName }) {
   const [volumeData, setVolumeData] = useState(null);
@@ -434,11 +434,7 @@ function VolumeDetailCard({ volumeData }) {
                       </div>
 
                       {isYamlExpanded && (
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                          <YamlHighlighter className="whitespace-pre-wrap">
-                            {formattedYaml}
-                          </YamlHighlighter>
-                        </div>
+                        <YamlCodeBlock value={formattedYaml} readOnly />
                       )}
                     </div>
                   )}

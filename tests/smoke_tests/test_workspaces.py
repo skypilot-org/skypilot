@@ -13,6 +13,7 @@ from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import skypilot_config
+from sky.utils import common_utils
 
 
 # ---------- Test workspace switching ----------
@@ -329,3 +330,103 @@ def test_workspace_multiple_aws_profiles():
         os.unlink(server_config_path)
         if os.path.exists(temp_credentials_path):
             os.unlink(temp_credentials_path)
+
+
+# ---------- Test per-workspace Kubernetes remote_identity ----------
+@pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+# We can't restart the api server in the dependency test.
+@pytest.mark.no_dependency
+def test_workspace_k8s_remote_identity():
+    """Does each team's cluster run under its own Kubernetes ServiceAccount?
+
+    One server, two workspaces:
+      team-a: no override            -> default identity
+      team-b: remote_identity: <sa>  -> its own identity
+
+    Before per-workspace remote_identity, everyone got the global identity.
+    This proves team-b's override is applied at provisioning time and does NOT
+    leak into team-a. We don't trust SkyPilot's logs -- we ask Kubernetes
+    directly (pod spec.serviceAccountName), the same way
+    test_workspace_multiple_aws_profiles asks CloudTrail who launched an
+    instance.
+    """
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip(
+            'Skipping workspace remote_identity test when not in Buildkite '
+            'environment')
+
+    ws1_name = 'team-a'  # No override -> default identity.
+    ws2_name = 'team-b'  # Its own service account.
+    sa_name = 'team-b-sa'
+
+    # One server config that defines two workspaces -- exactly what a platform
+    # admin would write for multi-tenancy.
+    server_config_content = textwrap.dedent(f"""\
+        workspaces:
+            {ws1_name}:
+                kubernetes: {{}}
+            {ws2_name}:
+                kubernetes:
+                    remote_identity: {sa_name}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_k8s_remote_id_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    name = smoke_tests_utils.get_cluster_name()
+    max_len = sky.Kubernetes.max_cluster_name_length()
+    name_on_cloud_1 = common_utils.make_cluster_name_on_cloud(
+        f'{name}-1', max_len)
+    name_on_cloud_2 = common_utils.make_cluster_name_on_cloud(
+        f'{name}-2', max_len)
+
+    def _get_pod_sa_cmd(name_on_cloud: str) -> str:
+        return (f'kubectl get pod -l skypilot-cluster-name={name_on_cloud} '
+                "-o jsonpath='{.items[0].spec.serviceAccountName}'")
+
+    test = smoke_tests_utils.Test(
+        'test_workspace_k8s_remote_identity',
+        [
+            # Pre-create the ServiceAccount team-b expects -- SkyPilot does not
+            # create custom SAs; the admin owns them.
+            f'kubectl create serviceaccount {sa_name} || true',
+            # Restart the API server with this two-workspace config loaded.
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && '
+            f'{smoke_tests_utils.SKY_API_RESTART}',
+            # Launch one cluster as each team.
+            f'sky launch -y -c {name}-1 --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={ws1_name} echo hi',
+            f'sky launch -y -c {name}-2 --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--config active_workspace={ws2_name} echo hi',
+            # The custom identity did not break normal operation.
+            f'sky logs {name}-1 1 --status',
+            f'sky logs {name}-2 1 --status',
+            # Ask Kubernetes who the pods REALLY run as.
+            # team-b's override MUST be applied at provisioning time.
+            f'sa=$({_get_pod_sa_cmd(name_on_cloud_2)}); '
+            f'echo "team-b pod serviceAccountName: $sa"; '
+            f'[ "$sa" = "{sa_name}" ]',
+            # Control group: team-b's identity MUST NOT leak into team-a, and a
+            # no-override workspace still gets the default. (Isolation!)
+            f'sa=$({_get_pod_sa_cmd(name_on_cloud_1)}); '
+            f'echo "team-a pod serviceAccountName: $sa"; '
+            f'[ "$sa" != "{sa_name}" ]',
+        ],
+        teardown=
+        (f'sky down -y {name}-1 --config active_workspace={ws1_name} || true; '
+         f'sky down -y {name}-2 --config active_workspace={ws2_name} || true; '
+         f'kubectl delete serviceaccount {sa_name} || true; '
+         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+         f'{smoke_tests_utils.SKY_API_RESTART}'),
+        timeout=20 * 60,
+    )
+
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(server_config_path)

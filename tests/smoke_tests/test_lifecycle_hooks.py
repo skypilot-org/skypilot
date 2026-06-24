@@ -1127,3 +1127,59 @@ def test_hook_invalid_inputs_rejected():
         timeout=180,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------------------------------------------------------------------------
+# `sky down` on a cluster that declared NO hooks must NOT SSH to the
+# head to run the teardown codegen.
+#
+# Before the fix, `_maybe_run_teardown_hooks` always ran the codegen
+# on the head, even when the cluster had no hooks at all. The codegen
+# was a no-op functionally, but if the head IP was transiently
+# unreachable (already partway shut down, stale cached handle, network
+# blip) it surfaced a misleading warning:
+#
+#   Failed to run down hook on '<cluster>': . Proceeding with teardown.
+#
+# …on a cluster the user never put a hook on. The visible
+# user-facing signal of the codegen actually running is the spinner
+# message ``Running down hook on '<cluster>'`` (sky/core.py:925),
+# which is emitted just before the head SSH. This test launches a
+# bare minimal cluster (zero hooks declared anywhere), runs
+# ``sky down`` with the spinner not suppressed, and asserts that
+# neither the spinner message nor the failure warning appears in the
+# output. Pre-fix: spinner appears (and on a flaky head, the failure
+# warning too). Post-fix: codegen is skipped → neither appears.
+# ---------------------------------------------------------------------------
+@_no_autostop
+@pytest.mark.no_kubernetes
+def test_hook_sky_down_no_hooks_skips_head_codegen(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test_hook_sky_down_no_hooks_skips_head_codegen',
+        [
+            # (1) Launch with the bare minimal YAML — no hooks anywhere.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--infra {generic_cloud} --fast '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # (2) `sky down` and capture stdout + stderr. The codegen's
+            # only visible user-facing signal is the spinner message
+            # "Running down hook on '<cluster>'"; the failure warning
+            # only fires when the head SSH itself errors, but the
+            # spinner appears unconditionally pre-fix. Assert neither
+            # appears, AND that teardown still succeeded (final
+            # "Terminating cluster <name>...done" line is present).
+            f'out=$(sky down -y {name} 2>&1) && '
+            f'echo "$out" | grep "Terminating cluster {name}...done" && '
+            f'! echo "$out" | grep -qE "Running (down|stop) hook on" && '
+            f'! echo "$out" | grep -qE "Failed to run (down|stop) hook on"',
+            # (3) Cluster is gone — `sky status` no longer lists it.
+            f'sky status {name} 2>/dev/null | grep -v "{name}" || true',
+        ],
+        # Belt-and-suspenders teardown in case step (2) somehow left it.
+        f'sky down -y {name} --purge || true',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)

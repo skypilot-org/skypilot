@@ -339,7 +339,10 @@ def get_cluster_events(
             is specified.
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
-        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        event_type: Type of events to retrieve (e.g. 'STATUS_CHANGE' or
+            'DEBUG'). Multiple types may be requested as a comma-separated
+            string (e.g. 'STATUS_CHANGE,LAUNCH_PROGRESS'); the results are
+            merged and ordered by timestamp.
         include_timestamps: If True, returns list of dicts with 'reason' and
             'transitioned_at' fields. If False, returns list of reason strings.
         limit: If specified, returns at most this many events (most recent).
@@ -351,11 +354,19 @@ def get_cluster_events(
             'transitioned_at' (unix timestamp) fields.
         Events are ordered from oldest to newest.
     """
-    event_type_enum = global_user_state.ClusterEventType(event_type)
+    event_type_enums = [
+        global_user_state.ClusterEventType(event_type_str.strip())
+        for event_type_str in event_type.split(',')
+        if event_type_str.strip()
+    ]
+    if not event_type_enums:
+        # Reject blank/empty input rather than silently matching nothing
+        # (an empty type list translates to `type IN ()`, i.e. no events).
+        raise ValueError(f'No valid cluster event type in {event_type!r}.')
     return global_user_state.get_cluster_events(
         cluster_name=cluster_name,
         cluster_hash=cluster_hash,
-        event_type=event_type_enum,
+        event_type=event_type_enums,
         include_timestamps=include_timestamps,
         limit=limit)
 
@@ -385,11 +396,11 @@ def endpoints(cluster: str,
 
 
 @usage_lib.entrypoint
-def cost_report(
-        days: Optional[int] = None,
-        dashboard_summary_response: bool = False,
-        cluster_hashes: Optional[List[str]] = None,
-        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def cost_report(days: Optional[int] = None,
+                dashboard_summary_response: bool = False,
+                cluster_hashes: Optional[List[str]] = None,
+                cluster_names: Optional[List[str]] = None,
+                exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -438,6 +449,10 @@ def cost_report(
             provided, rows matching either are returned (logical OR). Note
             that a single cluster name may map to multiple history records
             when the name is reused across launches.
+        exclude_managed_clusters: If True, exclude clusters launched by a
+            controller (managed jobs and services). Used by the dashboard so
+            that clusters backing managed jobs do not show up in the cluster
+            history view.
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
@@ -453,7 +468,8 @@ def cost_report(
         days=days,
         abbreviate_response=abbreviate_response,
         cluster_hashes=cluster_hashes,
-        cluster_names=cluster_names)
+        cluster_names=cluster_names,
+        exclude_managed_clusters=exclude_managed_clusters)
     logger.debug(
         f'{len(cluster_reports)} clusters found from history with {days} days.')
 
@@ -840,11 +856,19 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
         logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
 
 
+def user_initiated_down(cluster_name: str,
+                        purge: bool = False,
+                        graceful: bool = False,
+                        graceful_timeout: Optional[int] = None) -> None:
+    down(cluster_name, purge, graceful, graceful_timeout, user_initiated=True)
+
+
 @usage_lib.entrypoint
 def down(cluster_name: str,
          purge: bool = False,
          graceful: bool = False,
-         graceful_timeout: Optional[int] = None) -> None:
+         graceful_timeout: Optional[int] = None,
+         user_initiated: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tears down a cluster.
 
@@ -876,6 +900,15 @@ def down(cluster_name: str,
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+
+    if user_initiated:
+        # Record the event before teardown, while the cluster row still exists
+        # so its hash can be resolved (teardown deletes the row). There is no
+        # TERMINATED cluster status, so new_status is None.
+        global_user_state.add_cluster_event(
+            cluster_name, None, 'Cluster was terminated by user.',
+            global_user_state.ClusterEventType.STATUS_CHANGE)
+
     backend = backend_utils.get_backend_from_handle(handle)
 
     if graceful:
@@ -904,6 +937,21 @@ def _maybe_run_teardown_hooks(handle: 'backends.ResourceHandle',
     """
     # Only the VM/Ray backend is supported; other backends simply skip.
     if not isinstance(backend, cloud_vm_ray_backend.CloudVmRayBackend):
+        return
+    # Skip the head SSH entirely when the cluster has NO hooks declared.
+    # The codegen exists to (a) run user-declared hooks and (b) claim
+    # the per-event teardown slot so a later SIGTERM cannot fire a
+    # competing preemption hook on what was an intentional teardown.
+    # With no hooks at all, both are no-ops — there's nothing to run
+    # and no preemption hook can race. SSH-ing the head anyway is pure
+    # overhead and surfaces a misleading ``Failed to run <event> hook
+    # on '<cluster>': . Proceeding with teardown.`` warning whenever
+    # the head IP is transiently unreachable (already partway shut
+    # down, stale cached handle, etc.) — for a user who never declared
+    # a hook in their YAML.
+    declared_hooks = getattr(getattr(handle, 'launched_resources', None),
+                             'hooks', None)
+    if not declared_hooks:
         return
     # Claim the event slot unconditionally — even if no hook declares
     # this event. For 'down', the claim blocks the SIGTERM handler

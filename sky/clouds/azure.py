@@ -365,8 +365,8 @@ class Azure(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        if (resources.image_id is None or
-                resources.extract_docker_image() is not None):
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is None:
             # pylint: disable=import-outside-toplevel
             from sky.catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
@@ -374,11 +374,11 @@ class Azure(clouds.Cloud):
             image_id = self._get_default_image_tag(gen_version,
                                                    resources.instance_type)
         else:
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                assert region_name in resources.image_id, resources.image_id
-                image_id = resources.image_id[region_name]
+                assert region_name in cloud_image_id, cloud_image_id
+                image_id = cloud_image_id[region_name]
 
         # Checked basic image syntax in resources.py
         if image_id.startswith('skypilot:'):

@@ -101,7 +101,7 @@ class GetVersionResponse(_message.Message):
     def __init__(self, controller_version: _Optional[str] = ...) -> None: ...
 
 class GetJobTableRequest(_message.Message):
-    __slots__ = ("skip_finished", "accessible_workspaces", "job_ids", "workspace_match", "name_match", "pool_match", "page", "limit", "user_hashes", "statuses", "show_jobs_without_user_hash", "fields", "sort_by", "sort_order")
+    __slots__ = ("skip_finished", "accessible_workspaces", "job_ids", "workspace_match", "name_match", "pool_match", "page", "limit", "user_hashes", "statuses", "show_jobs_without_user_hash", "fields", "sort_by", "sort_order", "submitted_after", "submitted_before")
     SKIP_FINISHED_FIELD_NUMBER: _ClassVar[int]
     ACCESSIBLE_WORKSPACES_FIELD_NUMBER: _ClassVar[int]
     JOB_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -116,6 +116,8 @@ class GetJobTableRequest(_message.Message):
     FIELDS_FIELD_NUMBER: _ClassVar[int]
     SORT_BY_FIELD_NUMBER: _ClassVar[int]
     SORT_ORDER_FIELD_NUMBER: _ClassVar[int]
+    SUBMITTED_AFTER_FIELD_NUMBER: _ClassVar[int]
+    SUBMITTED_BEFORE_FIELD_NUMBER: _ClassVar[int]
     skip_finished: bool
     accessible_workspaces: Workspaces
     job_ids: JobIds
@@ -130,7 +132,9 @@ class GetJobTableRequest(_message.Message):
     fields: Fields
     sort_by: str
     sort_order: str
-    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ..., sort_by: _Optional[str] = ..., sort_order: _Optional[str] = ...) -> None: ...
+    submitted_after: float
+    submitted_before: float
+    def __init__(self, skip_finished: bool = ..., accessible_workspaces: _Optional[_Union[Workspaces, _Mapping]] = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., workspace_match: _Optional[str] = ..., name_match: _Optional[str] = ..., pool_match: _Optional[str] = ..., page: _Optional[int] = ..., limit: _Optional[int] = ..., user_hashes: _Optional[_Union[UserHashes, _Mapping]] = ..., statuses: _Optional[_Union[Statuses, _Mapping]] = ..., show_jobs_without_user_hash: bool = ..., fields: _Optional[_Union[Fields, _Mapping]] = ..., sort_by: _Optional[str] = ..., sort_order: _Optional[str] = ..., submitted_after: _Optional[float] = ..., submitted_before: _Optional[float] = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
     __slots__ = ("job_id", "task_id", "job_name", "task_name", "job_duration", "workspace", "status", "schedule_state", "resources", "cluster_resources", "cluster_resources_full", "cloud", "region", "infra", "accelerators", "recovery_count", "details", "failure_reason", "user_name", "user_hash", "submitted_at", "start_at", "end_at", "user_yaml", "entrypoint", "metadata", "pool", "pool_hash", "_job_id", "links", "is_primary_in_job_group", "zone", "labels", "cluster_name_on_cloud", "internal_external_ips", "internal_services", "priority_class", "is_batch", "batch_total_batches", "batch_completed_batches")
