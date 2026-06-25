@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDistance } from 'date-fns';
 import React, {
   useState,
   useEffect,
@@ -3170,6 +3171,11 @@ function ServiceAccountTokensView({
                   <TableRow key={token.token_id}>
                     <TableCell className="truncate" title={token.token_name}>
                       {token.token_name}
+                      {token.last_four && (
+                        <span className="ml-2 text-xs text-gray-400 font-mono">
+                          ····{token.last_four}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="truncate">
                       <div className="flex items-center">
@@ -3323,7 +3329,9 @@ function ServiceAccountTokensView({
                       {!token.expires_at ? (
                         'Never'
                       ) : new Date(token.expires_at * 1000) < new Date() ? (
-                        <span className="text-red-600">Expired</span>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          Expired {formatDistance(new Date(token.expires_at * 1000), new Date(), { addSuffix: true })}
+                        </span>
                       ) : (
                         <TimestampWithTooltip
                           date={new Date(token.expires_at * 1000)}

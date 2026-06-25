@@ -653,7 +653,8 @@ def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
         token_hash=token_data['token_hash'],
         creator_user_hash=creator_user_id,
         service_account_user_id=creator_user_id,
-        expires_at=token_data['expires_at'])
+        expires_at=token_data['expires_at'],
+        last_four=token_data['last_four'])
 
     return token_data['token'], token_data['token_id']
 
