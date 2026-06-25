@@ -294,6 +294,14 @@ def pytest_addoption(parser):
               'generator; has no effect when running locally)'),
     )
     parser.addoption(
+        '--kueue',
+        action='store_true',
+        default=False,
+        help=('Run kubernetes tests against a Kueue-enabled cluster. '
+              'In Buildkite, this routes the job to the kueue queue where '
+              'Kueue is pre-installed on the kind cluster.'),
+    )
+    parser.addoption(
         '--dependency',
         type=str,
         nargs='?',

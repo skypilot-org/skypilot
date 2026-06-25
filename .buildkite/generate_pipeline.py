@@ -45,6 +45,7 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
 QUEUE_KIND = 'kind'
+QUEUE_KUEUE = 'kueue'
 QUEUE_BENCHMARK = 'single_container'
 # We use a separate queue for generic cloud tests on remote servers because:
 # - generic_cloud queue has high concurrency on a single VM
@@ -70,7 +71,7 @@ CLOUD_QUEUE_MAP = {
     'lambda': QUEUE_GENERIC_CLOUD,
     'runpod': QUEUE_GENERIC_CLOUD,
     'slurm': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KIND
+    'kubernetes': QUEUE_KIND,
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
@@ -109,6 +110,8 @@ def _get_buildkite_queue(cloud: str,
         # the generic_cloud queue to optimize resource usage. If tests require customization
         # beyond the API server, update this logic to ensure they run on the correct resources.
         return QUEUE_GENERIC_CLOUD
+    if '--kueue' in args and cloud == 'kubernetes':
+        return QUEUE_KUEUE
     if run_on_cloud_kube_backend:
         return QUEUE_KUBE_BACKEND
 
@@ -155,6 +158,9 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--submodule-base-branch')
     parser.add_argument('--dependency', nargs='?', const='', default='all')
     parser.add_argument('--concurrency', type=int)
+    parser.add_argument('--kueue',
+                        action='store_true',
+                        help='Route kubernetes tests to the kueue queue.')
 
     # pytest_native: args the generate_pipeline parser does not recognise
     # (e.g. --no-resource-heavy).  They are conftest-registered pytest flags
@@ -207,6 +213,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.extend(['--env-file', parsed_args.env_file])
     if parsed_args.plugin_yaml:
         extra_args.extend(['--plugin-yaml', parsed_args.plugin_yaml])
+    if parsed_args.kueue:
+        extra_args.append('--kueue')
     if parsed_args.submodule_base_branch:
         extra_args.extend(
             ['--submodule-base-branch', parsed_args.submodule_base_branch])
