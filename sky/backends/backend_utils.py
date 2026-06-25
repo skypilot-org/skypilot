@@ -989,6 +989,12 @@ def write_cluster_config(
     # the implicit target of `uv`/`pip` in uv-first workflows.
     auto_activate = skypilot_config.get_nested(
         ('provision', 'conda_auto_activate'), None)
+    # Whether the user explicitly set the option. When they did, the preference
+    # is applied even on images that already ship conda on PATH (where the
+    # install block that normally sets it is skipped); see
+    # CONDA_INSTALLATION_COMMANDS.
+    conda_auto_activate_explicit = ('true'
+                                    if auto_activate is not None else 'false')
     if auto_activate is None:
         auto_activate = to_provision.extract_docker_image() is None
     conda_auto_activate = 'true' if auto_activate else 'false'
@@ -1191,7 +1197,9 @@ def write_cluster_config(
             'conda_installation_commands':
                 constants.CONDA_INSTALLATION_COMMANDS.replace(
                     '{conda_auto_activate}', conda_auto_activate).replace(
-                        '{is_custom_docker}', is_custom_docker)
+                        '{is_custom_docker}', is_custom_docker).replace(
+                            '{conda_auto_activate_explicit}',
+                            conda_auto_activate_explicit)
                 if install_conda else '',
             # UV setup
             'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,

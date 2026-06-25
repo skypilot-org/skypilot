@@ -285,6 +285,21 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
+    'fi;'
+    # The block above only sets auto_activate_base when conda is freshly
+    # installed (the `which conda` short-circuit). On images that already ship
+    # conda on PATH (e.g. the AWS DLAMI), that block is skipped and the setting
+    # would never take effect. So apply the preference here too, but only when
+    # the user explicitly set `provision.conda_auto_activate`, to avoid
+    # overriding conda config baked into custom images. Deactivating here also
+    # keeps base out of this provisioning shell (and thus the Ray runtime).
+    # Caller should replace {conda_auto_activate_explicit} / {conda_auto_activate}.  # pylint: disable=line-too-long
+    'if [ "{conda_auto_activate_explicit}" = "true" ] && '
+    'command -v conda > /dev/null 2>&1; then '
+    'conda config --set auto_activate_base {conda_auto_activate}; '
+    'if [ "{conda_auto_activate}" = "false" ]; then '
+    'conda deactivate 2> /dev/null || true; '
+    'fi;'
     'fi;')
 
 UV_INSTALLATION_COMMANDS = (

@@ -659,10 +659,13 @@ def test_conda_installation_deactivates_base_when_auto_activate_disabled():
     runtime / user jobs (where `uv`/`pip` would resolve to it implicitly).
     """
 
-    def render(conda_auto_activate: str, is_custom_docker: str) -> str:
+    def render(conda_auto_activate: str,
+               is_custom_docker: str,
+               explicit: str = 'false') -> str:
         return constants.CONDA_INSTALLATION_COMMANDS.replace(
-            '{conda_auto_activate}',
-            conda_auto_activate).replace('{is_custom_docker}', is_custom_docker)
+            '{conda_auto_activate}', conda_auto_activate).replace(
+                '{is_custom_docker}', is_custom_docker).replace(
+                    '{conda_auto_activate_explicit}', explicit)
 
     # Disabled on a non-docker image: set auto_activate_base false AND
     # deactivate. The deactivate guard's conda_auto_activate clause (the only
@@ -682,3 +685,11 @@ def test_conda_installation_deactivates_base_when_auto_activate_disabled():
     # clause is tautological).
     custom_docker = render('true', 'true')
     assert 'if [ "true" = "true" ]' in custom_docker
+
+    # Explicitly set by the user: the preference is also applied outside the
+    # install block (guarded by `command -v conda`), so it takes effect on
+    # images that already ship conda on PATH, where the install block is
+    # skipped. When not explicitly set, that stanza never fires.
+    explicit_disabled = render('false', 'false', explicit='true')
+    assert 'if [ "true" = "true" ] && command -v conda' in explicit_disabled
+    assert 'if [ "false" = "true" ] && command -v conda' in enabled
