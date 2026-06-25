@@ -198,7 +198,7 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Maps Modal Sandbox states to ClusterStatus."""
-    del cluster_name, retry_if_missing  # unused
+    del cluster_name, provider_config, retry_if_missing  # unused
     # Status query only needs sandbox state, not the SSH tunnel endpoint, so
     # skip the slow per-sandbox tunnel lookup.
     instances = _filter_instances(cluster_name_on_cloud, query_tunnels=False)
@@ -234,5 +234,5 @@ def query_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """No-op for v1 (port management deferred to v2)."""
-    del head_ip, provider_config  # Unused.
+    del cluster_name_on_cloud, ports, head_ip, provider_config  # Unused.
     return {}

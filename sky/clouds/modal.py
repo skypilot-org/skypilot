@@ -216,7 +216,7 @@ class Modal(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        """Emit Jinja template variables. Also emits 24h lifetime warning (PROV-04).
+        """Emit Jinja template vars; also emits the 24h warning (PROV-04).
 
         Note: query_status stays as raise NotImplementedError (D-09) — it is
         never called at runtime because STATUS_VERSION=SKYPILOT routes all
@@ -349,12 +349,12 @@ class Modal(clouds.Cloud):
             # If that happens to be set to None, then ValueError is raised.
             return False, dependency_error_msg
 
-        hint_msg = (
-            'Credentials can be set up by running:\n'
-            '        $ pip install modal\n'
-            '        $ modal token set --token-id ak-... --token-secret as-...\n'
-            '    For more information, see '
-            'https://modal.com/docs/reference/modal.config')
+        hint_msg = ('Credentials can be set up by running:\n'
+                    '        $ pip install modal\n'
+                    '        $ modal token set --token-id ak-... '
+                    '--token-secret as-...\n'
+                    '    For more information, see '
+                    'https://modal.com/docs/reference/modal.config')
 
         # Modal env vars take full precedence over file-based credentials.
         # Check both before touching the filesystem (T-01-03: no value echo).

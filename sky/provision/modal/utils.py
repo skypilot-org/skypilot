@@ -27,7 +27,8 @@ def _build_setup_cmd(public_key: str) -> str:
         'chmod 700 /root/.ssh && '
         f'echo "{public_key}" >> /root/.ssh/authorized_keys && '
         'chmod 600 /root/.ssh/authorized_keys && '
-        'sed -i "s/#PermitRootLogin.*/PermitRootLogin yes/" /etc/ssh/sshd_config; '
+        'sed -i "s/#PermitRootLogin.*/PermitRootLogin yes/" '
+        '/etc/ssh/sshd_config; '
         'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
         '/etc/ssh/sshd_config; '
         'cd /etc/ssh && ssh-keygen -A -q && '
@@ -54,6 +55,7 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
     CRITICAL: timeout=86400 (24h). Modal's default is 300s which kills the
     cluster before SkyPilot finishes bootstrapping Ray.
     """
+    del instance_type  # unused: GPU/CPU/memory come from the args below
     modal = modal_adaptor.modal
     name = f'{cluster_name}-{node_type}'
     app_name = f'skypilot-{cluster_name}'
@@ -85,11 +87,11 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
     # Acquire tunnel endpoint — blocks until sshd is reachable (up to 50s).
     try:
         tunnels = sandbox.tunnels(timeout=SANDBOX_SSH_TIMEOUT)
-    except modal.exception.SandboxTimeoutError:
+    except modal.exception.SandboxTimeoutError as exc:
         sandbox.terminate()
         raise RuntimeError(
             f'Modal Sandbox {name} did not expose SSH tunnel within '
-            f'{SANDBOX_SSH_TIMEOUT}s. Check image has openssh-server.')
+            f'{SANDBOX_SSH_TIMEOUT}s. Check image has openssh-server.') from exc
 
     if 22 not in tunnels:
         sandbox.terminate()
