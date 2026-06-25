@@ -23,6 +23,21 @@ logger = sky_logging.init_logger(__name__)
 _LOCK_PROBE_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 
+# How long to wait after acquiring the consolidation-mode lock before running
+# recovery. During a rolling update the new leader blocks on acquire() while
+# the old API server still holds the lock. The lock is released when the old
+# main process exits, but that pod's job controllers are detached subprocesses
+# (start_new_session=True), so they are not killed until the container itself
+# is torn down a moment later. If recovery ran in that residual window, it would
+# reset jobs that the still-alive (but about-to-die) old controllers can briefly
+# re-claim, stamping their soon-dead PIDs back onto the jobs;
+# update_managed_jobs_statuses would then mark those jobs FAILED_CONTROLLER (a
+# split brain across the upgrade overlap). Waiting here lets the old container
+# finish terminating before we reset and re-adopt its jobs. The recovery signal
+# file stays in place during the wait, so no controllers are started and no job
+# is marked FAILED_CONTROLLER in the meantime.
+_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS = 15
+
 
 class ManagedJobRefreshDaemonThread(threading.Thread):
     """Leader-elected thread that runs ha_recovery + ManagedJobEvent.
@@ -78,16 +93,46 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # its process and could mark the job FAILED_CONTROLLER. The signal
         # file makes update_managed_jobs_statuses and the scheduler's
         # controller-start path early-return until recovery completes.
+        # NOTE: the acquire is deliberately NOT inside the try/finally that
+        # wraps recovery below. The finally unlinks the signal file, but the
+        # lock-loss step-down path (_suicide_on_lock_loss) re-touches it to
+        # keep controllers gated through the shutdown drain — so that path must
+        # not be followed by an unlink. Scoping the finally to recovery only
+        # keeps those two concerns from fighting. It also means a raise from
+        # acquire() leaves the gate file in place while run() retries, which is
+        # what we want (controller starts stay gated until we hold the lock).
         signal_file = pathlib.Path(
             constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
         signal_file.touch()
-        try:
-            if not self._lock.is_locked():
-                logger.info(
-                    f'Acquiring the consolidation mode lock: {self._lock}')
-                self._lock.acquire()
-                logger.info('Consolidation mode lock acquired')
 
+        if not self._lock.is_locked():
+            logger.info(f'Acquiring the consolidation mode lock: {self._lock}')
+            self._lock.acquire()
+            logger.info('Consolidation mode lock acquired')
+
+        # Wait before recovery so a prior leader (e.g. the old pod during a
+        # rolling update) is fully gone first; see the comment on
+        # _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS. The signal file touched above
+        # stays in place, gating controller starts and the FAILED_CONTROLLER
+        # sweep until recovery completes.
+        logger.info(
+            f'Waiting {_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS}s after acquiring '
+            'the consolidation mode lock before running recovery, to let any '
+            'previous leader finish shutting down')
+        time.sleep(_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS)
+
+        # The wait above widens the window between acquiring the lock and
+        # running recovery, during which the lock's underlying session could go
+        # silently stale (PostgresLock only). Re-verify we still hold the lock
+        # before recovery; otherwise another replica may have taken it and
+        # could be recovering concurrently, so step down rather than run a
+        # second recovery loop. _suicide_on_lock_loss re-touches the signal
+        # file and SIGTERMs the process, so leave the file in place here.
+        if not self._lock_still_held():
+            self._suicide_on_lock_loss()
+            return
+
+        try:
             managed_job_utils.ha_recovery_for_consolidation_mode()
         finally:
             signal_file.unlink(missing_ok=True)
