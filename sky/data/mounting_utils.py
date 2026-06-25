@@ -801,6 +801,76 @@ def get_rclone_version_check_cmd() -> str:
     return f'rclone --version | grep -q {RCLONE_VERSION}'
 
 
+def get_mount_write_verification_cmd(mount_path: str,
+                                     expected_min_bytes: int = 1,
+                                     max_depth: Optional[int] = 1) -> str:
+    """Returns a shell command that verifies writes to ``mount_path`` produced
+    non-empty files.
+
+    The FUSE-based mount backends used for ``MOUNT``-mode storage (e.g. goofys
+    and rclone for S3) do not fully implement the POSIX interface, and some
+    writers (e.g. ``pandas.to_parquet``, pyarrow, tfrecord) silently produce
+    0-byte files when they hit an unsupported operation such as ``O_APPEND`` or
+    a partial flush. The kernel returns success, so the user is none the wiser
+    until the data is missing downstream.
+
+    This helper produces a snippet that walks ``mount_path`` and exits non-zero
+    if it finds any regular file smaller than ``expected_min_bytes`` bytes,
+    printing the offending paths to stderr. The runtime can append it to the
+    post-run command set of a task or job so a silent truncation fails the task
+    loudly.
+
+    It is a no-op when ``mount_path`` is empty, does not exist, or contains no
+    regular files. Hidden files (those whose names start with ``.``) and
+    symlinks are skipped, since they are typically metadata the mount backend
+    manages itself.
+
+    Args:
+        mount_path: Filesystem path that was mounted (e.g. ``/mounted_folder``).
+        expected_min_bytes: Minimum acceptable file size in bytes. Defaults to
+            ``1`` to flag zero-byte files, the most common silent-failure mode
+            reported in https://github.com/skypilot-org/skypilot/issues/1901.
+            Note: ``find -size -Nc`` matches files strictly less than ``N``
+            bytes, so the snippet passes ``expected_min_bytes`` (not
+            ``expected_min_bytes - 1``) to the find command.
+        max_depth: Maximum directory depth to descend into. ``1`` (the default)
+            only checks files at the mount root. ``None`` recurses without
+            limit, which catches partitioned writes
+            (``/mount/dataset/partition=*/part-*.parquet``) at the cost of
+            walking a potentially huge bucket. The runtime caps this in
+            ``_get_mount_verification_paths`` to keep the cost bounded for
+            typical workloads.
+
+    Returns:
+        A bash snippet suitable for `command_runner.run_with_timeout`. Always
+        exits 0 on a healthy mount and exits 1 if a zero-byte file is found.
+    """
+    # -mindepth 1 to skip the mount root itself.
+    # -maxdepth N caps recursion; pass `find ... -maxdepth 0` to recurse
+    # without bound (find interprets 0 as "no limit").
+    # ! -name '.*' skips dotfiles.
+    # -type f l handles regular files and symlinks-to-files (rclone often
+    # serves the bucket as symlinks).
+    if max_depth is None:
+        max_depth_arg = ''
+    else:
+        max_depth_arg = f'-maxdepth {max(0, max_depth)} '
+    return (
+        f'ZERO_BYTE_FILES=$(find {shlex.quote(mount_path)} '
+        f'-mindepth 1 {max_depth_arg}'
+        f'! -name ".*" \\( -type f -o -type l \\) '
+        f'-size -{max(0, expected_min_bytes)}c 2>/dev/null); '
+        f'if [ -n "$ZERO_BYTE_FILES" ]; then '
+        f'echo "SkyPilot mount write verification failed: '
+        f'the following file(s) in {mount_path} are unexpectedly small '
+        f'(less than {expected_min_bytes} byte(s)). This usually means the '
+        f'mount backend (goofys/rclone) did not flush the write, which can '
+        f'happen with writers that use append or partial-flush semantics '
+        f'(e.g. pandas.to_parquet, pyarrow). See '
+        f'https://github.com/skypilot-org/skypilot/issues/1901 for details." '
+        f'>&2; echo "$ZERO_BYTE_FILES" >&2; exit 1; fi')
+
+
 def _get_mount_binary(mount_cmd: str) -> str:
     """Returns mounting binary in string given as the mount command.
 
