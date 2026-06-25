@@ -65,6 +65,18 @@ else:
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
+# Wall-clock failsafe for downloading logs before cleanup, on every terminal
+# transition (cancel/SUCCEEDED/FAILED). Log download is best-effort and runs
+# synchronous remote I/O in a worker thread, which may block indefinitely if
+# the backing pod/node is unhealthy or stuck terminating (e.g. a `kubectl exec`
+# into a pod stuck in Terminating never returns). Without this bound, the job
+# can hang for many minutes before reaching its terminal state. On timeout we
+# abandon the (best-effort) log download and proceed with cleanup. This is a
+# coarse backstop: actively-progressing transfers are protected at a finer
+# grain by rsync's idle --timeout and the home-dir probe timeout in
+# command_runner.py.
+_LOG_DOWNLOAD_TIMEOUT_SECONDS = 120
+
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
 
@@ -316,6 +328,32 @@ class JobController:
                 f'task {task_id}')
 
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
+    async def _download_log_and_stream_with_timeout(
+        self,
+        task_id: Optional[int],
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        job_id_on_pool_cluster: Optional[int],
+        timeout: float,
+    ) -> None:
+        """Run download_log_and_stream in a worker thread, bounded by timeout.
+
+        Log download is best-effort and runs synchronous remote I/O that can
+        hang if the backing pod/node is unhealthy or stuck terminating. This
+        bounds it so the controller can still proceed to set the terminal
+        state and clean up. On timeout the underlying worker thread may still
+        be running, but it is detached from the controller's progress here.
+        """
+        try:
+            await asyncio.wait_for(asyncio.to_thread(
+                self.download_log_and_stream, task_id, handle,
+                job_id_on_pool_cluster),
+                                   timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                f'Timed out after {timeout}s downloading logs for job '
+                f'{self._job_id} (task {task_id}); continuing. The backing '
+                'pod/node may be unhealthy or stuck terminating.')
 
     async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
         if cluster_name is None:
@@ -854,9 +892,9 @@ class JobController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await asyncio.to_thread(self.download_log_and_stream,
-                                                task_id, handle,
-                                                job_id_on_pool_cluster)
+                        await self._download_log_and_stream_with_timeout(
+                            task_id, handle, job_id_on_pool_cluster,
+                            _LOG_DOWNLOAD_TIMEOUT_SECONDS)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -965,9 +1003,9 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await asyncio.to_thread(self.download_log_and_stream,
-                                            task_id, handle,
-                                            job_id_on_pool_cluster)
+                    await self._download_log_and_stream_with_timeout(
+                        task_id, handle, job_id_on_pool_cluster,
+                        _LOG_DOWNLOAD_TIMEOUT_SECONDS)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -2265,8 +2303,23 @@ class ControllerManager:
             # down, we skip gracefully.
             if active_task_ids:
                 try:
-                    await self._download_logs_for_cancelled_job(
-                        controller, job_id, active_task_ids, dag, pool)
+                    # Bound the log download so cancellation never blocks
+                    # indefinitely on an unhealthy/terminating backing
+                    # pod/node. On timeout we abandon the (best-effort) log
+                    # download and continue to cleanup. Note: the underlying
+                    # worker thread/subprocess may still be running, but it is
+                    # detached from the cancellation path here.
+                    await asyncio.wait_for(
+                        self._download_logs_for_cancelled_job(
+                            controller, job_id, active_task_ids, dag, pool),
+                        timeout=_LOG_DOWNLOAD_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f'Timed out after '
+                        f'{_LOG_DOWNLOAD_TIMEOUT_SECONDS}s downloading '
+                        f'logs for cancelled job {job_id}; proceeding with '
+                        'cleanup. This can happen when the backing pod/node is '
+                        'unhealthy or stuck terminating.')
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to download logs for cancelled job '
