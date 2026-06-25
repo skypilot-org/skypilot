@@ -520,7 +520,7 @@ class RayCodeGen(TaskCodeGen):
                 for i in range(len(setup_returncodes)):
                     returncode = setup_returncodes[i]
                     pid = setup_pids[i]
-                    if pid == None:
+                    if pid is None:
                         pid = os.getpid()
                     if returncode != 0 and returncode != CANCELLED_RETURN_CODE:
                         success = False
@@ -653,7 +653,7 @@ class RayCodeGen(TaskCodeGen):
             rank = job_ip_rank_map[ip]
 
             if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
-                name_str = '{task_name},' if {task_name!r} != None else 'task,'
+                name_str = '{task_name},' if {task_name!r} is not None else 'task,'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
             else: # Single-node or multi-node task on multi-node cluster
                 idx_in_cluster = cluster_ips_to_node_id[ip]
