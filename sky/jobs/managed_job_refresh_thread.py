@@ -93,6 +93,14 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         # its process and could mark the job FAILED_CONTROLLER. The signal
         # file makes update_managed_jobs_statuses and the scheduler's
         # controller-start path early-return until recovery completes.
+        # NOTE: the acquire is deliberately NOT inside the try/finally that
+        # wraps recovery below. The finally unlinks the signal file, but the
+        # lock-loss step-down path (_suicide_on_lock_loss) re-touches it to
+        # keep controllers gated through the shutdown drain — so that path must
+        # not be followed by an unlink. Scoping the finally to recovery only
+        # keeps those two concerns from fighting. It also means a raise from
+        # acquire() leaves the gate file in place while run() retries, which is
+        # what we want (controller starts stay gated until we hold the lock).
         signal_file = pathlib.Path(
             constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
         signal_file.touch()
@@ -102,17 +110,16 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
             self._lock.acquire()
             logger.info('Consolidation mode lock acquired')
 
-        # Wait briefly before recovery so a prior leader (e.g. the old pod
-        # during a rolling update) is fully gone first; see the comment on
+        # Wait before recovery so a prior leader (e.g. the old pod during a
+        # rolling update) is fully gone first; see the comment on
         # _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS. The signal file touched above
         # stays in place, gating controller starts and the FAILED_CONTROLLER
         # sweep until recovery completes.
-        if _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS > 0:
-            logger.info(
-                f'Waiting {_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS}s after '
-                'acquiring the consolidation mode lock before running '
-                'recovery, to let any previous leader finish shutting down')
-            time.sleep(_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS)
+        logger.info(
+            f'Waiting {_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS}s after acquiring '
+            'the consolidation mode lock before running recovery, to let any '
+            'previous leader finish shutting down')
+        time.sleep(_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS)
 
         # The wait above widens the window between acquiring the lock and
         # running recovery, during which the lock's underlying session could go
