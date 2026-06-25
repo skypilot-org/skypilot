@@ -36,7 +36,7 @@ _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 # finish terminating before we reset and re-adopt its jobs. The recovery signal
 # file stays in place during the wait, so no controllers are started and no job
 # is marked FAILED_CONTROLLER in the meantime.
-_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS = 10
+_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS = 15
 
 
 class ManagedJobRefreshDaemonThread(threading.Thread):
