@@ -520,7 +520,7 @@ class RayCodeGen(TaskCodeGen):
                 for i in range(len(setup_returncodes)):
                     returncode = setup_returncodes[i]
                     pid = setup_pids[i]
-                    if pid == None:
+                    if pid is None:
                         pid = os.getpid()
                     if returncode != 0 and returncode != CANCELLED_RETURN_CODE:
                         success = False
