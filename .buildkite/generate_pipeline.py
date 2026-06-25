@@ -110,7 +110,7 @@ def _get_buildkite_queue(cloud: str,
         # the generic_cloud queue to optimize resource usage. If tests require customization
         # beyond the API server, update this logic to ensure they run on the correct resources.
         return QUEUE_GENERIC_CLOUD
-    if '--kueue' in args and cloud == 'kubernetes':
+    if '--kueue' in args.split() and cloud == 'kubernetes':
         return QUEUE_KUEUE
     if run_on_cloud_kube_backend:
         return QUEUE_KUBE_BACKEND
