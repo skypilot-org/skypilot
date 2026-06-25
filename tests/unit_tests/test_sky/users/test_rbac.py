@@ -146,3 +146,26 @@ class TestDefaultRoleConfig:
         with mock.patch('sky.skypilot_config.get_nested',
                         return_value='viewer'):
             assert rbac.get_default_role() == 'viewer'
+
+
+class TestCallerCanGrantRole:
+    """Privilege-escalation guard for service-account role grants."""
+
+    def test_admin_can_grant_admin(self):
+        assert rbac.caller_can_grant_role(['admin'], 'admin')
+
+    def test_user_cannot_grant_admin(self):
+        assert not rbac.caller_can_grant_role(['user'], 'admin')
+
+    def test_user_can_grant_user_or_viewer(self):
+        assert rbac.caller_can_grant_role(['user'], 'user')
+        assert rbac.caller_can_grant_role(['user'], 'viewer')
+
+    def test_viewer_cannot_grant_user(self):
+        assert not rbac.caller_can_grant_role(['viewer'], 'user')
+
+    def test_empty_caller_roles_cannot_grant(self):
+        assert not rbac.caller_can_grant_role([], 'user')
+
+    def test_invalid_granted_role_returns_false(self):
+        assert not rbac.caller_can_grant_role(['admin'], 'superadmin')
