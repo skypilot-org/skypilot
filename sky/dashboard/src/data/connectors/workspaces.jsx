@@ -727,8 +727,17 @@ export async function updateConfig(config) {
     });
 
     if (!scheduleResponse.ok) {
+      let errorDetail = scheduleResponse.statusText;
+      try {
+        const errorData = await scheduleResponse.json();
+        if (errorData && errorData.detail) {
+          errorDetail = errorData.detail;
+        }
+      } catch (e) {
+        /* Use statusText when the response body is not JSON. */
+      }
       throw new Error(
-        `Error scheduling updateConfig: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+        `Error scheduling updateConfig: ${errorDetail} (status ${scheduleResponse.status})`
       );
     }
 

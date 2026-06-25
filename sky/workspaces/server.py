@@ -2,6 +2,7 @@
 
 import fastapi
 
+from sky import skypilot_config
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
@@ -113,6 +114,14 @@ async def get_config(request: fastapi.Request) -> None:
 async def update_config(request: fastapi.Request,
                         update_config_body: payloads.UpdateConfigBody) -> None:
     """Updates the entire SkyPilot configuration."""
+    if skypilot_config.get_nested(('dashboard', 'disable_config_editor'),
+                                  False):
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail=('SkyPilot API server config editing is disabled '
+                    'for this deployment.'),
+        )
+
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.WORKSPACES_UPDATE_CONFIG,

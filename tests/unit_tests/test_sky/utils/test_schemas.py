@@ -1274,6 +1274,15 @@ class TestDashboardSchema(unittest.TestCase):
         config = {'dashboard': {}}
         jsonschema.validate(instance=config, schema=self._get_schema())
 
+    def test_accepts_disable_config_editor(self):
+        config = {'dashboard': {'disable_config_editor': True}}
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_non_boolean_disable_config_editor(self):
+        config = {'dashboard': {'disable_config_editor': 'true'}}
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
     def test_rejects_missing_label(self):
         config = {
             'dashboard': {
