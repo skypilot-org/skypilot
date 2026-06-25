@@ -656,6 +656,61 @@ class TestAwsLoginIdentityDetection:
         assert not aws_mod.AWSIdentityType.LOGIN.can_credential_expire()
 
 
+class TestAwsAssumeRoleEnvAuth:
+    """ASSUME_ROLE-derived sessions (including assume-role-with-web-identity)
+    must route to env_auth=true in the rclone S3 config rather than embedding
+    the short-lived ASIA* session credentials into a profile that ships to a
+    remote VM."""
+
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
+    @mock.patch('subprocess.run')
+    def test_assume_role_with_web_identity_routes_to_env_auth(
+            self, mock_run, mock_get_profile):
+        """EKS IRSA / OIDC-federated pods: `aws configure list` Type column
+        'assume-role-with-web-identity' → AWSIdentityType.ASSUME_ROLE →
+        should_use_env_auth_for_s3() returns True."""
+        configure_list_output = (
+            b'      Name                    Value             Type    Location\n'
+            b'      ----                    -----             ----    --------\n'
+            b'   profile                <not set>             None    None\n'
+            b'access_key     ****************MAYI assume-role-with-web-identity\n'
+            b'secret_key     ****************ljFI assume-role-with-web-identity\n'
+            b'    region                us-west-2              env    AWS_DEFAULT_REGION\n'
+        )
+        mock_run.return_value = mock.Mock(returncode=0,
+                                          stdout=configure_list_output)
+        mock_get_profile.return_value = None
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        assert (aws_mod.AWS._current_identity_type() ==
+                aws_mod.AWSIdentityType.ASSUME_ROLE)
+        assert aws_mod.AWS.should_use_env_auth_for_s3() is True
+
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
+    @mock.patch('subprocess.run')
+    def test_plain_assume_role_routes_to_env_auth(self, mock_run,
+                                                  mock_get_profile):
+        """`aws sts assume-role` via profile role_arn/source_profile also
+        yields short-lived session tokens that expire before a remote VM uses
+        them; classify as non-static."""
+        configure_list_output = (
+            b'      Name                    Value             Type    Location\n'
+            b'      ----                    -----             ----    --------\n'
+            b'   profile                <not set>             None    None\n'
+            b'access_key     ****************abcd      assume-role\n'
+            b'secret_key     ****************abcd      assume-role\n'
+            b'    region                us-west-2      config-file    ~/.aws/config\n'
+        )
+        mock_run.return_value = mock.Mock(returncode=0,
+                                          stdout=configure_list_output)
+        mock_get_profile.return_value = None
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        assert (aws_mod.AWS._current_identity_type() ==
+                aws_mod.AWSIdentityType.ASSUME_ROLE)
+        assert aws_mod.AWS.should_use_env_auth_for_s3() is True
+
+
 class TestAwsConfigureList:
 
     @mock.patch('sky.adaptors.aws.get_workspace_profile')
