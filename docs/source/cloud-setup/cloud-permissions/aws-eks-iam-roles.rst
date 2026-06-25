@@ -11,6 +11,10 @@ This is useful when:
 - You want to avoid uploading credentials to pods
 - Your organization requires IAM role-based access
 
+.. tip::
+
+    For non-EKS clusters (e.g., Nebius, on-prem, GKE) that need AWS access, or pods on any cluster that need to reach a different cloud's resources (e.g., GCS, Azure Blob), see :ref:`kubernetes-oidc-federation`.
+
 There are two methods to assign IAM roles to Kubernetes pods:
 
 .. list-table::
