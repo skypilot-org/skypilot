@@ -1162,24 +1162,31 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
                 })
 
 
-def _parse_submit_log_job_ids(job_ids_str: str) -> Set[int]:
-    """Parse the id portion of a submit-job log filename into job ids.
+def _parse_submit_log_job_ranges(job_ids_str: str) -> List[Tuple[int, int]]:
+    """Parse a submit-job log filename's id portion into inclusive ranges.
 
-    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list
-    of single ids (``584``) or inclusive ranges (``580-588``). Raises
-    ValueError on an unrecognized shape so the caller can skip the file.
+    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list of
+    single ids (``584``) or inclusive ranges (``580-588``), returned as
+    (start, end) tuples. Ranges are kept intact rather than expanded into a set
+    of ints -- a filename like ``submit-job-1-100000000.log`` would otherwise
+    blow up memory. Raises ValueError on an unrecognized or inverted range so
+    the caller can skip the file.
     """
-    job_ids: Set[int] = set()
+    ranges: List[Tuple[int, int]] = []
     for token in job_ids_str.split(','):
         token = token.strip()
         if not token:
             continue
         if '-' in token:
             start_str, _, end_str = token.partition('-')
-            job_ids.update(range(int(start_str), int(end_str) + 1))
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                raise ValueError(f'Inverted range: {token!r}')
+            ranges.append((start, end))
         else:
-            job_ids.add(int(token))
-    return job_ids
+            val = int(token)
+            ranges.append((val, val))
+    return ranges
 
 
 def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
@@ -1215,9 +1222,11 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
         if not submit_logs_dir.is_dir():
             return
         for log_file in submit_logs_dir.glob(f'{prefix}*{suffix}'):
+            if not log_file.is_file():
+                continue
             ids_str = log_file.name[len(prefix):-len(suffix)]
             try:
-                submission_ids = _parse_submit_log_job_ids(ids_str)
+                submission_ranges = _parse_submit_log_job_ranges(ids_str)
             except ValueError:
                 # The only writer is sky.jobs.server.core with a fixed format,
                 # so an unparseable name is unexpected -- surface it rather than
@@ -1225,7 +1234,14 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
                 logger.warning('Skipping submit-job log with unrecognized '
                                f'name: {log_file.name}')
                 continue
-            if submission_ids & requested:
+            # Interval membership, no range expansion. Both the per-file range
+            # count and len(requested) are tiny for a -j dump, and the directory
+            # scan dominates regardless -- so the simple nested check is fine.
+            # Sorting + bisecting requested would only pay off for a large
+            # requested set, which doesn't occur here.
+            if any(start <= req <= end
+                   for start, end in submission_ranges
+                   for req in requested):
                 file_paths.append({
                     'remote_path': str(log_file),
                     'relative_path': f'managed_jobs/controller_submit_logs/'

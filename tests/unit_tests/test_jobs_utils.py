@@ -1104,23 +1104,34 @@ class TestControllerSystemLogScoping:
         assert errors == []
 
 
-class TestParseSubmitLogJobIds:
-    """Inverse of sky.jobs.server.core._job_ids_to_str."""
+class TestParseSubmitLogJobRanges:
+    """Inverse of sky.jobs.server.core._job_ids_to_str (kept as intervals)."""
 
     def test_single_id(self):
-        assert utils._parse_submit_log_job_ids('584') == {584}
+        assert utils._parse_submit_log_job_ranges('584') == [(584, 584)]
 
     def test_inclusive_range(self):
-        assert utils._parse_submit_log_job_ids('580-583') == {
-            580, 581, 582, 583
-        }
+        assert utils._parse_submit_log_job_ranges('580-583') == [(580, 583)]
 
     def test_mixed_singletons_and_ranges(self):
-        assert utils._parse_submit_log_job_ids('1,5-7,10') == {1, 5, 6, 7, 10}
+        assert utils._parse_submit_log_job_ranges('1,5-7,10') == [(1, 1),
+                                                                  (5, 7),
+                                                                  (10, 10)]
+
+    def test_large_range_is_not_expanded(self):
+        # A huge range must stay a single interval, never expand to a set of
+        # ints (that would risk OOM on a malicious/fat-fingered filename).
+        assert utils._parse_submit_log_job_ranges('1-100000000') == [
+            (1, 100000000)
+        ]
 
     def test_malformed_raises(self):
         with pytest.raises(ValueError):
-            utils._parse_submit_log_job_ids('not-an-int')
+            utils._parse_submit_log_job_ranges('not-an-int')
+
+    def test_inverted_range_raises(self):
+        with pytest.raises(ValueError):
+            utils._parse_submit_log_job_ranges('588-580')
 
 
 class TestControllerSubmitLogScoping:
