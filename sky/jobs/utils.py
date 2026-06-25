@@ -1234,11 +1234,9 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
                 logger.warning('Skipping submit-job log with unrecognized '
                                f'name: {log_file.name}')
                 continue
-            # Interval membership, no range expansion. Both the per-file range
-            # count and len(requested) are tiny for a -j dump, and the directory
-            # scan dominates regardless -- so the simple nested check is fine.
-            # Sorting + bisecting requested would only pay off for a large
-            # requested set, which doesn't occur here.
+            # Test if any requested job id is in the submission ranges.
+            # Requests and submission ranges are likely small, no nested check is likely OK.
+            # TODO (ishankaul1) - Add a more efficient check if needed.
             if any(start <= req <= end
                    for start, end in submission_ranges
                    for req in requested):
