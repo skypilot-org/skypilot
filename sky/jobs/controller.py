@@ -149,6 +149,30 @@ def _build_task_specs(
     return base_specs
 
 
+async def _cancel_and_drain_tasks(
+        async_tasks: typing.Iterable[asyncio.Task]) -> None:
+    """Cancel the given tasks and wait for them to fully exit.
+
+    asyncio.Task.cancel() only requests cancellation: the task keeps
+    running until the injected CancelledError unwinds through its
+    coroutine. Draining after cancelling guarantees that none of the tasks
+    is still mid-operation (e.g. completing a recovery launch) when the
+    caller proceeds to tear down the resources they use.
+    """
+    tasks = list(async_tasks)
+    for task in tasks:
+        task.cancel()
+    # return_exceptions=True so that one task failing while unwinding does
+    # not abort the drain of the others. CancelledError is the expected
+    # outcome and is not an Exception, so it is skipped below.
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for task, result in zip(tasks, results):
+        if isinstance(result, Exception):
+            logger.warning(
+                f'Task {task.get_name()} raised while being cancelled: '
+                f'{common_utils.format_exception(result)}')
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -1650,11 +1674,28 @@ class JobController:
                                 # All auxiliary jobs terminated, exit loop
                                 break
 
+        except asyncio.CancelledError:
+            # The job is being cancelled. asyncio.wait() above does not
+            # cancel its waitees, so without explicit cancellation the
+            # per-task monitors would keep running (and could even complete
+            # an in-flight recovery launch) while the cancellation flow in
+            # run_job_loop tears the clusters down under them. Cancel and
+            # fully drain them before re-raising; cluster cleanup itself is
+            # owned by the cancellation flow.
+            logger.info('JobGroup monitoring cancelled, stopping all task '
+                        'monitors')
+            # A second external cancel arriving during this drain aborts it,
+            # degrading to the pre-drain behavior (orphaned monitors) but
+            # never worse.
+            await _cancel_and_drain_tasks(monitor_async_tasks.values())
+            raise
         except Exception as e:
             logger.error(f'Monitoring failed: {e}')
-            # Cancel all remaining tasks
-            for task_id, async_task in monitor_async_tasks.items():
-                async_task.cancel()
+            # Cancel the remaining monitors and wait for them to fully exit
+            # before tearing down the clusters: a monitor mid-recovery could
+            # otherwise complete a launch after the cleanup below, leaking
+            # the cluster.
+            await _cancel_and_drain_tasks(monitor_async_tasks.values())
             await self._cleanup_job_group_clusters(cluster_names)
             raise
 
