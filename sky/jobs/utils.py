@@ -1235,7 +1235,7 @@ def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
                                f'name: {log_file.name}')
                 continue
             # Test if any requested job id is in the submission ranges.
-            # Requests and submission ranges are likely small, no nested check is likely OK.
+            # Requests and submission ranges are likely small, so nested check is likely OK.
             # TODO (ishankaul1) - Add a more efficient check if needed.
             if any(start <= req <= end
                    for start, end in submission_ranges
