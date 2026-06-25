@@ -268,9 +268,17 @@ def _create_vm(
                     key_data=public_key)
             ])),
         custom_data=os_linux_custom_data)
+    shared_gallery_image_id = node_config['azure_arm_parameters'].get(
+        'sharedGalleryImageId', None)
     community_image_id = node_config['azure_arm_parameters'].get(
         'communityGalleryImageId', None)
-    if community_image_id is not None:
+    if shared_gallery_image_id is not None:
+        # Prioritize a private Shared Image Gallery image, referenced by its
+        # full resource ID.
+        image_reference = compute.ImageReference(id=shared_gallery_image_id)
+        logger.info(f'Used shared_gallery_image_id: {shared_gallery_image_id} '
+                    f'for VM {vm_name}.')
+    elif community_image_id is not None:
         # Prioritize using community gallery image if specified.
         image_reference = compute.ImageReference(
             community_gallery_image_id=community_image_id)
