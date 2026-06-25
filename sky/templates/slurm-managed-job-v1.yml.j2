@@ -1,0 +1,112 @@
+{# Slurm-native managed-jobs v1 template.
+
+The cluster YAML carries:
+  * the v1 marker (provider.skypilot_runtime) consumed by every
+    routed provisioner function;
+  * the execution payload (setup / run / envs / workdir / file_mounts
+    / sbatch_options / container_image) consumed by
+    _create_managed_job_v1 when it builds the sbatch script;
+  * the same SSH + partition shape as slurm-ray.yml.j2 so the rest
+    of the backend's cluster-YAML consumption (status queries,
+    terminate, etc.) keeps working.
+
+There is no Ray, no skylet, and no SSH inside the cluster from
+SkyPilot's perspective — the runtime-metadata returned by
+_create_managed_job_v1 marks every post-provision phase as already
+done, so the backend skips file sync, setup, execute, and SSH
+registration. The auth / available_node_types / setup_commands
+sections below are kept as stubs satisfying ProvisionConfig parsing
+without doing anything user-visible.
+#}
+cluster_name: {{cluster_name_on_cloud}}
+
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+provider:
+  type: external
+  module: sky.provision.slurm
+
+  cluster: "{{slurm_cluster}}"
+  partition: "{{slurm_partition}}"
+  provision_timeout: {{provision_timeout}}
+
+  skypilot_runtime: managed_job_v1
+
+  ssh:
+    hostname: {{ssh_hostname}}
+    port: {{ssh_port}}
+    user: {{ssh_user}}
+{% if slurm_private_key is not none %}
+    private_key: {{slurm_private_key}}
+{% endif %}
+{% if slurm_proxy_command is not none %}
+    proxycommand: {{slurm_proxy_command | tojson }}
+{% endif %}
+{% if slurm_proxy_jump is not none %}
+    proxyjump: {{slurm_proxy_jump | tojson }}
+{% endif %}
+    identities_only: {{slurm_identities_only}}
+
+  # v1 managed-job execution payload (flat keys). Read back from
+  # provider_config in _create_managed_job_v1.
+  setup: {{setup | tojson}}
+  run: {{run | tojson}}
+  envs: {{envs | tojson}}
+  num_nodes: {{num_nodes}}
+  num_gpus_per_node: {{num_gpus_per_node}}
+{% if workdir is not none %}
+  workdir: {{workdir | tojson}}
+{% endif %}
+{% if file_mounts is not none %}
+  file_mounts: {{file_mounts | tojson}}
+{% endif %}
+{% if sbatch_options is not none %}
+  sbatch_options: {{sbatch_options | tojson}}
+{% endif %}
+{% if container_image is not none %}
+  container_image: {{container_image | tojson}}
+{% endif %}
+
+auth:
+  ssh_user: {{ssh_user}}
+  ssh_private_key: {{ssh_private_key}}
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      instance_type: {{instance_type}}
+      disk_size: {{disk_size}}
+      cpus: {{cpus}}
+      memory: {{memory}}
+      accelerator_type: {{accelerator_type}}
+      accelerator_count: {{accelerator_count}}
+{% if image_id is not none %}
+      image_id: {{image_id}}
+{% endif %}
+{% if sbatch_options is defined and sbatch_options %}
+      sbatch_options: {{sbatch_options | tojson}}
+{% endif %}
+
+head_node_type: ray_head_default
+
+# No file_mounts at the cluster-YAML layer: the v1 sbatch script
+# materializes the user's git workdir and cloud-URI file mounts
+# directly via its preamble (see _build_workdir_block /
+# _build_file_mounts_block).
+file_mounts: {}
+
+rsync_exclude: []
+initialization_commands: []
+# No setup_commands either: v1 jobs skip the runtime bootstrap entirely.
+setup_commands: []
+
+head_node: {}
+worker_nodes: {}
+
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False

@@ -1,13 +1,17 @@
 """Slurm instance provisioning."""
 
+import base64
+import importlib.resources
 import os
 import shlex
 import tempfile
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
+import hostlist
 
 from sky import exceptions
 from sky import sky_logging
@@ -26,9 +30,66 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky import provision as provision_lib
+    from sky import task as task_lib
+
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
+
+# -------- v1 (Slurm-native managed jobs) detection and gating -------- #
+#
+# v1 managed jobs submit a real ``sbatch`` whose script body is the
+# user's setup+run command — exiting when user code exits — instead
+# of today's ``sleep infinity`` + ``srun --jobid`` pattern. The v1
+# branch is selected at provision time by the provider-config marker
+# below; the legacy ``_create_virtual_instance`` path stays untouched
+# and runs by default.
+
+SLURM_MANAGED_JOB_V1_RUNTIME = 'managed_job_v1'
+
+# Opt-out env var. v1 is on by default; users who rely on the
+# long-lived sleep-infinity allocation (e.g. ``sky exec`` against a
+# managed-job cluster) can fall back to legacy.
+_DISABLE_V1_JOBS_ENV = 'SKYPILOT_SLURM_DISABLE_V1_JOBS'
+# Config-file analog: ``slurm.use_v1: false``.
+_V1_CONFIG_KEY = ('slurm', 'use_v1')
+
+# Base64-encoded ``git_clone.sh`` for embedding in the sbatch script
+# preamble. Reuses the same script as the regular path so token auth,
+# SSH key auth, shallow clones, ref-type detection, and incremental
+# updates all work identically. The env vars ``GIT_URL``,
+# ``GIT_BRANCH``/``GIT_TAG``/``GIT_COMMIT_HASH``, ``GIT_TOKEN``, and
+# ``GIT_SSH_KEY`` are already set as task envs by
+# ``task.py:_set_git_envs_and_secrets``.
+try:
+    _git_clone_script = importlib.resources.files('sky.utils').joinpath(
+        'git_clone.sh')
+    _GIT_CLONE_SCRIPT_B64: Optional[str] = base64.b64encode(
+        _git_clone_script.read_bytes()).decode()
+except (FileNotFoundError, AttributeError):
+    _GIT_CLONE_SCRIPT_B64 = None
+    logger.debug('git_clone.sh not found; git workdir support in the v1 '
+                 'fast path will be limited')
+
+
+def is_managed_job_v1_provider_config(provider_config: Dict[str, Any]) -> bool:
+    """Whether the provider config selects the Slurm v1 managed-job path."""
+    return provider_config.get(
+        'skypilot_runtime') == SLURM_MANAGED_JOB_V1_RUNTIME
+
+
+def is_slurm_managed_jobs_v1_enabled() -> bool:
+    """Whether Slurm v1 managed jobs are enabled.
+
+    On by default. Opt out by setting
+    ``SKYPILOT_SLURM_DISABLE_V1_JOBS=1`` or
+    ``slurm.use_v1: false`` in ``~/.sky/config.yaml``.
+    """
+    if os.environ.get(_DISABLE_V1_JOBS_ENV) == '1':
+        return False
+    return bool(skypilot_config.get_nested(_V1_CONFIG_KEY, True))
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -53,6 +114,10 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'mem',
     'gres',
     'partition',
+    # --signal controls SIGTERM/SIGKILL delivery on scancel/walltime. A user
+    # override (e.g. KILL@10) skips SIGTERM grace and can truncate the log
+    # tail before our tail_logs / cleanup completes.
+    'signal',
 })
 
 
@@ -207,6 +272,34 @@ def _wait_for_job_nodes(
             last_state = state
 
         if state is None:
+            # ``squeue --jobs <id>`` returns empty for terminal jobs by
+            # default (squeue's default filter only shows
+            # pending/running). For a fast-failing v1 job (e.g.
+            # OOM-killed within seconds), we'll observe PENDING then
+            # None even though the job is well within MinJobAge.
+            # Consult sacct to distinguish "terminated already" from
+            # "genuinely not found".
+            sacct_state = _v1_sacct_job_state(client, job_id)
+            _SLURM_TERMINAL = ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT',
+                               'NODE_FAIL', 'BOOT_FAIL', 'OUT_OF_MEMORY',
+                               'DEADLINE', 'SPECIAL_EXIT', 'PREEMPTED',
+                               'REVOKED')
+            if sacct_state in _SLURM_TERMINAL:
+                # The job ran (possibly very briefly) and is already
+                # done. Return cleanly so the caller can build a
+                # ProvisionRecord from sacct's NodeList; the managed-job
+                # controller's first ``get_job_status`` poll will then
+                # surface the terminal state via the chain registry,
+                # and the user-code-failure / SUCCEEDED branch will
+                # fire. Without this, the provisioner raises and the
+                # controller misclassifies fast-failing user code
+                # (e.g. OOM-kill) as an infrastructure error.
+                logger.info(
+                    f'Job {job_id} reached terminal state {sacct_state} '
+                    'before _wait_for_job_nodes observed nodes; returning '
+                    'cleanly so the caller surfaces the terminal status '
+                    'via the managed-job runtime.')
+                return
             raise RuntimeError(f'Job {job_id} not found. It may have been '
                                'cancelled or failed.')
 
@@ -780,6 +873,11 @@ def query_instances(
     del cluster_name, retry_if_missing  # Unused for Slurm
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
+    if is_managed_job_v1_provider_config(provider_config):
+        return _query_instances_v1(cluster_name_on_cloud,
+                                   provider_config,
+                                   non_terminated_only=non_terminated_only)
+
     ssh_config_dict = provider_config['ssh']
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
@@ -855,6 +953,9 @@ def query_instances(
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
+    if is_managed_job_v1_provider_config(config.provider_config):
+        return _create_managed_job_v1(region, cluster_name,
+                                      cluster_name_on_cloud, config)
     return _create_virtual_instance(region, cluster_name, cluster_name_on_cloud,
                                     config)
 
@@ -873,6 +974,20 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region
     assert provider_config is not None, cluster_name_on_cloud
+
+    if is_managed_job_v1_provider_config(provider_config):
+        info = _get_cluster_info_v1(cluster_name_on_cloud, provider_config)
+        if info is not None:
+            return info
+        # Safe default: an empty ClusterInfo. Mirrors the legacy
+        # "no running jobs" branch below — the controller treats this
+        # as "no instances yet" rather than crashing.
+        return common.ClusterInfo(
+            instances={},
+            head_instance_id=None,
+            provider_name='slurm',
+            provider_config=provider_config,
+        )
 
     # The SSH host is the remote machine running slurmctld daemon.
     # Cross-cluster operations are supported by interacting with
@@ -964,6 +1079,10 @@ def terminate_instances(
     if worker_only:
         logger.warning(
             'worker_only=True is not supported for Slurm, this is a no-op.')
+        return
+
+    if is_managed_job_v1_provider_config(provider_config):
+        _terminate_managed_job_v1(cluster_name_on_cloud, provider_config)
         return
 
     # Check if we are running inside a Slurm cluster (only happens with
@@ -1171,3 +1290,1198 @@ def get_command_runners(
     ]
 
     return runners
+
+
+# -------- v1 managed-job: predicates, template override, provision -------- #
+
+# Bounded wait used by the v1 ``terminate_instances`` branch to confirm
+# that ``scancel`` actually moved the job out of RUNNING before we let
+# the controller continue with a possibly-stale state. Slurm's default
+# ``KillWait`` is 30s; we use a slightly larger ceiling so a SIGTERM
+# followed by the eventual SIGKILL has time to land before we give up.
+_V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS = 30
+_V1_SCANCEL_POLL_INTERVAL_SECONDS = 1
+
+
+def _slurm_client_from_provider_config(
+        provider_config: Dict[str, Any]) -> 'slurm.SlurmClient':
+    """Build a ``SlurmClient`` from a v1 provider config's ssh block."""
+    ssh_config_dict = provider_config['ssh']
+    return slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict['port']),
+        ssh_config_dict['user'],
+        ssh_config_dict.get('private_key', None),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=ssh_config_dict.get('identities_only', False),
+    )
+
+
+def _resolve_v1_job_id(
+        client: 'slurm.SlurmClient',
+        cluster_name_on_cloud: str,
+        cluster_info: Optional[common.ClusterInfo] = None) -> Optional[str]:
+    """Resolve the Slurm job_id for a v1 cluster.
+
+    Identity contract (PLAN.md block-ship #4): the primary source is the
+    structured ``tags['job_id']`` populated by ``get_cluster_info``;
+    fallback is a name-keyed ``squeue`` query, which is safe on the v1
+    path because the COMPLETING-drain + existing-job reattach invariants
+    in ``_create_managed_job_v1`` guarantee a single live job per name.
+    """
+    # Primary: structured tag from cached ClusterInfo.
+    if cluster_info is not None and cluster_info.head_instance_id is not None:
+        head = cluster_info.get_head_instance()
+        if head is not None:
+            tag = head.tags.get('job_id') if head.tags else None
+            if tag:
+                return str(tag)
+    # Fallback: name-keyed query (single match enforced upstream).
+    matches = client.query_jobs(cluster_name_on_cloud, ['pending', 'running'])
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return None
+    raise RuntimeError(
+        f'Multiple Slurm jobs found for v1 cluster {cluster_name_on_cloud}: '
+        f'{matches}. Expected at most one — single-job-per-name is a v1 '
+        'invariant.')
+
+
+def _terminate_managed_job_v1(cluster_name_on_cloud: str,
+                              provider_config: Dict[str, Any]) -> None:
+    """Cancel the v1 Slurm job by job_id and wait briefly for RUNNING exit.
+
+    Uses ``scancel <jobid>`` against the resolved primary identity (per
+    PLAN.md block-ship #4), not ``scancel --name=...`` — the latter
+    stays on the legacy path. After scancel we poll briefly so the
+    controller does not continue with a stale RUNNING reading.
+    """
+    client = _slurm_client_from_provider_config(provider_config)
+
+    job_id = _resolve_v1_job_id(client, cluster_name_on_cloud)
+    if job_id is None:
+        logger.debug(f'V1 Slurm job for {cluster_name_on_cloud} not found in '
+                     'squeue; assuming already terminated.')
+        return
+
+    state = client.get_job_state(job_id)
+    if state is None:
+        logger.debug(f'V1 Slurm job {job_id} no longer in squeue; assuming '
+                     'already terminated.')
+        return
+
+    terminal_states = {
+        'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
+        'SPECIAL_EXIT', 'BOOT_FAIL', 'OUT_OF_MEMORY', 'DEADLINE', 'REVOKED'
+    }
+    if state in terminal_states:
+        logger.debug(f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) already '
+                     f'in terminal state {state}; nothing to do.')
+        return
+    if state == 'COMPLETING':
+        logger.debug(f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) already '
+                     'completing; nothing to do.')
+        return
+
+    if state in ('PENDING', 'CONFIGURING'):
+        # Pending jobs haven't allocated nodes; scancel without signal.
+        client.cancel_job_by_id(job_id, signal=None)
+    else:
+        # RUNNING / SUSPENDED / SIGNALING / STAGE_OUT: send SIGTERM with --full
+        # so the batch shell + its srun children receive the signal.
+        client.cancel_job_by_id(job_id, signal='TERM', full=True)
+
+    # Wait briefly for the job to leave RUNNING. Without this the
+    # controller may read a stale RUNNING state on its next status poll
+    # and conclude the cancel "didn't take".
+    start = time.time()
+    while (time.time() - start < _V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS):
+        state = client.get_job_state(job_id)
+        if state is None:
+            # Aged out of squeue; reach for sacct to confirm terminal.
+            return
+        if state in terminal_states or state == 'COMPLETING':
+            return
+        time.sleep(_V1_SCANCEL_POLL_INTERVAL_SECONDS)
+
+    logger.warning(
+        f'V1 Slurm job {job_id} ({cluster_name_on_cloud}) did not leave '
+        f'RUNNING within {_V1_SCANCEL_LEAVE_RUNNING_TIMEOUT_SECONDS}s after '
+        'scancel. The controller may briefly observe a stale state.')
+
+
+# Mapping from upper-case Slurm states (as returned by ``squeue`` /
+# ``sacct``) to a SkyPilot ``ClusterStatus``. Terminal states map to
+# ``None`` so callers can short-circuit cleanup. Aligned with the
+# state space documented at
+# https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES — see
+# also ``managed_job_runtime._slurm_state_to_job_status``.
+# Reverse map for the small set of state-filter keywords
+# ``query_jobs`` accepts against ``squeue --states <filter>``.
+# Filter words are lower-case; the upper-case canonical Slurm state
+# token is what ``_V1_SLURM_STATE_TO_CLUSTER_STATUS`` keys on. Used
+# by ``_query_instances_v1`` so we don't re-query the job's state —
+# the filter we asked for IS the state, and re-querying via
+# ``squeue --jobs <id>`` is unreliable on clusters with aggressive
+# ``MinJobAge`` (the by-id lookup ages out faster than the by-state
+# filter).
+_STATE_FILTER_TO_SLURM_STATE: Dict[str, str] = {
+    'pending': 'PENDING',
+    'running': 'RUNNING',
+    'completing': 'COMPLETING',
+    'completed': 'COMPLETED',
+    'cancelled': 'CANCELLED',
+    'failed': 'FAILED',
+    'node_fail': 'NODE_FAIL',
+    # Terminal states beyond plain FAILED. squeue keeps these visible
+    # within ``MinJobAge`` (default 300s) but each surfaces under its
+    # own filter — ``--states failed`` does NOT include TIMEOUT or
+    # OUT_OF_MEMORY rows. Without these entries, a walltime-killed
+    # or OOM-killed job goes invisible to ``_query_instances_v1``'s
+    # squeue path even though it's well within MinJobAge, and the
+    # controller misclassifies as preemption.
+    'timeout': 'TIMEOUT',
+    'out_of_memory': 'OUT_OF_MEMORY',
+    'deadline': 'DEADLINE',
+    'preempted': 'PREEMPTED',
+    'boot_fail': 'BOOT_FAIL',
+    'revoked': 'REVOKED',
+}
+
+_V1_SLURM_STATE_TO_CLUSTER_STATUS: Dict[str, Optional[status_lib.ClusterStatus]] = {
+    'PENDING': status_lib.ClusterStatus.INIT,
+    'CONFIGURING': status_lib.ClusterStatus.INIT,
+    'RESV_DEL_HOLD': status_lib.ClusterStatus.INIT,
+    'REQUEUED': status_lib.ClusterStatus.INIT,
+    'REQUEUE_HOLD': status_lib.ClusterStatus.INIT,
+    'REQUEUE_FED': status_lib.ClusterStatus.INIT,
+    'RESIZING': status_lib.ClusterStatus.INIT,
+    'RUNNING': status_lib.ClusterStatus.UP,
+    'COMPLETING': status_lib.ClusterStatus.UP,
+    'SIGNALING': status_lib.ClusterStatus.UP,
+    'STAGE_OUT': status_lib.ClusterStatus.UP,
+    'SUSPENDED': status_lib.ClusterStatus.UP,
+    # --- Terminal due to user-code outcome: report cluster as UP. ---
+    # The Slurm allocation is gone, but from the managed-jobs
+    # controller's perspective the "cluster" ran fine and the
+    # user's code is what terminated. Without UP here the
+    # controller's user-code-failure branch at controller.py:874+
+    # never fires (it gates on ``cluster_status == UP``), so a
+    # FAILED job is misclassified as cluster-preempted and
+    # retried indefinitely. Compare K8s legacy at
+    # ``kubernetes/instance.py:2640`` which uses ``status_map_overrides``
+    # (line 2631) to swap ``Failed → UP`` for v1-style pods that are
+    # also single-use; we set this directly because Slurm v1 owns
+    # the whole status path.
+    'COMPLETED': status_lib.ClusterStatus.UP,
+    'FAILED': status_lib.ClusterStatus.UP,
+    'TIMEOUT': status_lib.ClusterStatus.UP,
+    'OUT_OF_MEMORY': status_lib.ClusterStatus.UP,
+    'DEADLINE': status_lib.ClusterStatus.UP,
+    'SPECIAL_EXIT': status_lib.ClusterStatus.UP,
+    # --- Terminal due to infrastructure or cancellation: ``None``. ---
+    # ``None`` tells the controller "no longer an instance" so it
+    # takes the recovery / cleanup path (per its ``cluster_status
+    # != UP`` branch).
+    'NODE_FAIL': None,
+    'BOOT_FAIL': None,
+    'PREEMPTED': None,
+    'REVOKED': None,
+    'CANCELLED': None,
+}
+
+
+def _v1_sacct_job_state(client: 'slurm.SlurmClient',
+                        job_id_or_name: str) -> Optional[str]:
+    """Query ``sacct`` for the parent-row terminal state of a job.
+
+    Used by ``_query_instances_v1`` to surface terminal state for jobs
+    that have aged past squeue's ``MinJobAge`` window (default 300s) —
+    PLAN.md gap #12. ``--name`` is accepted by sacct, so we can key on
+    either job id or cluster_name_on_cloud.
+
+    Returns the upper-cased state of the most recent matching allocation
+    row, or ``None`` if sacct returns nothing parseable.
+    """
+    # Use ``-X`` (= ``--allocations``) to skip step rows. Quoting note:
+    # the caller may pass a numeric job id or a cluster name; both are
+    # safe to substitute (cluster names are validated against
+    # ``CLUSTER_NAME_VALID_REGEX``, and job ids are numeric).
+    is_numeric = job_id_or_name.isdigit()
+    key_flag = '-j' if is_numeric else '--name'
+    cmd = (f'sacct {key_flag} {job_id_or_name} --format=JobID,State '
+           '--parsable2 --noheader -X')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0:
+        return None
+    # Take the *last* row — sacct lists rows oldest-first, and on
+    # recovery_strategy reuse the same cluster name can have multiple
+    # historical rows. The last one is the most recent attempt.
+    last_state: Optional[str] = None
+    for line in stdout.splitlines():
+        parts = line.split('|')
+        if len(parts) < 2:
+            continue
+        state = parts[1].strip()
+        # ``CANCELLED by <uid>`` collapses to ``CANCELLED``.
+        if state.startswith('CANCELLED'):
+            state = 'CANCELLED'
+        if state:
+            last_state = state.upper()
+    return last_state
+
+
+def _query_instances_v1(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    *,
+    non_terminated_only: bool,
+) -> Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]]:
+    """v1 ``query_instances``: squeue + sacct merge.
+
+    Legacy ``query_instances`` queries ``squeue`` only, so a job that
+    aged past ``MinJobAge`` (default 300s) disappears from the result
+    map. For v1 managed jobs that's a correctness problem — the
+    controller needs to observe terminal state for short-lived jobs to
+    decide success/failure. So we additionally consult ``sacct``.
+
+    Returns a ``{instance_id: (cluster_status, reason)}`` map keyed on
+    ``slurm_utils.instance_id(job_id, node)`` for live jobs, or on the
+    bare ``cluster_name_on_cloud`` for terminal-only sacct surfacing
+    (we have no node list to fan out across).
+    """
+    client = _slurm_client_from_provider_config(provider_config)
+    statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
+                              Optional[str]]] = {}
+    seen_job_ids: set = set()
+
+    # --- squeue: gather all job_ids across the live + recently-terminal
+    # filter set, then pick ONLY the most-recent attempt. ---
+    #
+    # On recovery, the controller resubmits under the same
+    # cluster_name_on_cloud. Within ``MinJobAge`` (default 300s) squeue
+    # surfaces every recent attempt of that name. If we report all of
+    # them, ``backend_utils._update_cluster_status`` sees
+    # ``len(node_statuses) > launched_nodes`` and raises
+    # ``ClusterStatusFetchingError`` ("Found N node(s) with the same
+    # cluster name tag"), spinning the launch retry loop.
+    #
+    # Slurm job IDs are monotonic per slurmctld lifetime — the highest
+    # ID wins. We collect (job_id, state) pairs across the full filter
+    # set and keep the row with the largest job_id only.
+    candidates: Dict[str, str] = {}  # job_id -> upper-case Slurm state
+    for state_filter in [
+            'pending', 'running', 'completing', 'completed', 'cancelled',
+            'failed', 'node_fail', 'timeout', 'out_of_memory', 'deadline',
+            'preempted', 'boot_fail', 'revoked'
+    ]:
+        try:
+            job_ids = client.query_jobs(cluster_name_on_cloud, [state_filter])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'V1 query_instances: squeue query for state '
+                         f'{state_filter!r} failed: {e}')
+            continue
+        # The state filter we used IS the canonical state — derive the
+        # upper-case label from it directly. Re-querying via
+        # ``client.get_job_state(job_id)`` is unreliable on clusters
+        # with aggressive ``MinJobAge``: ``squeue --states=failed``
+        # surfaces the job_id but the follow-up ``squeue --jobs <id>``
+        # returns nothing because the by-id lookup has already aged
+        # out. The state filter is the ground truth.
+        state = _STATE_FILTER_TO_SLURM_STATE.get(state_filter)
+        if state is None:
+            # Unknown state_filter in the loop above — programming
+            # error; skip rather than coerce.
+            continue
+        for job_id in job_ids:
+            seen_job_ids.add(job_id)
+            candidates[job_id] = state
+
+    if candidates:
+        try:
+            best_job_id = str(max(int(j) for j in candidates))
+        except ValueError:
+            # Non-numeric job id (e.g. federated cluster). Fall back to
+            # lexicographic max — rare on this path; the legacy slurm
+            # adaptor already enforces numeric job ids.
+            best_job_id = max(candidates)
+        best_state = candidates[best_job_id]
+        sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(best_state)
+        if sky_status is None and not non_terminated_only:
+            try:
+                reason = client.get_job_reason(best_job_id)
+            except Exception:  # pylint: disable=broad-except
+                reason = None
+            statuses[best_job_id] = (None, reason)
+        elif sky_status is not None:
+            try:
+                nodes, _ = client.get_job_nodes(best_job_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'V1 query_instances: get_job_nodes('
+                             f'{best_job_id}) failed: {e}')
+                nodes = []
+            # ``get_job_nodes`` uses ``squeue --jobs <id>``, which excludes
+            # terminal jobs by default. For a terminal multi-node job within
+            # MinJobAge, the squeue filter loop above tells us the *state*
+            # but the by-id lookup returns no nodes. Fall back to sacct's
+            # NodeList so we fan out across the full allocation. Without
+            # this, multi-node terminal jobs collapse to a single entry
+            # under ``best_job_id`` and ``backend_utils._update_cluster_status``
+            # fires ``some_nodes_terminated`` → "one or more nodes
+            # terminated" → spurious recovery loop.
+            if not nodes:
+                try:
+                    sacct_nodes = _v1_sacct_node_list(client, best_job_id)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'V1 query_instances: _v1_sacct_node_list('
+                                 f'{best_job_id}) failed: {e}')
+                    sacct_nodes = None
+                if sacct_nodes:
+                    nodes = sacct_nodes
+            if not nodes:
+                # Surface the job-id keyed entry so the caller sees a
+                # single-entry cluster (matches launched_nodes=1).
+                statuses[best_job_id] = (sky_status, None)
+            else:
+                for node in nodes:
+                    instance_id = slurm_utils.instance_id(best_job_id, node)
+                    statuses[instance_id] = (sky_status, None)
+
+    # --- sacct: terminal state for jobs aged past MinJobAge. ---
+    # Consult sacct whenever the squeue path produced nothing, regardless
+    # of ``non_terminated_only``. The flag describes per-instance filtering
+    # semantics for multi-node clouds; v1 Slurm jobs are single-instance
+    # and the controller's ``_update_cluster_status`` (which calls us with
+    # the default ``non_terminated_only=True``) needs to distinguish
+    # ``cluster_status=UP`` (user-code terminal — fire user-code-failure
+    # branch) from ``cluster_status=None`` (infra terminal — fire recovery
+    # branch). Without surfacing sacct here, a job that aged past squeue's
+    # MinJobAge window appears as "no instance" and the controller
+    # misclassifies as preemption.
+    del non_terminated_only  # Intentionally ignored — see docstring above.
+    if not statuses:
+        sacct_state = _v1_sacct_job_state(client, cluster_name_on_cloud)
+        if sacct_state is not None:
+            sky_status = _V1_SLURM_STATE_TO_CLUSTER_STATUS.get(sacct_state)
+            # sacct's most-recent terminal state is keyed on the cluster
+            # name (we have no per-node fanout once the job is gone).
+            statuses[cluster_name_on_cloud] = (sky_status, sacct_state)
+
+    return statuses
+
+
+def _v1_precondition_cleanup(
+        login_node_runner: 'command_runner.SSHCommandRunner', sky_base_dir: str,
+        cluster_name_on_cloud: str) -> None:
+    """Purge residue from a prior v1 attempt under the same cluster name.
+
+    PLAN.md gap #10: if a previous attempt was killed under SIGKILL or
+    OOM, its EXIT trap (which would have removed
+    ``{sky_base_dir}/.sky_clusters/<cluster_name_on_cloud>``) never
+    ran. Submitting attempt N+1 without clearing that residue can leave
+    stale log markers, ready-signal files, or container init flags in
+    place, confusing the new attempt.
+
+    Best-effort: failures (e.g. NFS hiccup) are logged and tolerated —
+    the new attempt's sbatch script will still proceed; we just risk
+    seeing the stale residue if cleanup didn't take. The legacy path's
+    EXIT trap was the only place this was previously removed.
+    """
+    cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                             cluster_name_on_cloud)
+    cmd = f'rm -rf {shlex.quote(cluster_home_dir)}'
+    rc, stdout, stderr = login_node_runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    if rc != 0:
+        logger.warning(f'V1 precondition cleanup of {cluster_home_dir} '
+                       f'failed (rc={rc}): {stdout}\n{stderr}. Continuing '
+                       'with submission; stale residue may be visible to '
+                       'the new attempt.')
+    else:
+        logger.debug(f'V1 precondition cleanup of {cluster_home_dir} ok.')
+
+
+def _v1_sacct_node_list(client: 'slurm.SlurmClient',
+                        job_id: str) -> Optional[List[str]]:
+    """Recover the per-job node list from ``sacct`` when squeue is empty.
+
+    Used by ``_get_cluster_info_v1`` as a fallback for jobs that have
+    aged out of squeue. ``NodeList`` is on the parent allocation row in
+    Slurm's compact hostlist notation (e.g. ``node-[01-03]``); expanded
+    locally via the ``hostlist`` library (same dependency the in-cluster
+    executor uses) to avoid a second SSH round-trip.
+    """
+    cmd = (f'sacct -j {job_id} --format=NodeList --parsable2 --noheader -X')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0:
+        return None
+    nodelist: Optional[str] = None
+    for line in stdout.splitlines():
+        value = line.strip()
+        if not value or value == 'None assigned':
+            continue
+        nodelist = value
+        break
+    if nodelist is None:
+        return None
+    nodes = _expand_slurm_hostlist(nodelist)
+    return nodes if nodes else None
+
+
+def _expand_slurm_hostlist(nodelist: str) -> List[str]:
+    """Expand Slurm's compact hostlist syntax into individual node names.
+
+    Slurm emits NodeList as ``ip-10-3-93-178`` for single nodes and
+    ``node-[01-03,05]`` for ranges; the same shape is accepted by
+    ``hostlist.expand_hostlist``. Plain hostnames pass through.
+    """
+    if not nodelist:
+        return []
+    try:
+        return list(hostlist.expand_hostlist(nodelist))
+    except Exception as e:  # pylint: disable=broad-except
+        # Library raises ``hostlist.BadHostlist`` on malformed input;
+        # surface as debug rather than failing the whole status query.
+        logger.debug(f'Failed to expand Slurm hostlist {nodelist!r}: {e}')
+        return [nodelist]
+
+
+def _v1_sacct_latest_attempt(
+        client: 'slurm.SlurmClient',
+        cluster_name_on_cloud: str) -> Optional[Tuple[str, List[str]]]:
+    """Recover the most-recent attempt's (job_id, NodeList) from sacct.
+
+    For v1 jobs that have already terminated (typical for fast-failing
+    jobs like OOM-killed user code), ``squeue --jobs <id>`` returns
+    nothing because squeue's default filter excludes terminal states.
+    sacct retains the record within ``MinJobAge`` and can be queried by
+    ``--name``. Returns the most recent allocation row's job_id and
+    NodeList, or ``None`` if sacct has no record.
+    """
+    cmd = (f'sacct --name {cluster_name_on_cloud} '
+           '--format=JobID,NodeList --parsable2 --noheader -X')
+    # pylint: disable=protected-access
+    rc, stdout, _ = client._run_slurm_cmd(cmd)
+    if rc != 0 or not stdout.strip():
+        return None
+    # sacct lists rows oldest-first. The last row is the most recent
+    # attempt (controller may have recovered under the same name).
+    last_job_id: Optional[str] = None
+    last_nodelist_raw: Optional[str] = None
+    for line in stdout.splitlines():
+        parts = line.split('|')
+        if len(parts) < 2:
+            continue
+        last_job_id = parts[0].strip()
+        last_nodelist_raw = parts[1].strip()
+    if not last_job_id or not last_nodelist_raw or last_nodelist_raw == 'None':
+        return None
+    nodes = _expand_slurm_hostlist(last_nodelist_raw)
+    if not nodes:
+        return None
+    return last_job_id, nodes
+
+
+def _get_cluster_info_v1(
+        cluster_name_on_cloud: str,
+        provider_config: Dict[str, Any]) -> Optional[common.ClusterInfo]:
+    """v1 ``get_cluster_info``: minimal shape, no SSH-port shenanigans.
+
+    Unlike the legacy path's ``InstanceInfo(ssh_port=ssh_port,
+    external_ip=ssh_host, ...)`` (which is misleading on v1 — SkyPilot
+    never SSHes to the compute node), the v1 shape omits SSH leakage:
+    no external_ip, empty ssh_user override, and the InstanceInfo's
+    ``ssh_port`` left at its default. Tags carry the structured
+    ``job_id`` / ``node`` / ``TAG_SKYPILOT_CLUSTER_NAME`` so
+    ``_resolve_slurm_target`` (managed_job_runtime) finds the right
+    job_id without parsing.
+
+    Returns ``None`` (not a ``ClusterInfo``) when listing nodes fails
+    even after the sacct fallback — callers should treat that as
+    "no instances yet" and fall through to a safe default.
+    """
+    client = _slurm_client_from_provider_config(provider_config)
+
+    job_id: Optional[str] = None
+    nodes: List[str] = []
+
+    # First try squeue's "live" set (pending/running/completing). If a
+    # live job exists, prefer it.
+    try:
+        live_jobs = client.query_jobs(cluster_name_on_cloud,
+                                      ['pending', 'running', 'completing'])
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'V1 get_cluster_info: squeue query failed: {e}')
+        live_jobs = []
+
+    if live_jobs:
+        if len(live_jobs) > 1:
+            # Multiple "live" jobs for the same name — pick the highest
+            # (Slurm assigns monotonic IDs). Don't assert; recovery
+            # attempts may briefly overlap.
+            job_id = str(max(int(j) for j in live_jobs))
+        else:
+            job_id = live_jobs[0]
+        try:
+            nodes, _ = client.get_job_nodes(job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'V1 get_cluster_info: get_job_nodes({job_id}) '
+                         f'failed: {e}; trying sacct NodeList fallback.')
+            recovered = _v1_sacct_node_list(client, job_id)
+            if recovered:
+                nodes = recovered
+
+    if not nodes:
+        # No live job, or live job has no nodes yet — fall back to
+        # sacct's most recent attempt. This is the typical case for
+        # fast-failing v1 jobs: get_cluster_info is called after
+        # _create_managed_job_v1 returns but the sbatch has already
+        # OOM/FAILED, so squeue's live filter returns empty.
+        recovered = _v1_sacct_latest_attempt(client, cluster_name_on_cloud)
+        if recovered is not None:
+            job_id, nodes = recovered
+            logger.debug(f'V1 get_cluster_info: recovered job {job_id} with '
+                         f'nodes={nodes} from sacct (no live job).')
+
+    if not nodes or job_id is None:
+        # Nothing in sacct either. Return None so the caller falls
+        # through to its safe default. The managed-job controller's
+        # status poll will surface "no cluster" and the launch
+        # finalization treats this as a provisioning failure.
+        logger.debug(f'V1 get_cluster_info: no live job and no sacct '
+                     f'record for {cluster_name_on_cloud}; returning None.')
+        return None
+
+    instances: Dict[str, List[common.InstanceInfo]] = {}
+    for node in nodes:
+        instance_id = slurm_utils.instance_id(job_id, node)
+        instances[instance_id] = [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                # V1 never SSHes to the compute node; leave internal_ip
+                # empty.
+                internal_ip='',
+                external_ip=None,
+                tags={
+                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+                    'job_id': str(job_id),
+                    'node': node,
+                },
+                node_name=instance_id,
+            )
+        ]
+
+    return common.ClusterInfo(
+        instances=instances,
+        head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+        provider_name='slurm',
+        # V1 has no SSH user — runtime never executes against the node.
+        ssh_user='',
+        provider_config=provider_config,
+    )
+
+
+def _all_resource_alternatives_are_slurm(task: 'task_lib.Task') -> bool:
+    """Whether every resource alternative on the task is Slurm."""
+    # pylint: disable=import-outside-toplevel
+    from sky import clouds as sky_clouds
+
+    resources = list(task.resources)
+    if not resources:
+        return False
+    return all(resource.cloud is not None and
+               resource.cloud.is_same_cloud(sky_clouds.Slurm())
+               for resource in resources)
+
+
+def _get_unsupported_v1_inputs(task: 'task_lib.Task') -> List[str]:
+    """Return user inputs that force fallback from the v1 template."""
+    unsupported: List[str] = []
+    local_file_mounts = task.get_local_to_remote_file_mounts() or {}
+    has_local_workdir = (task.workdir is not None and
+                         isinstance(task.workdir, str))
+    storage_mounts = task.storage_mounts
+    if has_local_workdir:
+        unsupported.append(f'workdir: {task.workdir!r}')
+    if local_file_mounts:
+        for dst, src in local_file_mounts.items():
+            unsupported.append(f'file_mounts: {src!r} -> {dst!r}')
+    if storage_mounts:
+        for mnt_path, storage in storage_mounts.items():
+            unsupported.append(
+                f'storage_mounts: {storage.name!r} -> {mnt_path!r}')
+    return unsupported
+
+
+def will_use_v1_template(
+    task: 'task_lib.Task',
+    *,
+    is_launched_by_jobs_controller: bool = True,
+) -> bool:
+    """Whether this task will be claimed by the Slurm v1 template.
+
+    Keep this predicate in sync with ``template_override()``.
+    """
+    if (not is_slurm_managed_jobs_v1_enabled() or
+            not is_launched_by_jobs_controller):
+        return False
+    if not _all_resource_alternatives_are_slurm(task):
+        return False
+    return not _get_unsupported_v1_inputs(task)
+
+
+def template_override(
+    task: 'task_lib.Task',
+    *,
+    _extra_launch_context: Dict[str, Any],
+    _is_launched_by_jobs_controller: bool,
+) -> Optional['provision_lib.TemplateSpec']:
+    """Claim v1 Slurm managed-job tasks and return their template spec."""
+    # pylint: disable=import-outside-toplevel
+    from sky import provision as provision_lib
+    from sky import task as task_lib
+    from sky.backends import backend_utils
+
+    del _extra_launch_context  # No per-task context consumed yet.
+
+    if not will_use_v1_template(
+            task,
+            is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+    ):
+        unsupported = _get_unsupported_v1_inputs(task)
+        if (is_slurm_managed_jobs_v1_enabled() and
+                _is_launched_by_jobs_controller and
+                _all_resource_alternatives_are_slurm(task) and unsupported):
+            logger.warning(
+                'Falling back to legacy Slurm managed-jobs path: jobs with '
+                'local file mounts, workdir, or storage mounts are not '
+                'supported on the v1 fast path. Unsupported inputs:\n  ' +
+                '\n  '.join(unsupported) +
+                '\nUse a git workdir or cloud storage (s3://, gs://, etc.) '
+                'to opt into the v1 fast path.')
+        return None
+
+    resources = list(task.resources)
+    envs = task_lib.get_plaintext_envs_and_secrets(task.envs_and_secrets)
+
+    resource = resources[0]
+    sbatch_options: Dict[str, Any] = {}
+    cluster_overrides = resource.cluster_config_overrides
+    if cluster_overrides:
+        # Surface task-level sbatch_options into the template; cluster /
+        # partition level options are merged later by
+        # ``Slurm.make_deploy_resources_variables`` and threaded through
+        # the standard template variables (``sbatch_options``).
+        task_sbatch = cluster_overrides.get(
+            'slurm', {}).get('sbatch_options') if isinstance(
+                cluster_overrides, dict) else None
+        if isinstance(task_sbatch, dict):
+            sbatch_options.update(task_sbatch)
+
+    workdir = task.workdir
+    workdir_config: Optional[Dict[str, Any]] = None
+    if workdir is not None:
+        # Local workdirs are blocked by ``will_use_v1_template`` above —
+        # this branch only handles the git-dict form.
+        assert isinstance(
+            workdir,
+            dict), (f'Expected git workdir (dict), got {type(workdir)}')
+        workdir_config = {'git': workdir}
+
+    file_mounts: Optional[Dict[str, str]] = None
+    if task.file_mounts:
+        file_mounts = dict(task.file_mounts)
+
+    container_image = resource.extract_docker_image()
+
+    return provision_lib.TemplateSpec(
+        template_path='slurm-managed-job-v1.yml.j2',
+        variables={
+            'setup': task.setup,
+            'run': task.run,
+            'envs': envs,
+            'num_nodes': task.num_nodes,
+            'num_gpus_per_node': backend_utils.get_num_gpus_per_node(task),
+            'workdir': workdir_config,
+            'file_mounts': file_mounts,
+            'sbatch_options': sbatch_options or None,
+            'container_image': container_image,
+        },
+    )
+
+
+def _build_workdir_block(workdir: Optional[Dict[str, Any]]) -> str:
+    """Build sbatch preamble commands for the git workdir, or empty."""
+    if not workdir:
+        return ''
+    if 'git' not in workdir:
+        return ''
+    if _GIT_CLONE_SCRIPT_B64 is None:
+        raise RuntimeError(
+            'git_clone.sh not found; cannot use git workdir with the v1 '
+            'fast path')
+    # The git_clone.sh script expects to be invoked with the target
+    # workdir as its only positional argument. ``SKY_REMOTE_WORKDIR`` is
+    # the canonical destination used elsewhere; expand ~ to $HOME so
+    # bash double-quote semantics work.
+    remote_workdir = skylet_constants.SKY_REMOTE_WORKDIR.replace('~', '$HOME')
+    return (
+        '# === Workdir: git clone via git_clone.sh ===\n'
+        f"echo '{_GIT_CLONE_SCRIPT_B64}' | base64 -d > /tmp/sky_git_clone.sh\n"
+        f'bash /tmp/sky_git_clone.sh "{remote_workdir}"\n'
+        'rm -f /tmp/sky_git_clone.sh\n'
+        f'cd "{remote_workdir}"\n')
+
+
+def _build_file_mounts_block(file_mounts: Optional[Dict[str, str]]) -> str:
+    """Build sbatch preamble commands for cloud-URI file mounts, or empty."""
+    if not file_mounts:
+        return ''
+    # Lazy imports: ``sky.data.data_utils`` and ``sky.cloud_stores``
+    # both transitively import ``sky.clouds``. Importing them at
+    # module level creates a cycle when this module is loaded as part
+    # of the managed-job controller subprocess's import order (which
+    # starts at ``sky.clouds`` itself).
+    # pylint: disable=import-outside-toplevel
+    from sky import cloud_stores
+    from sky.data import data_utils
+
+    commands: List[str] = []
+    for remote_path, source in file_mounts.items():
+        if not data_utils.is_cloud_store_url(source):
+            logger.warning('Slurm v1 fast path: skipping non-cloud-URL '
+                           f'file mount {source} -> {remote_path}')
+            continue
+        try:
+            storage = cloud_stores.get_storage_from_path(source)
+            if storage.is_directory(source):
+                mkdir_cmd = f'mkdir -p {shlex.quote(remote_path)}'
+                sync_cmd = storage.make_sync_dir_command(
+                    source=source, destination=remote_path)
+            else:
+                mkdir_cmd = (f'mkdir -p $(dirname {shlex.quote(remote_path)})')
+                sync_cmd = storage.make_sync_file_command(
+                    source=source, destination=remote_path)
+            commands.append(f'{mkdir_cmd} && {sync_cmd}')
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                f'Slurm v1 fast path: cannot generate sync command for '
+                f'{source} -> {remote_path}',
+                exc_info=True)
+    if not commands:
+        return ''
+    return '# === File Mounts ===\n' + '\n'.join(commands) + '\n'
+
+
+def _build_env_exports(envs: Optional[Dict[str, str]]) -> str:
+    """Render env exports as bash ``export`` lines."""
+    if not envs:
+        return ''
+    lines = ['# === Env vars ===']
+    for key, value in envs.items():
+        lines.append(f'export {key}={shlex.quote(str(value))}')
+    return '\n'.join(lines) + '\n'
+
+
+def _build_v1_sbatch_script(
+    *,
+    cluster_name_on_cloud: str,
+    num_nodes: int,
+    log_path: str,
+    resources: Dict[str, Any],
+    setup: Optional[str],
+    run: Optional[str],
+    envs: Dict[str, str],
+    workdir: Optional[Dict[str, Any]],
+    file_mounts: Optional[Dict[str, str]],
+    container_image: Optional[str],
+    extra_sbatch_directives: str,
+) -> str:
+    """Build the v1 sbatch script whose body is the user's setup+run.
+
+    Pattern: a single ``srun --nodes=N --ntasks-per-node=1`` whose body
+    is ``bash -c '<setup> && <run>'``. Container support wraps the same
+    srun with pyxis flags. No ``sleep infinity``; the job exits when
+    user code exits and Slurm marks it COMPLETED / FAILED naturally.
+    """
+    accelerator_type = resources.get('accelerator_type')
+    accelerator_count_raw = resources.get('accelerator_count')
+    try:
+        accelerator_count = int(
+            accelerator_count_raw) if accelerator_count_raw is not None else 0
+    except (TypeError, ValueError):
+        accelerator_count = 0
+
+    gpu_directive = ''
+    if accelerator_count > 0:
+        if (accelerator_type is not None and
+                accelerator_type.upper() != 'NONE'):
+            gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
+                             f'{accelerator_count}')
+        else:
+            gpu_directive = f'#SBATCH --gres=gpu:{accelerator_count}'
+
+    mem_directive = ''
+    if float(resources.get('memory', 0)) > 0:
+        mem_in_mb = int(float(resources['memory']) * 1024)
+        mem_directive = f'#SBATCH --mem={mem_in_mb}M'
+
+    cpus = int(resources.get('cpus', 1))
+
+    # Compose the inner user command. ``set -o pipefail`` is the only
+    # global shell flag we impose — legacy doesn't add ``-e`` or ``-u``
+    # and user setup blocks routinely rely on ``+u`` (sourcing
+    # unset-var-tolerant rc files) and ``|| true``-style guards.
+    user_setup = (setup or '').strip()
+    user_run = (run or '').strip()
+    if user_setup and user_run:
+        user_script = f'set -o pipefail\n{user_setup}\n{user_run}'
+    elif user_setup:
+        user_script = f'set -o pipefail\n{user_setup}'
+    elif user_run:
+        user_script = f'set -o pipefail\n{user_run}'
+    else:
+        user_script = 'set -o pipefail\n# no setup / run specified'
+    quoted_user_script = shlex.quote(user_script)
+
+    # Container args (pyxis/enroot). Per-job container name (suffix with
+    # SLURM_JOB_ID) so a half-extracted rootfs from a killed previous
+    # attempt cannot collide with this attempt.
+    container_args = ''
+    if container_image:
+        container_name_base = slurm_utils.pyxis_container_name(
+            cluster_name_on_cloud)
+        container_args = (
+            f'--container-image={shlex.quote(container_image)} '
+            f'--container-name={shlex.quote(container_name_base)}-'
+            f'${{SLURM_JOB_ID}} '
+            f'--container-remap-root '
+            f'--container-writable ')
+
+    label_flag = '--label ' if num_nodes > 1 else ''
+    srun_line = (f'srun --nodes={num_nodes} --ntasks-per-node=1 '
+                 f'{label_flag}--unbuffered {container_args}'
+                 f'bash -c {quoted_user_script}')
+
+    workdir_block = _build_workdir_block(workdir)
+    file_mounts_block = _build_file_mounts_block(file_mounts)
+    env_exports = _build_env_exports(envs)
+
+    # pylint: disable=line-too-long
+    return (f'#!/bin/bash\n'
+            f'#SBATCH --job-name={cluster_name_on_cloud}\n'
+            f'#SBATCH --output={log_path}\n'
+            f'#SBATCH --error={log_path}\n'
+            f'#SBATCH --nodes={num_nodes}\n'
+            f'#SBATCH --wait-all-nodes=1\n'
+            f'#SBATCH --no-requeue\n'
+            f'#SBATCH --cpus-per-task={cpus}\n'
+            f'{mem_directive}\n'
+            f'{gpu_directive}'
+            f'{extra_sbatch_directives}\n'
+            f'\n'
+            f'{workdir_block}'
+            f'{file_mounts_block}'
+            f'{env_exports}'
+            f'\n'
+            f'{srun_line}\n')
+
+
+def _create_managed_job_v1(
+        region: str, cluster_name: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """Create a Slurm v1 managed job (single real ``sbatch``).
+
+    Replaces the ``sleep infinity`` + ``srun --jobid`` pattern: the
+    sbatch script body IS the user's task. When user code exits, the
+    Slurm job finishes; state propagates to ``sacct`` naturally.
+
+    Preserves the legacy prologue invariants (COMPLETING-drain +
+    existing-job reattach) so concurrent recovery attempts cannot trip
+    over each other.
+    """
+    provider_config = config.provider_config
+    ssh_config_dict = provider_config['ssh']
+    ssh_host = ssh_config_dict['hostname']
+    ssh_port = int(ssh_config_dict['port'])
+    ssh_user = ssh_config_dict['user']
+    ssh_key = ssh_config_dict.get('private_key', None)
+    ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+    identities_only = ssh_config_dict.get('identities_only', False)
+    partition = slurm_utils.get_partition_from_config(provider_config)
+
+    client = slurm.SlurmClient(
+        ssh_host,
+        ssh_port,
+        ssh_user,
+        ssh_key,
+        ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
+        identities_only=identities_only,
+    )
+
+    # ---- Drain COMPLETING jobs before submitting. Ported verbatim ----
+    # ---- from ``_create_virtual_instance``. Without this, recovery ----
+    # ---- attempt N+1 races attempt N's teardown and trips the ----
+    # ---- ``assert len(jobs_state) == 1`` invariant in ----
+    # ---- terminate_instances. ----
+    completing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['completing'],
+    )
+    start_time = time.time()
+    while (completing_jobs and
+           time.time() - start_time < _JOB_TERMINATION_TIMEOUT_SECONDS):
+        logger.debug(f'Found {len(completing_jobs)} completing jobs. '
+                     f'Waiting for them to finish: {completing_jobs}')
+        time.sleep(POLL_INTERVAL_SECONDS)
+        completing_jobs = client.query_jobs(
+            cluster_name_on_cloud,
+            ['completing'],
+        )
+    if completing_jobs:
+        raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
+                           'completing state after '
+                           f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s. '
+                           'This is typically due to non-killable processes '
+                           'associated with the job.')
+
+    # ---- Reattach if a previous attempt is already PENDING/RUNNING. ----
+    # ---- Without this, a controller restart mid-attempt would submit ----
+    # ---- a duplicate job. ----
+    existing_jobs = client.query_jobs(
+        cluster_name_on_cloud,
+        ['pending', 'running'],
+    )
+    provision_timeout: int = provider_config.get('provision_timeout', -1)
+
+    num_nodes = config.count
+    last_status_msg = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        if parts:
+            msg = f'Launching ({", ".join(parts)})'
+        else:
+            msg = 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
+
+    if existing_jobs:
+        assert len(existing_jobs) == 1, (
+            f'Multiple jobs found with name {cluster_name_on_cloud}: '
+            f'{existing_jobs}')
+
+        job_id = existing_jobs[0]
+        logger.debug(f'V1 job with name {cluster_name_on_cloud} already '
+                     f'exists (JOBID: {job_id}); reattaching.')
+
+        _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                            _on_pending)
+        nodes, _ = client.get_job_nodes(job_id)
+        if not nodes:
+            # The existing job left PENDING but has no allocated nodes —
+            # it has already reached a terminal state (RUNNING → FAILED /
+            # COMPLETED very quickly, common on v1 where the sbatch script
+            # IS the user code). Don't reattach to a corpse; fall through
+            # to a fresh submission. Without this guard ``nodes[0]`` below
+            # IndexErrors and the controller treats the recovery launch as
+            # crashed.
+            logger.info(
+                f'V1 existing job {job_id} for {cluster_name_on_cloud} has '
+                'no allocated nodes (already terminal); falling through to '
+                'fresh submission.')
+        else:
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Launching',
+                                         cluster_name=cluster_name))
+            return common.ProvisionRecord(
+                provider_name='slurm',
+                region=region,
+                zone=partition,
+                cluster_name=cluster_name_on_cloud,
+                head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+                resumed_instance_ids=[],
+                created_instance_ids=[
+                    slurm_utils.instance_id(job_id, n) for n in nodes
+                ],
+                runtime_metadata=common.ProvisionRuntimeMetadata(
+                    has_ray=False,
+                    has_skylet=False,
+                    has_job_queue=False,
+                    ssh_available=False,
+                    runtime_setup_done=True,
+                    workdir_synced=True,
+                    file_mounts_synced=True,
+                    setup_done=True,
+                    run_started=True,
+                ),
+            )
+
+    # ---- Fresh submission ----
+    login_node_runner = command_runner.SSHCommandRunner(
+        (ssh_host, ssh_port),
+        ssh_user,
+        ssh_key,
+        ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
+        enable_interactive_auth=True,
+        disable_identities_only=not identities_only,
+    )
+    remote_home_dir = login_node_runner.get_remote_home_dir()
+
+    # Resolve workdir (must be on a shared FS — same contract as legacy).
+    workdir_cfg = skypilot_config.get_effective_region_config(
+        cloud='slurm', region=region, keys=('workdir',), default_value=None)
+    if workdir_cfg is not None:
+        remote_env = client.get_env()
+        workdir_cfg = slurm_utils.expand_path_vars(workdir_cfg, remote_env)
+
+    sky_base_dir = workdir_cfg if workdir_cfg is not None else remote_home_dir
+    assert os.path.isabs(sky_base_dir), (
+        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    log_path = _sbatch_log_path(sky_base_dir, '%j')
+
+    provision_script_path = _sbatch_provision_script_path(
+        sky_base_dir, cluster_name_on_cloud)
+    provision_scripts_dir = os.path.dirname(provision_script_path)
+
+    # Precondition cleanup: a previous attempt killed under SIGKILL
+    # would have skipped its EXIT trap and left
+    # ``.sky_clusters/<cluster_name_on_cloud>`` behind. The legacy path
+    # tolerated this because its sbatch preamble recreated everything
+    # before user code ran. V1's sbatch script writes nothing under
+    # ``.sky_clusters`` today, but we still purge the directory so any
+    # historical residue (logs, ready markers, partial container init
+    # state) doesn't poison a fresh attempt — PLAN.md gap #10.
+    _v1_precondition_cleanup(login_node_runner, sky_base_dir,
+                             cluster_name_on_cloud)
+
+    # Read the persisted v1 execution payload from the provider config.
+    setup = provider_config.get('setup')
+    run = provider_config.get('run')
+    envs = provider_config.get('envs') or {}
+    workdir_payload = provider_config.get('workdir')
+    file_mounts_payload = provider_config.get('file_mounts')
+    container_image = provider_config.get('container_image')
+    sbatch_options = provider_config.get('sbatch_options') or {}
+
+    # Build user-supplied + auto-generated sbatch directives. We still
+    # consult partition info to compute a sensible ``--time`` default.
+    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+    partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
+    if partition_info is None:
+        raise ValueError(f'Partition info for {partition} not found '
+                         f'for SLURM cluster {slurm_cluster}')
+    extra_sbatch_directives = _build_sbatch_directives(sbatch_options,
+                                                       partition_info,
+                                                       partition)
+
+    resources = config.node_config
+
+    sbatch_script = _build_v1_sbatch_script(
+        cluster_name_on_cloud=cluster_name_on_cloud,
+        num_nodes=num_nodes,
+        log_path=log_path,
+        resources=resources,
+        setup=setup,
+        run=run,
+        envs=envs,
+        workdir=workdir_payload,
+        file_mounts=file_mounts_payload,
+        container_image=container_image,
+        extra_sbatch_directives=extra_sbatch_directives,
+    )
+
+    cmd = f'mkdir -p {provision_scripts_dir}'
+    rc, stdout, stderr = login_node_runner.run(cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    subprocess_utils.handle_returncode(
+        rc,
+        cmd,
+        'Failed to create provision scripts directory on login node.',
+        stderr=f'{stdout}\n{stderr}')
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=True) as f:
+        f.write(sbatch_script)
+        f.flush()
+        login_node_runner.rsync(f.name,
+                                provision_script_path,
+                                up=True,
+                                stream_logs=False)
+
+    job_id = client.submit_job(partition, cluster_name_on_cloud,
+                               provision_script_path)
+    logger.debug(f'Submitted v1 Slurm job {job_id} to partition {partition} '
+                 f'for cluster {cluster_name_on_cloud} with {num_nodes} nodes')
+
+    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                        _on_pending)
+    # Fast-failing v1 jobs (OOM-kill, exit non-zero, setup failure,
+    # ...) terminate before ``_wait_for_job_nodes`` sees nodes. In that
+    # case ``client.get_job_nodes`` RAISES ``RuntimeError`` ("No nodes
+    # found for job <id>") rather than returning an empty list. Fall
+    # back to sacct's NodeList — the ProvisionRecord we return is
+    # still valid; the managed-job controller's next
+    # ``get_job_status`` poll will surface the terminal state via the
+    # chain registry and the user-code-failure branch fires.
+    try:
+        nodes, _ = client.get_job_nodes(job_id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.info(
+            f'V1 get_job_nodes({job_id}) raised {type(e).__name__}: {e}; '
+            'falling back to sacct NodeList for fast-terminal v1 job.')
+        nodes = []
+    if not nodes:
+        nodes = _v1_sacct_node_list(client, job_id) or []
+        if not nodes:
+            raise RuntimeError(
+                f'V1 Slurm job {job_id} terminated before nodes were '
+                'observable and sacct has no NodeList record; cannot '
+                'construct a ProvisionRecord.')
+        logger.info(
+            f'V1 Slurm job {job_id} finished fast; recovered '
+            f'NodeList={nodes} from sacct.')
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
+
+    created_instance_ids = [
+        slurm_utils.instance_id(job_id, node) for node in nodes
+    ]
+
+    return common.ProvisionRecord(
+        provider_name='slurm',
+        region=region,
+        zone=partition,
+        cluster_name=cluster_name_on_cloud,
+        head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
+        resumed_instance_ids=[],
+        created_instance_ids=created_instance_ids,
+        runtime_metadata=common.ProvisionRuntimeMetadata(
+            has_ray=False,
+            has_skylet=False,
+            has_job_queue=False,
+            ssh_available=False,
+            runtime_setup_done=True,
+            workdir_synced=True,
+            file_mounts_synced=True,
+            setup_done=True,
+            run_started=True,
+        ),
+    )

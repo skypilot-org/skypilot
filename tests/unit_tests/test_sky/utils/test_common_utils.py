@@ -5,6 +5,7 @@ import tempfile
 from unittest import mock
 
 import pytest
+import yaml
 
 from sky import exceptions
 from sky import models
@@ -802,3 +803,81 @@ class TestAtomicWriteText:
         assert not target.exists()
         # Crucially: no hidden .tmp file left behind in the directory.
         assert list(tmp_path.iterdir()) == []
+
+
+class TestFillTemplateUnicode:
+    """``fill_template`` emits YAML-safe UTF-8 even with non-BMP content.
+
+    The default Jinja ``tojson`` filter calls ``json.dumps(ensure_ascii=True)``,
+    which encodes codepoints above U+FFFF as UTF-16 surrogate pairs
+    (e.g. ``\\ud83d\\ude80`` for 🚀). PyYAML's ``safe_load`` does NOT
+    accept surrogate pairs in double-quoted scalars — it expects whole
+    codepoints (``\\U0001F680``). Without the ``ensure_ascii=False``
+    override on the Jinja environment, any task YAML whose ``run`` script
+    contains emoji or other non-BMP characters renders to a cluster YAML
+    that fails to parse downstream with ``yaml.scanner.ScannerError:
+    invalid Unicode character escape code``.
+
+    See also: https://yaml.org/spec/1.2.2/#57-escaped-characters — YAML
+    1.2 spec accepts ``\\u`` only for the BMP and requires ``\\U`` for
+    higher codepoints; surrogate pair encoding is not part of YAML.
+    """
+
+    def _render(self, template_text, variables, tmp_path):
+        template_path = tmp_path / 'tmpl.yml.j2'
+        template_path.write_text(template_text, encoding='utf-8')
+        output_path = tmp_path / 'out.yml'
+        common_utils.fill_template(str(template_path), variables,
+                                   str(output_path))
+        return output_path.read_text(encoding='utf-8')
+
+    def test_emoji_round_trips_through_yaml(self, tmp_path):
+        rendered = self._render('run: {{run|tojson}}\n',
+                                {'run': 'echo 🚀 hello'}, tmp_path)
+        # Critical: surrogate pairs must NOT appear in the output.
+        assert '\\ud83d' not in rendered, (
+            f'Surrogate pair leaked into rendered YAML: {rendered!r}. '
+            f'This means ensure_ascii=False was not applied to tojson.')
+        # Round-trip through safe_load to confirm YAML accepts it.
+        parsed = yaml.safe_load(rendered)
+        assert parsed == {'run': 'echo 🚀 hello'}
+
+    def test_cjk_round_trips(self, tmp_path):
+        rendered = self._render(
+            'run: {{run|tojson}}\n',
+            {'run': 'echo 你好世界 こんにちは 안녕하세요'}, tmp_path)
+        parsed = yaml.safe_load(rendered)
+        assert parsed == {'run': 'echo 你好世界 こんにちは 안녕하세요'}
+
+    def test_rtl_combining_and_math_round_trip(self, tmp_path):
+        # RTL Arabic + math symbols + combining mark.
+        rendered = self._render('run: {{run|tojson}}\n',
+                                {'run': 'مرحبا ∑∫∂ é'}, tmp_path)
+        parsed = yaml.safe_load(rendered)
+        assert parsed == {'run': 'مرحبا ∑∫∂ é'}
+
+    def test_envs_dict_with_unicode_values(self, tmp_path):
+        rendered = self._render(
+            'envs: {{envs|tojson}}\n',
+            {'envs': {
+                'GREETING': '你好',
+                'ROCKET': '🚀'
+            }}, tmp_path)
+        parsed = yaml.safe_load(rendered)
+        assert parsed == {'envs': {'GREETING': '你好', 'ROCKET': '🚀'}}
+
+    def test_ascii_preserved(self, tmp_path):
+        """Ensure we didn't change behavior for ascii-only content."""
+        rendered = self._render('run: {{run|tojson}}\n',
+                                {'run': 'echo hello'}, tmp_path)
+        assert 'echo hello' in rendered
+        parsed = yaml.safe_load(rendered)
+        assert parsed == {'run': 'echo hello'}
+
+    def test_control_chars_still_escaped(self, tmp_path):
+        """Newlines and quotes still need JSON escaping."""
+        rendered = self._render('run: {{run|tojson}}\n',
+                                {'run': 'echo "a"\nls'}, tmp_path)
+        # Both YAML and JSON should accept the escaped form.
+        parsed = yaml.safe_load(rendered)
+        assert parsed == {'run': 'echo "a"\nls'}
