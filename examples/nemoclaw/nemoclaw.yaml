@@ -1,0 +1,77 @@
+# Run NemoClaw on a cloud VM
+#
+# NemoClaw is an open-source security layer that wraps OpenClaw in a secure sandbox. It runs on NVIDIA's OpenShell.
+# NemoClaw is a significant security improvement compared to running OpenClaw directly. But running NemoClaw on your own machine still comes with security risks.
+# Run NemoClaw on a remote cloud VM for maximum security and minimal blast radius.
+#
+# This example deploys NemoClaw on a cloud VM via SkyPilot,
+# providing an isolated sandbox environment separate from your local machine.
+#
+# Prerequisites:
+#   - NVIDIA API key (build.nvidia.com/settings/api-keys)
+#
+# Usage:
+#   # Launch the gateway:
+#   sky launch -c nemoclaw nemoclaw.yaml
+#
+#   # SSH into your VM
+#   ssh nemoclaw
+#
+#   # Run the interactive NemoClaw installer
+#   cd ~/NemoClaw && ./install.sh"
+#
+#   # Open NemoClaw sandbox
+#   nemoclaw <assitant-name> connect
+#
+#   # Open TUI to interact with assistant
+#   openclaw tui
+#
+#   # Configure external access tooling, e.g. Telegram:
+#   TELEGRAM_BOT_TOKEN=<your-token> nemoclaw start telegram
+#
+#   # Stop when done — all state is preserved on disk:
+#   sky stop openclaw
+#
+#   # Resume later — picks up right where you left off:
+#   sky start openclaw
+
+resources:
+  cloud: gcp
+  cpus: 4+
+  memory: 16+ # NemoClaw sandbox image build needs ~8GB free; 16GB gives headroom
+  disk_size: 50 # GCP defaults to 10GB which is too small for Docker + sandbox image
+  autostop:
+    idle_minutes: 5
+    down: true
+
+setup: |
+  set -e
+
+  # Install Docker — required by NemoClaw's OpenShell sandbox
+  if ! docker info > /dev/null 2>&1; then
+    curl -fsSL https://get.docker.com | sudo sh
+    sudo usermod -aG docker $USER
+    sudo systemctl enable docker
+    sudo systemctl start docker
+  fi
+
+  # Find the login user — the non-root human user with a home under /home.
+  # This works across GCP, AWS, Azure regardless of username.
+  LOGIN_USER=$(ls /home | head -1)
+  LOGIN_HOME="/home/${LOGIN_USER}"
+  echo "LOGIN_USER: $LOGIN_USER, LOGIN_HOME: $LOGIN_HOME"
+  if [ ! -d "${LOGIN_HOME}/NemoClaw" ]; then
+    sudo -u "$LOGIN_USER" git clone https://github.com/NVIDIA/NemoClaw.git "${LOGIN_HOME}/NemoClaw"
+  fi
+
+  echo "========================================================"
+  echo "VM is ready. SSH in and complete setup:"
+  echo ""
+  echo "  ssh <cluster-name>"
+  echo "  cd ~/NemoClaw && ./install.sh"
+  echo ""
+  echo "When prompted, provide your NVIDIA_API_KEY"
+  echo "========================================================"
+
+run: |
+  source ~/.bashrc # needed to update PATH
