@@ -246,11 +246,16 @@ def get_ingress_external_ip_and_ports(
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api(context)
-    ingress_services = [
-        item for item in core_api.list_namespaced_service(
-            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
-        if item.metadata.name == 'ingress-nginx-controller'
-    ]
+    try:
+        ingress_services = core_api.list_service_for_all_namespaces(
+            field_selector='metadata.name=ingress-nginx-controller',
+            _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.kubernetes.client.ApiException:
+        ingress_services = [
+            item for item in core_api.list_namespaced_service(
+                namespace, _request_timeout=kubernetes.API_TIMEOUT).items
+            if item.metadata.name == 'ingress-nginx-controller'
+        ]
     if not ingress_services:
         return (None, None)
 
