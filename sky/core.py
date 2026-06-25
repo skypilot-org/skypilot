@@ -507,9 +507,17 @@ def cost_report(days: Optional[int] = None,
 
     for report in cluster_reports:
         _update_record_with_resources(report, dashboard_summary_response)
+        # The dashboard User column renders ``user_name`` and uses
+        # ``user_hash`` to build the user link and detect service accounts.
+        # Historical clusters whose user row no longer exists have a None
+        # ``user_name``, which would render an empty cell, so fall back to the
+        # hash for display.
+        if report.get('user_name') is None and report.get('user_hash'):
+            report['user_name'] = report['user_hash']
         if dashboard_summary_response:
             report.pop('usage_intervals')
-            report.pop('user_hash')
+            # Keep ``user_hash``: the dashboard User column needs it for the
+            # user link and service-account badge.
             report.pop('resources')
 
     return cluster_reports
@@ -551,8 +559,16 @@ def _update_record_with_resources(
                      f'{record["name"]}: {str(e)}')
         for field in fields:
             record[field] = None
-        record['resources_str'] = '-'
-        record['resources_str_full'] = '-'
+        # Fall back to the raw resources repr so the dashboard Resources
+        # column still shows something (e.g. for historical clusters whose
+        # launched resources cannot be re-formatted), instead of an empty
+        # cell. Use '-' only when even that is unavailable.
+        try:
+            fallback_str = f'{num_nodes}x{resources}'
+        except Exception:  # pylint: disable=broad-except
+            fallback_str = '-'
+        record['resources_str'] = fallback_str
+        record['resources_str_full'] = fallback_str
 
 
 def _start(
