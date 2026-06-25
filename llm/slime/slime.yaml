@@ -1,0 +1,214 @@
+# slime: RL post-training with SkyPilot.
+#
+# slime (https://github.com/THUDM/slime) is THUDM's RL post-training framework
+# for LLMs -- the one they use to post-train the GLM models. It runs Megatron-LM
+# training + SGLang rollout over Ray, colocated on the same GPUs. This runs its
+# canonical Qwen3-4B GRPO recipe (scripts/run-qwen3-4B.sh) with one launch.
+#
+# Usage:
+#   sky launch -c slime llm/slime/slime.yaml --secret HF_TOKEN                 # 8 GPUs
+#   sky launch -c slime llm/slime/slime.yaml --secret HF_TOKEN --num-nodes 2   # 16 GPUs
+#   sky logs slime     # stream training logs
+#   sky down slime     # tear down
+
+num_nodes: 1
+
+resources:
+  accelerators: H100:8
+  memory: 200+
+  disk_size: 256
+  # slime's image ships slime at /root/slime and Megatron-LM at /root/Megatron-LM.
+  image_id: docker:slimerl/slime:latest
+  ports:
+    - 8265  # Ray dashboard
+
+envs:
+  MODEL_SCRIPT: qwen3-4B  # Megatron arch flags: scripts/models/${MODEL_SCRIPT}.sh
+  HF_MODEL_REPO: Qwen/Qwen3-4B
+  MODEL_DIR: Qwen3-4B
+  TRAIN_DATASET_REPO: zhuzilin/dapo-math-17k
+  EVAL_DATASET_REPO: zhuzilin/aime-2024
+  NUM_ROLLOUT: "30"  # slime's full recipe uses 3000
+
+secrets:
+  HF_TOKEN: null  # pass with --secret HF_TOKEN; used to download the model + datasets
+
+file_mounts:
+  # Persist checkpoints to a bucket so they survive teardown and are shared across
+  # nodes. SkyPilot creates the bucket if it doesn't exist.
+  /checkpoints:
+    source: s3://my-skypilot-bucket/
+    store: s3
+    mode: MOUNT
+
+setup: |
+  set -e
+  pip install -q -U huggingface_hub
+
+  # Every node trains in colocate mode, so each needs the model locally (no shared
+  # filesystem assumed). Datasets are small; the model is read via mmap during
+  # conversion, so keep both on local disk.
+  hf download "${HF_MODEL_REPO}" --local-dir "/models/${MODEL_DIR}"
+  hf download --repo-type dataset "${TRAIN_DATASET_REPO}" --local-dir "/models/train-data"
+  hf download --repo-type dataset "${EVAL_DATASET_REPO}" --local-dir "/models/eval-data"
+
+  # slime trains in Megatron's torch_dist format; convert the HF checkpoint once.
+  # The result is the reference (KL) model and the training start point.
+  cd /root/slime
+  source scripts/models/${MODEL_SCRIPT}.sh
+  PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+    ${MODEL_ARGS[@]} \
+    --hf-checkpoint /models/${MODEL_DIR} \
+    --save /models/${MODEL_DIR}_torch_dist
+
+run: |
+  set -e
+  export PYTHONUNBUFFERED=1
+  cd /root/slime
+
+  # SkyPilot runs its own Ray (port 6380). Run slime's Ray on 6379 with
+  # non-default agent/metrics ports so the two don't collide -- otherwise job
+  # submission fails with "No available agent to submit job". Unset RAY_ADDRESS
+  # so slime's CLI talks to slime's Ray, and skip slime's usual `ray stop` /
+  # `pkill ray`, which would kill SkyPilot's Ray.
+  unset RAY_ADDRESS
+  NUM_GPUS=${SKYPILOT_NUM_GPUS_PER_NODE}
+  TOTAL_GPUS=$((NUM_GPUS * SKYPILOT_NUM_NODES))
+  HEAD_IP=$(echo "${SKYPILOT_NODE_IPS}" | head -n1)
+  MY_IP=$(echo "${SKYPILOT_NODE_IPS}" | sed -n "$((SKYPILOT_NODE_RANK + 1))p")
+
+  # Primary network interface for NCCL/Gloo (eth0 on K8s pods, differently named
+  # on cloud VMs) -- read it from the default route so the same YAML runs anywhere
+  # (no dependency on the `ip` tool, which the image may not ship).
+  IFACE=$(awk '$2 == "00000000" { print $1; exit }' /proc/net/route)
+
+  # NVLink -> enable NCCL NVLS (faster intra-node collectives).
+  NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
+  [ "${NVLINK_COUNT}" -gt 0 ] && HAS_NVLINK=1 || HAS_NVLINK=0
+
+  RAY_PORTS="--dashboard-agent-listen-port 52366 --dashboard-agent-grpc-port 52367 \
+    --runtime-env-agent-port 52368 --metrics-export-port 52369"
+
+  if [ "${SKYPILOT_NODE_RANK}" != "0" ]; then
+    # Worker node: join the head's Ray, then idle until the head-driven job ends.
+    echo "Worker ${SKYPILOT_NODE_RANK}: waiting for Ray head at ${HEAD_IP}:6379 ..."
+    while ! (exec 3<>/dev/tcp/${HEAD_IP}/6379) 2>/dev/null; do sleep 10; done
+    ray start --address "${HEAD_IP}:6379" --node-ip-address "${MY_IP}" \
+      --num-gpus ${NUM_GPUS} --temp-dir /tmp/slime-ray --disable-usage-stats ${RAY_PORTS}
+    sleep infinity
+  fi
+
+  # Head node (rank 0): start the Ray head and wait for all workers to join.
+  ray start --head --node-ip-address "${MY_IP}" --port 6379 \
+    --num-gpus ${NUM_GPUS} --temp-dir /tmp/slime-ray --disable-usage-stats \
+    --dashboard-host 0.0.0.0 --dashboard-port 8265 ${RAY_PORTS}
+  echo "Waiting for ${TOTAL_GPUS} GPUs in the Ray cluster ..."
+  until ray status --address 127.0.0.1:6379 2>/dev/null | grep -qE "/${TOTAL_GPUS}\.0 GPU"; do sleep 10; done
+
+  source scripts/models/${MODEL_SCRIPT}.sh
+
+  # Argument groups, ported verbatim from slime's scripts/run-qwen3-4B.sh.
+  CKPT_ARGS=(
+    --hf-checkpoint /models/${MODEL_DIR}
+    --ref-load /models/${MODEL_DIR}_torch_dist
+    --load /checkpoints/${MODEL_DIR}_slime/
+    --save /checkpoints/${MODEL_DIR}_slime/
+    --save-interval 20
+  )
+  ROLLOUT_ARGS=(
+    --prompt-data /models/train-data/$(basename ${TRAIN_DATASET_REPO}).jsonl
+    --input-key prompt
+    --label-key label
+    --apply-chat-template
+    --rollout-shuffle
+    --rm-type deepscaler
+    --num-rollout ${NUM_ROLLOUT}
+    --rollout-batch-size 32
+    --n-samples-per-prompt 8
+    --rollout-max-response-len 8192
+    --rollout-temperature 1
+    --global-batch-size 256
+    --balance-data
+  )
+  EVAL_ARGS=(
+    --eval-interval 20
+    --eval-prompt-data aime /models/eval-data/$(basename ${EVAL_DATASET_REPO}).jsonl
+    --n-samples-per-eval-prompt 16
+    --eval-max-response-len 16384
+    --eval-top-p 1
+  )
+  PERF_ARGS=(
+    --tensor-model-parallel-size 2
+    --sequence-parallel
+    --pipeline-model-parallel-size 1
+    --context-parallel-size 1
+    --recompute-granularity full
+    --recompute-method uniform
+    --recompute-num-layers 1
+    --use-dynamic-batch-size
+    --max-tokens-per-gpu 9216
+  )
+  GRPO_ARGS=(
+    --advantage-estimator grpo
+    --use-kl-loss
+    --kl-loss-coef 0.00
+    --kl-loss-type low_var_kl
+    --entropy-coef 0.00
+    --eps-clip 0.2
+    --eps-clip-high 0.28
+  )
+  OPTIMIZER_ARGS=(
+    --optimizer adam
+    --lr 1e-6
+    --lr-decay-style constant
+    --weight-decay 0.1
+    --adam-beta1 0.9
+    --adam-beta2 0.98
+  )
+  SGLANG_ARGS=(
+    --rollout-num-gpus-per-engine 2
+    --sglang-mem-fraction-static 0.7
+  )
+  MISC_ARGS=(
+    --attention-dropout 0.0
+    --hidden-dropout 0.0
+    --accumulate-allreduce-grads-in-fp32
+    --attention-softmax-in-fp32
+    --attention-backend flash
+  )
+
+  # Cross-node collectives use the detected interface; InfiniBand is disabled for
+  # portability. On an RDMA cluster, drop NCCL_IB_DISABLE (and set
+  # NCCL_SOCKET_IFNAME to the IB interface) for much faster inter-node bandwidth.
+  RUNTIME_ENV_JSON="{
+    \"env_vars\": {
+      \"PYTHONPATH\": \"/root/Megatron-LM/\",
+      \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
+      \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
+      \"NCCL_SOCKET_IFNAME\": \"${IFACE}\",
+      \"GLOO_SOCKET_IFNAME\": \"${IFACE}\",
+      \"NCCL_IB_DISABLE\": \"1\"
+    }
+  }"
+
+  echo "Waiting for the Ray job agent ..."
+  until ray job list --address http://127.0.0.1:8265 >/dev/null 2>&1; do sleep 5; done
+
+  echo "Submitting slime GRPO job (colocate, ${TOTAL_GPUS} GPUs) ..."
+  ray job submit --address="http://127.0.0.1:8265" \
+    --runtime-env-json="${RUNTIME_ENV_JSON}" \
+    -- python3 train.py \
+    --actor-num-nodes ${SKYPILOT_NUM_NODES} \
+    --actor-num-gpus-per-node ${NUM_GPUS} \
+    --colocate \
+    ${MODEL_ARGS[@]} \
+    ${CKPT_ARGS[@]} \
+    ${ROLLOUT_ARGS[@]} \
+    ${OPTIMIZER_ARGS[@]} \
+    ${GRPO_ARGS[@]} \
+    ${PERF_ARGS[@]} \
+    ${EVAL_ARGS[@]} \
+    ${SGLANG_ARGS[@]} \
+    ${MISC_ARGS[@]}
+
+  echo "slime GRPO training complete. Checkpoints under /checkpoints/${MODEL_DIR}_slime."
