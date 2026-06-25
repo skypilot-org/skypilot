@@ -122,6 +122,41 @@ class TestGetContextNamespace:
         mock_get_namespace.assert_called_once_with('default-context')
 
     @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
+           'get_current_kube_config_context_name')
+    @patch('sky.clouds.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
+           'get_kube_config_context_namespace')
+    def test_get_context_namespace_without_region_uses_allowed_context(
+            self, mock_get_namespace, mock_allowed_contexts, mock_get_context):
+        """Region defaults to an enabled allowed_context, not the current one.
+
+        Regression test for the bug where a volume created without --infra was
+        registered against the kubeconfig current/first context even when that
+        context was not an allowed_context, making it unschedulable.
+        """
+        mock_get_context.return_value = 'context-a'
+        mock_allowed_contexts.return_value = ['context-b']
+        mock_get_namespace.return_value = 'default-namespace'
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-vol-pvc',
+            size=None,
+            config={},
+        )
+        context, namespace = k8s_volume._get_context_namespace(config)
+
+        assert context == 'context-b'
+        assert config.region == 'context-b'
+        assert namespace == 'default-namespace'
+        mock_get_namespace.assert_called_once_with('context-b')
+
+    @patch('sky.provision.kubernetes.volume.kubernetes_utils.'
            'get_kube_config_context_namespace')
     def test_get_context_namespace_without_namespace(self, mock_get_namespace):
         """Test when namespace is not specified."""

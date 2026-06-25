@@ -3158,6 +3158,33 @@ def get_current_kube_config_context_name() -> Optional[str]:
         return None
 
 
+@annotations.lru_cache(scope='request')
+def get_default_volume_context() -> Optional[str]:
+    """Returns the default Kubernetes context for a volume with no --infra.
+
+    When a volume is created without an explicit context (e.g.
+    ``sky volumes apply`` without ``--infra``), we must pick a context to
+    create and register the PVC against. Defaulting to the kubeconfig's
+    current/first context is wrong when that context is not one of the
+    configured ``allowed_contexts``: the volume gets registered against a
+    context the optimizer will never schedule on, so any later launch that
+    mounts it fails its precheck with a "not enabled" error.
+
+    Prefer an enabled ``allowed_context`` so the volume lands on a context
+    that can actually be used. The current context is preferred when it is
+    itself allowed (preserving prior behavior); otherwise the first allowed
+    context is used. Falls back to the current kubeconfig context when no
+    allowed contexts can be determined.
+    """
+    current_context = get_current_kube_config_context_name()
+    allowed_contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
+    if not allowed_contexts:
+        return current_context
+    if current_context in allowed_contexts:
+        return current_context
+    return allowed_contexts[0]
+
+
 def is_incluster_config_available() -> bool:
     """Check if in-cluster auth is available.
 
