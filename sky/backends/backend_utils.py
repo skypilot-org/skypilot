@@ -987,14 +987,11 @@ def write_cluster_config(
     # Users can override this default via the `provision.conda_auto_activate`
     # config, e.g. to keep conda installed but inactive so it does not become
     # the implicit target of `uv`/`pip` in uv-first workflows.
-    conda_auto_activate_config = skypilot_config.get_nested(
+    auto_activate = skypilot_config.get_nested(
         ('provision', 'conda_auto_activate'), None)
-    if conda_auto_activate_config is not None:
-        conda_auto_activate = ('true'
-                               if conda_auto_activate_config else 'false')
-    else:
-        conda_auto_activate = (
-            'true' if to_provision.extract_docker_image() is None else 'false')
+    if auto_activate is None:
+        auto_activate = to_provision.extract_docker_image() is None
+    conda_auto_activate = 'true' if auto_activate else 'false'
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
 
