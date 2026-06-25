@@ -116,6 +116,87 @@ def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def serialize_cluster_history_record(
+        history_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a cluster history record to a JSON-friendly dict.
+
+    The input is a record returned by
+    global_user_state.get_clusters_from_history.
+    """
+    launched_at = history_record.get('launched_at')
+    resources = history_record.get('resources')
+    status = history_record.get('status')
+    return {
+        'name': history_record.get('name'),
+        'cluster_hash': history_record.get('cluster_hash'),
+        'status': str(status) if status is not None else None,
+        'launched_at': launched_at,
+        'launched_at_human': epoch_to_human(launched_at),
+        'duration': history_record.get('duration'),
+        'num_nodes': history_record.get('num_nodes'),
+        'resources': str(resources) if resources is not None else None,
+        'usage_intervals': history_record.get('usage_intervals'),
+        'user_hash': history_record.get('user_hash'),
+        'user_name': history_record.get('user_name'),
+        'workspace': history_record.get('workspace'),
+        'last_event': history_record.get('last_event'),
+        'node_names': history_record.get('node_names'),
+        'last_creation_command': history_record.get('last_creation_command'),
+        'last_creation_yaml':
+            (redact_task_yaml(history_record['last_creation_yaml'])
+             if history_record.get('last_creation_yaml') is not None else None),
+    }
+
+
+def get_cluster_dump_data(cluster_name: str) -> List[Tuple[str, Any]]:
+    """Collect JSON-serializable dump data for a cluster.
+
+    Returns (relative_filename, content) pairs covering the live cluster
+    record (if the cluster still exists), its cluster history records, and
+    cluster events. Cluster history and events outlive the cluster row, so
+    terminated clusters (e.g. a finished managed job's cluster) still
+    produce data. Shared by the API server dump (_dump_cluster_info in
+    debug_utils.py) and the controller manifest
+    (_collect_cluster_debug_manifest in jobs/utils.py).
+    """
+    data: List[Tuple[str, Any]] = []
+    cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    # A single name can map to multiple history records when the name is
+    # reused across launches.
+    history_records = global_user_state.get_clusters_from_history(
+        cluster_names=[cluster_name])
+    if cluster_record is not None:
+        data.append(
+            ('cluster_info.json', serialize_cluster_record(cluster_record)))
+    if history_records:
+        data.append(('cluster_history.json', [
+            serialize_cluster_history_record(record)
+            for record in history_records
+        ]))
+
+    # Events are keyed by cluster hash. Collect from the live cluster's
+    # hash AND every history hash (deduplicated — the live cluster has a
+    # history record with the same hash): when a name has been reused, the
+    # current cluster and its terminated predecessors all have events
+    # worth dumping.
+    event_hashes = []
+    if cluster_record is not None and cluster_record.get('cluster_hash'):
+        event_hashes.append(cluster_record['cluster_hash'])
+    for record in history_records:
+        record_hash = record.get('cluster_hash')
+        if record_hash and record_hash not in event_hashes:
+            event_hashes.append(record_hash)
+    # Suffix event files with the hash only when the name maps to several
+    # clusters, so the common single-cluster case keeps stable filenames.
+    use_hash_suffix = len(event_hashes) > 1
+    for cluster_hash in event_hashes:
+        suffix = f'.{cluster_hash[:8]}' if use_hash_suffix else ''
+        for event_data in get_cluster_events_data(cluster_hash):
+            data.append((f'events_{event_data["event_type"]}{suffix}.json',
+                         event_data['events']))
+    return data
+
+
 def get_cluster_events_data(cluster_hash: str) -> List[Dict[str, Any]]:
     """Get cluster events for all event types.
 

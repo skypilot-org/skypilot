@@ -1977,6 +1977,287 @@ class TestSerializeClusterRecord:
 
 
 # ---------------------------------------------------------------------------
+# Tests for serialize_cluster_history_record
+# ---------------------------------------------------------------------------
+class TestSerializeClusterHistoryRecord:
+
+    def _make_history_record(self, **overrides):
+        """Create a history record matching get_clusters_from_history."""
+        defaults = {
+            'name': 'test-cluster',
+            'cluster_hash': 'hash-1234',
+            'status': None,
+            'launched_at': 1700000000,
+            'duration': 3600,
+            'num_nodes': 2,
+            'resources': SimpleNamespace(),
+            'usage_intervals': [(1700000000, 1700003600)],
+            'user_hash': 'user-abc',
+            'user_name': 'testuser',
+            'workspace': 'default',
+            'last_event': 'cluster terminated',
+            'node_names': ['node-0', 'node-1'],
+            'last_creation_command': 'sky launch test.yaml',
+            'last_creation_yaml': 'resources:\n  cloud: aws\n',
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_all_expected_keys_present(self):
+        record = self._make_history_record()
+        result = debug_dump_helpers.serialize_cluster_history_record(record)
+        expected_keys = {
+            'name', 'cluster_hash', 'status', 'launched_at',
+            'launched_at_human', 'duration', 'num_nodes', 'resources',
+            'usage_intervals', 'user_hash', 'user_name', 'workspace',
+            'last_event', 'node_names', 'last_creation_command',
+            'last_creation_yaml'
+        }
+        assert set(result.keys()) == expected_keys
+        assert result['name'] == 'test-cluster'
+        assert result['cluster_hash'] == 'hash-1234'
+        # Terminated cluster has no status.
+        assert result['status'] is None
+        assert result['launched_at_human'] is not None
+
+    def test_resources_and_status_stringified(self):
+        record = self._make_history_record(
+            status=SimpleNamespace(value='UP'),
+            resources='AWS(m6i.large)',
+        )
+        result = debug_dump_helpers.serialize_cluster_history_record(record)
+        assert isinstance(result['status'], str)
+        assert isinstance(result['resources'], str)
+
+    def test_last_creation_yaml_redacted(self):
+        yaml_str = ('name: my-task\n'
+                    'secrets:\n'
+                    '  API_KEY: super_secret_key\n')
+        record = self._make_history_record(last_creation_yaml=yaml_str)
+        result = debug_dump_helpers.serialize_cluster_history_record(record)
+        assert 'super_secret_key' not in result['last_creation_yaml']
+        assert '<redacted>' in result['last_creation_yaml']
+
+    def test_minimal_record(self):
+        result = debug_dump_helpers.serialize_cluster_history_record(
+            {'name': 'bare'})
+        assert result['name'] == 'bare'
+        assert result['resources'] is None
+        assert result['last_creation_yaml'] is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_cluster_dump_data
+# ---------------------------------------------------------------------------
+class TestGetClusterDumpData:
+
+    def _history_record(self, cluster_hash: str) -> Dict[str, Any]:
+        return {
+            'name': 'test-cluster',
+            'cluster_hash': cluster_hash,
+            'status': None,
+            'launched_at': 1700000000,
+        }
+
+    @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_cluster_from_name')
+    def test_live_cluster(self, mock_get_cluster, mock_get_history,
+                          mock_get_events):
+        """A live cluster yields cluster_info, history, and live-hash
+        events."""
+        mock_get_cluster.return_value = {
+            'name': 'test-cluster',
+            'cluster_hash': 'live-hash',
+            'status': 'UP',
+        }
+        mock_get_history.return_value = [self._history_record('live-hash')]
+        mock_get_events.return_value = [{
+            'event_type': 'status_change',
+            'events': [{
+                'reason': 'UP'
+            }],
+        }]
+
+        data = dict(debug_dump_helpers.get_cluster_dump_data('test-cluster'))
+
+        assert set(data.keys()) == {
+            'cluster_info.json', 'cluster_history.json',
+            'events_status_change.json'
+        }
+        mock_get_events.assert_called_once_with('live-hash')
+        mock_get_history.assert_called_once_with(cluster_names=['test-cluster'])
+
+    @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_cluster_from_name')
+    def test_reused_name_with_live_cluster_dumps_all_events(
+            self, mock_get_cluster, mock_get_history, mock_get_events):
+        """A live cluster whose name was previously used by a terminated
+        cluster yields events for BOTH hashes — history is not just a
+        fallback for terminated clusters."""
+        mock_get_cluster.return_value = {
+            'name': 'test-cluster',
+            'cluster_hash': 'live-hash-11',
+            'status': 'UP',
+        }
+        mock_get_history.return_value = [
+            self._history_record('live-hash-11'),
+            self._history_record('old-hash-22'),
+        ]
+        mock_get_events.return_value = [{
+            'event_type': 'status_change',
+            'events': [{
+                'reason': 'UP'
+            }],
+        }]
+
+        data = dict(debug_dump_helpers.get_cluster_dump_data('test-cluster'))
+
+        assert 'cluster_info.json' in data
+        assert 'events_status_change.live-has.json' in data
+        assert 'events_status_change.old-hash.json' in data
+        assert mock_get_events.call_count == 2
+
+    @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_cluster_from_name')
+    def test_terminated_cluster_falls_back_to_history(self, mock_get_cluster,
+                                                      mock_get_history,
+                                                      mock_get_events):
+        """A terminated cluster (no live record) still yields history and
+        events keyed by the history hash."""
+        mock_get_cluster.return_value = None
+        mock_get_history.return_value = [self._history_record('old-hash')]
+        mock_get_events.return_value = [{
+            'event_type': 'status_change',
+            'events': [{
+                'reason': 'terminated'
+            }],
+        }]
+
+        data = dict(debug_dump_helpers.get_cluster_dump_data('test-cluster'))
+
+        assert 'cluster_info.json' not in data
+        assert 'cluster_history.json' in data
+        # Single history record keeps the stable event filename.
+        assert 'events_status_change.json' in data
+        mock_get_events.assert_called_once_with('old-hash')
+
+    @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_cluster_from_name')
+    def test_reused_name_suffixes_event_files(self, mock_get_cluster,
+                                              mock_get_history,
+                                              mock_get_events):
+        """Multiple history records for a reused name suffix event files
+        with the cluster hash."""
+        mock_get_cluster.return_value = None
+        mock_get_history.return_value = [
+            self._history_record('aaaaaaaa1111'),
+            self._history_record('bbbbbbbb2222'),
+        ]
+        mock_get_events.return_value = [{
+            'event_type': 'status_change',
+            'events': [{
+                'reason': 'terminated'
+            }],
+        }]
+
+        data = dict(debug_dump_helpers.get_cluster_dump_data('test-cluster'))
+
+        assert 'events_status_change.aaaaaaaa.json' in data
+        assert 'events_status_change.bbbbbbbb.json' in data
+        assert mock_get_events.call_count == 2
+
+    @mock.patch('sky.utils.debug_dump_helpers.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_clusters_from_history')
+    @mock.patch('sky.utils.debug_dump_helpers.global_user_state.'
+                'get_cluster_from_name')
+    def test_unknown_cluster_yields_nothing(self, mock_get_cluster,
+                                            mock_get_history, mock_get_events):
+        mock_get_cluster.return_value = None
+        mock_get_history.return_value = []
+
+        data = debug_dump_helpers.get_cluster_dump_data('unknown')
+
+        assert data == []
+        mock_get_events.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests for _dump_cluster_info
+# ---------------------------------------------------------------------------
+class TestDumpClusterInfo:
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_history_provision_log_path')
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers.get_cluster_dump_data'
+               )
+    def test_writes_dump_data_and_provision_log(self, mock_dump_data,
+                                                mock_provision_path,
+                                                mock_get_tasks, tmp_path):
+        """Dump data files and the provision log should be written."""
+        mock_dump_data.return_value = [
+            ('cluster_history.json', [{
+                'name': 'gone-cluster'
+            }]),
+            ('events_status_change.json', [{
+                'reason': 'terminated'
+            }]),
+        ]
+        provision_log = tmp_path / 'provision.log'
+        provision_log.write_text('provisioning...')
+        mock_provision_path.return_value = str(provision_log)
+        mock_get_tasks.return_value = []
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'gone-cluster'},
+                                       str(tmp_path),
+                                       errors=errors)
+
+        cluster_dir = tmp_path / 'clusters' / 'gone-cluster'
+        assert (cluster_dir / 'cluster_history.json').exists()
+        assert (cluster_dir / 'events_status_change.json').exists()
+        assert (cluster_dir / 'provision.log').read_text() == 'provisioning...'
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_history_provision_log_path')
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers.get_cluster_dump_data'
+               )
+    def test_dump_data_failure_is_recorded(self, mock_dump_data,
+                                           mock_provision_path, mock_get_tasks,
+                                           tmp_path):
+        """A failure collecting cluster data is recorded, and the rest of
+        the dump still proceeds."""
+        mock_dump_data.side_effect = RuntimeError('db down')
+        mock_provision_path.return_value = None
+        mock_get_tasks.return_value = []
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'c1'}, str(tmp_path), errors=errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'clusters'
+        assert errors[0]['resource'] == 'c1'
+        # Associated requests are still dumped.
+        assert (tmp_path / 'clusters' / 'c1' /
+                'associated_requests.json').exists()
+
+
+# ---------------------------------------------------------------------------
 # Tests for redact_config
 # ---------------------------------------------------------------------------
 class TestRedactConfig:

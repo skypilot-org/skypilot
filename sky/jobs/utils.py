@@ -969,7 +969,7 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
             seen_cluster_names.add(cluster_name)
             job_prefix = f'managed_jobs/{job_id}'
             _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                            inline_data, errors)
+                                            inline_data, file_paths, errors)
 
     # Collect controller system log paths (shared, not per-job). Scope to
     # the controllers that actually ran the requested jobs — globbing the
@@ -1097,34 +1097,40 @@ def _collect_job_debug_manifest(
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
                                     inline_data: List[Dict[str, str]],
+                                    file_paths: List[Dict[str, str]],
                                     errors: List[Dict[str, str]]) -> None:
-    """Collect cluster info and events for a managed job's cluster."""
+    """Collect cluster info, history, events, and the provision log for a
+    managed job's cluster.
+
+    Cluster history and events outlive the cluster row, so this still
+    produces data for terminated clusters (the normal state for a finished
+    managed job's cluster).
+    """
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
 
     with _catch_to_errors(errors, 'managed_jobs',
                           f'{cluster_name}/cluster_info'):
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return
-        cluster_info = debug_dump_helpers.serialize_cluster_record(
-            cluster_record)
-        inline_data.append({
-            'relative_path': f'{cluster_prefix}/cluster_info.json',
-            'content': json.dumps(cluster_info, indent=2, default=str),
-        })
-
-        cluster_hash = cluster_record.get('cluster_hash')
-        if not cluster_hash:
-            return
-        for event_data in debug_dump_helpers.get_cluster_events_data(
-                cluster_hash):
+        for filename, content in debug_dump_helpers.get_cluster_dump_data(
+                cluster_name):
             inline_data.append({
-                'relative_path': f'{cluster_prefix}/'
-                                 f'events_{event_data["event_type"]}.json',
-                'content': json.dumps(event_data['events'],
-                                      indent=2,
-                                      default=str),
+                'relative_path': f'{cluster_prefix}/{filename}',
+                'content': json.dumps(content, indent=2, default=str),
             })
+
+    # Provision log (FILE — needs rsync). The path is recorded in cluster
+    # history, so this also works for terminated clusters.
+    with _catch_to_errors(errors, 'managed_jobs',
+                          f'{cluster_name}/provision_log'):
+        provision_log_path = (
+            global_user_state.get_cluster_history_provision_log_path(
+                cluster_name))
+        if provision_log_path:
+            provision_log = pathlib.Path(provision_log_path).expanduser()
+            if provision_log.is_file():
+                file_paths.append({
+                    'remote_path': str(provision_log),
+                    'relative_path': f'{cluster_prefix}/provision.log',
+                })
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],

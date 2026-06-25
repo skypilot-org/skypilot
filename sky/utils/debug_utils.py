@@ -911,22 +911,21 @@ def _dump_cluster_info(cluster_names: Set[str],
         cluster_dir = os.path.join(clusters_dir, cluster_name)
         os.makedirs(cluster_dir, exist_ok=True)
 
-        # Get cluster info from DB
-        cluster_record = None
+        # Get cluster info, history, and events. Cluster history and
+        # events outlive the cluster row, so terminated clusters still
+        # produce data here.
         try:
-            cluster_record = global_user_state.get_cluster_from_name(
-                cluster_name)
-            if cluster_record is not None:
-                cluster_info = debug_dump_helpers.serialize_cluster_record(
-                    cluster_record)
-                cluster_info_path = os.path.join(cluster_dir,
-                                                 'cluster_info.json')
-                with open(cluster_info_path, 'w', encoding='utf-8') as f:
-                    json.dump(cluster_info, f, indent=2, default=str)
+            dump_data = debug_dump_helpers.get_cluster_dump_data(cluster_name)
+            for filename, content in dump_data:
+                file_path = os.path.join(cluster_dir, filename)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(content, f, indent=2, default=str)
+            if dump_data:
                 logger.debug(f'Dumped cluster {cluster_name!r} '
-                             f'(status={cluster_record.get("status")})')
+                             f'({len(dump_data)} files)')
             else:
-                logger.debug(f'Cluster {cluster_name!r} not found in DB')
+                logger.debug(f'Cluster {cluster_name!r} not found in DB or '
+                             f'cluster history')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for cluster '
                            f'{cluster_name}: {e}')
@@ -938,27 +937,26 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'traceback': _full_traceback()
                 })
 
-        # Get cluster events
+        # Copy the provision log if available. The path is recorded in
+        # cluster history, so this also works for terminated clusters.
         try:
-            cluster_hash = (cluster_record.get('cluster_hash')
-                            if cluster_record else None)
-            if cluster_hash:
-                for event_data in debug_dump_helpers.get_cluster_events_data(
-                        cluster_hash):
-                    event_file = f'events_{event_data["event_type"]}.json'
-                    event_path = os.path.join(cluster_dir, event_file)
-                    with open(event_path, 'w', encoding='utf-8') as f:
-                        json.dump(event_data['events'],
-                                  f,
-                                  indent=2,
-                                  default=str)
+            provision_log_path = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_name))
+            if provision_log_path:
+                provision_log = pathlib.Path(provision_log_path).expanduser()
+                if provision_log.is_file():
+                    shutil.copy2(provision_log,
+                                 os.path.join(cluster_dir, 'provision.log'))
+                    logger.debug(
+                        f'Copied provision log for cluster {cluster_name!r}')
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get events for cluster '
+            logger.warning(f'Failed to copy provision log for cluster '
                            f'{cluster_name}: {e}')
             if errors is not None:
                 errors.append({
                     'component': 'clusters',
-                    'resource': f'{cluster_name}/events',
+                    'resource': f'{cluster_name}/provision_log',
                     'error': str(e),
                     'traceback': _full_traceback()
                 })
