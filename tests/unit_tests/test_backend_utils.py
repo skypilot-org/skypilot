@@ -664,8 +664,9 @@ def test_conda_installation_deactivates_base_when_auto_activate_disabled():
                explicit: str = 'false') -> str:
         return constants.CONDA_INSTALLATION_COMMANDS.replace(
             '{conda_auto_activate}', conda_auto_activate).replace(
-                '{is_custom_docker}', is_custom_docker).replace(
-                    '{conda_auto_activate_explicit}', explicit)
+                '{is_custom_docker}',
+                is_custom_docker).replace('{conda_auto_activate_explicit}',
+                                          explicit)
 
     # Disabled on a non-docker image: set auto_activate_base false AND
     # deactivate. The deactivate guard's conda_auto_activate clause (the only
