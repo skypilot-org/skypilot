@@ -1,27 +1,27 @@
 {
   "skill_name": "skypilot",
-  "description": "Evaluates the 'Before You Start (Agent Bootstrap)' section behavior",
+  "description": "Evaluates SkyPilot bootstrap behavior and high-value operational failure modes for agents",
   "evals": [
     {
       "id": 1,
-      "name": "happy-path-server-running",
+      "name": "happy-path-server-connected",
       "prompt": "I want to launch an 8xH100 cluster for training a LLaMA model. My SkyPilot is already set up.",
-      "expected_output": "Agent runs `sky api status -l 1`, sees the server is running (table output with request data), skips rest of bootstrap (no `sky check`, no install, no `sky api start`), and proceeds directly to help write the task YAML or run `sky launch`.",
+      "expected_output": "Agent runs `sky api info -o json`, sees a reachable server with version/status/user data, skips credential/bootstrap work, then proceeds to help write or launch the H100 task.",
       "assertions": [
         {
-          "text": "Agent runs `sky api status` (or `sky api status -l 1`) as the first SkyPilot command",
+          "text": "Agent runs `sky api info -o json` as the first SkyPilot command",
           "type": "required_action"
         },
         {
-          "text": "Agent does NOT run `sky check` when the server is already running",
+          "text": "Agent does NOT run `sky check` when the API server is already connected and no credential diagnosis is needed",
           "type": "negative"
         },
         {
-          "text": "Agent does NOT run `sky api start` or `sky api login` when the server is already running",
+          "text": "Agent does NOT run `sky api start` or `sky api login` when the server is already connected",
           "type": "negative"
         },
         {
-          "text": "Agent proceeds to help with the user's actual task (launching H100 cluster) without unnecessary bootstrap steps",
+          "text": "Agent proceeds to the user's actual launch/YAML task without unnecessary setup detours",
           "type": "required_action"
         }
       ]
@@ -30,26 +30,22 @@
       "id": 2,
       "name": "server-not-running-local-setup",
       "prompt": "I just installed SkyPilot and want to try launching a GPU instance on AWS. I don't have a remote API server.",
-      "expected_output": "Agent runs `sky api status -l 1`, detects 'SkyPilot API server is not running.', asks about local vs remote, user indicates local, agent runs `sky api start`, re-checks with `sky api status -l 1`, then runs `sky check` for credentials since this is a fresh setup.",
+      "expected_output": "Agent runs `sky api info -o json`, detects no connected API server, starts a local server with `sky api start`, rechecks with `sky api info -o json`, then runs `sky check -o json` because this is a fresh AWS setup.",
       "assertions": [
         {
-          "text": "Agent runs `sky api status` as the first SkyPilot command",
+          "text": "Agent runs `sky api info -o json` as the first SkyPilot command",
           "type": "required_action"
         },
         {
-          "text": "Agent asks the user whether they have a remote server or want to start locally",
+          "text": "Agent runs `sky api start` because the user explicitly said they do not have a remote API server",
           "type": "required_action"
         },
         {
-          "text": "Agent runs `sky api start` after user confirms local setup",
+          "text": "Agent re-runs `sky api info -o json` after starting the local server",
           "type": "required_action"
         },
         {
-          "text": "Agent re-runs `sky api status` after starting the server to confirm it's reachable",
-          "type": "required_action"
-        },
-        {
-          "text": "Agent runs `sky check` since this is a fresh setup",
+          "text": "Agent runs `sky check -o json` for the fresh AWS credential setup",
           "type": "required_action"
         }
       ]
@@ -58,22 +54,158 @@
       "id": 3,
       "name": "server-not-running-remote-connect",
       "prompt": "I need to connect to our team's SkyPilot API server at https://skypilot.internal.company.com and launch a fine-tuning job.",
-      "expected_output": "Agent runs `sky api status -l 1`, detects server not running, recognizes user already provided a remote URL, runs `sky api login -e https://skypilot.internal.company.com` without asking unnecessary questions, re-checks status, then proceeds to help with the fine-tuning job.",
+      "expected_output": "Agent runs `sky api info -o json`, detects no reachable connected server, uses the provided endpoint with `sky api login -e https://skypilot.internal.company.com`, rechecks with `sky api info -o json`, and proceeds to the fine-tuning task.",
       "assertions": [
         {
-          "text": "Agent runs `sky api status` as the first SkyPilot command",
+          "text": "Agent runs `sky api info -o json` as the first SkyPilot command",
           "type": "required_action"
         },
         {
-          "text": "Agent uses `sky api login -e https://skypilot.internal.company.com` (not `sky api start`) since the user provided a remote endpoint",
+          "text": "Agent uses `sky api login -e https://skypilot.internal.company.com` because the user provided the endpoint",
           "type": "required_action"
         },
         {
-          "text": "Agent does NOT ask the user for the server URL again since they already provided it",
+          "text": "Agent does NOT ask the user for the server URL again",
           "type": "negative"
         },
         {
-          "text": "Agent re-runs `sky api status` after connecting to confirm it's reachable",
+          "text": "Agent re-runs `sky api info -o json` after login",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "cluster-job-status-101",
+      "prompt": "My cluster job might have failed. `sky logs train 7 --status` returned exit code 101 and printed RUNNING.",
+      "expected_output": "Agent interprets 101 as not finished, not failure. It checks scheduler state with `sky queue train -o json --skip-finished` and suggests recent logs or SSH/GPU/process probes if progress is unclear.",
+      "assertions": [
+        {
+          "text": "Agent states that exit code 101 means the job is not finished",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT treat exit code 101 as a failed job",
+          "type": "negative"
+        },
+        {
+          "text": "Agent uses or recommends `sky queue train -o json --skip-finished` to inspect current scheduler state",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent uses targeted logs or SSH process/GPU checks before declaring the job hung",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "ssh-secret-environment",
+      "prompt": "I SSHed into my cluster and `echo $WANDB_API_KEY` is empty, but I launched with `--secret WANDB_API_KEY`. Can you debug by running the script manually over SSH?",
+      "expected_output": "Agent explains that SkyPilot secrets are injected into the task setup/run environment, not arbitrary SSH shells. It avoids exposing the secret and reruns through `sky exec --secret WANDB_API_KEY` or asks for/sources a deliberate remote env file.",
+      "assertions": [
+        {
+          "text": "Agent says interactive SSH shells do not automatically inherit SkyPilot task setup/run secrets",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT ask the user to print or paste the secret value",
+          "type": "negative"
+        },
+        {
+          "text": "Agent uses or recommends `sky exec ... --secret WANDB_API_KEY` for commands requiring the secret",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "stale-remote-workdir",
+      "prompt": "I deleted an old config locally and reran `sky exec`, but the job still seems to use it on the cluster.",
+      "expected_output": "Agent recognizes that local-path workdir rsync is additive, inspects `~/sky_workdir`, uses `find` instead of assuming paths, and recommends cleaning the specific stale files or wiping `~/sky_workdir` before rerun when safe.",
+      "assertions": [
+        {
+          "text": "Agent states that SkyPilot local-path workdir sync can leave deleted local files on the remote",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent checks or recommends checking `~/sky_workdir` on the cluster",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent uses or recommends `find ~/sky_workdir` to locate the stale config",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT assume the local filesystem state exactly matches the remote filesystem state",
+          "type": "negative"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "progress-bar-log-parsing",
+      "prompt": "The training log has tqdm progress bars and grep/tail output looks contradictory. How should I inspect it?",
+      "expected_output": "Agent normalizes carriage returns with `tr \"\\r\" \"\\n\"`, uses targeted grep patterns, and warns that progress bars may reset per phase or epoch.",
+      "assertions": [
+        {
+          "text": "Agent uses or recommends `tr \"\\r\" \"\\n\"` before grepping progress-bar logs",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent uses targeted grep patterns instead of streaming full logs",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent warns that progress bars can reset per phase, epoch, shard, or domain",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "silent-long-running-job",
+      "prompt": "My SkyPilot job has not printed logs for 20 minutes. Should I cancel it?",
+      "expected_output": "Agent does not cancel immediately. It checks job status, recent targeted logs, `ps`, `nvidia-smi`, and optionally `nvidia-smi pmon -c 1` before deciding whether the job is hung.",
+      "assertions": [
+        {
+          "text": "Agent does NOT recommend immediate cancellation based only on stale logs",
+          "type": "negative"
+        },
+        {
+          "text": "Agent checks or recommends `sky logs CLUSTER JOB_ID --status` and scheduler state",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent checks or recommends `ps` and `nvidia-smi` over SSH",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent mentions `nvidia-smi pmon -c 1` when multiple Python processes may exist",
+          "type": "required_action"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "checkpoint-safe-cancel-resume",
+      "prompt": "I need to stop a running fine-tuning job and resume later without losing progress.",
+      "expected_output": "Agent waits for a durable checkpoint/progress artifact, verifies files and log lines, cancels only at a safe boundary, then resumes with a descriptive job name using the existing resume logic.",
+      "assertions": [
+        {
+          "text": "Agent waits for or verifies a durable checkpoint/progress artifact before cancellation",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent checks both disk state and log confirmation before relying on resume",
+          "type": "required_action"
+        },
+        {
+          "text": "Agent does NOT recommend cancelling at an arbitrary point when progress consistency matters",
+          "type": "negative"
+        },
+        {
+          "text": "Agent uses a descriptive incremental job name for the resumed run",
           "type": "required_action"
         }
       ]
