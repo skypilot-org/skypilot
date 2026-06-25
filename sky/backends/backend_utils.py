@@ -2636,11 +2636,23 @@ def _update_cluster_status(
             ready_workers = 0
             output = ''
             stderr = ''
+            # Whether any attempt actually executed `ray status` and returned a
+            # parseable result. If this stays False, every attempt failed to
+            # even reach the cluster (a transient control-plane/transport
+            # error), meaning we have NO measurement of Ray's health -- which is
+            # very different from having measured that nodes are missing.
+            got_successful_ray_status = False
+            # The last CommandError seen, surfaced in the warning below so the
+            # underlying transport failure is visible (it is otherwise only
+            # logged at debug level).
+            last_command_error = None
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
                         get_node_counts_from_ray_status(head_runner))
+                    got_successful_ray_status = True
                 except exceptions.CommandError as e:
+                    last_command_error = e
                     logger.debug(f'Refreshing status ({cluster_name!r}) attempt'
                                  f' {i}: {common_utils.format_exception(e)}')
                     if cloud_name != 'kubernetes':
@@ -2689,6 +2701,33 @@ def _update_cluster_status(
                 # - The ray cluster is somehow degraded so not all instances are
                 #   showing up
                 time.sleep(1)
+
+            # We exhausted all retries. Two very different situations reach
+            # here:
+            #   (a) `ray status` ran but reported fewer ready nodes than
+            #       expected -> the Ray cluster is genuinely degraded.
+            #   (b) `ray status` never executed at all because the control
+            #       plane was transiently unreachable (e.g. connection
+            #       refused/timeout, a 521 from a CF-fronted endpoint, or
+            #       `connect: operation not permitted` from a CNI/conntrack
+            #       hiccup). ready_head/ready_workers are still their
+            #       initialized 0 -- we have no measurement at all.
+            # In case (b), do NOT fabricate a `0/N ready` result. This function
+            # only runs when the cloud API already reports every node UP (see
+            # the `all_nodes_up and ...` caller), so declaring the cluster
+            # unhealthy would flip it to INIT and trigger a destructive managed
+            # job recovery for what is merely a brief blip in the controller's
+            # connection to the API server. Treat the runtime as healthy and
+            # re-verify on the next status refresh instead.
+            if not got_successful_ray_status:
+                last_error = (common_utils.format_exception(last_command_error)
+                              if last_command_error is not None else 'unknown')
+                logger.warning(
+                    f'Refreshing status ({cluster_name!r}): could not run '
+                    '`ray status` after multiple attempts; keeping the '
+                    'current UP status from the cloud node states (will '
+                    f're-check next refresh). Last error: {last_error}')
+                return True
 
             ray_status_details = (
                 f'{ready_head + ready_workers}/{total_nodes} ready')
