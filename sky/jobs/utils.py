@@ -978,6 +978,12 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     _collect_controller_system_log_paths(file_paths, errors,
                                          seen_controller_uuids)
 
+    # Submission logs (submit-job-*.log): each records the "Started N
+    # controllers" count for one submission (the controller over-count
+    # signal), scoped to the requested jobs like the controller_system
+    # logs above.
+    _collect_controller_submit_log_paths(file_paths, errors, job_ids)
+
     return {
         'inline_data': inline_data,
         'file_paths': file_paths,
@@ -1152,6 +1158,92 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
                 file_paths.append({
                     'remote_path': str(log_file),
                     'relative_path': f'managed_jobs/controller_system/'
+                                     f'{log_file.name}',
+                })
+
+
+def _parse_submit_log_job_ranges(job_ids_str: str) -> List[Tuple[int, int]]:
+    """Parse a submit-job log filename's id portion into inclusive ranges.
+
+    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list of
+    single ids (``584``) or inclusive ranges (``580-588``), returned as
+    (start, end) tuples. Ranges are kept intact rather than expanded into a set
+    of ints -- a filename like ``submit-job-1-100000000.log`` would otherwise
+    blow up memory. Raises ValueError on an unrecognized or inverted range so
+    the caller can skip the file.
+    """
+    ranges: List[Tuple[int, int]] = []
+    for token in job_ids_str.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        if '-' in token:
+            start_str, _, end_str = token.partition('-')
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                raise ValueError(f'Inverted range: {token!r}')
+            ranges.append((start, end))
+        else:
+            val = int(token)
+            ranges.append((val, val))
+    return ranges
+
+
+def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
+                                         errors: List[Dict[str, str]],
+                                         job_ids: List[int]) -> None:
+    """Collect managed-job submission log file paths (submit-job-*.log).
+
+    Each submission writes ``~/sky_logs/managed_jobs/submit-job-<ids>.log``
+    (see sky.jobs.server.core), where ``<ids>`` is the submission's job-id set
+    formatted as comma-separated singletons/ranges. This per-submission log
+    records the "Started N controllers" count -- the over-count signal that
+    pins leaked controllers to a specific submission -- and is not
+    reconstructable from the per-job ``<jobid>.log`` or ``job_info``.
+
+    Scoped to ``job_ids``: we list ``submit-job-*.log`` but only collect
+    submissions whose id-set intersects the requested jobs. Unlike
+    _collect_controller_system_log_paths -- which builds exact
+    ``controller_<uuid>.log`` paths from the relevant UUID set and never lists
+    the directory -- a job id cannot be mapped back to its submission filename
+    without listing: the job may have been submitted in a multi-job batch whose
+    file is range-named (e.g. ``submit-job-580-588.log``). So the listing is
+    unavoidable; what stays bounded is the expensive part -- the set of files
+    rsynced -- not the directory scan.
+    """
+    requested = set(job_ids)
+    if not requested:
+        return
+    prefix, suffix = 'submit-job-', '.log'
+    with _catch_to_errors(errors, 'managed_jobs', 'controller_submit_logs'):
+        submit_logs_dir = (
+            pathlib.Path(constants.SKY_LOGS_DIRECTORY).expanduser() /
+            'managed_jobs')
+        if not submit_logs_dir.is_dir():
+            return
+        for log_file in submit_logs_dir.glob(f'{prefix}*{suffix}'):
+            if not log_file.is_file():
+                continue
+            ids_str = log_file.name[len(prefix):-len(suffix)]
+            try:
+                submission_ranges = _parse_submit_log_job_ranges(ids_str)
+            except ValueError:
+                # The only writer is sky.jobs.server.core with a fixed format,
+                # so an unparseable name is unexpected -- surface it rather than
+                # silently guess which jobs the submission covered.
+                logger.warning('Skipping submit-job log with unrecognized '
+                               f'name: {log_file.name}')
+                continue
+            # Test if any requested job id is in the submission ranges.
+            # Requests and submission ranges are likely small,
+            # so nested check is likely OK.
+            # TODO (ishankaul1) - Add a more efficient check if needed.
+            if any(start <= req <= end
+                   for start, end in submission_ranges
+                   for req in requested):
+                file_paths.append({
+                    'remote_path': str(log_file),
+                    'relative_path': f'managed_jobs/controller_submit_logs/'
                                      f'{log_file.name}',
                 })
 

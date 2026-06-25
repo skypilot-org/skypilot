@@ -1104,6 +1104,109 @@ class TestControllerSystemLogScoping:
         assert errors == []
 
 
+class TestParseSubmitLogJobRanges:
+    """Inverse of sky.jobs.server.core._job_ids_to_str (kept as intervals)."""
+
+    def test_single_id(self):
+        assert utils._parse_submit_log_job_ranges('584') == [(584, 584)]
+
+    def test_inclusive_range(self):
+        assert utils._parse_submit_log_job_ranges('580-583') == [(580, 583)]
+
+    def test_mixed_singletons_and_ranges(self):
+        assert utils._parse_submit_log_job_ranges('1,5-7,10') == [(1, 1),
+                                                                  (5, 7),
+                                                                  (10, 10)]
+
+    def test_large_range_is_not_expanded(self):
+        # A huge range must stay a single interval, never expand to a set of
+        # ints (that would risk OOM on a malicious/fat-fingered filename).
+        assert utils._parse_submit_log_job_ranges('1-100000000') == [
+            (1, 100000000)
+        ]
+
+    def test_malformed_raises(self):
+        with pytest.raises(ValueError):
+            utils._parse_submit_log_job_ranges('not-an-int')
+
+    def test_inverted_range_raises(self):
+        with pytest.raises(ValueError):
+            utils._parse_submit_log_job_ranges('588-580')
+
+
+class TestControllerSubmitLogScoping:
+    """Scope managed_jobs/controller_submit_logs/submit-job-*.log to the
+    submissions whose job-id set includes a requested job (mirrors the
+    controller_system scoping; avoids dragging a long-lived controller's
+    entire submission history into every dump).
+    """
+
+    def _setup(self, tmpdir, filenames):
+        """Create ``<tmpdir>/managed_jobs/<filename>`` for each filename."""
+        mj_dir = pathlib.Path(tmpdir) / 'managed_jobs'
+        mj_dir.mkdir()
+        for name in filenames:
+            (mj_dir / name).write_text('Started 9 controllers\n')
+
+    def _run(self, tmpdir, job_ids):
+        file_paths: list = []
+        errors: list = []
+        with mock.patch('sky.jobs.utils.constants.SKY_LOGS_DIRECTORY', tmpdir):
+            utils._collect_controller_submit_log_paths(file_paths, errors,
+                                                       job_ids)
+        return file_paths, errors
+
+    def test_includes_only_submissions_with_a_requested_job(self):
+        """A singleton match and a range that *contains* the job both count;
+        an unrelated submission is excluded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup(
+                tmpdir,
+                [
+                    'submit-job-584.log',
+                    'submit-job-580-588.log',  # range contains 584
+                    'submit-job-999.log',  # unrelated
+                ])
+            file_paths, errors = self._run(tmpdir, [584])
+        rel = sorted(p['relative_path'] for p in file_paths)
+        assert rel == [
+            'managed_jobs/controller_submit_logs/submit-job-580-588.log',
+            'managed_jobs/controller_submit_logs/submit-job-584.log',
+        ]
+        assert errors == []
+
+    def test_empty_job_ids_collects_nothing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup(tmpdir, ['submit-job-1.log'])
+            file_paths, errors = self._run(tmpdir, [])
+        assert file_paths == []
+        assert errors == []
+
+    def test_missing_dir_is_noop(self):
+        """No managed_jobs dir (controller never submitted) is benign."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_paths, errors = self._run(tmpdir, [1])
+        assert file_paths == []
+        assert errors == []
+
+    def test_unparseable_filename_skipped_with_warning(self):
+        """A filename that doesn't parse is skipped with a warning, not an
+        errors-list entry (it's not a collection failure)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._setup(tmpdir, [
+                'submit-job-weird.log',
+                'submit-job-7.log',
+            ])
+            with mock.patch('sky.jobs.utils.logger') as mock_logger:
+                file_paths, errors = self._run(tmpdir, [7])
+        rel = [p['relative_path'] for p in file_paths]
+        assert rel == ['managed_jobs/controller_submit_logs/submit-job-7.log']
+        assert errors == []
+        # The unparseable name is surfaced, not silently dropped.
+        assert mock_logger.warning.call_count == 1
+        assert 'submit-job-weird.log' in mock_logger.warning.call_args[0][0]
+
+
 class TestCleanupExpiredApiAccessTokens:
     """Unit tests for the expired managed-job token sweep."""
 
