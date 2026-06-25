@@ -112,7 +112,7 @@ def launch(name: str,
     # compatibility and future use (port-forwarding is handled separately).
     del ports
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
-    gpu_name = instance_type.split('-')[1].replace('_', ' ')
+    gpu_name = instance_type.split('-')[1]
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
     query = [
@@ -121,7 +121,7 @@ def launch(name: str,
         f'geolocation="{region[-2:]}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
-        f'gpu_name="{gpu_name}"',
+        f'gpu_name={gpu_name}',
         f'cpu_ram>="{cpu_ram}"',
     ]
     if secure_only:
