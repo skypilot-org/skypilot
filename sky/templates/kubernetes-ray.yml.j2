@@ -620,6 +620,13 @@ available_node_types:
                   fi
           {% endif %}
           env:
+            # Pin Ray's node IP to the address SkyPilot records as internal_ip
+            # (status.podIP). On multi-NIC / hostNetwork nodes Ray may otherwise
+            # auto-detect a different NIC and break multi-node rank ordering.
+            - name: SKYPILOT_RAY_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: SKYPILOT_POD_NODE_TYPE
               valueFrom:
                 fieldRef:

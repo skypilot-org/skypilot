@@ -81,6 +81,8 @@ class TestRayStartCommands:
         # Ray sees its own default behavior for these. We verify the
         # substitution form is in place (i.e., we didn't accidentally
         # hardcode a value).
+        assert ('${SKYPILOT_RAY_NODE_IP:+'
+                '--node-ip-address=$SKYPILOT_RAY_NODE_IP}') in cmd
         assert ('${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
                 '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT}') in cmd
         assert (

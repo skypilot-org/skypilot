@@ -563,7 +563,11 @@ class RayCodeGen(TaskCodeGen):
                 ])
 
                 cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-                job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+                # Unmapped IPs (multi-NIC: Ray reports a NIC SkyPilot didn't record)
+                # sort last, deterministically, instead of crashing the whole job.
+                job_ip_rank_list = sorted(
+                    gang_scheduling_id_to_ip,
+                    key=lambda ip: (cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id)), ip))
                 job_ip_rank_map = {{ip: i for i, ip in enumerate(job_ip_rank_list)}}
                 job_ip_list_str = '\\n'.join(job_ip_rank_list)
                 """),
@@ -656,8 +660,8 @@ class RayCodeGen(TaskCodeGen):
                 name_str = '{task_name},' if {task_name!r} != None else 'task,'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
             else: # Single-node or multi-node task on multi-node cluster
-                idx_in_cluster = cluster_ips_to_node_id[ip]
-                if cluster_ips_to_node_id[ip] == 0:
+                idx_in_cluster = cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id) + {gang_scheduling_id!r})
+                if idx_in_cluster == 0:
                     node_name = 'head'
                 else:
                     node_name = f'worker{{idx_in_cluster}}'

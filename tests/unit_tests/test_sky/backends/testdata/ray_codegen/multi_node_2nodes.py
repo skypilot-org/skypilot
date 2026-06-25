@@ -514,7 +514,11 @@ gang_scheduling_id_to_ip = ray.get([
 ])
 
 cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1', '10.0.0.2'])}
-job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+# Unmapped IPs (multi-NIC: Ray reports a NIC SkyPilot didn't record)
+# sort last, deterministically, instead of crashing the whole job.
+job_ip_rank_list = sorted(
+    gang_scheduling_id_to_ip,
+    key=lambda ip: (cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id)), ip))
 job_ip_rank_map = {ip: i for i, ip in enumerate(job_ip_rank_list)}
 job_ip_list_str = '\n'.join(job_ip_rank_list)
 
@@ -535,8 +539,8 @@ if script is not None:
         name_str = 'distributed_task,' if 'distributed_task' != None else 'task,'
         log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
     else: # Single-node or multi-node task on multi-node cluster
-        idx_in_cluster = cluster_ips_to_node_id[ip]
-        if cluster_ips_to_node_id[ip] == 0:
+        idx_in_cluster = cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id) + 0)
+        if idx_in_cluster == 0:
             node_name = 'head'
         else:
             node_name = f'worker{idx_in_cluster}'
@@ -572,8 +576,8 @@ if script is not None:
         name_str = 'distributed_task,' if 'distributed_task' != None else 'task,'
         log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', 'run.log'))
     else: # Single-node or multi-node task on multi-node cluster
-        idx_in_cluster = cluster_ips_to_node_id[ip]
-        if cluster_ips_to_node_id[ip] == 0:
+        idx_in_cluster = cluster_ips_to_node_id.get(ip, len(cluster_ips_to_node_id) + 1)
+        if idx_in_cluster == 0:
             node_name = 'head'
         else:
             node_name = f'worker{idx_in_cluster}'
