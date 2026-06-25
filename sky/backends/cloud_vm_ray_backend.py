@@ -47,6 +47,7 @@ from sky.clouds import kubernetes as k8s_cloud
 from sky.clouds.utils import gcp_utils
 from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
+from sky.data import mounting_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
@@ -3901,7 +3902,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
                 launched_resources.cloud, all_file_mounts)
             self._execute_file_mounts(handle, all_file_mounts)
-            self._execute_storage_mounts(handle, storage_mounts)
+            # Storage MOUNT may already have been done at provision time (e.g.
+            # Slurm mounts from the persistent batch job so the FUSE daemon
+            # survives proctrack/cgroup). Metadata is still recorded below --
+            # it is a local DB write that `sky start` relies on.
+            if handle.provision_runtime_metadata.storage_mounts_synced:
+                logger.info('Skipping storage mounts: provisioner reported '
+                            'they are already mounted.')
+            else:
+                self._execute_storage_mounts(handle, storage_mounts)
             self._set_storage_mounts_metadata(handle.cluster_name,
                                               storage_mounts)
 
@@ -6378,18 +6387,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if storage_mounts is None:
             return
 
-        # Process only mount mode objects here. COPY mode objects have been
-        # converted to regular copy file mounts and thus have been handled
-        # in the '_execute_file_mounts' method.
-        storage_mounts = {
-            path: storage_mount
-            for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES
-        }
+        # Construct each mountable store and build its mount command (COPY-mode
+        # storages are skipped here -- they are handled as regular file mounts
+        # in '_execute_file_mounts'). Shared with the Slurm provision-time
+        # template_override so the two paths stay in sync.
+        mount_specs = mounting_utils.resolve_mount_commands(
+            storage_mounts, cluster_name=handle.cluster_name)
 
         # Handle cases when there aren't any Storages with either MOUNT or
         # MOUNT_CACHED mode.
-        if not storage_mounts:
+        if not mount_specs:
             return
         start = time.time()
         runners = handle.get_command_runners()
@@ -6397,41 +6404,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             str(handle.launched_resources.cloud))
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
-        plural = 's' if len(storage_mounts) > 1 else ''
+        plural = 's' if len(mount_specs) > 1 else ''
         rich_utils.force_update_status(
             ux_utils.spinner_message(
-                f'Mounting {len(storage_mounts)} storage{plural}', log_path))
+                f'Mounting {len(mount_specs)} storage{plural}', log_path))
 
-        for dst, storage_obj in storage_mounts.items():
-            storage_obj.construct()
-            if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
-            # Raised when the bucket is externall removed before re-mounting
-            # with sky start.
-            if not storage_obj.stores:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageExternalDeletionError(
-                        f'The bucket, {storage_obj.name!r}, could not be '
-                        f'mounted on cluster {handle.cluster_name!r}. Please '
-                        'verify that the bucket exists. The cluster started '
-                        'successfully without mounting the bucket.')
-            # Get the first store and use it to mount
-            store = list(storage_obj.stores.values())[0]
-            assert store is not None, storage_obj
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
-                read_only = bool(storage_obj.mount_config and
-                                 storage_obj.mount_config.read_only)
-                mount_cmd = store.mount_command(dst, read_only=read_only)
-                action_message = 'Mounting'
-            else:
-                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
-                mount_cmd = store.mount_cached_command(
-                    dst, config=storage_obj.resolve_mount_cached_config())
-                action_message = 'Mounting cached mode'
-            src_print = (storage_obj.source
-                         if storage_obj.source else storage_obj.name)
-            if isinstance(src_print, list):
-                src_print = ', '.join(src_print)
+        for dst, mount_cmd, action_message, src_print in mount_specs:
             try:
                 backend_utils.parallel_data_transfer_to_nodes(
                     runners,

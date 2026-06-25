@@ -389,6 +389,16 @@ def cleanup_custom_multi_network(
     raise NotImplementedError
 
 
+# Register built-in provisioners that expose a template_override hook. Done
+# here (not in the submodule) because submodules are imported above before
+# register_provisioner is defined. Plugins register their own via install().
+register_provisioner(
+    'slurm',
+    module=slurm,
+    template_override=slurm.template_override,
+)
+
+
 @_route_to_cloud_impl
 def open_ports(
     provider_name: str,

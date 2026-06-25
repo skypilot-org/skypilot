@@ -114,6 +114,12 @@ class ProvisionRuntimeMetadata:
     # Whether the task's file_mounts have already been synced to the
     # cluster by the provisioner.
     file_mounts_synced: bool = False
+    # Whether the task's MOUNT-mode storages have already been mounted on the
+    # cluster by the provisioner. Used by Slurm, which mounts at provision time
+    # from the persistent batch job so the FUSE daemon survives proctrack/
+    # cgroup step teardown. Narrower than ``file_mounts_synced``: COPY-mode
+    # file_mounts still sync at runtime.
+    storage_mounts_synced: bool = False
     # Whether the user's ``setup`` commands have already been run on the
     # cluster by the provisioner.
     setup_done: bool = False

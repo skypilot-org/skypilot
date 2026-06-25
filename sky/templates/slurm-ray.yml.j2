@@ -14,6 +14,14 @@ provider:
   cluster: "{{slurm_cluster}}"
   partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
+{% if storage_mounts_setup is defined and storage_mounts_setup %}
+  # Storage MOUNT baked into provisioning (Slurm template_override): the FUSE
+  # daemon is launched by the persistent batch job so it survives proctrack/
+  # cgroup step teardown. Consumed in sky/provision/slurm/instance.py.
+  storage_mounts_setup: {{storage_mounts_setup | tojson}}
+  storage_mount_creds: {{storage_mount_creds | tojson}}
+  fuse_required: {{fuse_required | tojson}}
+{% endif %}
 
   ssh:
     hostname: {{ssh_hostname}}

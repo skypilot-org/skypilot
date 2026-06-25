@@ -5,6 +5,7 @@ import shlex
 import tempfile
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
@@ -26,9 +27,18 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky import provision as provision_lib
+    from sky import resources as resources_lib
+    from sky import task as task_lib
+
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
+
+# The cluster-config Jinja template Slurm uses (under sky/templates/). Kept in
+# sync with _get_cluster_config_template() in cloud_vm_ray_backend.
+_SLURM_CLUSTER_CONFIG_TEMPLATE = 'slurm-ray.yml.j2'
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -306,6 +316,118 @@ def _wait_for_job_ready(
 
 
 @timeline.event
+def _relay_storage_mount_creds(
+    login_node_runner: command_runner.SSHCommandRunner,
+    sky_cluster_home_dir: str,
+    storage_mount_creds: Dict[str, str],
+    creds_ready_signal: str,
+) -> None:
+    """Copies cloud-credential files onto the shared cluster home, then signals.
+
+    The sbatch storage-mount block resolves ``~`` to ``sky_cluster_home_dir``,
+    so a credential whose remote path is ``~/.aws/credentials`` is placed at
+    ``{sky_cluster_home_dir}/.aws/credentials``; the shared filesystem makes it
+    visible to every compute node. Finally touches ``creds_ready_signal`` to
+    release the waiting sbatch mount block -- always, even with no creds, so
+    env-auth mounts (which need no credential file) still proceed.
+    """
+    for remote_path, local_path in storage_mount_creds.items():
+        rel = (remote_path[2:]
+               if remote_path.startswith('~/') else remote_path.lstrip('/'))
+        dest = f'{sky_cluster_home_dir}/{rel}'
+        rc, stdout, stderr = login_node_runner.run(
+            f'mkdir -p {shlex.quote(os.path.dirname(dest))}',
+            require_outputs=True,
+            stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            'mkdir',
+            f'Failed to create credential dir for {dest} on the Slurm cluster.',
+            stderr=f'{stdout}\n{stderr}')
+        login_node_runner.rsync(local_path, dest, up=True, stream_logs=False)
+    rc, stdout, stderr = login_node_runner.run(
+        f'mkdir -p {shlex.quote(sky_cluster_home_dir)} && '
+        f'touch {shlex.quote(creds_ready_signal)}',
+        require_outputs=True,
+        stream_logs=False)
+    subprocess_utils.handle_returncode(
+        rc,
+        'touch',
+        'Failed to signal credential readiness on the Slurm cluster.',
+        stderr=f'{stdout}\n{stderr}')
+
+
+def template_override(
+    task: 'task_lib.Task',
+    to_provision: 'resources_lib.Resources',
+    *,
+    _extra_launch_context: Dict[str, Any],
+    _is_launched_by_jobs_controller: bool,
+) -> Optional['provision_lib.TemplateSpec']:
+    """Bakes storage MOUNT into provisioning for Slurm.
+
+    Slurm runs every ``runner.run()`` as an ephemeral ``srun`` step, and under
+    ``proctrack/cgroup`` the FUSE daemon a mount spawns is killed when that
+    step exits, leaving a stale mount. Mounting at provision time instead lets
+    the sbatch script launch the daemon inside the persistent batch job, where
+    it lives for the cluster's lifetime.
+
+    This hook injects the per-store mount commands and the cloud-credential
+    file list into the cluster YAML's ``provider`` block; ``run_instances``
+    relays the creds and runs the mounts from the batch job, then reports
+    ``storage_mounts_synced=True`` so the backend skips the runtime mount.
+
+    Returns ``None`` (use the default template unchanged) when the task has no
+    MOUNT / MOUNT_CACHED storage.
+    """
+    # Lazy imports: avoid import cycles and keep provision import light.
+    # pylint: disable=import-outside-toplevel
+    from sky import check as sky_check
+    from sky import clouds as sky_clouds
+    from sky import provision as provision_lib
+    from sky.data import mounting_utils
+
+    del _extra_launch_context, _is_launched_by_jobs_controller
+
+    # Container clusters mount inside the container (a separate execution
+    # context), which provision-time baking does not handle yet; only bake
+    # mounts for non-container clusters here.
+    if to_provision.extract_docker_image() is not None:
+        return None
+
+    # ``construct()`` (inside resolve_mount_commands) has cloud-side effects;
+    # it runs here on the API server, never in the provisioner subprocess.
+    mount_specs = mounting_utils.resolve_mount_commands(task.storage_mounts)
+    if not mount_specs:
+        # Nothing to mount -- fall back to the default template untouched.
+        return None
+
+    mount_blocks = []
+    for dst, mount_cmd, _action_message, src_print in mount_specs:
+        mount_blocks.append(f'# Mount {src_print} -> {dst}\n{mount_cmd}')
+    storage_mounts_setup = '\n'.join(mount_blocks)
+
+    # Cloud-credential files the mounts may need (e.g. R2/CoreWeave keys).
+    # Kubernetes/SSH only emit kubeconfig, which storage mounting never needs;
+    # Slurm itself has no credential file. ``run_instances`` relays these onto
+    # the compute nodes before mounting.
+    storage_mount_creds = sky_check.get_cloud_credential_file_mounts(
+        excluded_clouds=[
+            sky_clouds.Slurm(),
+            sky_clouds.Kubernetes(),
+            sky_clouds.SSH()
+        ])
+
+    return provision_lib.TemplateSpec(
+        template_path=_SLURM_CLUSTER_CONFIG_TEMPLATE,
+        variables={
+            'storage_mounts_setup': storage_mounts_setup,
+            'storage_mount_creds': storage_mount_creds,
+            'fuse_required': True,
+        },
+    )
+
+
 def _create_virtual_instance(
         region: str, cluster_name: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -498,6 +620,51 @@ def _create_virtual_instance(
     slurm_marker_file = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
 
+    # Storage MOUNT baked into provisioning (set by template_override; only for
+    # non-container clusters). When present, the sbatch script mounts the
+    # buckets from a persistent srun step (the FUSE daemon survives proctrack/
+    # cgroup), and we report storage_mounts_synced=True so the backend skips
+    # the runtime mount. Credentials are relayed to the shared cluster home
+    # below, before the sbatch mount block runs (gated on creds_ready_signal).
+    storage_mounts_setup = provider_config.get('storage_mounts_setup')
+    storage_mount_creds: Dict[str,
+                              str] = (provider_config.get('storage_mount_creds')
+                                      or {})
+    storage_baked = bool(storage_mounts_setup)
+    creds_ready_signal = f'{sky_cluster_home_dir}/.sky_creds_ready'
+    storage_mount_done_dir = f'{sky_cluster_home_dir}/.sky_storage_mount_done'
+    storage_mount_block = ''
+    if storage_baked:
+        # Runs on every node and stays alive (``exec sleep infinity``) so the
+        # daemons it spawns are children of this persistent step. HOME is set
+        # to the shared cluster home so ``~`` matches how runtime tasks (via
+        # SlurmCommandRunner) see it, and so relayed creds resolve.
+        mount_inner = (f'cd {sky_cluster_home_dir} && export HOME="$PWD"\n'
+                       f'set -e\n'
+                       f'{storage_mounts_setup}\n'
+                       f'touch {storage_mount_done_dir}/$SLURM_PROCID\n'
+                       f'exec sleep infinity')
+        label = '--label ' if num_nodes > 1 else ''
+        storage_mount_block = (
+            f'echo "[storage] waiting for credential relay..."\n'
+            f'while [ ! -f {creds_ready_signal} ]; do sleep 0.5; done\n'
+            f'rm -rf {storage_mount_done_dir} && mkdir -p '
+            f'{storage_mount_done_dir}\n'
+            f'echo "[storage] mounting on {num_nodes} node(s)..."\n'
+            f'srun --overlap {label}--unbuffered --nodes={num_nodes} '
+            f'--ntasks-per-node=1 bash -c {shlex.quote(mount_inner)} &\n'
+            f'STORAGE_MOUNT_PID=$!\n'
+            f'while true; do\n'
+            f'  ready=$(ls -1 {storage_mount_done_dir} 2>/dev/null | wc -l)\n'
+            f'  if [ "$ready" -ge "{num_nodes}" ]; then break; fi\n'
+            f'  if ! kill -0 $STORAGE_MOUNT_PID 2>/dev/null; then\n'
+            f'    echo "[storage] mount step exited before mounting"\n'
+            f'    wait $STORAGE_MOUNT_PID; exit 1\n'
+            f'  fi\n'
+            f'  sleep 1\n'
+            f'done\n'
+            f'echo "[storage] mounted on all nodes"')
+
     # For non-Docker Hub registries, pyxis/enroot requires '#' separator
     # between registry and path. See:
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
@@ -681,6 +848,7 @@ echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
+{storage_mount_block}
 {f'touch {ready_signal}' if container_image is None else ''}
 {'sleep infinity' if container_image is None else 'wait'}
 """
@@ -708,6 +876,15 @@ touch {sky_cluster_home_dir}/.hushlogin
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
+
+    if storage_baked:
+        # Relay cloud-credential files onto the shared cluster home (visible to
+        # all compute nodes) so the sbatch mount block can use them, then
+        # release that block (it waits on creds_ready_signal). Writes go
+        # through the login node, which shares the filesystem with the compute
+        # nodes; no Slurm step needed.
+        _relay_storage_mount_creds(login_node_runner, sky_cluster_home_dir,
+                                   storage_mount_creds, creds_ready_signal)
 
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
@@ -759,13 +936,18 @@ touch {sky_cluster_home_dir}/.hushlogin
                          f'=== End of Slurm job logs ===')
         raise e
 
-    return common.ProvisionRecord(provider_name='slurm',
-                                  region=region,
-                                  zone=partition,
-                                  cluster_name=cluster_name_on_cloud,
-                                  head_instance_id=created_instance_ids[0],
-                                  resumed_instance_ids=[],
-                                  created_instance_ids=created_instance_ids)
+    return common.ProvisionRecord(
+        provider_name='slurm',
+        region=region,
+        zone=partition,
+        cluster_name=cluster_name_on_cloud,
+        head_instance_id=created_instance_ids[0],
+        resumed_instance_ids=[],
+        created_instance_ids=created_instance_ids,
+        # The sbatch script mounted the buckets from the persistent batch job,
+        # so the backend can skip the runtime storage-mount step.
+        runtime_metadata=common.ProvisionRuntimeMetadata(
+            storage_mounts_synced=storage_baked))
 
 
 @common_utils.retry
