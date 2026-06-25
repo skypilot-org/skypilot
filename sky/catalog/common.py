@@ -178,6 +178,20 @@ class LazyDataFrame:
                     raise e
         return self._df
 
+    def get_dataframe(self) -> 'pd.DataFrame':
+        """Return the underlying df, loading it on first use per request.
+
+        Backed by `_load_df`, which is request-scoped LRU-cached: the first
+        call in a request checks staleness and reads the CSV; subsequent
+        calls in the same request reuse the cached frame.
+        """
+        return self._load_df()
+
+    @property
+    def filename(self) -> str:
+        """Path to the on-disk CSV that backs this lazy df."""
+        return self._filename
+
     def __getattr__(self, name: str):
         return getattr(self._load_df(), name)
 
