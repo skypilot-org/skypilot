@@ -334,6 +334,7 @@ def _get_cluster_config_template(cloud):
         clouds.PrimeIntellect: 'primeintellect-ray.yml.j2',
         clouds.DO: 'do-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
+        clouds.Modal: 'modal-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.SSH: 'kubernetes-ray.yml.j2',
         clouds.Shadeform: 'shadeform-ray.yml.j2',
