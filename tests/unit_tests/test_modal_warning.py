@@ -30,14 +30,26 @@ class TestMakeDeployResourcesVariables:
         region = clouds.Region('us')
         resources = _make_modal_resources(instance_type)
 
-        with caplog.at_level(logging.WARNING, logger='sky.clouds.modal'):
-            Modal().make_deploy_resources_variables(
-                resources=resources,
-                cluster_name=None,
-                region=region,
-                zones=None,
-                num_nodes=1,
-            )
+        # SkyPilot loggers may set propagate=False, which would stop caplog's
+        # root handler from seeing the record. Attach caplog's handler to the
+        # module logger directly and force propagation for the duration of the
+        # call so the warning is captured regardless of the logging config.
+        modal_logger = logging.getLogger('sky.clouds.modal')
+        prev_propagate = modal_logger.propagate
+        modal_logger.addHandler(caplog.handler)
+        modal_logger.propagate = True
+        try:
+            with caplog.at_level(logging.WARNING, logger='sky.clouds.modal'):
+                Modal().make_deploy_resources_variables(
+                    resources=resources,
+                    cluster_name=None,
+                    region=region,
+                    zones=None,
+                    num_nodes=1,
+                )
+        finally:
+            modal_logger.removeHandler(caplog.handler)
+            modal_logger.propagate = prev_propagate
 
         warning_records = [
             r for r in caplog.records

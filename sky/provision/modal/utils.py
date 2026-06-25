@@ -101,11 +101,16 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
     return sandbox.object_id
 
 
-def list_instances(cluster_name_on_cloud: str) -> Dict[str, Dict[str, Any]]:
+def list_instances(cluster_name_on_cloud: str,
+                   query_tunnels: bool = True) -> Dict[str, Dict[str, Any]]:
     """Returns {sandbox_object_id: {status, name, external_ip, ssh_port}}.
 
-    Filters by cluster tag. Forces a fresh Sandbox object per sandbox for
-    live tunnel re-query (D-03).
+    Filters by cluster tag. When ``query_tunnels`` is True (the default,
+    required by ``get_cluster_info`` per D-03) a fresh Sandbox object is
+    fetched per sandbox to live-query the SSH tunnel endpoint. Status-only
+    callers (e.g. ``query_instances``) pass ``query_tunnels=False`` to skip
+    that slow per-sandbox network round-trip; their ``external_ip``/``ssh_port``
+    are returned as None.
     """
     modal = modal_adaptor.modal
     result: Dict[str, Dict[str, Any]] = {}
@@ -128,16 +133,18 @@ def list_instances(cluster_name_on_cloud: str) -> Dict[str, Dict[str, Any]]:
         except Exception:  # pylint: disable=broad-except
             tags = {}
         node_role = tags.get('skypilot-node', 'head')
-        # Force a fresh Sandbox object for tunnel re-query (D-03).
-        fresh = modal.Sandbox.from_id(sandbox.object_id)
-        try:
-            tunnels = fresh.tunnels(timeout=10)
-        except Exception:  # pylint: disable=broad-except
-            tunnels = {}
-        if 22 in tunnels:
-            ssh_host, ssh_port = tunnels[22].tcp_socket
-        else:
-            ssh_host, ssh_port = None, None
+        ssh_host, ssh_port = None, None
+        if query_tunnels:
+            # Force a fresh Sandbox object for tunnel re-query (D-03): a new
+            # object resets `_tunnels=None`, so `.tunnels()` triggers a live
+            # lookup rather than returning a stale cached endpoint.
+            fresh = modal.Sandbox.from_id(sandbox.object_id)
+            try:
+                tunnels = fresh.tunnels(timeout=10)
+            except Exception:  # pylint: disable=broad-except
+                tunnels = {}
+            if 22 in tunnels:
+                ssh_host, ssh_port = tunnels[22].tcp_socket
         result[sandbox.object_id] = {
             'status': 'RUNNING',  # list() only returns live sandboxes
             'name': f'{cluster_name_on_cloud}-{node_role}',

@@ -3,7 +3,7 @@
 from importlib import util as import_lib_util
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
@@ -215,7 +215,7 @@ class Modal(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+    ) -> Dict[str, Any]:
         """Emit Jinja template variables. Also emits 24h lifetime warning (PROV-04).
 
         Note: query_status stays as raise NotImplementedError (D-09) — it is

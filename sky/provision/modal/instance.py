@@ -15,9 +15,15 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _filter_instances(cluster_name_on_cloud: str,
-                      running_only: bool = False) -> Dict[str, Any]:
-    """Returns instances for the cluster, optionally filtered to running only."""
-    instances = utils.list_instances(cluster_name_on_cloud)
+                      running_only: bool = False,
+                      query_tunnels: bool = True) -> Dict[str, Any]:
+    """Returns instances for the cluster, optionally filtered to running only.
+
+    ``query_tunnels`` is forwarded to ``utils.list_instances``; status-only
+    callers pass False to skip the per-sandbox SSH-tunnel network lookup.
+    """
+    instances = utils.list_instances(cluster_name_on_cloud,
+                                     query_tunnels=query_tunnels)
     if running_only:
         return {
             k: v for k, v in instances.items() if v.get('status') == 'RUNNING'
@@ -122,6 +128,9 @@ def terminate_instances(
     """Terminates all Sandboxes for the cluster."""
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud)
+    # Attempt to terminate every Sandbox before raising, so a single failure
+    # does not leave the remaining (billable) Sandboxes orphaned.
+    failures = []
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating Modal Sandbox {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
@@ -129,11 +138,16 @@ def terminate_instances(
         try:
             utils.remove(inst_id)
         except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Failed to terminate Modal Sandbox {inst_id}: '
-                    f'{common_utils.format_exception(e, use_bracket=False)}'
-                ) from e
+            failures.append((inst_id, e))
+    if failures:
+        details = '; '.join(
+            f'{inst_id}: '
+            f'{common_utils.format_exception(e, use_bracket=False)}'
+            for inst_id, e in failures)
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Failed to terminate {len(failures)} Modal Sandbox(es): '
+                f'{details}') from failures[0][1]
 
 
 def get_cluster_info(
@@ -185,7 +199,9 @@ def query_instances(
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Maps Modal Sandbox states to ClusterStatus."""
     del cluster_name, retry_if_missing  # unused
-    instances = _filter_instances(cluster_name_on_cloud)
+    # Status query only needs sandbox state, not the SSH tunnel endpoint, so
+    # skip the slow per-sandbox tunnel lookup.
+    instances = _filter_instances(cluster_name_on_cloud, query_tunnels=False)
 
     status_map = {
         'RUNNING': status_lib.ClusterStatus.UP,
