@@ -128,6 +128,7 @@ class ApiServerStatus(enum.Enum):
 
 @dataclasses.dataclass
 class ApiServerInfo:
+    """Information about the API server status and configuration."""
     status: ApiServerStatus
     api_version: ApiVersion = None
     version: Optional[str] = None
@@ -137,6 +138,8 @@ class ApiServerInfo:
     basic_auth_enabled: bool = False
     error: Optional[str] = None
     latest_version: Optional[str] = None
+    # VM SSH proxy mode: 'none', 'all', or 'only-internal'
+    vm_ssh_proxy_mode: str = 'only-internal'
 
 
 def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
@@ -539,6 +542,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         commit = result.get('commit')
         user = result.get('user')
         latest_version = result.get('latest_version')
+        vm_ssh_proxy_mode = result.get('vm_ssh_proxy_mode', 'only-internal')
         # Cache basic_auth_enabled and set client user hash on the
         # client-side usage singleton.
         global basic_auth_enabled, client_user_hash
@@ -554,7 +558,8 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                     commit=commit,
                                     user=user,
                                     basic_auth_enabled=basic_auth_enabled,
-                                    latest_version=latest_version)
+                                    latest_version=latest_version,
+                                    vm_ssh_proxy_mode=vm_ssh_proxy_mode)
         if api_version is None or version is None or commit is None:
             server_url = endpoint if endpoint is not None else get_server_url()
             logger.warning(f'API server response missing '

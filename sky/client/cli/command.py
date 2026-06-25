@@ -216,6 +216,22 @@ def _write_ssh_config_for_cluster(handle: Any, credentials: Dict[str, Any],
                          f'{handle.cluster_name} '
                          f'slurm-job-ssh-proxy %w')
         credentials['ssh_proxy_command'] = proxy_command
+    elif not server_common.is_api_server_local():
+        # Optionally proxy SSH through the API server based on
+        # the server's vm_ssh_proxy_mode setting.
+        vm_ssh_proxy_mode = (server_common.get_api_server_status()
+                             .vm_ssh_proxy_mode)
+        use_vm_proxy = (vm_ssh_proxy_mode == 'all' or
+                        (vm_ssh_proxy_mode == 'only-internal' and
+                         handle.use_internal_ips()))
+        if use_vm_proxy:
+            # %w is a placeholder for the node index, substituted per-node
+            # in cluster_utils.SSHConfigHelper.add_cluster().
+            proxy_command = (f'{ws_proxy_cmd} '
+                             f'{server_common.get_server_url()} '
+                             f'{handle.cluster_name} '
+                             f'vm-ssh-proxy %w')
+            credentials['ssh_proxy_command'] = proxy_command
 
     cluster_utils.SSHConfigHelper.add_cluster(
         handle.cluster_name,
