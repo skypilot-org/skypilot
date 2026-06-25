@@ -85,6 +85,32 @@ You can use ``accelerator:count`` in various places that accept accelerator spec
 
 See :ref:`auto-failover` for more examples.
 
+Selecting GPUs by memory
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of specifying a GPU by name, you can select GPUs by their memory size.
+Use ``+`` to select GPUs with at least that much memory, and optionally prefix
+with a manufacturer name.
+
+.. code-block:: console
+
+   $ sky launch --gpus 40GB+      # Any GPU with at least 40GB memory
+   $ sky launch --gpus 80GB:8     # 8 GPUs with exactly 80GB memory each
+   $ sky launch --gpus NVIDIA:40GB+  # Any NVIDIA GPU with at least 40GB
+
+.. code-block:: yaml
+
+   resources:
+     accelerators: 40GB+    # Any GPU with at least 40GB memory
+
+   resources:
+     accelerators: 80GB:8   # 8 GPUs with exactly 80GB memory each
+
+   resources:
+     accelerators: NVIDIA:40GB+  # Any NVIDIA GPU with at least 40GB
+
+See :ref:`yaml-spec-resources-accelerators` for the full syntax reference.
+
 Google TPUs
 -----------
 
