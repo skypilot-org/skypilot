@@ -72,7 +72,7 @@ class EvaluationHead:
             try:
                 self.model.load_state_dict(torch.load(model_path))
                 print(f"✓ Loaded model from {model_path}")
-            except:
+            except Exception:
                 print(f"✗ Could not load model, using random weights")
 
         self.model.eval()  # Set to evaluation mode
@@ -600,7 +600,7 @@ class EvaluationHead:
         for ws in self.websockets:
             try:
                 await ws.send_text(stats_message)
-            except:
+            except Exception:
                 disconnected.add(ws)
 
         # Remove disconnected clients
