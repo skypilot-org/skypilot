@@ -50,6 +50,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import log_links
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -2768,11 +2769,24 @@ class ControllerManager:
                 logger.info('Loading %d environment variables for job %s',
                             len(env_vars), job_id)
                 if ctx is not None:
-                    for key, value in env_vars.items():
-                        if value is not None:
-                            ctx.override_envs({key: value})
-                            logger.debug('Set environment variable: %s=%s', key,
-                                         value)
+                    overrides = {
+                        key: value
+                        for key, value in env_vars.items()
+                        if value is not None
+                    }
+                    # Always run the per-job loop with debug logging enabled,
+                    # regardless of the launching client's log level. The
+                    # per-job env loaded above carries the client's
+                    # SKYPILOT_DEBUG (e.g. '0'); override it to '1' so the
+                    # per-job controller logs always include debug detail +
+                    # timestamps, mirroring the controller process itself (see
+                    # __main__). These logs are essential for incident
+                    # debugging and the extra verbosity is an acceptable cost.
+                    overrides[env_options.Options.SHOW_DEBUG_INFO.env_key] = '1'
+                    ctx.override_envs(overrides)
+                    for key, value in overrides.items():
+                        logger.debug('Set environment variable: %s=%s', key,
+                                     value)
 
                     # Restore config file if needed
                     file_content_utils.restore_job_config_file(job_id)
@@ -3161,6 +3175,29 @@ async def main(controller_uuid: str):
 
 
 if __name__ == '__main__':
+    # Always run the jobs controller with debug logging enabled, regardless of
+    # whatever SKYPILOT_DEBUG it would otherwise inherit. That inherited level
+    # is unreliable and rarely debug:
+    #   - Consolidation mode: the controller subprocess inherits the os.environ
+    #     of whichever process started it. In steady state that is the
+    #     managed-job refresh daemon (a thread in the main API server process),
+    #     so it inherits the *API server's* level; when a `sky jobs launch`
+    #     request worker starts it directly, it inherits the *client's* level.
+    #   - Remote mode: it comes from the controller env file (built from the
+    #     launching client's level).
+    # None of these is guaranteed to be debug, so the controller's own
+    # ("controller_system") logs land at INFO and without timestamps unless
+    # someone happened to opt in. Controller debug logs (timestamps + extra
+    # detail) are essential for reconstructing incidents -- e.g. determining
+    # when controllers re-claim jobs during failover -- and the extra verbosity
+    # on the controller is an acceptable cost. We set the env var (so
+    # subprocesses spawned by the controller inherit it) and reload the logger
+    # so the level and timestamped formatter take effect immediately.
+    # sky_logging is a single shared module instance (cached in sys.modules),
+    # so this reload also applies to the imported-module copy that the shim
+    # below delegates to.
+    os.environ[env_options.Options.SHOW_DEBUG_INFO.env_key] = '1'
+    sky_logging.reload_logger()
     # This file is launched as `python -u -m sky.jobs.controller <uuid>`, so
     # runpy executes this module a second time under the name `__main__`,
     # in addition to the normal import as `sky.jobs.controller`. That means
