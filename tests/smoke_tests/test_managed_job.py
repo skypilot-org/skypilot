@@ -1424,6 +1424,46 @@ def test_managed_jobs_storage(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
+@pytest.mark.managed_jobs
+@pytest.mark.no_dependency  # Storage tests require full dependency installed
+def test_managed_jobs_multinode_storage(generic_cloud: str):
+    """Multi-node managed job with storage: every node must materialize
+    the COPY bucket and FUSE-mount the MOUNT bucket independently."""
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-multinode-{name}'
+    task_yaml = 'tests/test_yamls/test_managed_jobs_multinode_storage.yaml'
+    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
+    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_multinode_storage',
+        [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            (f'sky jobs launch -n {name} --infra {generic_cloud} '
+             f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml} '
+             f'--env TEST_BUCKET={storage_name} -y -d'),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            (f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
+             f'echo "$s"; echo "$s" | grep -q STORAGE_OK_RANK_0; '
+             f'echo "$s" | grep -q STORAGE_OK_RANK_1'),
+        ],
+        (f'sky jobs cancel -y -n {name} || true; '
+         f'sky storage delete -y {storage_name} || true'),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.aws
 def test_managed_jobs_intermediate_storage(generic_cloud: str):
     """Test storage with managed job"""
