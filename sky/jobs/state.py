@@ -3019,7 +3019,47 @@ async def set_failed_async(
     end_time: Optional[float] = None,
     override_terminal: bool = False,
 ):
-    """Set an entire job or task to failed."""
+    """Set an entire job or task to failed.
+
+    Routes through the optional plugin-registered managed-jobs db-write
+    wrapper (see ``sky.server.plugins.register_managed_jobs_db_write_wrapper``)
+    so an out-of-tree plugin can layer idempotency + retry semantics around
+    the write without forking this module. With no wrapper registered, this
+    is equivalent to a direct call to ``_set_failed_async_impl`` — the
+    default behavior is unchanged.
+    """
+    # Lazy import avoids a sky.jobs.state ↔ sky.server.plugins import cycle
+    # during module load (state.py is imported very early in the controller).
+    from sky.server import plugins as _plugins  # pylint: disable=import-outside-toplevel
+    wrapper = _plugins.get_managed_jobs_db_write_wrapper()
+    if wrapper is not None:
+        return await wrapper(_set_failed_async_impl,
+                             job_id,
+                             task_id=task_id,
+                             failure_type=failure_type,
+                             failure_reason=failure_reason,
+                             callback_func=callback_func,
+                             end_time=end_time,
+                             override_terminal=override_terminal)
+    return await _set_failed_async_impl(job_id,
+                                        task_id=task_id,
+                                        failure_type=failure_type,
+                                        failure_reason=failure_reason,
+                                        callback_func=callback_func,
+                                        end_time=end_time,
+                                        override_terminal=override_terminal)
+
+
+async def _set_failed_async_impl(
+    job_id: int,
+    task_id: Optional[int],
+    failure_type: ManagedJobStatus,
+    failure_reason: str,
+    callback_func: Optional[AsyncCallbackType] = None,
+    end_time: Optional[float] = None,
+    override_terminal: bool = False,
+):
+    """Implementation of ``set_failed_async``. See that function for docs."""
     await add_job_event_async(job_id, task_id, failure_type,
                               f'Job failed: {failure_reason}')
     assert failure_type.is_failed(), failure_type
@@ -3120,7 +3160,22 @@ async def update_links_async(job_id: int, task_id: int,
 
 async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
-    states."""
+    states.
+
+    Routes through the optional plugin-registered managed-jobs db-write
+    wrapper. See ``set_failed_async`` for the rationale.
+    """
+    # Lazy import to avoid sky.jobs.state ↔ sky.server.plugins cycle.
+    from sky.server import plugins as _plugins  # pylint: disable=import-outside-toplevel
+    wrapper = _plugins.get_managed_jobs_db_write_wrapper()
+    if wrapper is not None:
+        return await wrapper(_set_cancelling_async_impl, job_id, callback_func)
+    return await _set_cancelling_async_impl(job_id, callback_func)
+
+
+async def _set_cancelling_async_impl(job_id: int,
+                                     callback_func: AsyncCallbackType):
+    """Implementation of ``set_cancelling_async``."""
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
                               'Job is cancelling')
 
@@ -3145,7 +3200,22 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
 
 
 async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
-    """Set tasks in the job as cancelled, if they are in CANCELLING state."""
+    """Set tasks in the job as cancelled, if they are in CANCELLING state.
+
+    Routes through the optional plugin-registered managed-jobs db-write
+    wrapper. See ``set_failed_async`` for the rationale.
+    """
+    # Lazy import to avoid sky.jobs.state ↔ sky.server.plugins cycle.
+    from sky.server import plugins as _plugins  # pylint: disable=import-outside-toplevel
+    wrapper = _plugins.get_managed_jobs_db_write_wrapper()
+    if wrapper is not None:
+        return await wrapper(_set_cancelled_async_impl, job_id, callback_func)
+    return await _set_cancelled_async_impl(job_id, callback_func)
+
+
+async def _set_cancelled_async_impl(job_id: int,
+                                    callback_func: AsyncCallbackType):
+    """Implementation of ``set_cancelled_async``."""
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
                               'Job has been cancelled')
 
