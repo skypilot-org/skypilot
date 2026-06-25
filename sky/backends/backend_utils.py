@@ -1381,6 +1381,10 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
             clouds.DO,
             clouds.Nebius,
             clouds.Yotta,
+            # Modal injects the SkyPilot public key directly into the Sandbox
+            # via the provisioner entrypoint, so it only needs the generic
+            # SSH-info setup (no account-level key registration).
+            clouds.Modal,
         )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):

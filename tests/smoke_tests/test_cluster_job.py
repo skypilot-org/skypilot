@@ -1026,6 +1026,38 @@ def test_runpod_http_server_with_custom_ports():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Modal end-to-end: launch T4 -> exec x2 -> down. ----------
+@pytest.mark.modal
+def test_modal_launch():
+    """TEST-02 / D-06: Modal end-to-end smoke — launch T4 Sandbox, exec x2, down.
+
+    Codifies the P3 live-proven flow (03-02-SUMMARY.md SC1-SC3).
+    Credential-gated: skips cleanly when ~/.modal.toml or env vars are absent,
+    so CI never makes a paid call without explicit Modal credentials + --modal.
+    """
+    from sky.clouds.modal import Modal  # noqa: PLC0415
+    valid, _ = Modal._check_credentials()  # pylint: disable=protected-access
+    if not valid:
+        pytest.skip('Modal credentials not configured '
+                    '(MODAL_TOKEN_ID/MODAL_TOKEN_SECRET or ~/.modal.toml)')
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'modal_launch',
+        [
+            f'sky launch -y -c {name} --cloud modal --gpus T4:1 '
+            f'tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} -- echo MODAL_EXEC_1',
+            f'sky logs {name} 2 --status',
+            f'sky exec {name} -- echo MODAL_EXEC_2',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout('modal', override_timeout=30 * 60),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Web apps with custom ports on SCP. ----------
 @pytest.mark.scp
 def test_scp_http_server_with_custom_ports():
