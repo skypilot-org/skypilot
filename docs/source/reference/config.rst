@@ -731,6 +731,12 @@ When set to ``false``, conda is still installed (unless ``install_conda: false``
 ``base`` environment is not auto-activated, so tools like ``uv`` and ``pip`` no longer
 resolve to it implicitly.
 
+.. note::
+
+  This option controls conda *auto-activation*. Images that bake ``CONDA_PREFIX``
+  into the container environment itself (rather than activating ``base`` via
+  ``conda init``) keep ``base`` as the implicit target regardless of this option.
+
 Default: ``true`` (``false`` when a custom Docker image is used).
 
 Example:
