@@ -23,6 +23,7 @@ smoke tests for those clouds are not generated.
 
 import argparse
 import collections
+import hashlib
 import os
 import re
 import shlex
@@ -232,8 +233,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--generic-cloud {parsed_args.generic_cloud}')
 
     return (default_clouds_to_run, parsed_args.k, extra_args,
-            parsed_args.concurrency, parsed_args.env_file
-            is not None, parsed_args.exclusive, pytest_native)
+            parsed_args.concurrency, parsed_args.env_file,
+            parsed_args.exclusive, pytest_native)
 
 
 def _extract_marked_tests(
@@ -380,8 +381,9 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
-    (default_clouds_to_run, k_value, extra_args, concurrency, has_env_file,
+    (default_clouds_to_run, k_value, extra_args, concurrency, env_file,
      exclusive, pytest_native) = _parse_args(args)
+    has_env_file = env_file is not None
     # Pass a clean arg string: extra_args (conftest-registered flags extracted
     # from the generate_pipeline parser) + pytest_native (conftest-registered
     # flags the generate_pipeline parser did not recognise).
@@ -397,12 +399,16 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     build_id = None
     concurrency_group = None
     if exclusive:
-        # Exclusive tests mutate shared server state, so the whole
-        # exclusive-only run is serialized to one step at a time, regardless of
-        # --concurrency / --env-file.
+        # Exclusive tests mutate shared server state, so the whole exclusive-only
+        # run is serialized to one step at a time. Key the group on the target
+        # (the --env-file) rather than the build id, so two exclusive builds
+        # against the SAME server also serialize -- e.g. a re-triggered run, or a
+        # deploy-and-test command racing a manual run. Fall back to the build id
+        # when there is no --env-file (each build kept isolated).
         concurrency_limit = 1
-        build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
-        concurrency_group = f'exclusive-smoke-test-{build_id}'
+        tag = (hashlib.sha256(env_file.encode()).hexdigest()[:12]
+               if env_file else os.environ.get('BUILDKITE_BUILD_ID', 'local'))
+        concurrency_group = f'exclusive-smoke-test-{tag}'
     elif has_env_file:
         concurrency_limit = (concurrency if concurrency is not None else
                              DEFAULT_ENV_FILE_CONCURRENCY_LIMIT)
