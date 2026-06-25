@@ -1,5 +1,5 @@
 """Utility functions for generating instance links for cloud providers."""
-from typing import Dict
+from typing import Dict, Optional
 
 from sky import sky_logging
 from sky.provision import common
@@ -75,6 +75,7 @@ def _build_gcp_instances_url(project_id: str, tag_key: str,
 def generate_instance_links(
     cluster_info: common.ClusterInfo,
     cluster_name: str,
+    cluster_name_on_cloud: Optional[str] = None,
 ) -> Dict[str, str]:
     """Generate instance links for a cluster based on the cloud provider.
 
@@ -84,6 +85,8 @@ def generate_instance_links(
     Args:
         cluster_info: ClusterInfo object containing instance information.
         cluster_name: Cluster name for tag-based filtering.
+        cluster_name_on_cloud: Optional cloud-side cluster name/tag value.
+            If provided, this is used for cloud console filtering.
 
     Returns:
         Dictionary mapping link labels to URLs. Empty dict if links cannot be
@@ -99,6 +102,7 @@ def generate_instance_links(
 
     # Tag used by SkyPilot to identify cluster instances
     tag_key = provision_constants.TAG_RAY_CLUSTER_NAME
+    cluster_tag_value = cluster_name_on_cloud or cluster_name
 
     if provider_name == 'aws':
         region = provider_config.get('region')
@@ -109,7 +113,7 @@ def generate_instance_links(
         links['AWS Instances'] = AWS_INSTANCES_URL.format(
             region=region,
             tag_key=tag_key,
-            cluster_name=cluster_name,
+            cluster_name=cluster_tag_value,
         )
 
     elif provider_name == 'gcp':
@@ -121,7 +125,7 @@ def generate_instance_links(
         links['GCP Instances'] = _build_gcp_instances_url(
             project_id=project_id,
             tag_key=tag_key,
-            cluster_name=cluster_name,
+            cluster_name=cluster_tag_value,
         )
 
     elif provider_name == 'azure':
