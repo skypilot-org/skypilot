@@ -441,6 +441,8 @@ class Modal(clouds.Cloud):
                 return False, (
                     f'{config_path} [{active_profile}] is missing token_secret.'
                 )
+        except OSError as e:
+            return False, f'Failed to read {config_path}: {e}'
         except (TypeError, ValueError):
             return False, f'{config_path} is not a valid TOML file.'
 

@@ -161,8 +161,11 @@ def get_cluster_info(
     returning the stable (but never cached) tunnel endpoint.
     """
     del region  # unused
+    # query_tunnels=True (the default, stated explicitly): get_cluster_info
+    # needs the live SSH tunnel host:port for the cluster's InstanceInfo.
     running_instances = _filter_instances(cluster_name_on_cloud,
-                                          running_only=True)
+                                          running_only=True,
+                                          query_tunnels=True)
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
