@@ -151,6 +151,7 @@ def test_cli_invalid_config_details(generic_cloud: str):
         timeout=smoke_tests_utils.get_timeout(generic_cloud))
     smoke_tests_utils.run_one_test(test, check_sky_status=False)
 
+
 def test_cli_auto_retry(generic_cloud: str):
     """Test that cli auto retry works."""
     name = smoke_tests_utils.get_cluster_name()
