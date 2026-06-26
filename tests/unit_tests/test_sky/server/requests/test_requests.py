@@ -9,11 +9,13 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky import core
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
+from sky.server.requests.serializers import encoders
 
 
 def dummy():
@@ -1953,3 +1955,63 @@ def test_to_row_keeps_true_status_for_old_clients(remote_api_version):
     # Same context: the wire encoding downgrades, the DB row does not.
     assert request.encode().status == 'RUNNING'
     assert request.to_row()[status_idx] == 'WAITING'
+
+
+def test_decode_entrypoint_resolves_known_symbol():
+    """A resolvable entrypoint decodes back to the original callable."""
+    encoded = encoders.pickle_and_encode(core.down)
+    assert requests.Request._decode_entrypoint(encoded) is core.down
+
+
+def test_decode_entrypoint_falls_back_when_unresolvable(monkeypatch):
+    """An entrypoint referencing a symbol this client lacks decodes to the
+    placeholder instead of raising.
+
+    Regression for the client/server version-skew break: the `/down` entrypoint
+    became `core.user_initiated_down` in #9916. The entrypoint is pickled by
+    reference in `Request.encode` and unpickled by the client in
+    `Request.decode`, so a client predating the symbol crashed with
+    `AttributeError: Can't get attribute 'user_initiated_down'`. The entrypoint
+    is never invoked on the client, so #9946 falls back to a placeholder.
+    """
+    # Encode while the symbol exists (mirrors the newer server) ...
+    encoded = encoders.pickle_and_encode(core.user_initiated_down)
+    # ... then simulate an older client whose `sky.core` lacks it.
+    monkeypatch.delattr(core, 'user_initiated_down')
+
+    decoded = requests.Request._decode_entrypoint(encoded)
+
+    assert decoded is requests._unresolved_entrypoint
+    # The placeholder is never called on the client, but guards that case.
+    with pytest.raises(RuntimeError, match='client/server version mismatch'):
+        decoded()
+
+
+def test_decode_tolerates_unresolvable_entrypoint(monkeypatch):
+    """`Request.decode` succeeds end-to-end when the entrypoint is unresolvable.
+
+    The whole request must still decode -- status, body, ids intact -- with only
+    the unused entrypoint falling back to the placeholder. Before #9946 the
+    unresolved entrypoint raised and failed the entire request (so `sky down`
+    crashed on an older client against a newer server).
+    """
+    request = requests.Request(request_id='down-req',
+                               name='down',
+                               entrypoint=core.user_initiated_down,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               finished_at=1.0,
+                               user_id='test-user')
+    # Encoded by the newer server, which has the symbol.
+    payload = request.encode()
+
+    # Older client: `sky.core` has no `user_initiated_down`.
+    monkeypatch.delattr(core, 'user_initiated_down')
+
+    decoded = requests.Request.decode(payload)
+
+    assert decoded.entrypoint is requests._unresolved_entrypoint
+    assert decoded.request_id == 'down-req'
+    assert decoded.name == 'down'
+    assert decoded.status == RequestStatus.SUCCEEDED
