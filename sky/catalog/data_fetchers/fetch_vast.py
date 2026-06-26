@@ -140,7 +140,7 @@ if __name__ == '__main__':
         for instance in toList:
             hosting_type = instance.get('HostingType', 0)
             stub = (f'{instance["InstanceType"]} '
-                    f'{instance["Region"][-2:]} {hosting_type}')
+                    f'{instance["Region"].split(",")[-1].strip()} {hosting_type}')
             if stub in seen:
                 printstub = f'{stub}#print'
                 if printstub not in seen:
