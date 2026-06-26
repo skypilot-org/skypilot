@@ -67,6 +67,7 @@ if typing.TYPE_CHECKING:
     from google.protobuf import json_format
     import grpc
     import psutil
+    import sqlalchemy
 
     import sky
     from sky import dag as dag_lib
@@ -2407,6 +2408,7 @@ def get_managed_job_queue(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -2455,6 +2457,7 @@ def get_managed_job_queue(
         skip_finished=skip_finished,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        status_expr=status_expr,
     )
 
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
@@ -2473,6 +2476,7 @@ def get_managed_job_queue(
         limit=limit,
         sort_by=sort_by,
         sort_order=sort_order,
+        status_expr=status_expr,
     )
 
     if cluster_handle_required:
