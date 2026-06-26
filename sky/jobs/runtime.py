@@ -86,15 +86,19 @@ class ManagedJobRuntime(Protocol):
         backend: 'backends.CloudVmRayBackend',
         job_id: int,
         task_id: Optional[int],
+        exit_codes: Optional[List[int]] = None,
     ) -> None:
         """Hook invoked just before a managed job recovers.
 
         Called from the controller's recovery branch before the failing
         cluster is torn down or relaunched. The cluster may already be
         unreachable when this fires; implementations must handle a
-        ``None`` handle and network timeouts gracefully. Side-effecting;
-        the return value is ignored, and the caller swallows exceptions
-        so a failure here never blocks recovery."""
+        ``None`` handle and network timeouts gracefully. ``exit_codes``
+        carries the failed run's per-node exit codes when recovery was
+        triggered by a job failure (``None`` for an infra-level failure
+        such as preemption). Side-effecting; the return value is ignored,
+        and the caller swallows exceptions so a failure here never blocks
+        recovery."""
         ...
 
     def tail_logs(
@@ -220,6 +224,7 @@ def on_before_recovery(
     backend: 'backends.CloudVmRayBackend',
     job_id: int,
     task_id: Optional[int],
+    exit_codes: Optional[List[int]] = None,
 ) -> None:
     if _current is None:
         return
@@ -228,7 +233,12 @@ def on_before_recovery(
     hook = getattr(_current, 'on_before_recovery', None)
     if hook is None:
         return
-    hook(handle, backend, job_id, task_id)  # pylint: disable=not-callable
+    hook(  # pylint: disable=not-callable
+        handle,
+        backend,
+        job_id,
+        task_id,
+        exit_codes=exit_codes)
 
 
 def tail_logs(
