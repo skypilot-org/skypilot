@@ -80,6 +80,23 @@ class ManagedJobRuntime(Protocol):
         """Download logs to a local file. Returns the path or None."""
         ...
 
+    def on_before_recovery(
+        self,
+        handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+        backend: 'backends.CloudVmRayBackend',
+        job_id: int,
+        task_id: Optional[int],
+    ) -> None:
+        """Hook invoked just before a managed job recovers.
+
+        Called from the controller's recovery branch before the failing
+        cluster is torn down or relaunched, while it is (best-effort)
+        still reachable -- so a runtime can snapshot the about-to-be-lost
+        run's logs. Side-effecting; the return value is ignored, and the
+        caller swallows exceptions so a failure here never blocks
+        recovery."""
+        ...
+
     def tail_logs(
         self,
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
@@ -196,6 +213,22 @@ def download_logs(
     if _current is None:
         return None
     return _current.download_logs(handle, job_id, task_id)
+
+
+def on_before_recovery(
+    handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
+    backend: 'backends.CloudVmRayBackend',
+    job_id: int,
+    task_id: Optional[int],
+) -> None:
+    if _current is None:
+        return
+    # Defensive: a runtime registered by an older plugin build may not
+    # implement this hook. Skip rather than crash on version skew.
+    hook = getattr(_current, 'on_before_recovery', None)
+    if hook is None:
+        return
+    hook(handle, backend, job_id, task_id)
 
 
 def tail_logs(

@@ -1087,6 +1087,17 @@ class JobController:
                             'unrecoverable error. Try to recover the job by'
                             ' restarting the job/cluster.')
 
+            # Before tearing down or relaunching, give the runtime a chance
+            # to capture the about-to-be-lost run's logs while the cluster
+            # is (best-effort) still reachable. Side-effecting and best-
+            # effort: a failure here must never block recovery.
+            try:
+                managed_job_runtime.on_before_recovery(handle, self._backend,
+                                                       self._job_id, task_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning('on_before_recovery hook failed (continuing '
+                               f'recovery): {e}')
+
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources
