@@ -1474,6 +1474,30 @@ _SBATCH_OPTIONS_SCHEMA = {
     },
 }
 
+_SRUN_OPTIONS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'oneOf': [
+            {
+                'type': 'string',
+                # Disallow newlines to prevent shell-quoting issues when
+                # the option is appended to the srun command line.
+                'pattern': r'^[^\n]*$'
+            },
+            {
+                'type': 'number'
+            },
+            {
+                'type': 'boolean'
+            },
+            {
+                'type': 'null'
+            },
+        ]
+    },
+}
+
 _GPU_PARTITION_MAP_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -2057,6 +2081,7 @@ def get_config_schema():
                 },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'srun_options': _SRUN_OPTIONS_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                 'cpu_partition': {
                     'type': 'string',
@@ -2078,6 +2103,7 @@ def get_config_schema():
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'srun_options': _SRUN_OPTIONS_SCHEMA,
                             'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
                             'cpu_partition': {
                                 'type': 'string',
@@ -2093,6 +2119,7 @@ def get_config_schema():
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
                                         'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                        'srun_options': _SRUN_OPTIONS_SCHEMA,
                                     },
                                 },
                             },

@@ -55,6 +55,76 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
     'partition',
 })
 
+# srun options that SkyPilot controls and must not be overridden by users.
+# Union across all SkyPilot-owned srun invocations in task_codegen.py
+# (run-section srun + the shared template). Filtering is done up front
+# rather than per-call-site for simplicity; if a user actually has a
+# legitimate need to override one of these, we can revisit.
+_SRUN_PROTECTED_OPTIONS = frozenset({
+    'export',
+    'quiet',
+    'unbuffered',
+    'kill-on-bad-exit',
+    'jobid',
+    'job-name',
+    'ntasks-per-node',
+    'nodes',
+    'cpus-per-task',
+    'mem',
+    'gpus-per-node',
+    'exclusive',
+    'overlap',
+    'container-name',
+    'container-image',
+    'container-mounts',
+    'container-remap-root',
+    'container-writable',
+    'no-container-mount-home',
+    'label',
+})
+
+
+def _build_custom_srun_args(srun_options: Dict[str, Any]) -> str:
+    """Build srun CLI args from user-supplied ``srun_options``.
+
+    Returns a space-separated string of ``--key=value`` / ``--key`` args
+    suitable for appending to an srun command. Protected options managed
+    by SkyPilot are dropped with a warning. Returns the empty string when
+    nothing would be emitted.
+    """
+    if not srun_options:
+        return ''
+
+    # Normalize: srun accepts both underscores and hyphens for some options,
+    # but we standardize on hyphens to match _build_custom_sbatch_directives.
+    normalized = {k.replace('_', '-'): v for k, v in srun_options.items()}
+
+    conflicting = set(normalized.keys()) & _SRUN_PROTECTED_OPTIONS
+    if conflicting:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Ignoring protected srun options '
+            f'managed by SkyPilot: {sorted(conflicting)}. Remove them '
+            f'from slurm.srun_options in ~/.sky/config.yaml.'
+            f'{colorama.Style.RESET_ALL}')
+        for key in conflicting:
+            del normalized[key]
+
+    parts: List[str] = []
+    for key in sorted(normalized):
+        value = normalized[key]
+        if value is None or value is False:
+            continue
+        str_value = str(value)
+        if '\n' in key or '\n' in str_value:
+            raise ValueError(
+                f'Newline characters are not allowed in srun options: '
+                f'{key!r}={str_value!r}')
+        if value is True:
+            parts.append(f'--{key}')
+        else:
+            parts.append(f'--{key}={shlex.quote(str_value)}')
+    return ' '.join(parts)
+
 
 def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
     """Build #SBATCH directive lines from user-supplied sbatch_options.

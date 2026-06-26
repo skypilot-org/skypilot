@@ -691,16 +691,22 @@ class SlurmCodeGen(TaskCodeGen):
         self,
         slurm_job_id: str,
         container_name: Optional[str],
+        srun_extra_args: str = '',
     ):
         """Initialize SlurmCodeGen.
 
         Args:
             slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
             container_name: pyxis container name, or None
+            srun_extra_args: Pre-built CLI-arg string from
+                ``slurm.srun_options`` (e.g. ``"--auto-resume=1"``),
+                appended to the run-section srun. Empty when no user
+                options are set.
         """
         super().__init__()
         self._slurm_job_id = slurm_job_id
         self._container_name = container_name
+        self._srun_extra_args = srun_extra_args
 
     def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
@@ -930,6 +936,13 @@ class SlurmCodeGen(TaskCodeGen):
                     #   resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
                     #   fetch_config: DNS SRV lookup failed
                     #   fatal: Could not establish a configuration source
+                    #
+                    # Also re-export SLURM_JOB_ID after the strip: SPANK plugins
+                    # such as AWS HyperPod's spank_auto_resume.so call
+                    # getenv("SLURM_JOB_ID") in slurm_spank_local_user_init to
+                    # detect "am I inside an existing allocation?". Without it,
+                    # they reject srun with "Auto Resume can only run within an
+                    # exiting allocation" even when --jobid is passed.
                     cmd_parts = []
                     # Only unset SKY_RUNTIME_DIR for container runs. For non-container
                     # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
@@ -944,6 +957,7 @@ class SlurmCodeGen(TaskCodeGen):
                     bash_cmd = shlex.quote(' '.join(cmd_parts))
                     srun_cmd = (
                         "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {{print $1}}') && "
+                        f'export SLURM_JOB_ID={self._slurm_job_id} && '
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
                         f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1{container_flags} {{extra_flags}} '
                         f'/bin/bash -c {{bash_cmd}}'
@@ -958,7 +972,12 @@ class SlurmCodeGen(TaskCodeGen):
                 def run_thread_func():
                     # This blocks until Slurm allocates resources (--exclusive)
                     # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
-                    run_flags = f'--nodes={num_nodes} --cpus-per-task={task_cpu_demand} --mem=0 {{gpu_arg}} --exclusive'
+                    # User-supplied slurm.srun_options are appended here so
+                    # resilience flags like AWS HyperPod's --auto-resume=1 take
+                    # effect on the task's primary srun step. Not propagated to
+                    # the setup srun (see setup_flags below) since auto-resume
+                    # semantics during --overlap setup are unclear.
+                    run_flags = f'--nodes={num_nodes} --cpus-per-task={task_cpu_demand} --mem=0 {{gpu_arg}} --exclusive {self._srun_extra_args}'
                     srun_cmd, cleanup = build_task_runner_cmd(
                         script, run_flags, {log_dir!r}, sky_env_vars_dict,
                         task_name={task_name!r},

@@ -28,6 +28,42 @@ logger = sky_logging.init_logger(__name__)
 CREDENTIAL_PATH = slurm_utils.DEFAULT_SLURM_PATH
 
 
+def _merge_slurm_options(
+    option_key: str,
+    cluster: Optional[str],
+    partition: Optional[str],
+    cluster_config_overrides: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Merge a slurm.* options dict across four precedence levels.
+
+    Lowest to highest: global < cluster < partition < task-YAML
+    cluster_config_overrides. Later levels overwrite earlier ones.
+
+    ``cluster`` and ``partition`` may be ``None``; the corresponding levels
+    are simply skipped.
+    """
+    merged: Dict[str, Any] = {}
+    keys_to_try: List[Tuple[str, ...]] = [('slurm', option_key)]
+    if cluster is not None:
+        keys_to_try.append(('slurm', 'cluster_configs', cluster, option_key))
+        if partition is not None:
+            keys_to_try.append(('slurm', 'cluster_configs', cluster,
+                                'partition_configs', partition, option_key))
+    for keys in keys_to_try:
+        level_config = skypilot_config.get_nested(keys, default_value=None)
+        if level_config is not None:
+            merged.update(level_config)
+    if cluster_config_overrides and cluster is not None:
+        task_level = config_utils.get_cloud_config_value_from_dict(
+            dict_config=cluster_config_overrides,
+            cloud='slurm',
+            region=cluster,
+            keys=(option_key,))
+        if task_level is not None:
+            merged.update(task_level)
+    return merged
+
+
 @registry.CLOUD_REGISTRY.register
 class Slurm(clouds.Cloud):
     """Slurm."""
@@ -560,27 +596,13 @@ class Slurm(clouds.Cloud):
                 # are a lot of pending jobs to be processed.
                 provision_timeout = 2 * 60  # 2 minutes
 
-        # Read sbatch_options with three-level merge:
-        # global < cluster < partition.
-        sbatch_options: Dict[str, Any] = {}
-        for config_keys in [
-            ('slurm', 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
-            ('slurm', 'cluster_configs', cluster, 'partition_configs',
-             partition, 'sbatch_options'),
-        ]:
-            level_config = skypilot_config.get_nested(config_keys,
-                                                      default_value=None)
-            if level_config is not None:
-                sbatch_options.update(level_config)
-        # Merge task-level config overrides (from `config:` in task YAML).
-        task_sbatch = config_utils.get_cloud_config_value_from_dict(
-            dict_config=resources.cluster_config_overrides,
-            cloud='slurm',
-            region=cluster,
-            keys=('sbatch_options',))
-        if task_sbatch is not None:
-            sbatch_options.update(task_sbatch)
+        # Read sbatch_options / srun_options with the same four-level merge:
+        # global < cluster < partition < task-YAML cluster_config_overrides.
+        sbatch_options = _merge_slurm_options(
+            'sbatch_options', cluster, partition,
+            resources.cluster_config_overrides)
+        srun_options = _merge_slurm_options('srun_options', cluster, partition,
+                                            resources.cluster_config_overrides)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -609,6 +631,7 @@ class Slurm(clouds.Cloud):
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
             'sbatch_options': sbatch_options,
+            'srun_options': srun_options,
         }
 
         return deploy_vars

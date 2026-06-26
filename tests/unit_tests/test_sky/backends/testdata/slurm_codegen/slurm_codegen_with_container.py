@@ -541,6 +541,13 @@ if script or False:
         #   resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
         #   fetch_config: DNS SRV lookup failed
         #   fatal: Could not establish a configuration source
+        #
+        # Also re-export SLURM_JOB_ID after the strip: SPANK plugins
+        # such as AWS HyperPod's spank_auto_resume.so call
+        # getenv("SLURM_JOB_ID") in slurm_spank_local_user_init to
+        # detect "am I inside an existing allocation?". Without it,
+        # they reject srun with "Auto Resume can only run within an
+        # exiting allocation" even when --jobid is passed.
         cmd_parts = []
         # Only unset SKY_RUNTIME_DIR for container runs. For non-container
         # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
@@ -555,6 +562,7 @@ if script or False:
         bash_cmd = shlex.quote(' '.join(cmd_parts))
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ && $1 !~ /^SLURM_CONF/ {print $1}') && "
+            f'export SLURM_JOB_ID=12345 && '
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 --container-remap-root --container-name=test-cluster:exec {extra_flags} '
             f'/bin/bash -c {bash_cmd}'
@@ -569,7 +577,12 @@ if script or False:
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
-        run_flags = f'--nodes=1 --cpus-per-task=1 --mem=0 {gpu_arg} --exclusive'
+        # User-supplied slurm.srun_options are appended here so
+        # resilience flags like AWS HyperPod's --auto-resume=1 take
+        # effect on the task's primary srun step. Not propagated to
+        # the setup srun (see setup_flags below) since auto-resume
+        # semantics during --overlap setup are unclear.
+        run_flags = f'--nodes=1 --cpus-per-task=1 --mem=0 {gpu_arg} --exclusive '
         srun_cmd, cleanup = build_task_runner_cmd(
             script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
             task_name='hello',
