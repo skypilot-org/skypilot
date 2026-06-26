@@ -374,8 +374,11 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
             service_account = ray_service_account
             satisfied = ray_satisfied
         elif service_account is None:
-            # Fallback to the default compute service account, which exists
-            # in all GCP projects and avoids needing iam.serviceAccounts.create.
+            # Fallback to the default compute service account to avoid needing
+            # iam.serviceAccounts.create. This SA may not exist in locked-down
+            # orgs (admins can delete it or suppress it via
+            # constraints/iam.automaticIamGrantsForDefaultServiceAccounts), and
+            # its roles are not guaranteed, so we still check permissions.
             project = _get_project(project_id, crm)
             project_number = project['projectNumber']
             default_compute_email = (f'{project_number}'
@@ -385,7 +388,8 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
             service_account = _get_service_account(default_compute_email,
                                                    project_id, iam)
             if service_account is not None:
-                satisfied = True
+                satisfied, policy = _is_permission_satisfied(
+                    service_account, crm, iam, permissions, roles)
             else:
                 logger.info('_configure_iam_role: '
                             'Creating new service account {}'.format(
