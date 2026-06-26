@@ -1148,21 +1148,32 @@ class JobController:
             force_transit_to_recovering = False
 
     async def _prepare_job_group_task_for_launch(
-        self, task: 'sky.Task', task_id: int, job_group_name: str,
-        other_job_names: List[str]
+        self,
+        task: 'sky.Task',
+        task_id: int,
+        job_group_name: str,
+        other_job_names: List[str],
+        set_starting: bool = True,
     ) -> Tuple[str, recovery_strategy.StrategyExecutor]:
         """Prepare a JobGroup task for launch.
 
         This function:
         1. Injects a wait script to ensure networking is ready
         2. Creates the recovery strategy executor
-        3. Sets task state to STARTING
+        3. Sets task state to STARTING (only when ``set_starting`` is True)
 
         Args:
             task: Task to prepare.
             task_id: Task ID.
             job_group_name: JobGroup name.
             other_job_names: Other task names in the group (to wait for).
+            set_starting: Whether to transition the task to STARTING. Must be
+                False when resuming a task the controller was already running
+                before a restart: such a task is past PENDING, so the guarded
+                PENDING->STARTING update in set_starting matches no rows and
+                raises, wrongly failing the whole group as FAILED_CONTROLLER.
+                Mirrors the single-task path, which only sets STARTING when
+                ``not is_resume``.
 
         Returns:
             Tuple of (cluster_name, executor). cluster_name is always
@@ -1209,18 +1220,24 @@ class JobController:
             file_mounts_blob_id=managed_job_state.get_file_mounts_blob_id(
                 self._job_id))
 
-        callback_func = managed_job_utils.event_callback_func(
-            job_id=self._job_id, task_id=task_id, task=task)
-        resources_str = backend_utils.get_task_resources_str(
-            task, is_managed_job=True)
-        await managed_job_state.set_starting_async(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            time.time(),
-            resources_str=resources_str,
-            specs=_build_task_specs(executor),
-            callback_func=callback_func)
+        # Only transition to STARTING for a fresh launch. A resumed task is
+        # already past PENDING, so set_starting's guarded PENDING->STARTING
+        # update would match no rows and raise, wrongly failing the task as
+        # FAILED_CONTROLLER. The monitor loop drives state for resumed tasks
+        # via force_transit_to_recovering instead.
+        if set_starting:
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id, task_id=task_id, task=task)
+            resources_str = backend_utils.get_task_resources_str(
+                task, is_managed_job=True)
+            await managed_job_state.set_starting_async(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                time.time(),
+                resources_str=resources_str,
+                specs=_build_task_specs(executor),
+                callback_func=callback_func)
 
         return cluster_name, executor
 
@@ -1411,8 +1428,15 @@ class JobController:
 
                 # Get list of other job names (excluding current task)
                 other_job_names = [t.name for t in tasks if t.name != task.name]
+                # Only set STARTING for fresh launches (None/PENDING). Resumed
+                # tasks (STARTING/RUNNING/RECOVERING) are already past PENDING;
+                # re-issuing STARTING would fail the group as FAILED_CONTROLLER.
                 name, executor = await self._prepare_job_group_task_for_launch(
-                    task, task_id, job_group_name, other_job_names)
+                    task,
+                    task_id,
+                    job_group_name,
+                    other_job_names,
+                    set_starting=needs_launch(task_id))
                 cluster_names.append(name)
                 strategy_executors.append(executor)
 
