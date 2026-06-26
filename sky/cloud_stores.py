@@ -109,11 +109,11 @@ class S3CloudStorage(CloudStorage):
 class GcsCloudStorage(CloudStorage):
     """Google Cloud Storage."""
 
-    # We use gsutil as a basic implementation.  One pro is that its -m
-    # multi-threaded download is nice, which frees us from implementing
-    # parellel workers on our end.
-    # The gsutil command is part of the Google Cloud SDK, and we reuse
-    # the installation logic here.
+    # Download paths use `gcloud storage`, which saturates the available
+    # network throughput and parallelizes transfers automatically (so we no
+    # longer need gsutil's `-m` flag or our own parallel workers). `gcloud
+    # storage` ships with the Google Cloud SDK, so we reuse the same
+    # installation logic. gsutil is still used by `is_directory` below.
     _INSTALL_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
     @property
@@ -129,6 +129,20 @@ class GcsCloudStorage(CloudStorage):
             '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
             '2> /dev/null || true; '
             f'{gsutil_alias}')
+
+    @property
+    def _gcloud_command(self):
+        return (
+            f'GOOGLE_APPLICATION_CREDENTIALS='
+            f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+            # Explicitly activate the service account so that `gcloud storage`
+            # authenticates with it. Setting GOOGLE_APPLICATION_CREDENTIALS
+            # alone is not sufficient: the gcloud CLI reads credentials from
+            # its own credential store rather than that environment variable.
+            'gcloud auth activate-service-account '
+            '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+            '2> /dev/null || true; '
+            'gcloud storage')
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
@@ -162,19 +176,21 @@ class GcsCloudStorage(CloudStorage):
         return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using gsutil."""
-        download_via_gsutil = (f'{self._gsutil_command} '
-                               f'rsync -e -r {source} {destination}')
+        """Downloads a directory using gcloud storage."""
+        # `gcloud storage rsync` ignores symlinks by default, which matches
+        # the previous `gsutil rsync -e` behavior.
+        download_via_gcloud = (f'{self._gcloud_command} '
+                               f'rsync -r {source} {destination}')
         all_commands = [self._INSTALL_GSUTIL]
-        all_commands.append(download_via_gsutil)
+        all_commands.append(download_via_gcloud)
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using gsutil."""
-        download_via_gsutil = f'{self._gsutil_command} ' \
-                              f'cp {source} {destination}'
+        """Downloads a file using gcloud storage."""
+        download_via_gcloud = (f'{self._gcloud_command} '
+                               f'cp {source} {destination}')
         all_commands = [self._INSTALL_GSUTIL]
-        all_commands.append(download_via_gsutil)
+        all_commands.append(download_via_gcloud)
         return ' && '.join(all_commands)
 
 
