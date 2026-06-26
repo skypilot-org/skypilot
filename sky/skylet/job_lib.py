@@ -272,6 +272,14 @@ class JobStatus(enum.Enum):
 # TODO(zhwu): This number should be tuned based on heuristics.
 _INIT_SUBMIT_GRACE_PERIOD = 60
 
+# Grace period for PENDING jobs. If a job stays in PENDING state for longer
+# than this period and the job driver process is not running, it is likely
+# the driver crashed during early initialization (e.g., import error,
+# permission error) before it could update the job status. We should
+# transition it to FAILED_DRIVER to unblock autodown. See #9815.
+# TODO(dzorlu): This number should be tuned based on heuristics.
+_PENDING_GRACE_PERIOD = 10 * 60  # 10 minutes
+
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
 
@@ -906,6 +914,29 @@ def update_job_status(job_ids: List[int],
                     # overridden by the actual job terminal status in the table
                     # if the job driver process finished correctly.)
                     status = JobStatus.PENDING
+
+            # If the job has been PENDING for longer than the grace period
+            # (measured from job creation via submitted_at, which is always
+            # >= the PENDING entry time) and the driver process is not
+            # running, the driver likely crashed during early initialization
+            # before updating its status. Fail it so that
+            # is_cluster_idle() returns True and autodown can proceed.
+            # We only check jobs that were actually launched (submit > 0 or
+            # no pending_jobs entry); jobs still queued (submit <= 0) are
+            # legitimately waiting their turn and should not be failed.
+            # See #9815.
+            job_was_launched = (pending_job is None or
+                                pending_job['submit'] > 0)
+            if (job_was_launched and original_status == JobStatus.PENDING and
+                    status == JobStatus.PENDING and
+                    job_submitted_at < pid_query_time - _PENDING_GRACE_PERIOD
+                    and not (job_pid > 0 and
+                             _is_job_driver_process_running(job_pid, job_id))):
+                failed_driver_transition_message = (
+                    f'PENDING job {job_id} has been stuck since creation '
+                    f'({_PENDING_GRACE_PERIOD}s ago), setting to '
+                    f'FAILED_DRIVER')
+                status = JobStatus.FAILED_DRIVER
 
             assert original_status is not None, (job_id, status)
             if status is None:
