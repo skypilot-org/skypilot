@@ -979,12 +979,20 @@ class JobController:
                         managed_job_status = (
                             managed_job_state.ManagedJobStatus.FAILED_SETUP)
                     elif job_status == job_lib.JobStatus.FAILED_DRIVER:
-                        # FAILED_DRIVER is kind of an internal error, so we mark
-                        # this as FAILED_CONTROLLER, even though the failure is
-                        # not strictly within the controller.
+                        # FAILED_DRIVER means the user job's driver process on
+                        # the remote cluster died, most commonly because the
+                        # user workload ran the node out of memory (e.g. a Ray
+                        # OutOfMemoryError). This is a failure of the user
+                        # workload, not of the jobs controller, so we classify
+                        # it as FAILED (not FAILED_CONTROLLER) to avoid firing
+                        # spurious controller-failure alerts. Like any other
+                        # user-job failure, whether it is retried is decided by
+                        # should_restart_on_failure() below (i.e. by
+                        # max_restarts_on_errors / recover_on_exit_codes), which
+                        # defaults to no retry -- appropriate here since an OOM
+                        # is deterministic and would likely recur on recovery.
                         managed_job_status = (
-                            managed_job_state.ManagedJobStatus.FAILED_CONTROLLER
-                        )
+                            managed_job_state.ManagedJobStatus.FAILED)
                         failure_reason = (
                             'The job driver on the remote cluster failed. This '
                             'can be caused by the job taking too much memory '
