@@ -961,6 +961,14 @@ def update_service_account_role(
             'Only admins can update roles for service accounts owned by other '
             'users.')
 
+    # Only admin can grant the admin role (mirrors user_update guard).
+    if role_body.role == rbac.RoleName.ADMIN.value:
+        caller_roles = permission.permission_service.get_user_roles(
+            auth_user.id)
+        if rbac.RoleName.ADMIN.value not in caller_roles:
+            raise fastapi.HTTPException(
+                status_code=403, detail='Only admin can grant the admin role.')
+
     try:
         # Update service account role
         service_account_user_id = token_info['service_account_user_id']
