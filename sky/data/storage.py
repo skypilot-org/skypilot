@@ -3522,24 +3522,21 @@ class AzureBlobStore(AbstractStore):
                 storage account.
         """
         try:
+            storage_models = azure.azure_mgmt_models('storage')
             creation_response = (
                 self.storage_client.storage_accounts.begin_create(
-                    resource_group_name, storage_account_name, {
-                        'sku': {
-                            'name': 'Standard_GRS'
-                        },
-                        'kind': 'StorageV2',
-                        'location': self.region,
-                        'encryption': {
-                            'services': {
-                                'blob': {
-                                    'key_type': 'Account',
-                                    'enabled': True
-                                }
-                            },
-                            'key_source': 'Microsoft.Storage'
-                        },
-                    }).result())
+                    resource_group_name, storage_account_name,
+                    storage_models.StorageAccountCreateParameters(
+                        sku=storage_models.Sku(name='Standard_GRS'),
+                        kind='StorageV2',
+                        location=self.region,
+                        encryption=storage_models.Encryption(
+                            services=storage_models.EncryptionServices(
+                                blob=storage_models.EncryptionService(
+                                    key_type='Account',
+                                    enabled=True)),
+                            key_source='Microsoft.Storage'),
+                    )).result())
         except azure.exceptions().ResourceExistsError as error:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
