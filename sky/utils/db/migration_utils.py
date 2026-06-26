@@ -34,7 +34,7 @@ GLOBAL_USER_STATE_VERSION = '020'  # add is_managed column to cluster_history
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '020'  # add indexes for pool dashboard queries
+SPOT_JOBS_VERSION = '021'  # add status_override column to spot table
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
