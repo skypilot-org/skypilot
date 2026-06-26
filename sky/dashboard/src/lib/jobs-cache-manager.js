@@ -40,7 +40,7 @@ class JobsCacheManager {
     const {
       page = 1,
       limit = 10,
-      sortBy = 'submitted_at',
+      sortBy = 'job_id',
       sortOrder = 'desc',
       allUsers = true,
       jobIdMatch,
@@ -286,7 +286,7 @@ class JobsCacheManager {
     const {
       page = 1,
       limit = 10,
-      sortBy = 'submitted_at',
+      sortBy = 'job_id',
       sortOrder = 'desc',
       statuses,
       ...filterOptions
