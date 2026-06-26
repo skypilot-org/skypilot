@@ -90,11 +90,11 @@ class ManagedJobRuntime(Protocol):
         """Hook invoked just before a managed job recovers.
 
         Called from the controller's recovery branch before the failing
-        cluster is torn down or relaunched, while it is (best-effort)
-        still reachable -- so a runtime can snapshot the about-to-be-lost
-        run's logs. Side-effecting; the return value is ignored, and the
-        caller swallows exceptions so a failure here never blocks
-        recovery."""
+        cluster is torn down or relaunched. The cluster may already be
+        unreachable when this fires; implementations must handle a
+        ``None`` handle and network timeouts gracefully. Side-effecting;
+        the return value is ignored, and the caller swallows exceptions
+        so a failure here never blocks recovery."""
         ...
 
     def tail_logs(
@@ -228,7 +228,7 @@ def on_before_recovery(
     hook = getattr(_current, 'on_before_recovery', None)
     if hook is None:
         return
-    hook(handle, backend, job_id, task_id)
+    hook(handle, backend, job_id, task_id)  # pylint: disable=not-callable
 
 
 def tail_logs(
