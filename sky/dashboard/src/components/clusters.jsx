@@ -995,12 +995,16 @@ export function ClusterTable({
       ),
       renderCell: (item) => (
         <TableCell>
-          <NonCapitalizedTooltip
-            content={item.resources_str_full || item.resources_str || '-'}
-            className="text-sm text-muted-foreground"
-          >
-            <span>{item.resources_str || '-'}</span>
-          </NonCapitalizedTooltip>
+          {item.resources_str_full || item.resources_str ? (
+            <NonCapitalizedTooltip
+              content={item.resources_str_full || item.resources_str}
+              className="text-sm text-muted-foreground"
+            >
+              <span>{item.resources_str || '-'}</span>
+            </NonCapitalizedTooltip>
+          ) : (
+            <span>-</span>
+          )}
         </TableCell>
       ),
     },
