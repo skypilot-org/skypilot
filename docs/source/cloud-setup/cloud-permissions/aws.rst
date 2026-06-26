@@ -369,6 +369,16 @@ These are the minimal policy rules required by SkyPilot:
             },
             {
                 "Effect": "Allow",
+                "Action": "ec2:CreateTags",
+                "Resource": "arn:aws:ec2:*:<account-ID-without-hyphens>:security-group/*",
+                "Condition": {
+                    "StringEquals": {
+                        "ec2:CreateAction": "CreateSecurityGroup"
+                    }
+                }
+            },
+            {
+                "Effect": "Allow",
                 "Action": "iam:CreateServiceLinkedRole",
                 "Resource": "*",
                 "Condition": {
