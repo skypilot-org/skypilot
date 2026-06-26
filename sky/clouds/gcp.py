@@ -1399,6 +1399,24 @@ class GCP(clouds.Cloud):
         accelerator = list(resources.accelerators.keys())[0]
         use_spot = resources.use_spot
         region = resources.region
+        managed_instance_group_config = (
+            skypilot_config.get_effective_region_config(
+                cloud='gcp',
+                region=region,
+                keys=('managed_instance_group',),
+                default_value=None,
+                override_configs=resources.cluster_config_overrides))
+        if managed_instance_group_config is not None:
+            # Flex-start VMs use DWS. GCP documents that these requests consume
+            # preemptible quota once a project has requested preemptible quota;
+            # projects that have never requested preemptible quota may consume
+            # standard quota instead. Avoid incorrectly failing early on the
+            # on-demand quota check and let the DWS resize request handle
+            # quota/capacity.
+            logger.warning(
+                'Skipping GCP quota precheck for DWS/Flex-start. The DWS '
+                'resize request will validate quota and capacity.')
+            return True
 
         # pylint: disable=import-outside-toplevel
         from sky.catalog import gcp_catalog

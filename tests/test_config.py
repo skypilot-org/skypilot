@@ -21,8 +21,8 @@ from sky.utils import yaml_utils
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
-RUN_DURATION = 30
-RUN_DURATION_OVERRIDE = 10
+RUN_DURATION = 600
+RUN_DURATION_OVERRIDE = 1200
 PROVISION_TIMEOUT = 600
 
 

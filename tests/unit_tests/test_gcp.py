@@ -8,6 +8,7 @@ from sky import logs
 from sky import resources
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.clouds import gcp as gcp_cloud
 from sky.clouds import Region
 from sky.clouds import Zone
 from sky.clouds.gcp import GCP
@@ -15,6 +16,7 @@ from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import config as gcp_config
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -103,6 +105,76 @@ def test_gcp_reservation_name():
         specific_reservation_required=True,
         zone='zone')
     assert r.name == 'projects/<project>/reservations/<reservation-name>'
+
+
+def test_gcp_mig_instance_template_uses_flex_start(monkeypatch):
+    compute = MagicMock()
+    insert = compute.regionInstanceTemplates.return_value.insert
+    insert.return_value.execute.return_value = {'name': 'operation'}
+    monkeypatch.setattr(
+        mig_utils.gcp,
+        'build',
+        lambda *args, **kwargs: compute,
+    )
+
+    node_config = {
+        gcp_constants.MANAGED_INSTANCE_GROUP_CONFIG: {
+            'run_duration': 3600,
+            'provision_timeout': 900,
+        },
+        'machineType': 'n1-standard-4',
+        'guestAccelerators': [{
+            'acceleratorType': 'nvidia-tesla-a100',
+            'acceleratorCount': 1,
+        }],
+        'scheduling': {
+            'onHostMaintenance': 'TERMINATE',
+        },
+        'reservationAffinity': {
+            'consumeReservationType': 'SPECIFIC_RESERVATION',
+        },
+    }
+
+    operation = mig_utils.create_region_instance_template(
+        'cluster', 'project', 'us-central1', 'template', node_config)
+
+    assert operation == {'name': 'operation'}
+    insert.assert_called_once()
+    body = insert.call_args.kwargs['body']
+    properties = body['properties']
+    assert gcp_constants.MANAGED_INSTANCE_GROUP_CONFIG not in properties
+    assert properties['reservationAffinity'] == {
+        'consumeReservationType': 'NO_RESERVATION',
+    }
+    assert properties['scheduling'] == {
+        'provisioningModel': 'FLEX_START',
+        'instanceTerminationAction': 'DELETE',
+        'maxRunDuration': {
+            'seconds': '3600',
+        },
+        'onHostMaintenance': 'TERMINATE',
+    }
+
+
+def test_gcp_check_quota_skips_for_managed_instance_group(monkeypatch):
+    """DWS/Flex-start should not be blocked by on-demand quota precheck."""
+    resources_obj = resources.Resources(cloud=GCP(),
+                                        region='us-central1',
+                                        accelerators={'A100-80GB': 1})
+    monkeypatch.setattr(
+        skypilot_config,
+        'get_effective_region_config',
+        lambda *args, **kwargs: {
+            'run_duration': 600,
+        },
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError('Quota subprocess should not be called for DWS.')
+
+    monkeypatch.setattr(gcp_cloud.subprocess_utils, 'run', fail_if_called)
+
+    assert GCP.check_quota_available(resources_obj) is True
 
 
 @pytest.mark.parametrize(
