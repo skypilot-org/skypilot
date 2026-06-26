@@ -762,6 +762,11 @@ class JobController:
             # Get job status (skip on first iteration if forcing recovery)
             job_status = None
             transient_job_check_error_reason = None
+            # Per-node exit codes of the failed run, populated only when
+            # recovery is triggered by a job failure (not an infra-level
+            # failure like preemption). Reset each iteration so a stale
+            # value never leaks into the on_before_recovery hook.
+            exit_codes: Optional[List[int]] = None
 
             if not force_transit_to_recovering:
                 await asyncio.sleep(
@@ -1094,7 +1099,7 @@ class JobController:
                 try:
                     await asyncio.to_thread(
                         managed_job_runtime.on_before_recovery, handle,
-                        self._backend, self._job_id, task_id)
+                        self._backend, self._job_id, task_id, exit_codes)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning('on_before_recovery hook failed (continuing '
                                    f'recovery): {e}')
