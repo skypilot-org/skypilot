@@ -390,6 +390,20 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
             if service_account is not None:
                 satisfied, policy = _is_permission_satisfied(
                     service_account, crm, iam, permissions, roles)
+                if not satisfied:
+                    # In locked-down orgs the same policy that blocks
+                    # iam.serviceAccounts.create also blocks
+                    # projects.setIamPolicy.  Attempting to add roles would
+                    # produce a 403.  Trust that the admin has pre-configured
+                    # the SA and proceed; the actual GCP operations will fail
+                    # with a clear error if roles are genuinely missing.
+                    logger.warning(
+                        '_configure_iam_role: Default compute service account '
+                        f'{default_compute_email} may lack the required roles '
+                        f'{roles}. Proceeding without adding roles — IAM '
+                        'policy updates are likely also restricted in this '
+                        'environment.')
+                    satisfied = True
             else:
                 logger.info('_configure_iam_role: '
                             'Creating new service account {}'.format(
