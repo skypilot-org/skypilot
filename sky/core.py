@@ -1,5 +1,6 @@
 """SDK functions for cluster/job management."""
 import concurrent.futures
+import json
 import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -38,6 +39,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import debug_utils
+from sky.utils import log_links
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1201,6 +1203,21 @@ def autostop(
 # ==================
 
 
+def _annotate_job_links(jobs: List[Dict[str, Any]]) -> None:
+    """Compute each job's external links from its harvested-URL metadata.
+
+    Matching against the configured dashboard.external_links patterns happens
+    here, server-side, in one place. URLs are harvested into job metadata by the
+    cluster's skylet, so a link is surfaced even if no one streamed the logs.
+    """
+    patterns = log_links.get_patterns()
+    for job in jobs:
+        meta = job.get('metadata') or {}
+        urls = meta.get(log_links.EXTRACTED_URLS_METADATA_KEY)
+        job['links'] = (log_links.match_links(urls, patterns)
+                        if patterns and isinstance(urls, list) else {})
+
+
 def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                    backend: backends.CloudVmRayBackend,
                    user_hash: Optional[str],
@@ -1228,11 +1245,14 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
                     'resources': job_info.resources,
                     'log_path': job_info.log_path,
                     'user_hash': job_info.username,
+                    'metadata': (json.loads(job_info.metadata)
+                                 if job_info.metadata else {}),
                 }
                 # Copied from job_lib.load_job_queue.
                 user = global_user_state.get_user(job_dict['user_hash'])
                 job_dict['username'] = user.name if user is not None else None
                 jobs.append(job_dict)
+            _annotate_job_links(jobs)
             return jobs
         except exceptions.SKYLET_GRPC_FALLBACK_ERRORS as e:
             logger.debug(f'gRPC failed, falling back to SSH: {e}')
@@ -1249,7 +1269,9 @@ def _get_job_queue(handle: backends.CloudVmRayResourceHandle,
         f'{handle.cluster_name}.',
         stderr=f'{jobs_payload + stderr}',
         stream_logs=True)
-    return job_lib.load_job_queue(jobs_payload)
+    jobs = job_lib.load_job_queue(jobs_payload)
+    _annotate_job_links(jobs)
+    return jobs
 
 
 @usage_lib.entrypoint

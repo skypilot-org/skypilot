@@ -160,6 +160,10 @@ class ClusterJobRecord(ResponseBaseModel):
     status: job_lib.JobStatus
     log_path: str
     metadata: Dict[str, Any] = {}
+    # External links extracted from the job's logs (label -> url). Computed
+    # server-side by matching URLs harvested into `metadata` against the
+    # configured dashboard.external_links patterns.
+    links: Dict[str, str] = {}
 
 
 class UploadStatus(enum.Enum):

@@ -4639,6 +4639,75 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
+    def get_job_metadata(
+        self,
+        handle: CloudVmRayResourceHandle,
+        job_ids: Optional[List[int]] = None,
+    ) -> Dict[int, dict]:
+        """Best-effort fetch of per-job ``metadata`` from the cluster's skylet.
+
+        Reuses the existing job-queue read, whose payload already carries each
+        job's metadata JSON, over gRPC when available and SSH otherwise, so it
+        also works on non-gRPC clusters. Returns ``{}`` on any failure:
+        metadata-derived links are best-effort and the controller's
+        terminal-state log scan is the guarantee. Older clusters do not populate
+        the harvested-URL metadata, so they simply yield nothing here.
+        """
+        # (job_id, metadata) pairs; metadata is a JSON string (gRPC) or an
+        # already-decoded dict (SSH payload via load_job_queue).
+        raw_metadata: List[Any] = []
+        used_grpc = False
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = jobsv1_pb2.GetJobQueueRequest(all_jobs=True)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).get_job_queue(request))
+                raw_metadata = [
+                    (job.job_id, job.metadata) for job in response.jobs
+                ]
+                used_grpc = True
+            except Exception as e:  # pylint: disable=broad-except
+                # Best-effort: any gRPC/channel failure (including a tunnel
+                # RuntimeError raised by get_grpc_channel) should fall back to
+                # the SSH path below rather than propagate.
+                logger.debug('gRPC job metadata fetch failed, falling back to '
+                             f'SSH: {e}')
+        if not used_grpc:
+            code = job_lib.JobLibCodeGen.get_job_queue(None, True)
+            try:
+                returncode, stdout, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    require_outputs=True,
+                    separate_stderr=True,
+                    stream_logs=False)
+                if returncode != 0 or not stdout:
+                    logger.debug('SSH job metadata fetch failed '
+                                 f'(returncode={returncode}): {stderr}')
+                    return {}
+                raw_metadata = [(record['job_id'], record.get('metadata'))
+                                for record in job_lib.load_job_queue(stdout)]
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'SSH job metadata fetch failed: {e}')
+                return {}
+        # Empty set means "all jobs"; a non-empty set filters to those ids.
+        wanted = set(job_ids or [])
+        result: Dict[int, dict] = {}
+        for job_id, metadata in raw_metadata:
+            if wanted and job_id not in wanted:
+                continue
+            if isinstance(metadata, str):
+                if not metadata:
+                    continue
+                try:
+                    metadata = json.loads(metadata)
+                except (ValueError, TypeError):
+                    continue
+            if isinstance(metadata, dict) and metadata:
+                result[job_id] = metadata
+        return result
+
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],

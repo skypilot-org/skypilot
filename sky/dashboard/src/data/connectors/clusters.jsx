@@ -410,6 +410,8 @@ export async function getClusterJobs({ clusterName, workspace }) {
         logs: '',
         workspace: workspace || 'default',
         git_commit: job.metadata?.git_commit || '-',
+        // External links extracted server-side from the job's logs.
+        links: job.links || {},
       };
     });
     return jobData;
