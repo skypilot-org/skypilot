@@ -3044,9 +3044,58 @@ def query_instances(
     label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
                       f'{cluster_name_on_cloud}')
 
+    # Try the registered ``PodInfoSource`` first — a plugin can serve this
+    # from a local cache and avoid the direct ``list_namespaced_pod`` call
+    # below, which dominates this function's wall time at scale. We pass
+    # the same namespace+label scope so the cache returns the exact same
+    # pod set the direct query would.
+    #
+    # Three possible cache outcomes:
+    #   1. Non-empty list  — trust it; matches direct-K8s semantics.
+    #   2. ``None``        — no provider registered, or the provider
+    #                        couldn't answer (e.g. context unknown to
+    #                        the cache, transient backend error). Fall
+    #                        through to direct ``list_namespaced_pod``.
+    #   3. Empty list (``[]``) — *ambiguous*. Either there genuinely are
+    #      no pods for this cluster, or the cache hasn't observed an
+    #      ADD event yet (informer-style caches are eventually
+    #      consistent and can lag the API server by ~100ms–seconds
+    #      depending on watch health). For ``retry_if_missing=True``,
+    #      the existing retry loop below covers this by re-querying
+    #      ``list_namespaced_pod`` directly. For ``retry_if_missing=
+    #      False`` we must NOT trust the cache's empty answer, because
+    #      callers that pass ``False`` are typically about to act on
+    #      "cluster has no instances" as a terminal decision (e.g.
+    #      ``_update_cluster_status``'s ``_LAUNCH_DOUBLE_CHECK_DELAY``
+    #      recheck that marks the cluster TERMINATED on empty result,
+    #      or ``post_teardown_cleanup``'s sanity check). Pre-cache
+    #      these callers got a single ground-truth read from
+    #      ``list_namespaced_pod``; we preserve that contract by
+    #      falling back to a direct read when cache says empty and
+    #      ``retry_if_missing`` is False.
+    pods = None
+    if plugin_extensions.PodInfoSource.is_registered() and context is not None:
+        pods = plugin_extensions.PodInfoSource.get(
+            context,
+            namespace=namespace,
+            labels={constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud},
+        )
+        if pods is not None:
+            logger.debug(
+                f'Got pod info for {cluster_name_on_cloud} from external '
+                f'provider ({len(pods)} pods)')
+
     attempts = 0
-    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
-                               is_ssh, identity, label_selector)
+    # Fall back to direct ``list_namespaced_pod`` when:
+    #   - the cache is unavailable (``pods is None``); OR
+    #   - the cache returned empty AND the caller will not retry on its
+    #     own (``not retry_if_missing``). The ``retry_if_missing=True``
+    #     empty-result case is handled by the retry loop just below,
+    #     which already invokes ``list_namespaced_pod`` directly and
+    #     would duplicate work if we fell back here too.
+    if pods is None or (not pods and not retry_if_missing):
+        pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                                   is_ssh, identity, label_selector)
     # When we see no pods returned from the k8s api, we assume the pods have
     # been terminated by the user directly and mark the cluster as terminated
     # in the global user state.
