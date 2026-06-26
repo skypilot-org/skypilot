@@ -1817,7 +1817,10 @@ def get_managed_jobs_with_filters(
         'job_name': spot_table.c.job_name,
         'name': spot_table.c.job_name,
         'submitted_at': spot_table.c.submitted_at,
-        'status': spot_table.c.status,
+        # Sort by the refined status (status_expr) when provided, so the order
+        # matches the displayed/grouped status instead of the raw column.
+        'status':
+            (status_expr if status_expr is not None else spot_table.c.status),
         'job_duration': spot_table.c.job_duration,
         'duration': spot_table.c.job_duration,
         'recovery_count': spot_table.c.recovery_count,
