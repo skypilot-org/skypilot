@@ -218,6 +218,7 @@ class RequestWorker:
         self.burstable_parallelism = config.burstable_parallelism
         self.num_db_connections_per_worker = (
             config.num_db_connections_per_worker)
+        self.max_tasks_per_child = config.max_tasks_per_child
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
 
@@ -392,6 +393,7 @@ class RequestWorker:
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
+                max_tasks_per_child=self.max_tasks_per_child,
                 initializer=executor_initializer,
                 initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
