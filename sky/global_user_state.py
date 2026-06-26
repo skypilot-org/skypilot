@@ -1223,8 +1223,11 @@ async def cluster_event_retention_daemon():
     """Garbage collect cluster events periodically."""
     while True:
         logger.info('Running cluster event retention daemon...')
-        # Use the latest config.
-        skypilot_config.reload_config()
+        # gc_should_skip() reloads the config, so the retention reads below
+        # also see the latest values.
+        if skypilot_config.gc_should_skip('cluster event retention daemon'):
+            await asyncio.sleep(MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
+            continue
         retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_event_retention_hours'),
             DEFAULT_CLUSTER_EVENT_RETENTION_HOURS)

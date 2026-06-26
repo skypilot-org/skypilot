@@ -595,6 +595,8 @@ async def cleanup_upload_ids():
     # is to prevent stale chunks taking up space on the API server.
     while True:
         await asyncio.sleep(3600)
+        if skypilot_config.gc_should_skip('cleanup_upload_ids'):
+            continue
         current_time = datetime.datetime.now()
         # We use list() to avoid modifying the dict while iterating over it.
         upload_ids_to_cleanup_list = list(upload_ids_to_cleanup.items())
@@ -647,6 +649,8 @@ async def cleanup_unreferenced_file_mounts():
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
+        if skypilot_config.gc_should_skip('cleanup_unreferenced_file_mounts'):
+            continue
         try:
             await asyncio.to_thread(_do_cleanup)
         except Exception as e:  # pylint: disable=broad-except
@@ -663,6 +667,8 @@ async def cleanup_download_tmp():
     """
     while True:
         await asyncio.sleep(3600)
+        if skypilot_config.gc_should_skip('cleanup_download_tmp'):
+            continue
         try:
             tmp_dir = bs.get_blob_storage().download_tmp_base_dir()
             if tmp_dir is None:

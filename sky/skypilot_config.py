@@ -334,6 +334,32 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
+def gc_should_skip(loop_name: str) -> bool:
+    """Reload config and report whether ``loop_name`` should skip GC work.
+
+    The single gate every server-side GC loop calls at the top of its body. It
+    reloads the live config (so a config-backed pause provider is honored
+    without a server restart) and then consults the active GC pause provider.
+    If GC is paused, it logs once at INFO and returns True so the loop skips
+    its destructive body for this run.
+
+    The default provider is a no-op that never pauses; a deployment installs a
+    custom provider via ``ExtensionContext.register_gc_pause_provider``.
+    """
+    reload_config()
+    # Imported lazily to avoid importing the server package at config-module
+    # import time (and any import cycle through it).
+    # pylint: disable=import-outside-toplevel
+    from sky.server import gc as gc_provider
+    provider = gc_provider.get_gc_pause_provider()
+    if provider.is_paused():
+        paused_until = provider.paused_until()
+        until = f' until {paused_until.isoformat()}' if paused_until else ''
+        logger.info(f'GC paused{until}, skipping {loop_name}')
+        return True
+    return False
+
+
 def get_effective_workspace_region_config(
         cloud: str,
         keys: Tuple[str, ...],
