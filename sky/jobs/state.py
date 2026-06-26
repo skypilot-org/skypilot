@@ -23,6 +23,7 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
 from sky.skylet import constants
@@ -3609,6 +3610,9 @@ async def job_event_retention_daemon():
     """Garbage collect job events periodically."""
     while True:
         logger.info('Running job event retention daemon...')
+        if skypilot_config.gc_should_skip('job event retention daemon'):
+            await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)
+            continue
         try:
             await cleanup_job_events_with_retention_async(
                 DEFAULT_JOB_EVENT_RETENTION_HOURS)

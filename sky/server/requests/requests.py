@@ -1242,8 +1242,11 @@ async def requests_gc_daemon():
     """Garbage collect finished requests periodically."""
     while True:
         logger.info('Running requests GC daemon...')
-        # Use the latest config.
-        skypilot_config.reload_config()
+        # gc_should_skip() reloads the config, so the retention read below
+        # also sees the latest values.
+        if skypilot_config.gc_should_skip('requests GC daemon'):
+            await asyncio.sleep(3600)
+            continue
         retention_seconds = skypilot_config.get_nested(
             ('api_server', 'requests_retention_hours'),
             DEFAULT_REQUESTS_RETENTION_HOURS) * 3600

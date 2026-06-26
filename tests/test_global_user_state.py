@@ -39,6 +39,8 @@ async def test_cluster_event_retention_daemon():
                 'sky.global_user_state.cleanup_cluster_events_with_retention'
         ) as mock_clean:
             with mock.patch('asyncio.sleep') as mock_sleep:
+                # GC pause gate: not paused, so the daemon runs.
+                mock_config.gc_should_skip.return_value = False
                 # Configure negative retention (disabled)
                 mock_config.get_nested.return_value = -1
 
