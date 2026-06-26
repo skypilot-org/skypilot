@@ -161,8 +161,8 @@ def iam():
 
 def billing():
     # pylint: disable=import-outside-toplevel
-    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
-    return billing_v1alpha1
+    from nebius.api.nebius.billing import v1 as billing_v1
+    return billing_v1
 
 
 def nebius_common():
