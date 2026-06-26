@@ -884,6 +884,46 @@ def test_get_pvc_binding_status_pending_pvc(monkeypatch):
     assert 'test-namespace' in result
 
 
+def test_get_pvc_binding_status_wait_for_first_consumer(monkeypatch):
+    """A PVC pending only on WaitForFirstConsumer is not a binding failure.
+
+    Late-binding storage classes (volumeBindingMode: WaitForFirstConsumer,
+    e.g. kind's local-path) keep the PVC Pending until its consumer pod is
+    scheduled. That is normal in-progress provisioning, not a binding issue,
+    so _get_pvc_binding_status must not surface it as an error.
+    """
+    pod = mock.MagicMock()
+    pvc_claim = mock.MagicMock()
+    pvc_claim.claim_name = 'test-pvc'
+    volume = mock.MagicMock()
+    volume.persistent_volume_claim = pvc_claim
+    pod.spec.volumes = [volume]
+
+    # Mock the PVC as pending
+    pvc = mock.MagicMock()
+    pvc.status.phase = 'Pending'
+
+    # The only event is a benign Normal WaitForFirstConsumer event.
+    pvc_event = mock.MagicMock()
+    pvc_event.type = 'Normal'
+    pvc_event.reason = 'WaitForFirstConsumer'
+    pvc_event.message = ('waiting for first consumer to be created before '
+                         'binding')
+    pvc_events = mock.MagicMock()
+    pvc_events.items = [pvc_event]
+
+    core_api_mock = mock.MagicMock()
+    core_api_mock.read_namespaced_persistent_volume_claim.return_value = pvc
+    core_api_mock.list_namespaced_event.return_value = pvc_events
+
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *args, **kwargs: core_api_mock)
+
+    result = instance._get_pvc_binding_status('test-namespace', 'test-context',
+                                              pod)
+    assert result is None
+
+
 def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):
     """Test that _raise_pod_scheduling_errors surfaces PVC binding issues."""
     error_message = '0/3 nodes are available: 3 pod has unbound immediate PersistentVolumeClaims.'

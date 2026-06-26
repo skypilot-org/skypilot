@@ -668,17 +668,32 @@ class Kubernetes(clouds.Cloud):
             per_node_timeout = 10
             max_timeout = 2400
         elif volume_mounts is not None:
+            has_pvc = False
+            has_rwx_pvc = False
             for volume_mount in volume_mounts:
                 if (volume_mount.volume_config.type ==
                         volume_lib.VolumeType.PVC.value):
+                    has_pvc = True
                     if (volume_mount.volume_config.config.get(
                             'access_mode', '') ==
                             volume_lib.VolumeAccessMode.READ_WRITE_MANY.value):
-                        # GKE may take several minutes to provision a PV
-                        # supporting READ_WRITE_MANY with filestore.
-                        base_timeout = 180
-                        max_timeout = 240
+                        has_rwx_pvc = True
                         break
+            if has_rwx_pvc:
+                # GKE may take several minutes to provision a PV
+                # supporting READ_WRITE_MANY with filestore.
+                base_timeout = 180
+                max_timeout = 240
+            elif has_pvc:
+                # Even ReadWriteOnce PVCs can take meaningfully longer than the
+                # 10s default to come up: storage classes that use late binding
+                # (volumeBindingMode: WaitForFirstConsumer, e.g. kind's
+                # local-path and many cloud defaults) only bind the PVC once the
+                # consumer pod is scheduled, after which the provisioner still
+                # has to create the volume. Give that more room before failing
+                # over so a healthy-but-slow provision is not misread as an
+                # unschedulable pod / PVC binding failure.
+                base_timeout = 30
 
         return int(
             min(base_timeout + (per_node_timeout * (num_nodes - 1)),
