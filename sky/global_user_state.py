@@ -2368,34 +2368,39 @@ def get_clusters_from_history(
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
+    # last_creation_yaml / last_creation_command hold the full task YAML and
+    # launch command for each history row. In aggregate these are by far the
+    # largest columns (a 30-day report can span thousands of clusters), yet
+    # only targeted by-hash / by-name lookups (e.g. a single cluster's detail
+    # view) actually read them. Bulk reports such as `sky cost-report` and the
+    # dashboard history list never use them, so fetch them only for filtered
+    # queries to avoid loading every cluster's YAML into memory.
+    include_creation_yaml = (not abbreviate_response and
+                             (cluster_hashes is not None or
+                              cluster_names is not None))
+
     with orm.Session(engine) as session:
-        # Explicitly select columns from both tables to avoid ambiguity
-        if abbreviate_response:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
-        else:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
+        # Explicitly select columns from both tables to avoid ambiguity.
+        selected_columns = [
+            cluster_history_table.c.cluster_hash,
+            cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.workspace.label('history_workspace'),
+            cluster_history_table.c.last_activity_time,
+            cluster_history_table.c.launched_at,
+            cluster_history_table.c.node_names,
+            cluster_table.c.status,
+            cluster_table.c.workspace,
+        ]
+        if include_creation_yaml:
+            selected_columns.extend([
                 cluster_history_table.c.last_creation_yaml,
                 cluster_history_table.c.last_creation_command,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
+            ])
+        query = session.query(*selected_columns)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
@@ -2499,7 +2504,7 @@ def get_clusters_from_history(
             'last_event': last_event,
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        if not abbreviate_response:
+        if include_creation_yaml:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
 
