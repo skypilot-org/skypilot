@@ -1,0 +1,60 @@
+name: action-pin-check
+
+on:
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+
+jobs:
+  check-action-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check third-party actions are pinned to full-length commit SHAs
+        run: |
+          # Find all workflow and action YAML files
+          FILES=$(find .github/workflows .github/actions -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null)
+
+          EXIT_CODE=0
+          for file in $FILES; do
+            # Extract 'uses:' lines, skip local actions (./) and reusable workflow calls (.github/)
+            while IFS= read -r line; do
+              # Get the action reference (everything after 'uses:')
+              ref=$(echo "$line" | sed "s/.*uses:[[:space:]]*//" | tr -d "'" | tr -d '"')
+
+              # Skip local actions and reusable workflows
+              if echo "$ref" | grep -qE '^\./'; then
+                continue
+              fi
+
+              # Skip Docker references (docker://)
+              if echo "$ref" | grep -qE '^docker://'; then
+                continue
+              fi
+
+              # Extract the version part (after @), stripping inline comments and whitespace
+              version=$(echo "$ref" | sed 's/.*@//' | sed 's/[[:space:]]*#.*//' | tr -d '[:space:]')
+
+              # Check if version is a full-length (40 char) hex SHA
+              if ! echo "$version" | grep -qE '^[0-9a-fA-F]{40}$'; then
+                echo "::error file=${file}::Action '${ref}' is not pinned to a full-length commit SHA. See https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions"
+                EXIT_CODE=1
+              fi
+            done < <(grep -n '^\s*-\?\s*uses:' "$file" | grep -v '^\s*#')
+          done
+
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "All third-party GitHub Actions must be pinned to a full-length commit SHA."
+            echo "Example: uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4"
+            echo ""
+            echo "You can find the full SHA for a release tag by running:"
+            echo "  git ls-remote https://github.com/OWNER/REPO refs/tags/TAG"
+            exit 1
+          fi
+
+          echo "All third-party actions are pinned to full-length commit SHAs."
