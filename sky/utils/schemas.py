@@ -2586,6 +2586,9 @@ def get_config_schema():
             'install_conda': {
                 'type': 'boolean',
             },
+            'conda_auto_activate': {
+                'type': 'boolean',
+            },
         }
     }
 

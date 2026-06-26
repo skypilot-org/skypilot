@@ -1,0 +1,16 @@
+# Used by tests/smoke_tests/test_images.py::test_conda_auto_activate_disabled.
+# Launched with `provision.conda_auto_activate: false`. On the default image
+# SkyPilot otherwise auto-activates the conda `base` env, which makes it the
+# implicit target of `uv`/`pip`. The run asserts that `base` is not active
+# (CONDA_PREFIX unset) in the task environment.
+resources:
+  cpus: 2+
+
+run: |
+  echo "CONDA_PREFIX=[${CONDA_PREFIX}]"
+  echo "CONDA_DEFAULT_ENV=[${CONDA_DEFAULT_ENV}]"
+  if [ -n "${CONDA_PREFIX}" ]; then
+    echo "FAIL: conda base is auto-activated (CONDA_PREFIX=${CONDA_PREFIX})"
+    exit 1
+  fi
+  echo "PASS: conda base is not auto-activated"

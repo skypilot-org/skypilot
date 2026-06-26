@@ -12,6 +12,7 @@ from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.exceptions import ClusterNotUpError
 from sky.resources import Resources
+from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -647,3 +648,49 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+def test_conda_installation_deactivates_base_when_auto_activate_disabled():
+    """Rendered conda commands deactivate base when auto-activate is disabled.
+
+    When `provision.conda_auto_activate` resolves to false, the base env must
+    be both set to not auto-activate and deactivated within the chained
+    provisioning shell, otherwise it stays active and leaks into the Ray
+    runtime / user jobs (where `uv`/`pip` would resolve to it implicitly).
+    """
+
+    def render(conda_auto_activate: str,
+               is_custom_docker: str,
+               explicit: str = 'false') -> str:
+        return constants.CONDA_INSTALLATION_COMMANDS.replace(
+            '{conda_auto_activate}', conda_auto_activate).replace(
+                '{is_custom_docker}',
+                is_custom_docker).replace('{conda_auto_activate_explicit}',
+                                          explicit)
+
+    # Disabled on a non-docker image: set auto_activate_base false AND
+    # deactivate. The deactivate guard's conda_auto_activate clause (the only
+    # guard with a `||`) is tautological here, so the deactivate fires.
+    disabled = render('false', 'false')
+    assert 'conda config --set auto_activate_base false' in disabled
+    assert 'conda deactivate' in disabled
+    assert '|| [ "false" = "false" ]' in disabled
+
+    # Enabled on a non-docker image: base stays active. Neither deactivate
+    # guard clause is tautological, so the deactivate branch never fires.
+    enabled = render('true', 'false')
+    assert 'conda config --set auto_activate_base true' in enabled
+    assert '|| [ "false" = "false" ]' not in enabled
+
+    # Custom docker images keep deactivating base, as before (the first guard
+    # clause is tautological).
+    custom_docker = render('true', 'true')
+    assert 'if [ "true" = "true" ]' in custom_docker
+
+    # Explicitly set by the user: the preference is also applied outside the
+    # install block (guarded by `command -v conda`), so it takes effect on
+    # images that already ship conda on PATH, where the install block is
+    # skipped. When not explicitly set, that stanza never fires.
+    explicit_disabled = render('false', 'false', explicit='true')
+    assert 'if [ "true" = "true" ] && command -v conda' in explicit_disabled
+    assert 'if [ "false" = "true" ] && command -v conda' in enabled
