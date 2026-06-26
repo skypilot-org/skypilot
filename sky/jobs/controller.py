@@ -762,6 +762,11 @@ class JobController:
             # Get job status (skip on first iteration if forcing recovery)
             job_status = None
             transient_job_check_error_reason = None
+            # Per-node exit codes of the failed run, populated only when
+            # recovery is triggered by a job failure (not an infra-level
+            # failure like preemption). Reset each iteration so a stale
+            # value never leaks into the on_before_recovery hook.
+            exit_codes: Optional[List[int]] = None
 
             if not force_transit_to_recovering:
                 await asyncio.sleep(
@@ -1086,6 +1091,18 @@ class JobController:
                             'Failed to fetch the job status due to '
                             'unrecoverable error. Try to recover the job by'
                             ' restarting the job/cluster.')
+
+            # Before tearing down or relaunching, give the runtime a chance
+            # to capture the about-to-be-lost run's logs. Side-effecting
+            # and best-effort: a failure here must never block recovery.
+            if managed_job_runtime.is_registered():
+                try:
+                    await asyncio.to_thread(
+                        managed_job_runtime.on_before_recovery, handle,
+                        self._backend, self._job_id, task_id, exit_codes)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning('on_before_recovery hook failed (continuing '
+                                   f'recovery): {e}')
 
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
