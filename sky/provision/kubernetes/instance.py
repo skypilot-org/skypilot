@@ -280,12 +280,29 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
                                                                 pvc_name,
                                                                 reverse=False)
                 event_messages = []
+                has_binding_failure = False
+                saw_wait_for_consumer = False
                 for event in sorted_events:
+                    if event.reason == 'WaitForFirstConsumer':
+                        saw_wait_for_consumer = True
+                    if event.type == 'Warning' or event.reason == (
+                            'ProvisioningFailed'):
+                        has_binding_failure = True
                     if event.type == 'Warning' or event.reason in (
                             'ProvisioningFailed', 'WaitForFirstConsumer'):
                         msg = event.message or ''
                         if msg:
                             event_messages.append(f'{event.reason}: {msg}')
+                # A PVC backed by a WaitForFirstConsumer storage class stays
+                # Pending by design until its consumer pod is scheduled, after
+                # which the volume is provisioned and bound. That is normal
+                # late binding in progress, not a binding failure, so don't
+                # surface it as a PVC error (otherwise a healthy-but-slow
+                # provision on such a storage class is misreported as a binding
+                # issue). Genuine problems still emit Warning/ProvisioningFailed
+                # events and are reported below.
+                if saw_wait_for_consumer and not has_binding_failure:
+                    continue
                 pending_info = f'{pvc_name} (phase: Pending)'
                 if event_messages:
                     # Take the most recent event message
