@@ -1135,3 +1135,79 @@ class TestMultiTaskStatusFilterCharacterization:
             state.ManagedJobStatus.SUCCEEDED, state.ManagedJobStatus.RUNNING
         }
         assert total == 1
+
+
+class TestStatusExprSeam:
+    """The optional status_expr seam lets a caller surface a refined
+    user-facing status (e.g. a plugin override) in the status counts and the
+    status filter without changing the raw spot.status column."""
+
+    def _seed(self, engine):
+        import sqlalchemy
+        rows = [
+            # (job_id, status, status_override)
+            (1, 'STARTING', 'PENDING'),  # queued -> surfaces as PENDING
+            (2, 'STARTING', None),  # genuinely starting
+            (3, 'RUNNING', 'PENDING'),  # stale override -> must stay RUNNING
+            (4, 'PENDING', None),  # real pending
+            (5, 'SUCCEEDED', None),
+        ]
+        with engine.begin() as conn:
+            for jid, st, ov in rows:
+                conn.execute(state.spot_table.insert().values(
+                    spot_job_id=jid,
+                    task_id=0,
+                    job_name=f'j{jid}',
+                    status=st,
+                    status_override=ov))
+
+    @staticmethod
+    def _override_expr():
+        import sqlalchemy
+        spot = state.spot_table
+        starting = state.ManagedJobStatus.STARTING.value
+        return sqlalchemy.case((sqlalchemy.and_(
+            spot.c.status == starting,
+            spot.c.status_override.isnot(None)), spot.c.status_override),
+                               else_=spot.c.status)
+
+    def test_status_override_column_exists(self, _mock_managed_jobs_db_conn):
+        import sqlalchemy
+        cols = [
+            c['name'] for c in sqlalchemy.inspect(
+                _mock_managed_jobs_db_conn).get_columns('spot')
+        ]
+        assert 'status_override' in cols
+
+    def test_counts_collapse_with_status_expr(self, _mock_managed_jobs_db_conn):
+        self._seed(_mock_managed_jobs_db_conn)
+        raw = state.get_status_count_with_filters()
+        assert raw.get('STARTING') == 2 and raw.get('PENDING') == 1
+        collapsed = state.get_status_count_with_filters(
+            status_expr=self._override_expr())
+        # job1 STARTING -> PENDING; job3 stays RUNNING (stale override ignored)
+        assert collapsed.get('PENDING') == 2
+        assert collapsed.get('STARTING') == 1
+        assert collapsed.get('RUNNING') == 1
+
+    def test_status_filter_with_status_expr(self, _mock_managed_jobs_db_conn):
+        self._seed(_mock_managed_jobs_db_conn)
+        expr = self._override_expr()
+        pending, _ = state.get_managed_jobs_with_filters(statuses=['PENDING'],
+                                                         status_expr=expr,
+                                                         page=1,
+                                                         limit=50)
+        assert sorted(j['job_id'] for j in pending) == [1, 4]
+        starting, _ = state.get_managed_jobs_with_filters(statuses=['STARTING'],
+                                                          status_expr=expr,
+                                                          page=1,
+                                                          limit=50)
+        assert sorted(j['job_id'] for j in starting) == [2]
+
+    def test_status_expr_none_is_noop(self, _mock_managed_jobs_db_conn):
+        self._seed(_mock_managed_jobs_db_conn)
+        # Without the seam, behaviour is unchanged: raw statuses are used.
+        starting, _ = state.get_managed_jobs_with_filters(statuses=['STARTING'],
+                                                          page=1,
+                                                          limit=50)
+        assert sorted(j['job_id'] for j in starting) == [1, 2]

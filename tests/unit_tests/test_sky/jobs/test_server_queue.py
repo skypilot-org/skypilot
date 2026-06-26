@@ -692,7 +692,8 @@ class TestDumpManagedJobQueue:
                                                sort_by=None,
                                                sort_order=None,
                                                submitted_after=None,
-                                               submitted_before=None):
+                                               submitted_before=None,
+                                               status_expr=None):
             # Apply pre-filters aligned with utils.get_managed_job_queue
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,
@@ -717,7 +718,8 @@ class TestDumpManagedJobQueue:
                                                user_hashes,
                                                skip_finished,
                                                submitted_after=None,
-                                               submitted_before=None):
+                                               submitted_before=None,
+                                               status_expr=None):
             # Compute status counts after applying non-paginated filters
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,
