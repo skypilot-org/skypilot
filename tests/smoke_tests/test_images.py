@@ -525,6 +525,34 @@ def test_custom_default_conda_env(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+def test_conda_auto_activate_disabled(generic_cloud: str):
+    """`provision.conda_auto_activate: false` keeps conda base inactive.
+
+    On the default image SkyPilot otherwise auto-activates conda `base`, which
+    makes it the implicit target of `uv`/`pip`. With the option disabled, the
+    run/exec environment must not have `base` active (CONDA_PREFIX unset). The
+    task YAML self-asserts and exits non-zero if base is active.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = 'tests/test_yamls/test_conda_auto_activate_disabled.yaml'
+    test = smoke_tests_utils.Test(
+        'conda_auto_activate_disabled',
+        [
+            f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra {generic_cloud} {yaml_path}',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} {yaml_path}',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        config_dict={'provision': {
+            'conda_auto_activate': False
+        }},
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 def test_kubernetes_docker_image_and_ssh():
     """Test K8s docker image ID interchangeability with/without prefix."""
