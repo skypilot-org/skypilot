@@ -104,6 +104,14 @@ API_COOKIE_FILE_ENV_VAR = f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_COOKIE_FILE'
 # Keep in sync with websocket_proxy.py
 API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
 
+# Maximum number of requests a guaranteed executor worker process handles
+# before it is recycled (replaced by a fresh process), to bound the
+# worker's high-water-mark RSS. Maps to ProcessPoolExecutor's
+# `max_tasks_per_child`, which requires Python 3.11+; ignored on older
+# interpreters. Unset (default) keeps workers for the lifetime of the pool.
+WORKER_MAX_TASKS_PER_CHILD_ENV_VAR = (
+    f'{constants.SKYPILOT_ENV_VAR_PREFIX}API_SERVER_WORKER_MAX_TASKS_PER_CHILD')
+
 # The path to the dashboard build output
 DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
                              'out')

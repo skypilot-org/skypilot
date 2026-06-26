@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import functools
 import os
+import sys
 from typing import Literal, Optional
 
 from sky import sky_logging
@@ -74,6 +75,40 @@ class WorkerConfig:
     garanteed_parallelism: int
     burstable_parallelism: int
     num_db_connections_per_worker: int
+    # Recycle a guaranteed worker after it has handled this many requests, to
+    # bound its high-water-mark RSS. None keeps workers for the pool lifetime.
+    max_tasks_per_child: Optional[int] = None
+
+
+def _get_worker_max_tasks_per_child() -> Optional[int]:
+    """Reads the per-worker task limit from the environment.
+
+    Returns None (no recycling) when unset/invalid, or when the interpreter is
+    older than 3.11 (``ProcessPoolExecutor.max_tasks_per_child`` was added in
+    3.11), logging a warning in the latter case so the misconfiguration is
+    visible.
+    """
+    raw = os.environ.get(server_constants.WORKER_MAX_TASKS_PER_CHILD_ENV_VAR)
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning('Ignoring %s=%r: expected a positive integer.',
+                       server_constants.WORKER_MAX_TASKS_PER_CHILD_ENV_VAR, raw)
+        return None
+    if value < 1:
+        logger.warning('Ignoring %s=%r: expected a positive integer.',
+                       server_constants.WORKER_MAX_TASKS_PER_CHILD_ENV_VAR, raw)
+        return None
+    if sys.version_info < (3, 11):
+        logger.warning(
+            '%s is set but worker recycling requires Python 3.11+; '
+            'ignoring it on Python %d.%d.',
+            server_constants.WORKER_MAX_TASKS_PER_CHILD_ENV_VAR,
+            sys.version_info[0], sys.version_info[1])
+        return None
+    return value
 
 
 @dataclasses.dataclass
@@ -134,6 +169,7 @@ def compute_server_config(
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
     queue_backend = QueueBackend.MULTIPROCESSING
+    max_tasks_per_child = _get_worker_max_tasks_per_child()
     burstable_parallel_for_long = 0
     burstable_parallel_for_short = 0
     # if num_db_connections_per_worker is 0, server will use NullPool
@@ -202,11 +238,13 @@ def compute_server_config(
         long_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_long,
             burstable_parallelism=burstable_parallel_for_long,
-            num_db_connections_per_worker=num_db_connections_per_worker),
+            num_db_connections_per_worker=num_db_connections_per_worker,
+            max_tasks_per_child=max_tasks_per_child),
         short_worker_config=WorkerConfig(
             garanteed_parallelism=max_parallel_for_short,
             burstable_parallelism=burstable_parallel_for_short,
-            num_db_connections_per_worker=num_db_connections_per_worker),
+            num_db_connections_per_worker=num_db_connections_per_worker,
+            max_tasks_per_child=max_tasks_per_child),
         num_db_connections_per_worker=num_db_connections_per_worker,
     )
 
