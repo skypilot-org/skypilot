@@ -458,72 +458,76 @@ export function Clusters() {
           />
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <div className="flex items-center gap-2">
-            <label
-              className="flex items-center cursor-pointer"
-              title="Toggle cluster history"
-            >
-              <input
-                type="checkbox"
-                checked={showHistory}
-                onChange={(e) => {
-                  const newValue = e.target.checked;
-                  setShowHistory(newValue);
-                  updateShowHistoryURL(newValue);
-                }}
-                className="sr-only"
-              />
-              <div
-                className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
-                    showHistory ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </div>
-              <span className="ml-2 text-sm text-gray-700">Show history</span>
-            </label>
-            {showHistory && (
-              <Select
-                value={historyDays.toString()}
-                onValueChange={(value) => {
-                  const newDays = parseInt(value);
+          {/* Single History dropdown — "Off" means no history, any time-range
+              picks the time-window and enables history. Fixed width, so the
+              right-aligned cluster doesn't shift when the value changes. */}
+          <span className="text-sm text-gray-700">History:</span>
+          <Select
+            value={showHistory ? historyDays.toString() : 'off'}
+            onValueChange={(value) => {
+              // updateShowHistoryURL and updateHistoryDaysURL each snapshot
+              // router.query and call router.replace. Calling them back-to-
+              // back in the same tick races — the second call snapshots the
+              // pre-first-call query and overwrites it. Compose one query
+              // object and do a single router.replace here.
+              const query = { ...router.query };
+              if (value === 'off') {
+                if (!showHistory) return;
+                setShowHistory(false);
+                query.history = 'false';
+              } else {
+                const newDays = parseInt(value);
+                if (showHistory && newDays === historyDays) return;
+                if (!showHistory) {
+                  setShowHistory(true);
+                  query.history = 'true';
+                }
+                if (newDays !== historyDays) {
                   setHistoryDays(newDays);
-                  updateHistoryDaysURL(newDays);
-                }}
-              >
-                <SelectTrigger className="w-24 h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 day</SelectItem>
-                  <SelectItem value="5">5 days</SelectItem>
-                  <SelectItem value="10">10 days</SelectItem>
-                  <SelectItem value="30">30 days</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          {loading && (
-            <div className="flex items-center">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
-            </div>
-          )}
-          {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
-          )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  query.historyDays = newDays.toString();
+                }
+              }
+              router.replace({ pathname: router.pathname, query }, undefined, {
+                shallow: true,
+              });
+            }}
           >
-            <RotateCwIcon className="h-4 w-4 mr-1.5" />
-            {!isMobile && <span>Refresh</span>}
-          </button>
+            <SelectTrigger className="w-36 h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">Off</SelectItem>
+              <SelectItem value="1">Last 1 day</SelectItem>
+              <SelectItem value="5">Last 5 days</SelectItem>
+              <SelectItem value="10">Last 10 days</SelectItem>
+              <SelectItem value="30">Last 30 days</SelectItem>
+            </SelectContent>
+          </Select>
+          {/* Refresh button with "Loading..." / "Updated X ago" stacked
+              directly underneath (right-aligned). Loading and the timestamp
+              share the same slot so the column doesn't grow/shrink between
+              refreshes — otherwise the ml-auto cluster expands left and
+              yanks the History dropdown sideways. min-w-[96px] absorbs the
+              small text-width swings ("5s ago" vs "10m ago") for the same
+              reason. ml-6 gives breathing room from the History select. */}
+          <div className="flex flex-col items-end leading-tight ml-6 min-w-[96px]">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            >
+              <RotateCwIcon className="h-4 w-4 mr-1.5" />
+              {!isMobile && <span>Refresh</span>}
+            </button>
+            {loading ? (
+              <span className="flex items-center text-xs text-gray-500">
+                <CircularProgress size={10} className="mr-1" />
+                Loading...
+              </span>
+            ) : lastFetchedTime ? (
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            ) : null}
+          </div>
         </div>
       </div>
 
