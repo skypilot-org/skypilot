@@ -45,15 +45,15 @@ For researchers and AI agents
 
 ▸ **Fast parallel jobs** — Launch thousands of parallel jobs in seconds, for RL rollouts, parallel evals, and batch inference. Tight integration with SkyPilot job groups.
 
-▸ **SkyPilot Sandboxes** — Fast, isolated compute environments on your own Kubernetes clusters for AI coding agents, RL training rollouts, and parallel evals. Pre-warmed pools launch sandboxes in under a second with volumes and secrets injected automatically. Ships with a built-in image for Claude Code. :ref:`Learn more <skypilot-sandboxes>`.
+▸ **SkyPilot Sandboxes** — Fast, isolated compute environments on your own Kubernetes clusters for AI coding agents, RL training rollouts, and parallel evals. Pre-warmed pools launch sandboxes in under a second with volumes and secrets injected automatically. Coding agents provision a sandbox through a tool call and run their generated code in it. :ref:`Learn more <skypilot-sandboxes>`.
 
 .. raw:: html
 
    <figure class="align-center" style="width: 90%; margin: 0 auto 20px auto;">
      <video id="sandbox-video" style="width: 100%; height: auto;" autoplay muted playsinline loop>
-        <source src="_static/sandbox-claude.mp4" type="video/mp4" />
+        <source src="_static/sandbox-chat.mp4" type="video/mp4" />
      </video>
-     <figcaption><p>Sandboxes: launching a Claude Code environment on your own cluster with secrets injected from the SkyPilot Secrets Manager.</p></figcaption>
+     <figcaption><p>Sandboxes: a coding agent provisions a SkyPilot sandbox through a tool call and runs its code there, on your own cluster.</p></figcaption>
    </figure>
 
 For infra teams

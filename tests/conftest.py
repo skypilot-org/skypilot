@@ -319,6 +319,10 @@ def pytest_configure(config):
         'markers', 'no_auto_retry: mark test to disable automatic retries '
         'in Buildkite CI (manual retries still allowed)')
     config.addinivalue_line('markers', 'batch: mark test as sky batch specific')
+    config.addinivalue_line(
+        'markers', 'exclusive: mark test that mutates shared server state and '
+        'must run serially; selected only by the pipeline generator\'s '
+        '--exclusive flag and excluded from normal parallel runs')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(

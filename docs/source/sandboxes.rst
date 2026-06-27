@@ -12,8 +12,9 @@ run commands in, and tear down, without provisioning a full cluster.
 Sandboxes are built for **AI coding agents**, **RL training rollouts**, and
 **parallel evals**: workloads that need many short-lived, isolated environments
 spun up and down quickly. Pre-warmed pools launch sandboxes in **under a
-second**, with volumes and secrets injected automatically. A built-in image for
-`Claude Code <https://www.anthropic.com/claude-code>`_ ships out of the box.
+second**, with volumes and secrets injected automatically. Coding agents like
+`Claude <https://www.anthropic.com/claude>`_ provision a sandbox through a tool
+call and run their generated code in it, isolated from everything else.
 
 .. tip::
 
@@ -24,9 +25,9 @@ second**, with volumes and secrets injected automatically. A built-in image for
 
    <figure class="align-center" style="width: 90%; margin: 0 auto 20px auto;">
      <video id="sandbox-video" style="width: 100%; height: auto;" autoplay muted playsinline loop>
-        <source src="_static/sandbox-claude.mp4" type="video/mp4" />
+        <source src="_static/sandbox-chat.mp4" type="video/mp4" />
      </video>
-     <figcaption><p>Sandboxes: launching a Claude Code environment on your own cluster with secrets injected from the SkyPilot Secrets Manager.</p></figcaption>
+     <figcaption><p>Sandboxes: a coding agent provisions a SkyPilot sandbox through a tool call and runs its code there, on your own cluster.</p></figcaption>
    </figure>
 
 Why sandboxes with SkyPilot
@@ -190,29 +191,64 @@ dashboard's **Sandboxes** page to manage pools and running sandboxes in the UI.
 Example: Running AI coding agents
 ---------------------------------
 
-The built-in ``claude`` pool ships with `Claude Code
-<https://www.anthropic.com/claude-code>`_ installed. Give an agent its own
-isolated sandbox, inject its token from the secrets manager, and drive it
-non-interactively:
+The common pattern is **not** to run a coding agent *inside* a sandbox. Instead,
+the agent runs wherever your application does and is given a *tool* to provision
+a sandbox on demand and run its generated code there, isolated from everything
+else. Below, `Claude <https://www.anthropic.com/claude>`_ drives the
+``sky.sandbox`` SDK through two tools: one to start a sandbox, one to run a
+command in it.
 
 .. code-block:: python
 
+   import anthropic
    import sky.sandbox
 
-   with sky.sandbox.create(
-       name='claude',
-       pool='claude',
-       secrets=['CLAUDE_CODE_OAUTH_TOKEN'],
-   ) as sb:
-       # Shell features like pipes need an explicit shell.
-       result = sb.exec(
-           'sh', '-c',
-           "echo 'Create a hello world index.html' | "
-           'claude -p --dangerously-skip-permissions')
-       print(result['stdout'])
+   # Claude runs outside the sandbox and calls these tools to create one on
+   # demand and run code in it. A chat that never runs code never makes a pod.
+   sb = None
 
-Each agent runs in its own pod, so many agents can work in parallel without
-sharing a filesystem or stepping on each other.
+   tools = [
+       {'name': 'start_skypilot_sandbox',
+        'description': 'Provision a fresh sandbox. Call the first time you '
+                       'need to run code.',
+        'input_schema': {'type': 'object', 'properties': {}}},
+       {'name': 'run_shell',
+        'description': 'Run a shell command in the sandbox. State persists '
+                       'across calls.',
+        'input_schema': {'type': 'object',
+                         'properties': {'command': {'type': 'string'}},
+                         'required': ['command']}},
+   ]
+
+   def dispatch(name, args):
+       global sb
+       if name == 'start_skypilot_sandbox':
+           sb = sky.sandbox.create(name='chat')  # claims a warm pod from the pool
+           return 'Sandbox ready.'
+       result = sb.exec('sh', '-c', args['command'])  # run_shell
+       return result['stdout'] or result['stderr']
+
+   client = anthropic.Anthropic()
+   messages = [{'role': 'user',
+                'content': 'Compute the 100th Fibonacci number with Python.'}]
+   while True:
+       resp = client.messages.create(model='claude-opus-4-8', max_tokens=4096,
+                                      tools=tools, messages=messages)
+       messages.append({'role': 'assistant', 'content': resp.content})
+       tool_uses = [b for b in resp.content if b.type == 'tool_use']
+       if not tool_uses:
+           break
+       messages.append({'role': 'user', 'content': [
+           {'type': 'tool_result', 'tool_use_id': tu.id,
+            'content': dispatch(tu.name, tu.input)} for tu in tool_uses]})
+
+   if sb is not None:
+       sb.terminate()
+
+Each agent gets its own pod, so many can work in parallel without sharing a
+filesystem or stepping on each other. Inject per-agent credentials at
+``create`` time with ``secrets=[...]`` so tokens never appear in the commands
+the agent runs.
 
 Advanced: Warm pools for fast provisioning
 ------------------------------------------
