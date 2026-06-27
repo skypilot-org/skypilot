@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var script = document.createElement('script');
     script.src = 'https://cdn.cr-relay.com/v1/site/1537a3d1-43b9-4d6c-8efa-8d60f2326b23/signals.js';
     script.async = true;
-    window.signals = Object.assign(
+    var signals = window.signals = Object.assign(
         [],
         { _opts: { apiHost: 'https://api.cr-relay.com' } },
         ['page', 'identify', 'form'].reduce(function (acc, method){
