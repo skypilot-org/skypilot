@@ -30,6 +30,7 @@ class VolumeType(enum.Enum):
     PVC = 'k8s-pvc'
     HOSTPATH = 'k8s-hostpath'
     RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
+    MODAL_VOLUME = 'modal-volume'
 
     @classmethod
     def supported_types(cls) -> list:

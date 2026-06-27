@@ -1,0 +1,6 @@
+resources:
+  cloud: modal
+  accelerators: H100:1
+
+run: |
+  nvidia-smi

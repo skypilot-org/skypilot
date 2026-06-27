@@ -1,0 +1,105 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# Modal MVP supports only a single Sandbox, used as the head node.
+max_workers: 0
+upscaling_speed: 0
+idle_timeout_minutes: 60
+
+provider:
+  type: external
+  module: sky.provision.modal
+  region: "{{region}}"
+  disable_launch_config_check: true
+
+auth:
+  ssh_user: root
+  ssh_private_key: {{ssh_private_key}}
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      InstanceType: {{instance_type}}
+      PublicKey: |-
+        skypilot:ssh_public_key_content
+      ModalRegion: {% if modal_region is none %}null{% else %}"{{modal_region}}"{% endif %}
+      Gpu: {% if modal_gpu is none %}null{% else %}"{{modal_gpu}}"{% endif %}
+      Cpu: {{modal_cpu}}
+      Memory: {{modal_memory}}
+      Timeout: {{modal_timeout}}
+      IdleTimeout: {% if modal_idle_timeout is none %}null{% else %}{{modal_idle_timeout}}{% endif %}
+      DockerImage: {% if modal_docker_image is none %}null{% else %}"{{modal_docker_image}}"{% endif %}
+      ModalVolumes:
+{%- if modal_volume_mounts %}
+{%- for volume_mount in modal_volume_mounts %}
+        - Path: "{{volume_mount.Path}}"
+          VolumeNameOnCloud: "{{volume_mount.VolumeNameOnCloud}}"
+          EnvironmentName: {% if volume_mount.EnvironmentName is none %}null{% else %}"{{volume_mount.EnvironmentName}}"{% endif %}
+          SubPath: {% if volume_mount.SubPath is none %}null{% else %}"{{volume_mount.SubPath}}"{% endif %}
+{%- endfor %}
+{%- else %}
+        []
+{%- endif %}
+      CloudBucketMounts:
+{%- if modal_cloud_bucket_mounts %}
+{%- for bucket_mount in modal_cloud_bucket_mounts %}
+        - Path: "{{bucket_mount.Path}}"
+          StoreType: "{{bucket_mount.StoreType}}"
+          BucketName: "{{bucket_mount.BucketName}}"
+          BucketEndpointUrl: {% if bucket_mount.BucketEndpointUrl is none %}null{% else %}"{{bucket_mount.BucketEndpointUrl}}"{% endif %}
+          KeyPrefix: {% if bucket_mount.KeyPrefix is none %}null{% else %}"{{bucket_mount.KeyPrefix}}"{% endif %}
+          Region: {% if bucket_mount.Region is none %}null{% else %}"{{bucket_mount.Region}}"{% endif %}
+          ReadOnly: {{bucket_mount.ReadOnly}}
+          ForcePathStyle: {{bucket_mount.ForcePathStyle}}
+{%- endfor %}
+{%- else %}
+        []
+{%- endif %}
+
+head_node_type: ray_head_default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+}
+
+rsync_exclude: []
+
+initialization_commands: []
+
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
+setup_commands:
+  - {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    sudo systemctl stop unattended-upgrades || true;
+    sudo systemctl disable unattended-upgrades || true;
+    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
+    sudo pkill -9 apt-get;
+    sudo pkill -9 dpkg;
+    sudo dpkg --configure -a;
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
+    which patch > /dev/null || sudo apt install -y patch;
+    {{ conda_installation_commands }}
+    {{ uv_installation_commands }}
+    {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
+    touch ~/.sudo_as_admin_successful;
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
+    {{ ssh_max_sessions_config }}
+
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.

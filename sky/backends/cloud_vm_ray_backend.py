@@ -345,6 +345,7 @@ def _get_cluster_config_template(cloud):
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
+        clouds.Modal: 'modal-ray.yml.j2',
         clouds.Verda: 'verda-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -1150,6 +1151,7 @@ class RetryingVmProvisioner(object):
                         dryrun=dryrun,
                         keep_launch_fields_in_existing_config=cluster_exists,
                         volume_mounts=volume_mounts,
+                        storage_mounts=task.storage_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
                         extra_template_variables=extra_vars,
                     )
@@ -6123,6 +6125,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
+                        elif isinstance(to_provision.cloud, clouds.Modal):
+                            # See sky/templates/modal-ray.yml.j2.
+                            volume_mounts_config = node_config.get(
+                                'ModalVolumes', [])
+                            for vol_mount in volume_mounts_config:
+                                vol_name = vol_mount.get('VolumeNameOnCloud')
+                                if vol_name:
+                                    existing_volume_names.add(vol_name)
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -6391,6 +6401,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # MOUNT_CACHED mode.
         if not storage_mounts:
             return
+
+        if isinstance(handle.launched_resources.cloud, clouds.Modal):
+            return
+
         start = time.time()
         runners = handle.get_command_runners()
         num_threads = subprocess_utils.get_parallel_threads(
