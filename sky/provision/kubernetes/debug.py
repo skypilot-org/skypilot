@@ -540,28 +540,26 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
             _request_timeout=kubernetes.API_TIMEOUT).items
         if pvcs:
             os.makedirs(out_dir, exist_ok=True)
-            _write_yaml(
-                os.path.join(out_dir, 'prometheus-pvcs.yaml'), [
-                    _with_type_meta(to_dict(v), 'v1', 'PersistentVolumeClaim')
-                    for v in pvcs
-                ])
+            _write_yaml(os.path.join(out_dir, 'prometheus-pvcs.yaml'), [
+                _with_type_meta(to_dict(v), 'v1', 'PersistentVolumeClaim')
+                for v in pvcs
+            ])
     except Exception as e:  # pylint: disable=broad-except
         _record_error(errors, 'gpu_metrics/prometheus-pvcs', e)
 
     try:
         dcgm_ds = [
-            d for d in kubernetes.apps_api(context).
-            list_daemon_set_for_all_namespaces(
-                _request_timeout=kubernetes.API_TIMEOUT).items
+            d for d in kubernetes.apps_api(
+                context).list_daemon_set_for_all_namespaces(
+                    _request_timeout=kubernetes.API_TIMEOUT).items
             if _DCGM_EXPORTER_NAME_SUBSTR in d.metadata.name
         ]
         if dcgm_ds:
             os.makedirs(out_dir, exist_ok=True)
-            _write_yaml(
-                os.path.join(out_dir, 'dcgm-exporter-daemonset.yaml'), [
-                    _with_type_meta(to_dict(d), 'apps/v1', 'DaemonSet')
-                    for d in dcgm_ds
-                ])
+            _write_yaml(os.path.join(out_dir, 'dcgm-exporter-daemonset.yaml'), [
+                _with_type_meta(to_dict(d), 'apps/v1', 'DaemonSet')
+                for d in dcgm_ds
+            ])
     except Exception as e:  # pylint: disable=broad-except
         _record_error(errors, 'gpu_metrics/dcgm-exporter-daemonset', e)
 

@@ -276,9 +276,9 @@ def test_context_gpu_metrics_config_and_topology_dumped(tmp_path, k8s_apis):
         'pvc')
     k8s_apis.apps.list_daemon_set_for_all_namespaces.return_value = (
         SimpleNamespace(items=[
-            SimpleNamespace(
-                _marker='ds',
-                metadata=SimpleNamespace(name='nvidia-dcgm-exporter')),
+            SimpleNamespace(_marker='ds',
+                            metadata=SimpleNamespace(
+                                name='nvidia-dcgm-exporter')),
             SimpleNamespace(_marker='unrelated',
                             metadata=SimpleNamespace(name='some-other-ds')),
         ]))
