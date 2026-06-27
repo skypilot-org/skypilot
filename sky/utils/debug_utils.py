@@ -22,11 +22,13 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import debug as kubernetes_debug
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server.requests import request_names
@@ -1045,6 +1047,12 @@ def _dump_kube_contexts_info(dump_dir: str,
     runs there. ``None`` in the list means in-cluster auth (see
     _sanitize_context_name).
 
+    We additionally always include the API server's own in-cluster context
+    (when running in-cluster), even if ``existing_allowed_contexts()`` drops it
+    -- which it does when ``allowed_contexts`` is an explicit list that omits
+    it, or ``SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false`` hides
+    it as a compute target. Its GPU-manager / Kueue config is worth dumping.
+
     Robustness (tenants can have defunct contexts that time out): every call is
     5s-bounded, the per-context fetch fast-fails on the first connection error,
     and contexts are fetched in parallel -- so N dead contexts cost ~5s, not
@@ -1062,6 +1070,13 @@ def _dump_kube_contexts_info(dump_dir: str,
                 'traceback': _full_traceback(),
             })
         return
+
+    # Always dump the API server's own in-cluster context, even when it's been
+    # excluded as a compute target (explicit allowed_contexts list, or
+    # SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false). The dedupe
+    # below drops it if existing_allowed_contexts() already surfaced it.
+    if kubernetes_utils.is_incluster_config_available():
+        contexts = list(contexts) + [kubernetes.in_cluster_context_name()]
 
     # Dedupe defensively while preserving order (None = in-cluster is allowed).
     unique_contexts = list(dict.fromkeys(contexts))
