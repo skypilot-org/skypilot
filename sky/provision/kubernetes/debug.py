@@ -57,11 +57,14 @@ _KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
 # per-SkyPilot-cluster, so they're dumped whenever present. The metrics
 # Prometheus is installed as helm release `skypilot-prometheus` in the
 # `skypilot` namespace, so its server pods are named `skypilot-prometheus-server
-# -*` (the prefix excludes the chart's kube-state-metrics pod). DCGM exporter's
-# namespace varies by installer, so it's matched by name substring. Both are
-# found in a single cluster-wide pod list (see _dump_gpu_metrics_pods).
+# -*`; the chart's kube-state-metrics pod (the source of `kube_pod_labels`, the
+# other half of the DCGM<->pod join) carries `kube-state-metrics` in its name.
+# DCGM exporter's namespace varies by installer, so it's matched by name
+# substring. See _dump_gpu_metrics_pods for the full object set (pods, the
+# prometheus config, the PVC, and the DCGM DaemonSet).
 _GPU_METRICS_NAMESPACE = 'skypilot'
 _PROMETHEUS_SERVER_NAME_PREFIX = 'skypilot-prometheus-server'
+_KUBE_STATE_METRICS_NAME_SUBSTR = 'kube-state-metrics'
 _DCGM_EXPORTER_NAME_SUBSTR = 'dcgm-exporter'
 
 # Keys in a serialized Secret whose values must never leave the cluster.
@@ -454,8 +457,16 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
     Into ``<output_dir>/gpu_metrics/``:
       - prometheus-server: the metrics Prometheus server pod (helm release
         ``skypilot-prometheus`` in the ``skypilot`` namespace).
+      - kube-state-metrics: the chart's KSM pod -- the source of
+        ``kube_pod_labels``, the other half of the DCGM<->pod join.
       - dcgm-exporter: the DCGM exporter pods, matched by name substring across
         all namespaces (the namespace varies by installer).
+      - prometheus-config: the rendered ``prometheus.yml`` ConfigMap -- scrape
+        intervals/timeouts, the KSM scrape job, and the federation match.
+      - prometheus-pvcs: the Prometheus PVC(s) -- storage/disk-bound failures.
+      - dcgm-exporter-daemonset: the DCGM exporter DaemonSet -- its
+        desired-vs-ready and tolerations show why some GPU nodes report no
+        metrics.
 
     These are cluster-wide infra (not per-SkyPilot-cluster), so they're dumped
     whenever present -- an absent component just yields no file. Both are found
@@ -486,17 +497,74 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
         if p.metadata.namespace == _GPU_METRICS_NAMESPACE and
         p.metadata.name.startswith(_PROMETHEUS_SERVER_NAME_PREFIX)
     ]
+    ksm_pods = [
+        p for p in all_pods
+        if p.metadata.namespace == _GPU_METRICS_NAMESPACE and
+        _KUBE_STATE_METRICS_NAME_SUBSTR in p.metadata.name
+    ]
     dcgm_pods = [
         p for p in all_pods if _DCGM_EXPORTER_NAME_SUBSTR in p.metadata.name
     ]
     out_dir = os.path.join(output_dir, 'gpu_metrics')
     for filename, matched in [('prometheus-server.yaml', prom_pods),
+                              ('kube-state-metrics.yaml', ksm_pods),
                               ('dcgm-exporter.yaml', dcgm_pods)]:
         if matched:
             os.makedirs(out_dir, exist_ok=True)
             _write_yaml(
                 os.path.join(out_dir, filename),
                 [_with_type_meta(to_dict(p), 'v1', 'Pod') for p in matched])
+
+    # The config + topology behind the pods. The prometheus.yml ConfigMap and
+    # the Prometheus PVC(s) are namespace-scoped (minimal RBAC); the
+    # DCGM-exporter DaemonSet is cluster-wide. All best-effort -- absent or
+    # forbidden just yields no file (a missing ConfigMap 404s -> treated as
+    # absent).
+    try:
+        cm = core.read_namespaced_config_map(
+            name=_PROMETHEUS_SERVER_NAME_PREFIX,
+            namespace=_GPU_METRICS_NAMESPACE,
+            _request_timeout=kubernetes.API_TIMEOUT)
+        os.makedirs(out_dir, exist_ok=True)
+        _write_yaml(os.path.join(out_dir, 'prometheus-config.yaml'),
+                    _with_type_meta(to_dict(cm), 'v1', 'ConfigMap'))
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            _record_error(errors, 'gpu_metrics/prometheus-config', e)
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'gpu_metrics/prometheus-config', e)
+
+    try:
+        pvcs = core.list_namespaced_persistent_volume_claim(
+            namespace=_GPU_METRICS_NAMESPACE,
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        if pvcs:
+            os.makedirs(out_dir, exist_ok=True)
+            _write_yaml(
+                os.path.join(out_dir, 'prometheus-pvcs.yaml'), [
+                    _with_type_meta(to_dict(v), 'v1', 'PersistentVolumeClaim')
+                    for v in pvcs
+                ])
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'gpu_metrics/prometheus-pvcs', e)
+
+    try:
+        dcgm_ds = [
+            d for d in kubernetes.apps_api(context).
+            list_daemon_set_for_all_namespaces(
+                _request_timeout=kubernetes.API_TIMEOUT).items
+            if _DCGM_EXPORTER_NAME_SUBSTR in d.metadata.name
+        ]
+        if dcgm_ds:
+            os.makedirs(out_dir, exist_ok=True)
+            _write_yaml(
+                os.path.join(out_dir, 'dcgm-exporter-daemonset.yaml'), [
+                    _with_type_meta(to_dict(d), 'apps/v1', 'DaemonSet')
+                    for d in dcgm_ds
+                ])
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'gpu_metrics/dcgm-exporter-daemonset', e)
+
     return True
 
 

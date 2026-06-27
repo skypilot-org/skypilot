@@ -74,9 +74,11 @@ def k8s_apis(monkeypatch):
     core.list_namespaced_persistent_volume_claim.return_value = _list()
     core.list_namespaced_config_map.return_value = _list()
     core.list_namespaced_secret.return_value = _list()
+    core.read_namespaced_config_map.side_effect = _FakeApiException(404)
 
     apps = mock.MagicMock()
     apps.list_namespaced_deployment.return_value = _list()
+    apps.list_daemon_set_for_all_namespaces.return_value = _list()
 
     networking = mock.MagicMock()
     networking.list_namespaced_ingress.return_value = _list()
@@ -236,9 +238,9 @@ def test_per_cluster_makes_no_cluster_scoped_calls(tmp_path, k8s_apis):
 
 
 def test_context_gpu_metrics_pods_dumped(tmp_path, k8s_apis):
-    """The metrics Prometheus server (skypilot ns) and DCGM exporter (any ns, by
-    name substring) are captured under gpu_metrics/ from one cluster-wide list;
-    the chart's kube-state-metrics and unrelated pods are excluded."""
+    """The metrics Prometheus server, the chart's kube-state-metrics, and the
+    DCGM exporter (any ns, by name substring) are captured under gpu_metrics/
+    from one cluster-wide list; unrelated pods are excluded."""
     k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
         ('skypilot', 'skypilot-prometheus-server-abc123'),
         ('skypilot', 'skypilot-prometheus-kube-state-metrics-xyz'),
@@ -252,12 +254,46 @@ def test_context_gpu_metrics_pods_dumped(tmp_path, k8s_apis):
     gdir = tmp_path / 'gpu_metrics'
     prom = yaml_utils.read_yaml(str(gdir / 'prometheus-server.yaml'))
     assert (prom['apiVersion'], prom['kind']) == ('v1', 'Pod')
+    ksm = yaml_utils.read_yaml(str(gdir / 'kube-state-metrics.yaml'))
+    assert (ksm['apiVersion'], ksm['kind']) == ('v1', 'Pod')
     dcgm = yaml_utils.read_yaml(str(gdir / 'dcgm-exporter.yaml'))
     assert (dcgm['apiVersion'], dcgm['kind']) == ('v1', 'Pod')
-    # Only the two matched kinds are written (KSM + unrelated pods excluded).
+    # The three matched pod kinds are written; the unrelated pod is excluded,
+    # and the config/PVC/DaemonSet are absent (404 / empty) in this fixture.
     assert sorted(p.name for p in gdir.iterdir()) == [
-        'dcgm-exporter.yaml', 'prometheus-server.yaml'
+        'dcgm-exporter.yaml', 'kube-state-metrics.yaml',
+        'prometheus-server.yaml'
     ]
+
+
+def test_context_gpu_metrics_config_and_topology_dumped(tmp_path, k8s_apis):
+    """The prometheus ConfigMap (rendered prometheus.yml), the Prometheus
+    PVC(s), and the DCGM-exporter DaemonSet are captured under gpu_metrics/
+    alongside the pods -- the config + topology behind the metrics pipeline."""
+    k8s_apis.core.read_namespaced_config_map.side_effect = None
+    k8s_apis.core.read_namespaced_config_map.return_value = _obj('cm')
+    k8s_apis.core.list_namespaced_persistent_volume_claim.return_value = _list(
+        'pvc')
+    k8s_apis.apps.list_daemon_set_for_all_namespaces.return_value = (
+        SimpleNamespace(items=[
+            SimpleNamespace(
+                _marker='ds',
+                metadata=SimpleNamespace(name='nvidia-dcgm-exporter')),
+            SimpleNamespace(_marker='unrelated',
+                            metadata=SimpleNamespace(name='some-other-ds')),
+        ]))
+
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    gdir = tmp_path / 'gpu_metrics'
+    cm = yaml_utils.read_yaml(str(gdir / 'prometheus-config.yaml'))
+    assert (cm['apiVersion'], cm['kind']) == ('v1', 'ConfigMap')
+    pvc = yaml_utils.read_yaml(str(gdir / 'prometheus-pvcs.yaml'))
+    assert (pvc['apiVersion'], pvc['kind']) == ('v1', 'PersistentVolumeClaim')
+    ds = yaml_utils.read_yaml(str(gdir / 'dcgm-exporter-daemonset.yaml'))
+    assert (ds['apiVersion'], ds['kind']) == ('apps/v1', 'DaemonSet')
+    assert ds['marker'] == 'ds'  # only the dcgm-exporter DS, not some-other-ds
 
 
 def test_context_gpu_metrics_absent_produces_no_dir(tmp_path, k8s_apis):
