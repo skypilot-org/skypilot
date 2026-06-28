@@ -4,6 +4,7 @@
 import asyncio
 import datetime
 import logging
+import os
 import threading
 import time
 from typing import Any, Optional
@@ -32,10 +33,52 @@ _session_creation_lock = threading.RLock()
 _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 
 
+def is_non_cli_credential() -> bool:
+    """Check if Azure env vars indicate non-CLI auth (SP, cert, etc.).
+
+    AZURE_CLIENT_ID is required by all non-CLI credential types
+    (client secret, certificate, workload identity). The actual credential
+    type selection is handled by DefaultAzureCredential.
+    """
+    return bool(os.environ.get('AZURE_CLIENT_ID'))
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def get_credential():
+    """Returns an Azure credential object.
+
+    Uses a hybrid approach:
+    - If AZURE_CLIENT_ID is set, use DefaultAzureCredential (handles SP
+      secret/cert, workload identity, managed identity). This takes priority
+      to be consistent with AWS/GCP, where service account credentials
+      (via env vars) take priority over personal CLI credentials.
+    - Otherwise, use AzureCliCredential with process_timeout=30 (fast path,
+      preserves workaround for Azure CLI bug
+      https://github.com/Azure/azure-cli/issues/20404).
+    """
+    from azure import identity
+
+    # Service principal / managed identity via env vars takes priority,
+    # consistent with AWS (env vars > ~/.aws/credentials) and
+    # GCP (GOOGLE_APPLICATION_CREDENTIALS > gcloud auth login).
+    if is_non_cli_credential():
+        return identity.DefaultAzureCredential(
+            exclude_cli_credential=True,
+            exclude_powershell_credential=True,
+        )
+    # Fast path: preserve existing CLI behavior with timeout workaround
+    return identity.AzureCliCredential(process_timeout=30)
+
+
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 @annotations.lru_cache(scope='global', maxsize=1)
 def get_subscription_id() -> str:
     """Get the default subscription id."""
+    # Check env var first (used by SP and other non-CLI auth)
+    env_sub_id = os.environ.get('AZURE_SUBSCRIPTION_ID')
+    if env_sub_id:
+        return env_sub_id
+
     from azure.common import credentials
     retry = 0
     backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
@@ -58,6 +101,8 @@ def get_subscription_id() -> str:
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
+    if is_non_cli_credential():
+        return os.environ['AZURE_CLIENT_ID']
     from azure.common import credentials
     return credentials.get_cli_profile().get_current_account_user()
 
@@ -107,13 +152,8 @@ def get_client(name: str,
         TimeoutError: If unable to get the container client within the
             specified time.
     """
-    # Sky only supports Azure CLI credential for now.
-    # Increase the timeout to fix the Azure get-access-token timeout issue.
-    # Tracked in
-    # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
-    from azure import identity
     with _session_creation_lock:
-        credential = identity.AzureCliCredential(process_timeout=30)
+        credential = get_credential()
         if name == 'compute':
             from azure.mgmt import compute
             return compute.ComputeManagementClient(credential, subscription_id)
@@ -348,20 +388,10 @@ def assign_storage_account_iam_role(
     """
     subscription_id = get_subscription_id()
     authorization_client = get_client('authorization', subscription_id)
-    graph_client = get_client('graph')
 
-    # Obtaining user's object ID to assign role.
-    # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
-    async def get_object_id() -> str:
-        httpx_logger = logging.getLogger('httpx')
-        original_level = httpx_logger.getEffectiveLevel()
-        # silencing the INFO level response log from httpx request
-        httpx_logger.setLevel(logging.WARNING)
-        user = await graph_client.users.with_url(
-            'https://graph.microsoft.com/v1.0/me').get()
-        httpx_logger.setLevel(original_level)
-        object_id = str(user.additional_data['id'])
-        return object_id
+    # Defintion ID of Storage Blob Data Owner role.
+    # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
+    storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 
     # Create a new event loop if none exists
     try:
@@ -370,11 +400,61 @@ def assign_storage_account_iam_role(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    object_id = loop.run_until_complete(get_object_id())
+    graph_client = get_client('graph')
 
-    # Defintion ID of Storage Blob Data Owner role.
-    # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
-    storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+    if is_non_cli_credential():
+        # For service principals, look up the SP's object ID via Graph API
+        # using the application (client) ID.
+        async def get_sp_object_id() -> str:
+            from msgraph.generated.service_principals.service_principals_request_builder import (
+                ServicePrincipalsRequestBuilder)  # pylint: disable=line-too-long
+            client_id = os.environ['AZURE_CLIENT_ID']
+            query_params = (ServicePrincipalsRequestBuilder.
+                            ServicePrincipalsRequestBuilderGetQueryParameters(
+                                filter=f'appId eq \'{client_id}\'',
+                                select=['id'],
+                            ))
+            config = (ServicePrincipalsRequestBuilder.
+                      ServicePrincipalsRequestBuilderGetRequestConfiguration(
+                          query_parameters=query_params,))
+            result = await graph_client.service_principals.get(
+                request_configuration=config)
+            if not result or not result.value:
+                raise sky_exceptions.StorageBucketCreateError(
+                    'Service principal not found in Azure AD. '
+                    'Ensure the service principal exists and you have '
+                    'Graph API permissions.')
+            return str(result.value[0].id)
+
+        try:
+            object_id = loop.run_until_complete(get_sp_object_id())
+        except sky_exceptions.StorageBucketCreateError:
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise sky_exceptions.StorageBucketCreateError(
+                    'Service principal lacks Graph API permissions to '
+                    'auto-assign storage role. Pre-assign '
+                    '\'Storage Blob Data Owner\' role to your service '
+                    'principal.\n'
+                    f'Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+        principal_type = 'ServicePrincipal'
+    else:
+        # Obtaining user's object ID to assign role.
+        # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
+        async def get_object_id_async() -> str:
+            httpx_logger = logging.getLogger('httpx')
+            original_level = httpx_logger.getEffectiveLevel()
+            # silencing the INFO level response log from httpx request
+            httpx_logger.setLevel(logging.WARNING)
+            user = await graph_client.users.with_url(
+                'https://graph.microsoft.com/v1.0/me').get()
+            httpx_logger.setLevel(original_level)
+            return str(user.additional_data['id'])
+
+        object_id = loop.run_until_complete(get_object_id_async())
+        principal_type = 'User'
     role_definition_id = ('/subscriptions'
                           f'/{subscription_id}'
                           '/providers/Microsoft.Authorization'
@@ -401,7 +481,7 @@ def assign_storage_account_iam_role(
             parameters={
                 'properties': {
                     'principalId': object_id,
-                    'principalType': 'User',
+                    'principalType': principal_type,
                     'roleDefinitionId': role_definition_id,
                 }
             },

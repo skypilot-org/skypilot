@@ -574,6 +574,35 @@ class Azure(clouds.Cloud):
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        dependency_installation_hints = (
+            'Azure dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.')
+        # Check if the azure blob storage dependencies are installed.
+        if not adaptors_common.can_import_modules(
+            ['azure.storage.blob', 'msgraph']):
+            return False, dependency_installation_hints
+
+        if azure.is_non_cli_credential():
+            # Service principal / workload identity / cert auth via env vars.
+            # Skip CLI-specific checks (token cache file, az --version).
+            sp_help_str = (
+                ' Set the following environment variables:'
+                f'\n{cls._INDENT_PREFIX}  $ export AZURE_CLIENT_ID=...'
+                f'\n{cls._INDENT_PREFIX}  $ export AZURE_CLIENT_SECRET=...'
+                f'\n{cls._INDENT_PREFIX}  $ export AZURE_TENANT_ID=...'
+                f'\n{cls._INDENT_PREFIX}  $ export AZURE_SUBSCRIPTION_ID=...')
+            try:
+                cls.get_active_user_identity()
+            except exceptions.CloudUserIdentityError as e:
+                return False, (
+                    'Getting user\'s Azure identity failed with service '
+                    f'principal credentials.{sp_help_str}\n'
+                    f'{cls._INDENT_PREFIX}Details: '
+                    f'{common_utils.format_exception(e)}')
+            return True, None
+
         help_str = (
             ' Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ az login'
@@ -588,16 +617,6 @@ class Azure(clouds.Cloud):
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
             return (False,
                     f'{azure_token_cache_file} does not exist.' + help_str)
-
-        dependency_installation_hints = (
-            'Azure dependencies are not installed. '
-            'Run the following commands:'
-            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
-            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.')
-        # Check if the azure blob storage dependencies are installed.
-        if not adaptors_common.can_import_modules(
-            ['azure.storage.blob', 'msgraph']):
-            return False, dependency_installation_hints
 
         try:
             _run_output('az --version')
@@ -622,6 +641,9 @@ class Azure(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
+        if azure.is_non_cli_credential():
+            # Credentials are via env vars / managed identity, not files.
+            return {}
         return {
             f'~/.azure/{filename}': f'~/.azure/{filename}'
             for filename in _CREDENTIAL_FILES
@@ -635,6 +657,17 @@ class Azure(clouds.Cloud):
                            maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
+        if azure.is_non_cli_credential():
+            # For service principal auth, use the client ID as identity.
+            client_id = os.environ['AZURE_CLIENT_ID']
+            try:
+                project_id = cls.get_project_id()
+            except (ModuleNotFoundError, RuntimeError) as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to get Azure project ID.') from e
+            return [[f'{client_id} [subscription_id={project_id}]']]
+
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
         while True:
