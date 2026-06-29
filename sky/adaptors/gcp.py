@@ -2,6 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 import json
+import logging
 import warnings
 
 from sky.adaptors import common
@@ -15,6 +16,12 @@ warnings.filterwarnings(
     message=
     r'.*You are using a Python version.*which Google will stop supporting.*',
 )
+
+# google_auth_httplib2 logs a warning on every GCE metadata-server credential
+# refresh ("httplib2 transport does not support per-request timeout"). It is a
+# stdlib logging call, not a warnings.warn, so raise the logger level to silence
+# it. Purely cosmetic; the credential refresh still succeeds.
+logging.getLogger('google_auth_httplib2').setLevel(logging.ERROR)
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
                          'Try pip install "skypilot[gcp]"')
