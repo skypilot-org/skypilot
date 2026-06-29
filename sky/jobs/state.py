@@ -880,6 +880,15 @@ def set_pending(
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
                   'Job submitted to queue')
 
+    # Record `submitted_at` once, when the task row is first inserted at
+    # PENDING (i.e. the moment the job entered the queue). Doing it here rather
+    # than at the PENDING -> STARTING transition ensures:
+    #   - No-op tasks (`task.run is None`) that short-circuit straight to
+    #     SUCCEEDED without ever going through STARTING still get a real
+    #     submission time (previously NULL -> blank "Submitted" column).
+    #   - Jobs that back off and re-enter STARTING keep their original
+    #     submission time instead of having it clobbered with the latest
+    #     attempt's timestamp.
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         session.execute(
@@ -889,6 +898,7 @@ def set_pending(
                 task_name=task_name,
                 resources=resources_str,
                 metadata=metadata,
+                submitted_at=time.time(),
                 status=ManagedJobStatus.PENDING.value,
                 is_primary_in_job_group=is_primary_in_job_group,
             ))
@@ -1078,9 +1088,19 @@ def set_pending_cancelled(job_id: int):
         )
 
         count = session.query(spot_table).filter(
-            spot_table.c.job_id.in_(subquery)).update(
-                {spot_table.c.status: ManagedJobStatus.CANCELLED.value},
-                synchronize_session=False)
+            spot_table.c.job_id.in_(subquery)
+        ).update(
+            {
+                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                # A job cancelled while still PENDING never actually
+                # started, so it has no meaningful submission time. Clear
+                # the queue-entry `submitted_at` recorded by `set_pending`
+                # so such terminal rows stay NULL -- this preserves the
+                # submitted-window filter's contract that a terminal job
+                # with no submission time is excluded from the window.
+                spot_table.c.submitted_at: None,
+            },
+            synchronize_session=False)
         session.commit()
         return count > 0
 
@@ -1885,9 +1905,15 @@ def get_managed_jobs_with_filters(
             if sort_column != spot_table.c.spot_job_id:
                 sort_column = sqlalchemy.func.max(sort_column)
             if sort_order == 'asc':
-                job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
+                ordering = sort_column.asc()
             else:
-                job_ids_subquery = job_ids_subquery.order_by(sort_column.desc())
+                ordering = sort_column.desc()
+            # Keep jobs without a `submitted_at` (e.g. cancelled/failed while
+            # still PENDING) deterministically at the end regardless of DB
+            # engine NULL-ordering semantics.
+            if sort_by == 'submitted_at':
+                ordering = ordering.nulls_last()
+            job_ids_subquery = job_ids_subquery.order_by(ordering)
         else:
             # Default sort: job_id desc (newest first)
             job_ids_subquery = job_ids_subquery.order_by(
@@ -1938,11 +1964,15 @@ def get_managed_jobs_with_filters(
     if sort_by and sort_by in sort_field_map:
         sort_column = sort_field_map[sort_by]
         if sort_order == 'asc':
-            query = query.order_by(sort_column.asc(),
-                                   spot_table.c.task_id.asc())
+            ordering = sort_column.asc()
         else:
-            query = query.order_by(sort_column.desc(),
-                                   spot_table.c.task_id.asc())
+            ordering = sort_column.desc()
+        # Keep jobs without a `submitted_at` (e.g. cancelled/failed while still
+        # PENDING) deterministically at the end regardless of DB engine
+        # NULL-ordering semantics.
+        if sort_by == 'submitted_at':
+            ordering = ordering.nulls_last()
+        query = query.order_by(ordering, spot_table.c.task_id.asc())
     else:
         # Default sort: job_id desc, task_id asc
         query = query.order_by(spot_table.c.spot_job_id.desc(),
@@ -2825,7 +2855,13 @@ async def set_starting_async(job_id: int,
     async def _op(session: sql_async.AsyncSession) -> int:
         values = {
             spot_table.c.resources: resources_str,
-            spot_table.c.submitted_at: submit_time,
+            # `submitted_at` is normally recorded once at PENDING (see
+            # `set_pending`), which is the canonical queue-entry time. Only
+            # backfill it here if it is missing (e.g. a legacy row created
+            # before that change) so we never clobber the original submission
+            # time on a (re-)entry into STARTING.
+            spot_table.c.submitted_at: sqlalchemy.func.coalesce(
+                spot_table.c.submitted_at, submit_time),
             spot_table.c.status: ManagedJobStatus.STARTING.value,
             spot_table.c.run_timestamp: run_timestamp,
             spot_table.c.specs: json.dumps(specs),

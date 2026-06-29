@@ -447,6 +447,10 @@ class JobController:
         if task.run is None:
             logger.info(f'Skip running task {task_id} ({task.name}) due to its '
                         'run commands being empty.')
+            # Note: `submitted_at` is recorded once when the task row is first
+            # inserted at PENDING (see `set_pending`), so this no-op task --
+            # which short-circuits straight to RUNNING/SUCCEEDED without going
+            # through STARTING -- still has a real submission time.
             # Call set_started first to initialize columns in the state table,
             # including start_at and last_recovery_at to avoid issues for
             # uninitialized columns.

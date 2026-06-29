@@ -344,7 +344,10 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # submitted_at is recorded at queue-entry (set_pending) time, so even a
+        # still-PENDING job has a non-NULL submission time.
+        assert target_job.HasField('submitted_at')
+        assert target_job.submitted_at > 0
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -408,7 +411,10 @@ class TestGetJobTable:
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
-        assert not target_job.HasField('submitted_at')
+        # submitted_at is recorded at queue-entry (set_pending) time, so even a
+        # still-PENDING job has a non-NULL submission time.
+        assert target_job.HasField('submitted_at')
+        assert target_job.submitted_at > 0
         assert not target_job.HasField('start_at')
         assert not target_job.HasField('end_at')
         assert not target_job.HasField('user_yaml')
@@ -458,9 +464,9 @@ class TestGetJobTable:
 
         job_data = {job.job_id: job for job in response.jobs}
 
-        # STARTING, RUNNING, SUCCEEDED jobs should have submitted_at > 0
-        # PENDING job should have submitted_at = 0.0
-        assert job_data[self.job_ids['job_id1']].submitted_at == 0.0
+        # submitted_at is recorded at queue-entry (set_pending) time, so all
+        # jobs -- including the still-PENDING job1 -- have submitted_at > 0.
+        assert job_data[self.job_ids['job_id1']].submitted_at > 0
         assert job_data[self.job_ids['job_id2']].submitted_at > 0
         assert job_data[self.job_ids['job_id3']].submitted_at > 0
         assert job_data[self.job_ids['job_id4']].submitted_at > 0
