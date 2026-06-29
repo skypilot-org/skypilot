@@ -17,10 +17,9 @@ warnings.filterwarnings(
     r'.*You are using a Python version.*which Google will stop supporting.*',
 )
 
-# google_auth_httplib2 logs a warning on every GCE metadata-server credential
-# refresh ("httplib2 transport does not support per-request timeout"). It is a
-# stdlib logging call, not a warnings.warn, so raise the logger level to silence
-# it. Purely cosmetic; the credential refresh still succeeds.
+# google_auth_httplib2 logs a benign per-request-timeout warning on every GCE
+# metadata-server credential refresh. It's a logging call (not warnings.warn),
+# so silence it by raising the logger level rather than filtering warnings.
 logging.getLogger('google_auth_httplib2').setLevel(logging.ERROR)
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
