@@ -6297,8 +6297,8 @@ def jobs_queue(verbose: bool,
               '-n',
               required=False,
               type=str,
-              help='Managed job name to cancel. Supports glob patterns '
-              '(e.g. \'my-job-*\'), in which case all matching jobs are '
+              help='Managed job name to cancel. Supports glob patterns, in '
+              'which case all jobs whose name matches the pattern are '
               'cancelled.')
 @click.option('--pool',
               '-p',
