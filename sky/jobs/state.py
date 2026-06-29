@@ -3387,8 +3387,11 @@ def get_task_logs_to_clean(retention_seconds: int,
                 )).
             where(
                 sqlalchemy.and_(
-                    job_info_table.c.schedule_state.is_(
-                        ManagedJobScheduleState.DONE.value),
+                    # Use ==, not .is_(): on PostgreSQL `IS <string>` is a
+                    # syntax error (IS only accepts NULL/TRUE/FALSE), which
+                    # would make the whole GC query raise on every run.
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.DONE.value,
                     spot_table.c.end_at.isnot(None),
                     spot_table.c.end_at < (now - retention_seconds),
                     spot_table.c.logs_cleaned_at.is_(None),
@@ -3432,8 +3435,8 @@ def get_controller_logs_to_clean(retention_seconds: int,
                     job_info_table.c.spot_job_id == spot_table.c.spot_job_id,
                 )).where(
                     sqlalchemy.and_(
-                        job_info_table.c.schedule_state.is_(
-                            ManagedJobScheduleState.DONE.value),
+                        job_info_table.c.schedule_state ==
+                        ManagedJobScheduleState.DONE.value,
                         job_info_table.c.controller_logs_cleaned_at.is_(None),
                     )).group_by(
                         job_info_table.c.spot_job_id,
