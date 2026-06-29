@@ -1088,19 +1088,9 @@ def set_pending_cancelled(job_id: int):
         )
 
         count = session.query(spot_table).filter(
-            spot_table.c.job_id.in_(subquery)
-        ).update(
-            {
-                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
-                # A job cancelled while still PENDING never actually
-                # started, so it has no meaningful submission time. Clear
-                # the queue-entry `submitted_at` recorded by `set_pending`
-                # so such terminal rows stay NULL -- this preserves the
-                # submitted-window filter's contract that a terminal job
-                # with no submission time is excluded from the window.
-                spot_table.c.submitted_at: None,
-            },
-            synchronize_session=False)
+            spot_table.c.job_id.in_(subquery)).update(
+                {spot_table.c.status: ManagedJobStatus.CANCELLED.value},
+                synchronize_session=False)
         session.commit()
         return count > 0
 
@@ -1618,12 +1608,18 @@ def build_managed_jobs_with_filters_no_status_query(
     if user_hashes is not None:
         query = query.where(job_info_table.c.user_hash.in_(user_hashes))
     if submitted_after is not None or submitted_before is not None:
-        # submitted_at is NULL until a job leaves PENDING (it is set at
-        # STARTING). For a still-active job that just means "not submitted
-        # yet", so treat it as submitted "now". A terminal job with no
-        # submitted_at never started (cancelled/failed before STARTING) and
-        # has no submission time, so leave it NULL to exclude it from the
-        # window rather than letting it masquerade as "now".
+        # submitted_at is now recorded when a job is first queued (see
+        # set_pending), so normal rows always have a non-NULL submitted_at
+        # and are filtered directly against the window.
+        #
+        # The NULL branches below only apply to legacy rows created before
+        # this change (pre-upgrade), which may still have a NULL
+        # submitted_at. For such a legacy job that is still active, NULL just
+        # means "submission time unknown / not yet recorded", so treat it as
+        # submitted "now" to keep it visible. A legacy terminal job with no
+        # submitted_at has no recoverable submission time, so leave it NULL to
+        # exclude it from the window rather than letting it masquerade as
+        # "now".
         terminal_values = [
             s.value for s in ManagedJobStatus.terminal_statuses()
         ]
@@ -2860,6 +2856,11 @@ async def set_starting_async(job_id: int,
             # backfill it here if it is missing (e.g. a legacy row created
             # before that change) so we never clobber the original submission
             # time on a (re-)entry into STARTING.
+            # TODO(v1.2): remove this COALESCE backcompat (~2 minor versions
+            # after this change ships, i.e. after v1.2). It only backfills
+            # submitted_at for jobs created before submitted_at was recorded
+            # at queue-entry (set_pending); once no such rows remain,
+            # set_starting_async can stop writing submitted_at entirely.
             spot_table.c.submitted_at: sqlalchemy.func.coalesce(
                 spot_table.c.submitted_at, submit_time),
             spot_table.c.status: ManagedJobStatus.STARTING.value,

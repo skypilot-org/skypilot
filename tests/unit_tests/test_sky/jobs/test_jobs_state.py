@@ -939,7 +939,8 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
 
 @pytest.fixture
 def _seed_pending_job(_mock_managed_jobs_db_conn):
-    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    """Seed one job left in PENDING; submitted_at is recorded at set_pending
+    (queue-entry), so it carries a non-NULL submitted_at of ~now."""
     job_id = state.set_job_info_without_job_id(name='job-pending',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -956,8 +957,13 @@ def _seed_pending_job(_mock_managed_jobs_db_conn):
 
 @pytest.fixture
 def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
-    """Seed a job cancelled while PENDING: terminal, with a NULL submitted_at
-    (it never reached STARTING)."""
+    """Seed a legacy terminal row with a NULL submitted_at.
+
+    Such rows only exist before this change (pre-upgrade): they were created
+    before `submitted_at` was recorded at queue-entry (`set_pending`) and never
+    reached STARTING, so they never got a `submitted_at`. We simulate one by
+    cancelling a PENDING job and then forcing `submitted_at` back to NULL.
+    """
     job_id = state.set_job_info_without_job_id(name='job-cancelled',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -972,6 +978,8 @@ def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
     state.scheduler_set_waiting([job_id], '/tmp/dag-c.yaml', '/tmp/user-c.yaml',
                                 '/tmp/env-c', None, 100)
     state.set_pending_cancelled(job_id)
+    # Simulate a legacy pre-upgrade row that never recorded a submitted_at.
+    _force_submitted_at(_mock_managed_jobs_db_conn, job_id, None)
     return job_id
 
 
@@ -1062,9 +1070,11 @@ class TestSubmittedAtRangeFilter:
         assert jobs == []
         assert total == 0
 
-    # A terminal job that never got a submitted_at (cancelled/failed before
-    # STARTING) has no submission time, so it is excluded from any window —
-    # it must not be treated as submitted "now" like a still-pending job.
+    # A legacy terminal row (pre-upgrade) that never recorded a submitted_at
+    # has no recoverable submission time, so it is excluded from any window —
+    # it must not be treated as submitted "now" like a still-active job.
+    # (Post-change rows always carry a submitted_at from set_pending, so they
+    # never hit this branch; see TestPendingTerminalRetainsSubmittedAt.)
     def test_terminal_no_submit_present_without_filter(
             self, _seed_terminal_no_submit):
         jobs, total = state.get_managed_jobs_with_filters()
@@ -1374,24 +1384,44 @@ class TestSubmittedAtRecordedAtPending:
         jobs, _ = state.get_managed_jobs_with_filters()
         assert jobs[0]['submitted_at'] == backfill
 
-    def test_cancelled_while_pending_clears_submitted_at(
+    def test_cancelled_while_pending_retains_submitted_at(
             self, _mock_managed_jobs_db_conn):
-        # A job cancelled while still PENDING never started; its submitted_at
-        # is cleared so the submitted-window filter keeps excluding it.
+        # A job cancelled while still PENDING was still submitted (queued), so
+        # it keeps the submitted_at recorded by set_pending. Cancelling it must
+        # not clear or change the submission time.
         job_id = self._make_pending_job('cancel-pending')
-        assert state.get_managed_jobs_with_filters(
-        )[0][0]['submitted_at'] is not None
+        submitted_at_at_pending = state.get_managed_jobs_with_filters(
+        )[0][0]['submitted_at']
+        assert submitted_at_at_pending is not None
         state.set_pending_cancelled(job_id)
         jobs, total = state.get_managed_jobs_with_filters()
         assert total == 1
         assert jobs[0]['status'] == state.ManagedJobStatus.CANCELLED
-        assert jobs[0]['submitted_at'] is None
+        assert jobs[0]['submitted_at'] == submitted_at_at_pending
+
+    def test_terminal_while_pending_included_by_submitted_window(
+            self, _mock_managed_jobs_db_conn):
+        # A job that cancels/fails while still PENDING (never started) keeps a
+        # non-NULL submitted_at, so the submitted-window filter includes it the
+        # same as any other submitted job -- it is no longer excluded.
+        job_id = self._make_pending_job('cancel-pending-window')
+        submitted_at_at_pending = state.get_managed_jobs_with_filters(
+        )[0][0]['submitted_at']
+        assert submitted_at_at_pending is not None
+        state.set_pending_cancelled(job_id)
+        # A submitted_after bound in the past (the row was submitted ~now)
+        # includes the cancelled-while-pending job.
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert total == 1
+        assert jobs[0]['job_id'] == job_id
+        assert jobs[0]['status'] == state.ManagedJobStatus.CANCELLED
+        assert jobs[0]['submitted_at'] is not None
 
 
 class TestSubmittedAtSortNullsLast:
     """Sorting by submitted_at must place rows with a NULL submitted_at
-    (cancelled/failed-while-PENDING jobs) last, deterministically, regardless
-    of DB engine, for both ascending and descending order."""
+    (legacy pre-upgrade rows that never recorded one) last, deterministically,
+    regardless of DB engine, for both ascending and descending order."""
 
     @pytest.fixture
     def _seed_mixed_submitted_at(self, _mock_managed_jobs_db_conn):
@@ -1425,7 +1455,8 @@ class TestSubmittedAtSortNullsLast:
                 await state.set_started_async(job_id, 0, submit_time,
                                               mock_callback)
                 ids[key] = job_id
-            # One job cancelled while PENDING: terminal, NULL submitted_at.
+            # One legacy terminal row with a NULL submitted_at (a pre-upgrade
+            # row created before submitted_at was recorded at queue-entry).
             null_id = state.set_job_info_without_job_id(name='job-null',
                                                         workspace='ws1',
                                                         entrypoint='ep',
@@ -1441,6 +1472,9 @@ class TestSubmittedAtSortNullsLast:
                                         '/tmp/user-null.yaml', '/tmp/env-null',
                                         None, 100)
             state.set_pending_cancelled(null_id)
+            # Simulate a legacy pre-upgrade row that never recorded a
+            # submitted_at.
+            _force_submitted_at(_mock_managed_jobs_db_conn, null_id, None)
             ids['null'] = null_id
             return ids
 
