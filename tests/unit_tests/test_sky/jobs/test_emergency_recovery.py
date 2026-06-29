@@ -4,15 +4,14 @@ Covers the two layers of the feature:
 - State transitions and budget bookkeeping (sky/jobs/state.py), run against
   a real temporary SQLite database.
 - The retry loop in JobController.run() (sky/jobs/controller.py), driven
-  with mocked state collaborators so every decision branch (retry, usurped,
-  fail, cancellation ordering) is exercised deterministically.
+  with mocked state collaborators so every decision branch (retry, fail,
+  cancellation ordering) is exercised deterministically.
 """
 import asyncio
 import contextlib
 import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
-from unittest.mock import patch
 
 import filelock
 import pytest
@@ -27,7 +26,6 @@ from sky.jobs import state
 
 _PID = 1234
 _PID_STARTED_AT = 111.0
-_OWN_RECORD = state.ControllerPidRecord(pid=_PID, started_at=_PID_STARTED_AT)
 
 
 @pytest.fixture
@@ -305,54 +303,40 @@ class TestEmergencyRecoveryState:
                                                       callback_func=callback)
 
     @pytest.mark.asyncio
-    async def test_budget_roundtrip_and_fence(self, _mock_managed_jobs_db_conn):
+    async def test_budget_roundtrip(self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine)
 
         assert await state.get_emergency_recovery_budget_async(1) == (0, None)
 
         now = time.time()
-        assert await state.record_emergency_recovery_attempt_async(
-            1, 1, now, _PID, _PID_STARTED_AT) is True
-        assert await state.get_emergency_recovery_budget_async(1) == (1, now)
-
-        # A mismatched fence (this controller no longer owns the job) must
-        # write nothing.
-        assert await state.record_emergency_recovery_attempt_async(
-            1, 7, now + 1, 9999, _PID_STARTED_AT) is False
-        assert await state.record_emergency_recovery_attempt_async(
-            1, 7, now + 1, _PID, 222.0) is False
+        await state.record_emergency_recovery_attempt_async(1, 1, now)
         assert await state.get_emergency_recovery_budget_async(1) == (1, now)
 
         # The write is an absolute value: re-running the same attempt is
         # idempotent and cannot double-spend the budget.
-        assert await state.record_emergency_recovery_attempt_async(
-            1, 1, now, _PID, _PID_STARTED_AT) is True
+        await state.record_emergency_recovery_attempt_async(1, 1, now)
         assert await state.get_emergency_recovery_budget_async(1) == (1, now)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'schedule_state,pid,expected',
+        'schedule_state,expected',
         [
-            # Stuck LAUNCHING owned by us: released back to ALIVE.
-            ('LAUNCHING', _PID, 'ALIVE'),
-            # LAUNCHING owned by someone else: left untouched (the caller
-            # treats anything other than ALIVE as loss of ownership).
-            ('LAUNCHING', 9999, 'LAUNCHING'),
+            # Stuck LAUNCHING: released back to ALIVE.
+            ('LAUNCHING', 'ALIVE'),
             # Already ALIVE: no-op.
-            ('ALIVE', _PID, 'ALIVE'),
-            # Reset by something else (e.g. HA recovery): left untouched.
-            ('WAITING', _PID, 'WAITING'),
+            ('ALIVE', 'ALIVE'),
+            # Reset by something else (e.g. HA recovery): left untouched
+            # (only a stuck LAUNCHING slot is released).
+            ('WAITING', 'WAITING'),
         ])
     async def test_normalize_schedule_state(self, _mock_managed_jobs_db_conn,
-                                            schedule_state, pid, expected):
+                                            schedule_state, expected):
         engine = _mock_managed_jobs_db_conn
-        _seed_job(engine, schedule_state=schedule_state, pid=pid)
+        _seed_job(engine, schedule_state=schedule_state)
 
-        result = await state.normalize_schedule_state_for_emergency_retry_async(
-            1, _PID, _PID_STARTED_AT)
+        await state.normalize_schedule_state_for_emergency_retry_async(1)
 
-        assert result == state.ManagedJobScheduleState(expected)
         assert _get_job_info_row(engine)['schedule_state'] == expected
 
     @pytest.mark.asyncio
@@ -376,8 +360,6 @@ class _RetryLoopHarness:
         dag.is_job_group.return_value = False
         dag.tasks = [task]
         jc._dag = dag
-        jc._controller_pid_record = _OWN_RECORD
-        jc._usurped = False
         jc._emergency_backoff_seconds = None
         jc._run_one_task = AsyncMock(side_effect=body_effects)
         jc._update_failed_task_state = AsyncMock()
@@ -386,16 +368,14 @@ class _RetryLoopHarness:
         jc._load_dag = MagicMock()
         self.jc = jc
 
-        # State collaborators, default to the happy path: we own the job,
-        # fresh budget, transitions apply, schedule state is clean.
-        self.get_controller_process = MagicMock(return_value=_OWN_RECORD)
+        # State collaborators, default to the happy path: fresh budget,
+        # transitions apply, schedule state is clean.
         self.get_budget = AsyncMock(return_value=(0, None))
-        self.record_attempt = AsyncMock(return_value=True)
+        self.record_attempt = AsyncMock()
         self.get_latest_task = AsyncMock(
             return_value=(0, state.ManagedJobStatus.RUNNING))
         self.set_emergency = AsyncMock(return_value=True)
-        self.normalize = AsyncMock(
-            return_value=state.ManagedJobScheduleState.ALIVE)
+        self.normalize = AsyncMock()
         self.set_cancelling = AsyncMock()
         self.set_cancelled = AsyncMock()
         self.sleeps = []
@@ -404,8 +384,6 @@ class _RetryLoopHarness:
             self.sleeps.append(seconds)
 
         mjs = 'sky.jobs.controller.managed_job_state'
-        monkeypatch.setattr(f'{mjs}.get_job_controller_process',
-                            self.get_controller_process)
         monkeypatch.setattr(f'{mjs}.get_emergency_recovery_budget_async',
                             self.get_budget)
         monkeypatch.setattr(f'{mjs}.record_emergency_recovery_attempt_async',
@@ -499,43 +477,6 @@ class TestEmergencyRetryLoop:
         h.record_attempt.assert_awaited_once()
         assert h.record_attempt.await_args.args[1] == 1
         h.jc._update_failed_task_state.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_usurped_at_ownership_check(self, monkeypatch):
-        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
-        h.get_controller_process.return_value = state.ControllerPidRecord(
-            pid=9999, started_at=222.0)
-
-        await h.jc.run()
-
-        assert h.jc.usurped is True
-        # Stand down without touching any job state: no budget spend, no
-        # failure write, and the finally is skipped entirely.
-        h.record_attempt.assert_not_awaited()
-        h.jc._update_failed_task_state.assert_not_called()
-        h.set_cancelling.assert_not_awaited()
-        h.set_cancelled.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_usurped_at_budget_record(self, monkeypatch):
-        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
-        h.record_attempt.return_value = False
-
-        await h.jc.run()
-
-        assert h.jc.usurped is True
-        h.set_emergency.assert_not_awaited()
-        h.set_cancelling.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_usurped_at_schedule_state_normalization(self, monkeypatch):
-        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
-        h.normalize.return_value = state.ManagedJobScheduleState.WAITING
-
-        await h.jc.run()
-
-        assert h.jc.usurped is True
-        h.set_cancelling.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_cancelling_task_retries_without_backoff(self, monkeypatch):

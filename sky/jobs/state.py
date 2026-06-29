@@ -3096,51 +3096,35 @@ async def get_emergency_recovery_budget_async(
 
 
 @db_retries.retry_async
-async def record_emergency_recovery_attempt_async(
-        job_id: int, attempt_count: int, attempt_time: float, pid: int,
-        pid_started_at: Optional[float]) -> bool:
-    """Record an emergency recovery attempt, fenced on controller ownership.
+async def record_emergency_recovery_attempt_async(job_id: int,
+                                                  attempt_count: int,
+                                                  attempt_time: float) -> None:
+    """Record an emergency recovery attempt.
 
     Writes absolute values rather than incrementing, so that re-running the
     emergency bookkeeping after a transient failure cannot double-spend the
     retry budget.
-
-    Returns False (writing nothing) if the fence did not match, i.e. this
-    controller no longer owns the job.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        result = await session.execute(
+        await session.execute(
             sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    # Fence on both pid and its start time: pids can be
-                    # reused across controller restarts on the same host.
-                    job_info_table.c.controller_pid == pid,
-                    job_info_table.c.controller_pid_started_at ==
-                    pid_started_at,
-                )).values({
+                job_info_table.c.spot_job_id == job_id).values({
                     job_info_table.c.emergency_recovery_count: attempt_count,
                     job_info_table.c.last_emergency_recovery_at: attempt_time,
                 }))
         await session.commit()
-        return result.rowcount == 1
 
 
 @db_retries.retry_async
 async def normalize_schedule_state_for_emergency_retry_async(
-        job_id: int, pid: int,
-        pid_started_at: Optional[float]) -> Optional['ManagedJobScheduleState']:
+        job_id: int) -> None:
     """Release a stuck LAUNCHING schedule state before an emergency retry.
 
     If the unexpected error escaped mid-launch, the job may still hold a
     LAUNCHING slot, which counts against the scheduler's launch limits.
-    Move it back to ALIVE, fenced on controller ownership, so the retry's
-    scheduled_launch can acquire a slot cleanly.
-
-    Returns the schedule state after normalization (None if the job row is
-    missing). Callers treat anything other than ALIVE as loss of ownership
-    of the job.
+    Move it back to ALIVE so the retry's scheduled_launch can acquire a slot
+    cleanly.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -3150,21 +3134,11 @@ async def normalize_schedule_state_for_emergency_retry_async(
                     job_info_table.c.spot_job_id == job_id,
                     job_info_table.c.schedule_state ==
                     ManagedJobScheduleState.LAUNCHING.value,
-                    job_info_table.c.controller_pid == pid,
-                    job_info_table.c.controller_pid_started_at ==
-                    pid_started_at,
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.ALIVE.value,
                 }))
         await session.commit()
-        result = await session.execute(
-            sqlalchemy.select(job_info_table.c.schedule_state).where(
-                job_info_table.c.spot_job_id == job_id))
-        row = result.fetchone()
-        if row is None or row[0] is None:
-            return None
-        return ManagedJobScheduleState(row[0])
 
 
 @db_retries.retry_async
