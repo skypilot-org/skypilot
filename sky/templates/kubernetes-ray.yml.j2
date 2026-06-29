@@ -301,8 +301,15 @@ available_node_types:
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% endif %}
-        {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
         annotations:
+          # The skypilot-user *label* (above) sanitizes characters that are
+          # invalid in Kubernetes label values (e.g. '@' and '.'), so a
+          # username like alice@example.com is recorded as aliceexamplecom.
+          # Always also record the original, uncleaned username as an
+          # annotation (annotation values have no such charset restrictions)
+          # so consumers can recover the exact username regardless of config.
+          skypilot-user: "{{ original_user }}"
+        {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
           skypilot-workspace: {{ workspace }}
           {% if priority_class is not none %}
           skypilot-priority-class: {{priority_class}}
@@ -313,7 +320,6 @@ available_node_types:
           {% if k8s_max_run_duration_seconds %}
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}
-          skypilot-user: "{{ original_user }}"
           {% endif %}
         # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
         # Values from google cloud guide
