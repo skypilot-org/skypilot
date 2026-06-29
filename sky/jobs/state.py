@@ -3414,7 +3414,9 @@ def get_controller_logs_to_clean(retention_seconds: int,
 
     The controller logs will only cleaned when:
     - the job schedule state is DONE
-    - AND the end time of the latest task is older than the retention period
+    - AND either the end time of the latest task is older than the retention
+      period, or the job has no end time at all (it was cancelled before it
+      ever ran, so there is no log to retain)
 
     Unlike task logs, controller logs do not require local_log_file to be set.
     A controller log file is written for every job the controller processes
@@ -3441,11 +3443,18 @@ def get_controller_logs_to_clean(retention_seconds: int,
                     )).group_by(
                         job_info_table.c.spot_job_id,
                         job_info_table.c.current_cluster_name,
-                    ).having(
-                        sqlalchemy.func.max(
-                            spot_table.c.end_at).isnot(None),).having(
-                                sqlalchemy.func.max(spot_table.c.end_at) < (
-                                    now - retention_seconds)).limit(batch_size))
+                    ).
+            having(
+                # A job cancelled while still PENDING (via
+                # set_pending_cancelled) reaches DONE with end_at never
+                # set. It never ran, so it has no controller log to
+                # retain -- clean it immediately. Filtering it out here
+                # instead would leave it forever uncleaned and re-scanned
+                # by the group-by on every GC cycle.
+                sqlalchemy.or_(
+                    sqlalchemy.func.max(spot_table.c.end_at).is_(None),
+                    sqlalchemy.func.max(spot_table.c.end_at) <
+                    (now - retention_seconds))).limit(batch_size))
         rows = result.fetchall()
         return [{'job_id': row[0]} for row in rows]
 
