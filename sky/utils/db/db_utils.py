@@ -72,9 +72,15 @@ def glob_to_sql_similar_pattern(glob_pattern: str) -> str:
     those are passed through (with glob's ``[!...]`` negation rewritten to SQL's
     ``[^...]``).
     """
-    # Escape special SIMILAR TO characters that are not special in glob, so a
-    # literal '%'/'_' in a job/cluster name is not treated as a wildcard.
-    glob_pattern = glob_pattern.replace('%', '\\%').replace('_', '\\_')
+    # ``SIMILAR TO`` is regex-like: besides the SQL wildcards '%'/'_', it treats
+    # '|', '+', '(', ')', '{', '}' as operators. None of these are special in
+    # glob, so escape them (and the escape character itself, first) to keep them
+    # literal -- otherwise a name like 'my-job-(1)' or 'job+v2' would cause a
+    # SQL syntax error or match incorrectly. We do this before translating the
+    # glob wildcards below so we don't escape the '%'/'_' we are about to emit.
+    glob_pattern = glob_pattern.replace('\\', '\\\\')
+    for char in ['%', '_', '|', '+', '(', ')', '{', '}']:
+        glob_pattern = glob_pattern.replace(char, '\\' + char)
 
     # Convert glob wildcards to SIMILAR TO wildcards.
     like_pattern = glob_pattern.replace('*', '%').replace('?', '_')

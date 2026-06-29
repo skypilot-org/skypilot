@@ -441,6 +441,13 @@ class TestGlobHelpers:
             ('job-?', 'job-_'),
             # Literal SQL wildcards are escaped so they are not treated as wildcards.
             ('a%b_c', 'a\\%b\\_c'),
+            # SIMILAR TO regex operators that are literal in glob are escaped.
+            ('job-(a)', 'job-\\(a\\)'),
+            ('job-a+b', 'job-a\\+b'),
+            ('a|b', 'a\\|b'),
+            ('job-{1}', 'job-\\{1\\}'),
+            # A literal backslash is escaped (doubled) before other escaping.
+            ('a\\b', 'a\\\\b'),
             # Character classes pass through; negation [!..] -> [^..].
             ('job-[ab]', 'job-[ab]'),
             ('job-[!ab]', 'job-[^ab]'),
