@@ -2507,6 +2507,13 @@ def get_clusters_from_history(
         if include_creation_yaml:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
+        elif not abbreviate_response:
+            # Preserve the dict schema for non-abbreviated callers: these keys
+            # were always present (possibly None) before we stopped fetching
+            # the heavy columns on bulk paths. The columns were not selected
+            # here, so this is None at zero memory cost.
+            record['last_creation_yaml'] = None
+            record['last_creation_command'] = None
 
         records.append(record)
 
