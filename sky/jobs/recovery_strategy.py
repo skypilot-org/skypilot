@@ -184,6 +184,7 @@ class StrategyExecutor:
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
         resume_recovery_source: Optional[Any] = None,
+        resume_keep_starting: bool = False,
         on_recovery: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
     ) -> Optional[bool]:
         """Strategy-owned monitoring loop override.
