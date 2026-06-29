@@ -3412,6 +3412,15 @@ def get_controller_logs_to_clean(retention_seconds: int,
     The controller logs will only cleaned when:
     - the job schedule state is DONE
     - AND the end time of the latest task is older than the retention period
+
+    Unlike task logs, controller logs do not require local_log_file to be set.
+    A controller log file is written for every job the controller processes
+    (during provisioning, recovery, etc.), regardless of whether the task ever
+    produced a downloaded log. Gating on local_log_file would leave controller
+    logs of jobs that terminate without a downloaded task log -- e.g. those that
+    end as FAILED_CONTROLLER on a controller crash, or are cancelled before the
+    task starts -- uncleaned forever. The DONE schedule state plus a finished
+    end_at is sufficient to know the controller has exited and its log is final.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -3425,7 +3434,6 @@ def get_controller_logs_to_clean(retention_seconds: int,
                     sqlalchemy.and_(
                         job_info_table.c.schedule_state.is_(
                             ManagedJobScheduleState.DONE.value),
-                        spot_table.c.local_log_file.isnot(None),
                         job_info_table.c.controller_logs_cleaned_at.is_(None),
                     )).group_by(
                         job_info_table.c.spot_job_id,

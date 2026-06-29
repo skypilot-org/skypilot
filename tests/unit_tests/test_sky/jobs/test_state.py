@@ -331,6 +331,51 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     assert len(res2) == 2
 
 
+def test_get_controller_logs_to_clean_without_local_log_file(
+        _mock_managed_jobs_db_conn):
+    """Controller logs are cleaned even when no task log was downloaded.
+
+    Jobs that terminate without a downloaded task log -- e.g. those ending as
+    FAILED_CONTROLLER on a controller crash, or cancelled before the task
+    starts -- still have a controller log file on disk. They must be eligible
+    for controller-log GC despite local_log_file being NULL.
+    """
+    now = time.time()
+    retention = 60
+    engine = state._db_manager.get_engine()
+
+    # Job cancelled before the task ran: terminal, old end_at, no local log.
+    job_cancelled = _insert_job_info(engine, controller_logs_cleaned_at=None)
+    _insert_task(
+        engine,
+        job_cancelled,
+        0,
+        status=ManagedJobStatus.CANCELLED,
+        end_at=now - 200,
+        local_log_file=None,
+        logs_cleaned_at=None,
+    )
+    state.scheduler_set_done(job_cancelled)
+
+    # Job that crashed the controller: terminal, old end_at, no local log.
+    job_failed_controller = _insert_job_info(engine,
+                                             controller_logs_cleaned_at=None)
+    _insert_task(
+        engine,
+        job_failed_controller,
+        0,
+        status=ManagedJobStatus.FAILED_CONTROLLER,
+        end_at=now - 150,
+        local_log_file=None,
+        logs_cleaned_at=None,
+    )
+    state.scheduler_set_done(job_failed_controller)
+
+    res = state.get_controller_logs_to_clean(retention, batch_size=10)
+    job_ids = {r['job_id'] for r in res}
+    assert job_ids == {job_cancelled, job_failed_controller}
+
+
 def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
     now = time.time()
 
