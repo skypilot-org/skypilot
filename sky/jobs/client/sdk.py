@@ -387,7 +387,8 @@ def cancel(
     Please refer to sky.cli.job_cancel for documentation.
 
     Args:
-        name: Name of the managed job to cancel.
+        name: Name of the managed job to cancel. Supports glob patterns
+            (e.g. ``my-job-*``), in which case all matching jobs are cancelled.
         job_ids: IDs of the managed jobs to cancel.
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.

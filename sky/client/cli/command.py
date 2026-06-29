@@ -6297,7 +6297,9 @@ def jobs_queue(verbose: bool,
               '-n',
               required=False,
               type=str,
-              help='Managed job name to cancel.')
+              help='Managed job name to cancel. Supports glob patterns '
+              '(e.g. \'my-job-*\'), in which case all matching jobs are '
+              'cancelled.')
 @click.option('--pool',
               '-p',
               required=False,
@@ -6331,6 +6333,9 @@ def jobs_cancel(
 
       # Cancel managed job with name 'my-job'
       $ sky jobs cancel -n my-job
+      \b
+      # Cancel all managed jobs whose name matches the glob pattern 'my-job-*'
+      $ sky jobs cancel -n 'my-job-*'
       \b
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3

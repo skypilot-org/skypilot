@@ -4,6 +4,7 @@ import contextlib
 import enum
 import os
 import pathlib
+import re
 import sqlite3
 import threading
 import typing
@@ -60,6 +61,49 @@ class UniqueConstraintViolationError(Exception):
 class SQLAlchemyDialect(enum.Enum):
     SQLITE = 'sqlite'
     POSTGRESQL = 'postgresql'
+
+
+def glob_to_sql_similar_pattern(glob_pattern: str) -> str:
+    """Converts a glob pattern to a PostgreSQL ``SIMILAR TO`` pattern.
+
+    PostgreSQL has no native glob operator (unlike SQLite's ``GLOB``), so we
+    translate glob wildcards into ``SIMILAR TO`` wildcards. ``SIMILAR TO``
+    supports character classes (``[...]``) with the same syntax as glob, so
+    those are passed through (with glob's ``[!...]`` negation rewritten to SQL's
+    ``[^...]``).
+    """
+    # Escape special SIMILAR TO characters that are not special in glob, so a
+    # literal '%'/'_' in a job/cluster name is not treated as a wildcard.
+    glob_pattern = glob_pattern.replace('%', '\\%').replace('_', '\\_')
+
+    # Convert glob wildcards to SIMILAR TO wildcards.
+    like_pattern = glob_pattern.replace('*', '%').replace('?', '_')
+
+    # Handle character classes, including negation ([!...] -> [^...]).
+    def replace_char_class(match):
+        group = match.group(0)
+        if group.startswith('[!'):
+            return '[^' + group[2:-1] + ']'
+        return group
+
+    like_pattern = re.sub(r'\[(!)?.*?\]', replace_char_class, like_pattern)
+    return like_pattern
+
+
+def glob_filter(engine: sqlalchemy.engine.Engine, column: 'sqlalchemy.Column',
+                glob_pattern: str) -> 'sqlalchemy.sql.elements.ColumnElement':
+    """Builds a SQLAlchemy filter matching ``column`` against a glob pattern.
+
+    Uses SQLite's native ``GLOB`` operator, or PostgreSQL's ``SIMILAR TO`` with
+    the pattern translated by :func:`glob_to_sql_similar_pattern`.
+    """
+    if engine.dialect.name == SQLAlchemyDialect.SQLITE.value:
+        return column.op('GLOB')(glob_pattern)
+    elif engine.dialect.name == SQLAlchemyDialect.POSTGRESQL.value:
+        return column.op('SIMILAR TO')(
+            glob_to_sql_similar_pattern(glob_pattern))
+    else:
+        raise ValueError(f'Unsupported database dialect: {engine.dialect.name}')
 
 
 @contextlib.contextmanager

@@ -1321,3 +1321,80 @@ class TestIsRelayedStatusPayloadLine:
     def test_plain_log_line_not_detected(self):
         assert jobs_utils._is_relayed_status_payload_line(
             'Preparing SkyPilot runtime (1/3)\n') is False
+
+
+class TestCancelJobByName:
+    """Tests for jobs_utils.cancel_job_by_name, incl. glob patterns."""
+
+    def test_exact_name_single_match(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state,
+                            'get_nonterminal_job_ids_by_name',
+                            lambda name, match_glob=False: [7])
+        captured = {}
+
+        def fake_cancel(job_ids, **kwargs):
+            captured['job_ids'] = job_ids
+            return 'cancelled.'
+
+        monkeypatch.setattr(jobs_utils, 'cancel_jobs_by_id', fake_cancel)
+        msg = jobs_utils.cancel_job_by_name('my-job')
+        assert captured['job_ids'] == [7]
+        assert msg == "'my-job' cancelled."
+
+    def test_exact_name_no_match(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state,
+                            'get_nonterminal_job_ids_by_name',
+                            lambda name, match_glob=False: [])
+        msg = jobs_utils.cancel_job_by_name('my-job')
+        assert msg == "No running job found with name 'my-job'."
+
+    def test_exact_name_multiple_is_ambiguous(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state,
+                            'get_nonterminal_job_ids_by_name',
+                            lambda name, match_glob=False: [1, 2])
+        # Should NOT cancel; returns an ambiguity error instead.
+        monkeypatch.setattr(
+            jobs_utils, 'cancel_jobs_by_id',
+            lambda *a, **k: pytest.fail('should not cancel on ambiguous name'))
+        msg = jobs_utils.cancel_job_by_name('my-job')
+        assert 'Multiple running jobs found' in msg
+        assert '[1, 2]' in msg
+
+    def test_glob_pattern_passes_match_glob(self, monkeypatch):
+        seen = {}
+
+        def fake_get_ids(name, match_glob=False):
+            seen['name'] = name
+            seen['match_glob'] = match_glob
+            return [1, 2, 3]
+
+        monkeypatch.setattr(managed_job_state,
+                            'get_nonterminal_job_ids_by_name', fake_get_ids)
+        captured = {}
+
+        def fake_cancel(job_ids, **kwargs):
+            captured['job_ids'] = job_ids
+            return 'cancelled.'
+
+        monkeypatch.setattr(jobs_utils, 'cancel_jobs_by_id', fake_cancel)
+        msg = jobs_utils.cancel_job_by_name('my-job-*')
+        assert seen == {'name': 'my-job-*', 'match_glob': True}
+        # All matched jobs are cancelled (no ambiguity error for globs).
+        assert captured['job_ids'] == [1, 2, 3]
+        assert "Pattern 'my-job-*' matched 3 running jobs." in msg
+
+    def test_glob_pattern_single_match(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state,
+                            'get_nonterminal_job_ids_by_name',
+                            lambda name, match_glob=False: [5])
+        monkeypatch.setattr(jobs_utils, 'cancel_jobs_by_id',
+                            lambda job_ids, **kwargs: 'cancelled.')
+        msg = jobs_utils.cancel_job_by_name('my-job-?')
+        assert "Pattern 'my-job-?' matched 1 running job." in msg
+
+    def test_glob_pattern_no_match(self, monkeypatch):
+        monkeypatch.setattr(managed_job_state,
+                            'get_nonterminal_job_ids_by_name',
+                            lambda name, match_glob=False: [])
+        msg = jobs_utils.cancel_job_by_name('nomatch-*')
+        assert msg == "No running job found matching name pattern 'nomatch-*'."

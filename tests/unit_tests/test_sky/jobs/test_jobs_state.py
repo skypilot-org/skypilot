@@ -1250,3 +1250,65 @@ class TestStatusExprSeam:
             fields=['job_id', 'status', 'task_id'])
         seq_d = [refined[j['job_id']] for j in desc]
         assert seq_d == sorted(seq_d, reverse=True), seq_d
+
+
+class TestGetNonterminalJobIdsByName:
+    """Tests for state.get_nonterminal_job_ids_by_name, incl. glob matching.
+
+    The seeded jobs have these names/statuses (see ``_seed_test_jobs``):
+      - job1: 'test-job-a' (PENDING, nonterminal)
+      - job2: 'test-job-b' (STARTING, nonterminal)
+      - job3: 'test-job-a' (RUNNING, nonterminal)
+      - job4: 'test-job-c' (SUCCEEDED, terminal)
+      - job5: 'test-job-d' (FAILED, terminal)
+    """
+
+    def test_exact_name_match(self, _seed_test_jobs):
+        ids = state.get_nonterminal_job_ids_by_name('test-job-a',
+                                                    all_users=True)
+        assert set(ids) == {
+            _seed_test_jobs['job_id1'], _seed_test_jobs['job_id3']
+        }
+
+    def test_exact_name_no_glob_expansion(self, _seed_test_jobs):
+        # Without match_glob, '*' is a literal and matches nothing.
+        ids = state.get_nonterminal_job_ids_by_name('test-job-*',
+                                                    all_users=True)
+        assert ids == []
+
+    def test_glob_star_matches_multiple(self, _seed_test_jobs):
+        ids = state.get_nonterminal_job_ids_by_name('test-job-*',
+                                                    all_users=True,
+                                                    match_glob=True)
+        # Matches the three nonterminal jobs; terminal jobs are excluded.
+        assert set(ids) == {
+            _seed_test_jobs['job_id1'],
+            _seed_test_jobs['job_id2'],
+            _seed_test_jobs['job_id3'],
+        }
+
+    def test_glob_question_mark(self, _seed_test_jobs):
+        ids = state.get_nonterminal_job_ids_by_name('test-job-?',
+                                                    all_users=True,
+                                                    match_glob=True)
+        assert set(ids) == {
+            _seed_test_jobs['job_id1'],
+            _seed_test_jobs['job_id2'],
+            _seed_test_jobs['job_id3'],
+        }
+
+    def test_glob_char_class(self, _seed_test_jobs):
+        ids = state.get_nonterminal_job_ids_by_name('test-job-[ab]',
+                                                    all_users=True,
+                                                    match_glob=True)
+        assert set(ids) == {
+            _seed_test_jobs['job_id1'],
+            _seed_test_jobs['job_id2'],
+            _seed_test_jobs['job_id3'],
+        }
+
+    def test_glob_no_match(self, _seed_test_jobs):
+        ids = state.get_nonterminal_job_ids_by_name('nomatch-*',
+                                                    all_users=True,
+                                                    match_glob=True)
+        assert ids == []

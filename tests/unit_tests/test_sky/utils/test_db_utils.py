@@ -428,3 +428,66 @@ class TestGetEngine:
             # Parent directory should be created
             expected_dir = runtime_dir / '.sky'
             assert expected_dir.exists()
+
+
+class TestGlobHelpers:
+    """Tests for the glob -> SQL helpers in db_utils."""
+
+    @pytest.mark.parametrize(
+        'glob_pattern,expected',
+        [
+            # '*' -> '%', '?' -> '_'
+            ('my-job-*', 'my-job-%'),
+            ('job-?', 'job-_'),
+            # Literal SQL wildcards are escaped so they are not treated as wildcards.
+            ('a%b_c', 'a\\%b\\_c'),
+            # Character classes pass through; negation [!..] -> [^..].
+            ('job-[ab]', 'job-[ab]'),
+            ('job-[!ab]', 'job-[^ab]'),
+        ])
+    def test_glob_to_sql_similar_pattern(self, glob_pattern, expected):
+        assert db_utils.glob_to_sql_similar_pattern(glob_pattern) == expected
+
+    def _make_names_engine(self):
+        engine = sqlalchemy.create_engine('sqlite:///:memory:')
+        metadata = sqlalchemy.MetaData()
+        table = sqlalchemy.Table('items', metadata,
+                                 sqlalchemy.Column('name', sqlalchemy.Text))
+        metadata.create_all(engine)
+        names = ['job-a', 'job-b', 'job-ab', 'other', 'job_literal']
+        with engine.begin() as conn:
+            conn.execute(table.insert(), [{'name': n} for n in names])
+        return engine, table
+
+    def test_glob_filter_sqlite_star(self):
+        engine, table = self._make_names_engine()
+        with engine.connect() as conn:
+            stmt = sqlalchemy.select(table.c.name).where(
+                db_utils.glob_filter(engine, table.c.name, 'job-*'))
+            matched = {row[0] for row in conn.execute(stmt)}
+        assert matched == {'job-a', 'job-b', 'job-ab'}
+
+    def test_glob_filter_sqlite_question_mark(self):
+        engine, table = self._make_names_engine()
+        with engine.connect() as conn:
+            stmt = sqlalchemy.select(table.c.name).where(
+                db_utils.glob_filter(engine, table.c.name, 'job-?'))
+            matched = {row[0] for row in conn.execute(stmt)}
+        assert matched == {'job-a', 'job-b'}
+
+    def test_glob_filter_sqlite_underscore_is_literal(self):
+        # An underscore in the pattern (not as glob's '?') should match a
+        # literal underscore, not any single character.
+        engine, table = self._make_names_engine()
+        with engine.connect() as conn:
+            stmt = sqlalchemy.select(table.c.name).where(
+                db_utils.glob_filter(engine, table.c.name, 'job_*'))
+            matched = {row[0] for row in conn.execute(stmt)}
+        assert matched == {'job_literal'}
+
+    def test_glob_filter_unsupported_dialect(self):
+        engine = mock.MagicMock()
+        engine.dialect.name = 'mysql'
+        column = mock.MagicMock()
+        with pytest.raises(ValueError, match='Unsupported database dialect'):
+            db_utils.glob_filter(engine, column, 'foo-*')
