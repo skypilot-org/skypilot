@@ -707,7 +707,8 @@ def get_expirable_clouds(
 
 
 def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
-    path_hash = hashlib.md5(path.encode()).hexdigest()[:6]
+    path_hash = hashlib.md5(path.encode(),
+                            usedforsecurity=False).hexdigest()[:6]
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
