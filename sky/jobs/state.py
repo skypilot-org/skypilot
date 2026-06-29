@@ -1901,15 +1901,9 @@ def get_managed_jobs_with_filters(
             if sort_column != spot_table.c.spot_job_id:
                 sort_column = sqlalchemy.func.max(sort_column)
             if sort_order == 'asc':
-                ordering = sort_column.asc()
+                job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
             else:
-                ordering = sort_column.desc()
-            # Keep jobs without a `submitted_at` (e.g. cancelled/failed while
-            # still PENDING) deterministically at the end regardless of DB
-            # engine NULL-ordering semantics.
-            if sort_by == 'submitted_at':
-                ordering = ordering.nulls_last()
-            job_ids_subquery = job_ids_subquery.order_by(ordering)
+                job_ids_subquery = job_ids_subquery.order_by(sort_column.desc())
         else:
             # Default sort: job_id desc (newest first)
             job_ids_subquery = job_ids_subquery.order_by(
@@ -1960,15 +1954,11 @@ def get_managed_jobs_with_filters(
     if sort_by and sort_by in sort_field_map:
         sort_column = sort_field_map[sort_by]
         if sort_order == 'asc':
-            ordering = sort_column.asc()
+            query = query.order_by(sort_column.asc(),
+                                   spot_table.c.task_id.asc())
         else:
-            ordering = sort_column.desc()
-        # Keep jobs without a `submitted_at` (e.g. cancelled/failed while still
-        # PENDING) deterministically at the end regardless of DB engine
-        # NULL-ordering semantics.
-        if sort_by == 'submitted_at':
-            ordering = ordering.nulls_last()
-        query = query.order_by(ordering, spot_table.c.task_id.asc())
+            query = query.order_by(sort_column.desc(),
+                                   spot_table.c.task_id.asc())
     else:
         # Default sort: job_id desc, task_id asc
         query = query.order_by(spot_table.c.spot_job_id.desc(),
@@ -2856,8 +2846,8 @@ async def set_starting_async(job_id: int,
             # backfill it here if it is missing (e.g. a legacy row created
             # before that change) so we never clobber the original submission
             # time on a (re-)entry into STARTING.
-            # TODO(v1.2): remove this COALESCE backcompat (~2 minor versions
-            # after this change ships, i.e. after v1.2). It only backfills
+            # TODO(cooperc): remove this COALESCE backcompat in v0.14.0 (~2
+            # minor releases after this change ships). It only backfills
             # submitted_at for jobs created before submitted_at was recorded
             # at queue-entry (set_pending); once no such rows remain,
             # set_starting_async can stop writing submitted_at entirely.
