@@ -216,7 +216,7 @@ export function Clusters() {
         if (cancelled) return;
         setAuthResolved(true);
         if (info && info.id && info.id !== 'local') {
-          setCurrentUser({ id: info.id, name: info.name || info.id });
+          setCurrentUser({ id: info.id, name: info.name });
         } else {
           setUserScope('all');
         }
@@ -271,8 +271,8 @@ export function Clusters() {
       }
 
       const isAnonymous = authResolved && !currentUser;
-      const expectedScope =
-        router.query.owner === 'all' ? 'all' : isAnonymous ? 'all' : 'mine';
+      const forceAllScope = router.query.owner === 'all' || isAnonymous;
+      const expectedScope = forceAllScope ? 'all' : 'mine';
       if (userScope !== expectedScope) {
         setUserScope(expectedScope);
       }

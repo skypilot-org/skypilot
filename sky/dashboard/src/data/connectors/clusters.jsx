@@ -671,16 +671,11 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
-    // Scope the active-cluster fetch server-side when we only want the current
-    // user's clusters. The all-users variant keeps the default (no-arg) cache
-    // key so it stays shared with the rest of the dashboard.
     const fetchActiveClusters = () =>
       allUsers
         ? dashboardCache.get(getClusters)
         : dashboardCache.get(getClusters, [{ allUsers: false }]);
 
-    // The cost_report (history) endpoint always returns every user's rows, so
-    // scope them here to match the server-scoped active clusters.
     const belongsToCurrentUser = (c) =>
       allUsers ||
       !currentUser ||
@@ -705,6 +700,7 @@ export function useClusterData(options = {}) {
       );
       allClusters = [
         ...activeClusters.map((c) => ({ ...c, isHistorical: false })),
+        // cost_report returns every user's rows, so scope history client-side.
         ...historyClusters
           .filter(
             (c) =>
