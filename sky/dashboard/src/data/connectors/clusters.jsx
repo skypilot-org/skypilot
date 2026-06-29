@@ -72,11 +72,14 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
-export async function getClusters({ clusterNames = null } = {}) {
+export async function getClusters({
+  clusterNames = null,
+  allUsers = true,
+} = {}) {
   try {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
-      all_users: true,
+      all_users: allUsers,
       include_credentials: false,
       include_handle: false,
       summary_response: clusterNames == null,
@@ -543,6 +546,13 @@ export function useClusterDetails({ cluster, job = null }) {
  * @param {boolean} options.showHistory - Whether to include historical clusters
  * @param {number} options.historyDays - Number of days of history to fetch
  * @param {number} options.refreshInterval - Auto-refresh interval in ms
+ * @param {Object} options.sortConfig - {key, direction} sort configuration
+ * @param {Array} options.filters - Active filter definitions
+ * @param {boolean} options.allUsers - When false, ask the server to return
+ *   only the current user's clusters (scopes the fetch instead of filtering
+ *   client-side).
+ * @param {Object} options.currentUser - Logged-in user {id, name}, used to
+ *   scope the historical (cost_report) rows that the server doesn't filter.
  * @returns {Object} Cluster data with pagination state and actions
  */
 export function useClusterData(options = {}) {
@@ -552,6 +562,8 @@ export function useClusterData(options = {}) {
     refreshInterval = null,
     sortConfig = { key: null, direction: 'ascending' },
     filters = [],
+    allUsers = true,
+    currentUser = null,
   } = options;
 
   // Convert sortConfig to API format
@@ -581,15 +593,15 @@ export function useClusterData(options = {}) {
   const [isServerPagination, setIsServerPagination] = useState(false);
   const isInitialMount = useRef(true);
 
-  // Reset to page 1 when filters change, but skip on initial mount
-  // so the page number read from the URL isn't overwritten.
+  // Reset to page 1 when filters or ownership scope change, but skip on
+  // initial mount so the page number read from the URL isn't overwritten.
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
     setPage(1);
-  }, [filtersKey]);
+  }, [filtersKey, allUsers]);
 
   /**
    * Fetch clusters using server-side pagination (plugin path)
@@ -607,6 +619,7 @@ export function useClusterData(options = {}) {
         sortBy,
         sortOrder,
         filters,
+        allUsers,
       },
     ]);
 
@@ -634,13 +647,23 @@ export function useClusterData(options = {}) {
         sortBy,
         sortOrder,
         filters,
+        allUsers,
       };
       dashboardCache
         .get(pluginFetch, [nextPageOptions], { ttl: 30000 })
         .then(() => console.log('[useClusterData] Prefetched page', page + 1))
         .catch((err) => console.warn('[useClusterData] Prefetch failed:', err));
     }
-  }, [page, limit, showHistory, historyDays, sortBy, sortOrder, filters]);
+  }, [
+    page,
+    limit,
+    showHistory,
+    historyDays,
+    sortBy,
+    sortOrder,
+    filters,
+    allUsers,
+  ]);
 
   /**
    * Fetch clusters using client-side pagination (default path)
@@ -648,9 +671,25 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
+    // Scope the active-cluster fetch server-side when we only want the current
+    // user's clusters. The all-users variant keeps the default (no-arg) cache
+    // key so it stays shared with the rest of the dashboard.
+    const fetchActiveClusters = () =>
+      allUsers
+        ? dashboardCache.get(getClusters)
+        : dashboardCache.get(getClusters, [{ allUsers: false }]);
+
+    // The cost_report (history) endpoint always returns every user's rows, so
+    // scope them here to match the server-scoped active clusters.
+    const belongsToCurrentUser = (c) =>
+      allUsers ||
+      !currentUser ||
+      c.user_hash === currentUser.id ||
+      c.user === currentUser.name;
+
     let allClusters;
     if (showHistory) {
-      const activeClusters = await dashboardCache.get(getClusters);
+      const activeClusters = await fetchActiveClusters();
       let historyClusters = [];
       try {
         historyClusters = await dashboardCache.get(getClusterHistory, [
@@ -669,12 +708,14 @@ export function useClusterData(options = {}) {
         ...historyClusters
           .filter(
             (c) =>
-              c.status === 'TERMINATED' && !activeHashes.has(c.cluster_hash)
+              c.status === 'TERMINATED' &&
+              !activeHashes.has(c.cluster_hash) &&
+              belongsToCurrentUser(c)
           )
           .map((c) => ({ ...c, isHistorical: true })),
       ];
     } else {
-      const activeClusters = await dashboardCache.get(getClusters);
+      const activeClusters = await fetchActiveClusters();
       allClusters = activeClusters.map((c) => ({
         ...c,
         isHistorical: false,
@@ -693,7 +734,7 @@ export function useClusterData(options = {}) {
     setHasNext(page < clientTotalPages);
     setHasPrev(page > 1);
     setIsServerPagination(false);
-  }, [showHistory, historyDays, page, limit]);
+  }, [showHistory, historyDays, page, limit, allUsers, currentUser]);
 
   /**
    * Main fetch function - chooses server or client path

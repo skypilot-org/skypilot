@@ -734,6 +734,21 @@ export function ClusterTable({
     return 10;
   };
 
+  // An explicit User filter from the dropdown overrides the My/All toggle, so
+  // in that case we fetch every user's clusters and let the filter match.
+  const hasExplicitUserFilter = (filters || []).some(
+    (f) => (f.property || '').toLowerCase() === 'user' && f.value
+  );
+
+  // Scope the fetch to the current user server-side ("My Clusters") instead of
+  // pulling everyone's clusters and filtering client-side. Falls back to all
+  // users when the caller is anonymous or an explicit User filter is active.
+  const allUsers = !(
+    userScope === 'mine' &&
+    currentUser &&
+    !hasExplicitUserFilter
+  );
+
   // Use the cluster data hook (supports plugin override for server-side pagination)
   const {
     data: hookData,
@@ -757,6 +772,8 @@ export function ClusterTable({
     filters,
     initialPage: getInitialPage(),
     initialLimit: getInitialLimit(),
+    allUsers,
+    currentUser,
   });
 
   // Sync page/limit to URL query params.
@@ -872,18 +889,10 @@ export function ClusterTable({
     };
 
     // For server-side pagination, server already handles filtering - just apply sorting
-    // For client-side pagination, we filter/sort the full data then paginate
-    let dataToProcess = isServerPagination ? hookData : allData;
-
-    const hasExplicitUserFilter = (filters || []).some(
-      (f) => (f.property || '').toLowerCase() === 'user' && f.value
-    );
-    if (userScope === 'mine' && currentUser && !hasExplicitUserFilter) {
-      dataToProcess = (dataToProcess || []).filter(
-        (item) =>
-          item.user_hash === currentUser.id || item.user === currentUser.name
-      );
-    }
+    // For client-side pagination, we filter/sort the full data then paginate.
+    // The current-user ("My Clusters") scope is applied server-side via the
+    // allUsers flag on useClusterData, so no client-side owner filter here.
+    const dataToProcess = isServerPagination ? hookData : allData;
 
     if (!isServerPagination) {
       const historicalCount = (allData || []).filter(
@@ -904,27 +913,44 @@ export function ClusterTable({
       : filterData(dataToProcess, filters);
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [
-    hookData,
-    allData,
-    sortConfig,
-    filters,
-    isServerPagination,
-    userScope,
-    currentUser,
-  ]);
+  }, [hookData, allData, sortConfig, filters, isServerPagination]);
 
-  // Number of clusters in the current view owned by *other* users, i.e. how
-  // many rows switching to "All Clusters" would actually reveal. Used to gate
-  // the empty-state CTA so we don't nudge to All when there's nothing to show.
-  const othersTotal = useMemo(() => {
-    if (!currentUser) return 0;
-    const source = isServerPagination ? hookData : allData;
-    return (source || []).filter(
-      (item) =>
-        item.user_hash !== currentUser.id && item.user !== currentUser.name
-    ).length;
-  }, [hookData, allData, isServerPagination, currentUser]);
+  // Number of clusters owned by *other* users, i.e. how many rows switching to
+  // "All Clusters" would actually reveal. Used to gate the empty-state CTA so
+  // we don't nudge to All when there's nothing to show. Because the table is
+  // now scoped to the current user server-side, the scoped data no longer
+  // contains other users' clusters; probe the shared all-users cache (already
+  // warm from the preloader, so this is typically a free read) only when the
+  // "My Clusters" view comes back empty.
+  const [othersTotal, setOthersTotal] = useState(0);
+  const scopedEmpty = isServerPagination
+    ? total === 0
+    : sortedData.length === 0;
+  useEffect(() => {
+    let cancelled = false;
+    const scopedToMine =
+      userScope === 'mine' && currentUser && !hasExplicitUserFilter;
+    if (!scopedToMine || hookLoading || !scopedEmpty) {
+      setOthersTotal(0);
+      return;
+    }
+    (async () => {
+      try {
+        const all = await dashboardCache.get(getClusters);
+        if (cancelled) return;
+        const others = (all || []).filter(
+          (item) =>
+            item.user_hash !== currentUser.id && item.user !== currentUser.name
+        ).length;
+        setOthersTotal(others);
+      } catch (e) {
+        if (!cancelled) setOthersTotal(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userScope, currentUser, hasExplicitUserFilter, hookLoading, scopedEmpty]);
 
   // Expose refresh to parent component
   React.useEffect(() => {
@@ -1355,9 +1381,7 @@ export function ClusterTable({
               ) : (
                 userScope === 'mine' &&
                 currentUser &&
-                !(filters || []).some(
-                  (f) => (f.property || '').toLowerCase() === 'user' && f.value
-                ) &&
+                !hasExplicitUserFilter &&
                 othersTotal > 0 ? (
                   <EmptyTableState
                     colSpan={totalColSpan}
