@@ -97,7 +97,6 @@ const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
 const GPU_CONSUMING_JOB_STATUSES = new Set([
   'RUNNING',
   'RECOVERING',
-  'EMERGENCY_RECOVERING',
   'CANCELLING',
 ]);
 

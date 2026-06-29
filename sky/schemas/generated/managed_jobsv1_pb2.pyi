@@ -23,7 +23,6 @@ class ManagedJobStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     MANAGED_JOB_STATUS_FAILED_NO_RESOURCE: _ClassVar[ManagedJobStatus]
     MANAGED_JOB_STATUS_FAILED_CONTROLLER: _ClassVar[ManagedJobStatus]
     MANAGED_JOB_STATUS_WINDING_DOWN: _ClassVar[ManagedJobStatus]
-    MANAGED_JOB_STATUS_EMERGENCY_RECOVERING: _ClassVar[ManagedJobStatus]
 
 class ManagedJobScheduleState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -51,7 +50,6 @@ MANAGED_JOB_STATUS_FAILED_PRECHECKS: ManagedJobStatus
 MANAGED_JOB_STATUS_FAILED_NO_RESOURCE: ManagedJobStatus
 MANAGED_JOB_STATUS_FAILED_CONTROLLER: ManagedJobStatus
 MANAGED_JOB_STATUS_WINDING_DOWN: ManagedJobStatus
-MANAGED_JOB_STATUS_EMERGENCY_RECOVERING: ManagedJobStatus
 MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED: ManagedJobScheduleState
 DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID: ManagedJobScheduleState
 MANAGED_JOB_SCHEDULE_STATE_INACTIVE: ManagedJobScheduleState

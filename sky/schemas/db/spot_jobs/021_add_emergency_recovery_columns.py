@@ -1,14 +1,18 @@
-"""Add emergency recovery columns to job_info and spot tables.
+"""Add emergency recovery + recovery source columns.
 
 These columns support automatic recovery from unexpected controller errors
-(EMERGENCY_RECOVERING status):
+(emergency recovery) and let consumers classify why a job is recovering:
 - job_info.emergency_recovery_count: recovery attempts used in the current
   episode (bounded retry budget).
 - job_info.last_emergency_recovery_at: timestamp of the most recent attempt,
   used for backoff and budget decay.
-- spot.status_before_emergency: the task status at the moment it entered
-  EMERGENCY_RECOVERING, so the resume logic can re-attach to a healthy
-  RUNNING cluster instead of tearing it down.
+- spot.status_before_emergency: the task status immediately before an
+  emergency recovery; non-NULL marks a RECOVERING task as emergency-origin so
+  the resume logic can re-attach to a healthy cluster instead of tearing it
+  down.
+- job_events.recovery_source: for RECOVERING events, why the job is
+  recovering (FAILURE / EMERGENCY / HA). NULL on other events and on
+  RECOVERING events written before this column existed (treated as FAILURE).
 
 Revision ID: 021
 Revises: 020
@@ -43,6 +47,10 @@ def upgrade():
                                              server_default=None)
         db_utils.add_column_to_table_alembic('spot',
                                              'status_before_emergency',
+                                             sa.Text(),
+                                             server_default=None)
+        db_utils.add_column_to_table_alembic('job_events',
+                                             'recovery_source',
                                              sa.Text(),
                                              server_default=None)
 

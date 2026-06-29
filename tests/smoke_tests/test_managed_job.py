@@ -3301,9 +3301,11 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
 
     Mutating job_info.schedule_state out from under the controller makes its
     next schedule-state transition fail unexpectedly (the incident signature
-    this feature addresses). The job must pass through EMERGENCY_RECOVERING
-    and still end SUCCEEDED, with exactly one recovery attempt recorded and
-    no duplicate cluster.
+    this feature addresses). The job must emergency-recover — surfacing as a
+    RECOVERING job event tagged recovery_source=EMERGENCY, with exactly one
+    recovery attempt recorded — and still end SUCCEEDED with no duplicate
+    cluster. (Emergency recovery reuses the normal RECOVERING status; the
+    EMERGENCY source on the event is the distinguishing signal.)
 
     The mutation needs direct access to the managed-jobs DB, so the test
     only runs where that access exists: local API server (both
@@ -3335,6 +3337,13 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
                     "WHERE status='STARTING')")
     count_sql = ('SELECT emergency_recovery_count FROM job_info '
                  f"WHERE name='{name}'")
+    # Count of RECOVERING events tagged EMERGENCY — the distinguishing
+    # signal that this was an emergency recovery (not a preemption).
+    emergency_event_sql = (
+        'SELECT COUNT(*) FROM job_events e JOIN job_info j '
+        'ON e.spot_job_id = j.spot_job_id '
+        f"WHERE j.name='{name}' AND e.new_status='RECOVERING' "
+        "AND e.recovery_source='EMERGENCY'")
 
     def _run_sql_locally(sql: str) -> int:
         """Run sql against the local server's managed-jobs DB.
@@ -3423,25 +3432,27 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
                 'recovery NOT exercised.')
         yield 'Mutated schedule_state during LAUNCHING.'
 
-        # Subject under test, strict from here on: the job must surface
-        # EMERGENCY_RECOVERING (the backoff before the retry is >= 60s, so
-        # a 5s poll cannot miss it), and must never duplicate the cluster.
+        # Subject under test, strict from here on: an EMERGENCY-tagged
+        # RECOVERING event must appear (the backoff before the retry is
+        # >= 60s, so a 5s poll cannot miss it), and the cluster must never
+        # be duplicated.
         observed = False
         deadline = time.time() + 300
         while time.time() < deadline:
+            if run_sql(emergency_event_sql) >= 1:
+                observed = True
+                break
             jobs_list = sky.get(sky.jobs.queue(refresh=False))
             job = [j for j in jobs_list if j['job_name'] == name]
             status = job[0]['status'] if job else None
-            if status == sky.ManagedJobStatus.EMERGENCY_RECOVERING:
-                observed = True
-                break
             assert status not in (
                 sky.ManagedJobStatus.FAILED_CONTROLLER,
                 None), (f'Job failed instead of emergency-recovering: {status}')
+            assert _count_job_clusters() <= 1, 'Duplicate cluster detected.'
             time.sleep(5)
-        assert observed, ('Job never entered EMERGENCY_RECOVERING after the '
+        assert observed, ('No EMERGENCY-tagged RECOVERING event after the '
                           'schedule-state mutation.')
-        yield 'Observed EMERGENCY_RECOVERING.'
+        yield 'Observed an EMERGENCY recovery event.'
         assert _count_job_clusters() <= 1, 'Duplicate cluster detected.'
 
         # Exactly one recovery attempt for exactly one mutation.

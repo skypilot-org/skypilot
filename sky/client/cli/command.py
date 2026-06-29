@@ -6010,11 +6010,9 @@ def jobs_queue(verbose: bool,
 
     - ``RUNNING``: Job is running.
 
-    - ``RECOVERING``: The cluster of the job is recovering from a preemption.
-
-    - ``EMERGENCY_RECOVERING``: The job's controller hit an unexpected
-      internal error, and SkyPilot is automatically restarting the job's
-      management. The job itself may still be running unaffected.
+    - ``RECOVERING``: The job is recovering — from a cluster preemption or
+      failure, or from a controller-side issue (the controller restarted or
+      hit an unexpected internal error and is restarting job management).
 
     - ``SUCCEEDED``: Job succeeded.
 

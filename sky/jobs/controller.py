@@ -656,32 +656,44 @@ class JobController:
         # If resuming from a controller failure, check the previous state
         # and determine if we need to force recovery.
         force_transit_to_recovering = False
+        # If we end up forcing recovery on resume, why: a controller-restart
+        # resume is HA; an emergency-origin RECOVERING is EMERGENCY. (Only
+        # consumed when force_transit_to_recovering is True.)
+        resume_recovery_source = managed_job_state.RecoverySource.HA
         if is_resume:
             prev_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
                     job_id=self._job_id, task_id=task_id))
 
-            if (prev_status ==
-                    managed_job_state.ManagedJobStatus.EMERGENCY_RECOVERING):
-                # The controller hit an unexpected error while managing this
-                # task. Resume based on the status the task had when the
-                # emergency began: a task that was RUNNING re-attaches to
-                # its (likely still healthy) cluster without restarting the
-                # workload; anything else falls through to forced recovery
-                # below, which cleans up the cluster before relaunching.
+            # A RECOVERING task with a saved pre-emergency status is
+            # emergency-origin (the controller hit an unexpected error while
+            # managing it). Resume based on the status the task had when the
+            # emergency began: a task that was RUNNING re-attaches to its
+            # (likely still healthy) cluster without restarting the workload;
+            # anything else falls through to forced recovery below, which
+            # cleans up the cluster before relaunching. Checked before the
+            # terminal/CANCELLING handling below, which still uses the real
+            # current status (the marker can linger on a CANCELLING row until
+            # set_cancelled clears it, so we gate on status == RECOVERING).
+            if prev_status == managed_job_state.ManagedJobStatus.RECOVERING:
                 saved_status = await (
                     managed_job_state.get_status_before_emergency_async(
                         job_id=self._job_id, task_id=task_id))
-                logger.info(f'Task {task_id} is in emergency recovery; status '
-                            f'before the emergency: {saved_status}')
-                if saved_status == managed_job_state.ManagedJobStatus.RUNNING:
-                    await managed_job_state.set_emergency_recovered_async(
-                        self._job_id,
-                        task_id,
-                        restored_time=time.time(),
-                        callback_func=managed_job_utils.event_callback_func(
-                            job_id=self._job_id, task_id=task_id, task=task))
-                prev_status = saved_status
+                if saved_status is not None:
+                    resume_recovery_source = (
+                        managed_job_state.RecoverySource.EMERGENCY)
+                    logger.info(f'Task {task_id} is in emergency recovery; '
+                                f'status before the emergency: {saved_status}')
+                    if (saved_status ==
+                            managed_job_state.ManagedJobStatus.RUNNING):
+                        await managed_job_state.set_emergency_recovered_async(
+                            self._job_id,
+                            task_id,
+                            restored_time=time.time(),
+                            callback_func=managed_job_utils.event_callback_func(
+                                job_id=self._job_id, task_id=task_id,
+                                task=task))
+                    prev_status = saved_status
 
             if prev_status is not None:
                 if prev_status.is_terminal():
@@ -714,6 +726,7 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
+            resume_recovery_source=resume_recovery_source,
         )
         if result is not None:
             return result
@@ -726,6 +739,7 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
+            resume_recovery_source=resume_recovery_source,
         )
 
     async def _run_batch_coordinator_task(
@@ -825,6 +839,8 @@ class JobController:
         callback_func: Optional[typing.Callable] = None,
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
+        resume_recovery_source: managed_job_state.RecoverySource = (
+            managed_job_state.RecoverySource.HA),
         on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
     ) -> bool:
         """Monitor a single task until completion with recovery support.
@@ -1214,6 +1230,12 @@ class JobController:
             # failed or the job status is failed to be fetched.
             logger.info(f'Starting recovery for task {task_id}, '
                         f'it is currently {job_status}')
+            # The forced recovery on the first post-resume iteration is
+            # controller-restart-driven (HA) or emergency-origin; any later
+            # recovery in this loop is a real preemption/failure (FAILURE).
+            recovery_source = (resume_recovery_source
+                               if force_transit_to_recovering else
+                               managed_job_state.RecoverySource.FAILURE)
             await managed_job_state.set_recovering_async(
                 job_id=self._job_id,
                 task_id=task_id,
@@ -1221,6 +1243,7 @@ class JobController:
                 callback_func=callback_func,
                 external_failures=external_failures,
                 cluster_event_reason=cluster_event_reason,
+                recovery_source=recovery_source,
             )
 
             recovered_time = await executor.recover()
@@ -1334,6 +1357,8 @@ class JobController:
         job_group_name: str,
         all_tasks_handles: List[Tuple['sky.Task', typing.Any]],
         force_transit_to_recovering: bool = False,
+        resume_recovery_source: managed_job_state.RecoverySource = (
+            managed_job_state.RecoverySource.HA),
     ) -> bool:
         """Monitor a single task in a JobGroup until completion.
 
@@ -1386,6 +1411,7 @@ class JobController:
             job_id_on_pool_cluster=None,
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
+            resume_recovery_source=resume_recovery_source,
             on_recovery=on_recovery,
         )
         if result is not None:
@@ -1398,6 +1424,7 @@ class JobController:
             job_id_on_pool_cluster=None,
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
+            resume_recovery_source=resume_recovery_source,
             on_recovery=on_recovery,
         )
 
@@ -1445,30 +1472,40 @@ class JobController:
         task_resume_info: Dict[int, Tuple[
             Optional[managed_job_state.ManagedJobStatus], bool]] = {}
 
+        # Per-task recovery source for any task that ends up force-recovering
+        # on resume (HA by default; EMERGENCY for emergency-origin tasks).
+        task_recovery_source: Dict[int, managed_job_state.RecoverySource] = {}
+
         for task_id, task in enumerate(tasks):
             task_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
                     job_id=self._job_id, task_id=task_id))
+            task_recovery_source[task_id] = (
+                managed_job_state.RecoverySource.HA)
 
-            if (task_status ==
-                    managed_job_state.ManagedJobStatus.EMERGENCY_RECOVERING):
-                # Resume based on the status the task had when the emergency
-                # began; see the same logic in _run_one_task. RUNNING tasks
-                # are restored and re-attached; anything else is classified
-                # below from the saved status (typically forced recovery).
+            if task_status == managed_job_state.ManagedJobStatus.RECOVERING:
+                # A RECOVERING task with a saved pre-emergency status is
+                # emergency-origin; see the same logic in _run_one_task.
+                # RUNNING tasks are restored and re-attached; anything else is
+                # classified below from the saved status (forced recovery).
                 saved_status = await (
                     managed_job_state.get_status_before_emergency_async(
                         job_id=self._job_id, task_id=task_id))
-                logger.info(f'Task {task_id} is in emergency recovery; status '
-                            f'before the emergency: {saved_status}')
-                if saved_status == managed_job_state.ManagedJobStatus.RUNNING:
-                    await managed_job_state.set_emergency_recovered_async(
-                        self._job_id,
-                        task_id,
-                        restored_time=time.time(),
-                        callback_func=managed_job_utils.event_callback_func(
-                            job_id=self._job_id, task_id=task_id, task=task))
-                task_status = saved_status
+                if saved_status is not None:
+                    task_recovery_source[task_id] = (
+                        managed_job_state.RecoverySource.EMERGENCY)
+                    logger.info(f'Task {task_id} is in emergency recovery; '
+                                f'status before the emergency: {saved_status}')
+                    if (saved_status ==
+                            managed_job_state.ManagedJobStatus.RUNNING):
+                        await managed_job_state.set_emergency_recovered_async(
+                            self._job_id,
+                            task_id,
+                            restored_time=time.time(),
+                            callback_func=managed_job_utils.event_callback_func(
+                                job_id=self._job_id, task_id=task_id,
+                                task=task))
+                    task_status = saved_status
 
             if task_status is None or task_status == (
                     managed_job_state.ManagedJobStatus.PENDING):
@@ -1693,7 +1730,8 @@ class JobController:
             assert executor is not None
             coro = self._monitor_job_group_task(task_id, task, cluster_name,
                                                 executor, job_group_name,
-                                                tasks_handles, force_recovery)
+                                                tasks_handles, force_recovery,
+                                                task_recovery_source[task_id])
             monitor_async_tasks[task_id] = asyncio.create_task(
                 coro, name=f'monitor_{task.name}')
 
@@ -2083,10 +2121,11 @@ class JobController:
 
         Sequence: verify we still own the job, spend one unit of the
         bounded retry budget (fenced on ownership), mark the latest task
-        EMERGENCY_RECOVERING (saving its prior status for the resume
-        logic), and release any stuck LAUNCHING schedule state. Every step
-        is idempotent so that the outer retry in _handle_unexpected_error
-        can safely re-run the whole sequence after a transient failure.
+        RECOVERING with recovery_source=EMERGENCY (saving its prior status
+        for the resume logic), and release any stuck LAUNCHING schedule
+        state. Every step is idempotent so that the outer retry in
+        _handle_unexpected_error can safely re-run the whole sequence after
+        a transient failure.
 
         May raise on DB errors (handled by the caller's retry layer).
         """
@@ -2142,11 +2181,11 @@ class JobController:
             self._usurped = True
             return (_EmergencyDecision.USURPED, None)
 
-        # 3. Mark the latest task EMERGENCY_RECOVERING, saving its prior
-        # status so the resume logic can re-attach to a healthy RUNNING
-        # cluster instead of tearing it down. Use the latest task (it is
-        # the only one that can be mid-flight in a chain DAG; for job
-        # groups the resume classification handles the other tasks from
+        # 3. Mark the latest task RECOVERING (recovery_source=EMERGENCY),
+        # saving its prior status so the resume logic can re-attach to a
+        # healthy RUNNING cluster instead of tearing it down. Use the latest
+        # task (it is the only one that can be mid-flight in a chain DAG; for
+        # job groups the resume classification handles the other tasks from
         # their raw statuses).
         task_id, _ = (await managed_job_state.get_latest_task_id_status_async(
             self._job_id))

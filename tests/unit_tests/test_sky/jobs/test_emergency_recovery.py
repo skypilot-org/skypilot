@@ -97,6 +97,19 @@ def _get_job_info_row(engine, job_id: int = 1):
     return dict(row)
 
 
+def _get_recovering_events(engine, job_id: int = 1):
+    """recovery_source of each RECOVERING job event, oldest first."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sqlalchemy.select(state.job_events_table.c.recovery_source).where(
+                sqlalchemy.and_(
+                    state.job_events_table.c.spot_job_id == job_id,
+                    state.job_events_table.c.new_status ==
+                    state.ManagedJobStatus.RECOVERING.value,
+                )).order_by(state.job_events_table.c.id.asc())).fetchall()
+    return [r[0] for r in rows]
+
+
 def _make_callback():
     calls = []
 
@@ -121,13 +134,17 @@ class TestEmergencyRecoveryState:
 
         assert applied is True
         row = _get_task_row(engine)
-        assert row['status'] == 'EMERGENCY_RECOVERING'
+        # Visible status is the normal RECOVERING; the emergency cause is on
+        # the event (recovery_source) and the saved prior status.
+        assert row['status'] == 'RECOVERING'
         assert row['status_before_emergency'] == 'RUNNING'
-        assert calls == ['EMERGENCY_RECOVERING']
+        assert calls == ['RECOVERING']
         events = state.get_job_events(1)
-        assert any(
-            e['new_status'] == state.ManagedJobStatus.EMERGENCY_RECOVERING and
-            e['reason'] == 'test reason' for e in events)
+        assert any(e['new_status'] == state.ManagedJobStatus.RECOVERING and
+                   e['reason'] == 'test reason' for e in events)
+        # The RECOVERING event is tagged EMERGENCY.
+        recovering_events = _get_recovering_events(engine, 1)
+        assert recovering_events == [state.RecoverySource.EMERGENCY.value]
 
     @pytest.mark.asyncio
     async def test_set_emergency_recovering_rerun_keeps_saved_status(
@@ -187,6 +204,69 @@ class TestEmergencyRecoveryState:
         assert row['last_recovered_at'] == started_running_at
 
     @pytest.mark.asyncio
+    async def test_set_recovering_records_source(self,
+                                                 _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        callback, _ = _make_callback()
+
+        # Default source is FAILURE (preemption/failure), and a normal
+        # recovery does not set the emergency marker.
+        _seed_job(engine, job_id=1, status='RUNNING')
+        await state.set_recovering_async(1,
+                                         0,
+                                         force_transit_to_recovering=False,
+                                         callback_func=callback)
+        assert _get_recovering_events(
+            engine, 1) == [state.RecoverySource.FAILURE.value]
+        assert _get_task_row(engine, 1)['status_before_emergency'] is None
+
+        # An HA-tagged force recovery records HA.
+        _seed_job(engine, job_id=2, status='STARTING')
+        await state.set_recovering_async(
+            2,
+            0,
+            force_transit_to_recovering=True,
+            callback_func=callback,
+            recovery_source=state.RecoverySource.HA)
+        assert _get_recovering_events(engine,
+                                      2) == [state.RecoverySource.HA.value]
+
+    @pytest.mark.asyncio
+    async def test_emergency_marker_cleared_on_terminal_and_running(
+            self, _mock_managed_jobs_db_conn):
+        # A stale status_before_emergency must not survive into a later
+        # unrelated recovery; every exit transition clears it.
+        engine = _mock_managed_jobs_db_conn
+        callback, _ = _make_callback()
+
+        async def _assert_cleared_after(setter):
+            _seed_job(engine, job_id=1, status='RUNNING')
+            await state.set_emergency_recovering_async(1,
+                                                       0,
+                                                       reason='x',
+                                                       callback_func=callback)
+            assert _get_task_row(engine, 1)['status_before_emergency'] == \
+                'RUNNING'
+            await setter()
+            assert _get_task_row(engine, 1)['status_before_emergency'] is None
+            # reset for the next sub-case
+            with engine.connect() as conn:
+                conn.execute(state.spot_table.delete())
+                conn.execute(state.job_info_table.delete())
+                conn.commit()
+
+        # The reachable exits from an emergency RECOVERING: forced/normal
+        # recovery completing (RECOVERING -> RUNNING), and failing the task.
+        await _assert_cleared_after(lambda: state.set_recovered_async(
+            1, 0, recovered_time=time.time(), callback_func=callback))
+        await _assert_cleared_after(lambda: state.set_failed_async(
+            1,
+            0,
+            failure_type=state.ManagedJobStatus.FAILED,
+            failure_reason='boom',
+            callback_func=callback))
+
+    @pytest.mark.asyncio
     async def test_set_emergency_recovered_restores_running(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
@@ -209,7 +289,7 @@ class TestEmergencyRecoveryState:
         assert row['last_recovered_at'] == restored_time
         # recovery_count counts cluster recoveries; a re-attach is not one.
         assert row['recovery_count'] == 0
-        assert calls == ['EMERGENCY_RECOVERING', 'EMERGENCY_RECOVERED']
+        assert calls == ['RECOVERING', 'EMERGENCY_RECOVERED']
 
     @pytest.mark.asyncio
     async def test_set_emergency_recovered_requires_emergency_status(
