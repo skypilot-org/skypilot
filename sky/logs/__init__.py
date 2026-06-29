@@ -6,6 +6,19 @@ from sky import skypilot_config
 from sky.logs.agent import LoggingAgent
 from sky.logs.aws import CloudwatchLoggingAgent
 from sky.logs.gcp import GCPLoggingAgent
+from sky.logs.reader import get_log_reader
+from sky.logs.reader import LogReader
+from sky.logs.reader import register_log_reader
+
+__all__ = [
+    'LoggingAgent',
+    'CloudwatchLoggingAgent',
+    'GCPLoggingAgent',
+    'LogReader',
+    'get_log_reader',
+    'register_log_reader',
+    'get_logging_agent',
+]
 
 
 def get_logging_agent() -> Optional[LoggingAgent]:

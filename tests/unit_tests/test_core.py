@@ -113,3 +113,64 @@ class TestEnabledCloudsWorkspacePermission:
              mock.patch('sky.core.skypilot_config.local_active_workspace_ctx'):
             core.enabled_clouds(workspace=None)
         mock_check.assert_not_called()
+
+
+class _FakeLogReader:
+    """A LogReader stub recording its call and returning a fixed exit code."""
+
+    def __init__(self, result) -> None:
+        self.result = result
+        self.calls = []
+
+    def read_cluster_job_logs(self, cluster_name, job_id, *, follow, tail):
+        self.calls.append((cluster_name, job_id, follow, tail))
+        return self.result
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_readback_when_cluster_not_up(
+        mock_check_cluster_available) -> None:
+    """When the cluster is not up, the reader's exit code is returned."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterNotUpError(
+        'not up', cluster_status=None)
+    reader = _FakeLogReader(result=0)
+    with mock.patch('sky.logs.get_log_reader', return_value=reader):
+        ret = core.tail_logs('test-cluster', job_id=7, follow=False, tail=10)
+    assert ret == 0
+    assert reader.calls == [('test-cluster', 7, False, 10)]
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_readback_propagates_exit_code(
+        mock_check_cluster_available) -> None:
+    """A non-zero exit code from the reader is propagated (not masked)."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterDoesNotExist(
+        'gone')
+    reader = _FakeLogReader(result=100)
+    with mock.patch('sky.logs.get_log_reader', return_value=reader):
+        ret = core.tail_logs('test-cluster', job_id=None, follow=True, tail=0)
+    assert ret == 100
+    assert reader.calls == [('test-cluster', None, True, 0)]
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_reraises_when_no_reader(
+        mock_check_cluster_available) -> None:
+    """With no reader registered, the original error is preserved."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterNotUpError(
+        'not up', cluster_status=None)
+    with mock.patch('sky.logs.get_log_reader', return_value=None):
+        with pytest.raises(exceptions.ClusterNotUpError):
+            core.tail_logs('test-cluster', job_id=7)
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_reraises_when_reader_finds_nothing(
+        mock_check_cluster_available) -> None:
+    """A reader that returns None falls through to the original error."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterDoesNotExist(
+        'gone')
+    reader = _FakeLogReader(result=None)
+    with mock.patch('sky.logs.get_log_reader', return_value=reader):
+        with pytest.raises(exceptions.ClusterDoesNotExist):
+            core.tail_logs('test-cluster', job_id=7)

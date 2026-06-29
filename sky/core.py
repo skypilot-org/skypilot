@@ -1430,10 +1430,24 @@ def tail_logs(cluster_name: str,
 
     """
     # Check the status of the cluster.
-    handle = backend_utils.check_cluster_available(
-        cluster_name,
-        operation='tailing logs',
-    )
+    try:
+        handle = backend_utils.check_cluster_available(
+            cluster_name,
+            operation='tailing logs',
+        )
+    except (exceptions.ClusterNotUpError, exceptions.ClusterDoesNotExist):
+        # The cluster is gone; if a log reader is registered, stream the logs
+        # back from the external store instead.
+        from sky import logs  # pylint: disable=import-outside-toplevel
+        reader = logs.get_log_reader()
+        if reader is not None:
+            returncode = reader.read_cluster_job_logs(cluster_name,
+                                                      job_id,
+                                                      follow=follow,
+                                                      tail=tail)
+            if returncode is not None:
+                return returncode
+        raise
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
