@@ -1406,7 +1406,8 @@ def wait_for_managed_job_status_sdk(job_name: str,
     """
     start_time = time.time()
     while time.time() - start_time < timeout:
-        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        jobs_list = sky.get(
+            sky.jobs.queue_v2(refresh=False, fields=['job_name', 'status']))[0]
         for job in jobs_list:
             if job['job_name'] == job_name:
                 if job['status'] in target_statuses:
