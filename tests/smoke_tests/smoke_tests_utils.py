@@ -251,8 +251,13 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "')
 
+# Match the job by name in *any* column. `sky (jobs) queue` shifts the NAME
+# column depending on whether the USER (-u) and WORKSPACE (>1 workspace)
+# columns are shown, so a fixed column index is not reliable.
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
-    'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
+    'awk "\\$1 == \\"{job_id}\\"',
+    'awk "{{matched=0; for (i=1; i<=NF; i++) if (\\$i == \\"{job_name}\\") matched=1}} matched'
+)
 
 
 def get_cmd_wait_until_job_status_contains_matching_job_id(
@@ -292,12 +297,10 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
 # Managed job functions
 
 _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
-    'sky queue {cluster_name}', 'sky jobs queue').replace(
-        'awk "\\$2 == \\"{job_name}\\"',
-        'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES,
-            _ALL_MANAGED_JOB_STATUSES).replace('sleep 10',
-                                               'sleep {gap_seconds}')
+    'sky queue {cluster_name}',
+    'sky jobs queue').replace(_ALL_JOB_STATUSES,
+                              _ALL_MANAGED_JOB_STATUSES).replace(
+                                  'sleep 10', 'sleep {gap_seconds}')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
