@@ -75,6 +75,7 @@ def k8s_apis(monkeypatch):
     core.list_namespaced_config_map.return_value = _list()
     core.list_namespaced_secret.return_value = _list()
     core.read_namespaced_config_map.side_effect = _FakeApiException(404)
+    core.read_namespaced_pod_log.return_value = ''
 
     apps = mock.MagicMock()
     apps.list_namespaced_deployment.return_value = _list()
@@ -294,6 +295,68 @@ def test_context_gpu_metrics_config_and_topology_dumped(tmp_path, k8s_apis):
     ds = yaml_utils.read_yaml(str(gdir / 'dcgm-exporter-daemonset.yaml'))
     assert (ds['apiVersion'], ds['kind']) == ('apps/v1', 'DaemonSet')
     assert ds['marker'] == 'ds'  # only the dcgm-exporter DS, not some-other-ds
+
+
+def test_context_prometheus_server_logs_collected(tmp_path, k8s_apis):
+    """The prometheus-server container's current and previous logs are written
+    under gpu_metrics/ as <pod>.log / <pod>.previous.log -- the WAL-replay
+    output the pod object can't show."""
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('skypilot', 'skypilot-prometheus-server-abc123'))
+
+    def _read_log(**kwargs):
+        assert kwargs['container'] == 'prometheus-server'
+        assert kwargs['tail_lines'] == debug._PROMETHEUS_LOG_TAIL_LINES
+        return ('replaying WAL previous\n'
+                if kwargs['previous'] else 'level=info ready\n')
+
+    k8s_apis.core.read_namespaced_pod_log.side_effect = _read_log
+
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    gdir = tmp_path / 'gpu_metrics'
+    assert (gdir / 'skypilot-prometheus-server-abc123.log').read_text() == (
+        'level=info ready\n')
+    assert (gdir /
+            'skypilot-prometheus-server-abc123.previous.log').read_text() == (
+                'replaying WAL previous\n')
+
+
+def test_context_prometheus_logs_no_previous_is_not_an_error(
+        tmp_path, k8s_apis):
+    """A 400 on the previous-container read (the server has never restarted) is
+    expected: the current log is still written and no error is recorded."""
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('skypilot', 'skypilot-prometheus-server-abc123'))
+
+    def _read_log(**kwargs):
+        if kwargs['previous']:
+            raise _FakeApiException(400)
+        return 'current only\n'
+
+    k8s_apis.core.read_namespaced_pod_log.side_effect = _read_log
+
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    gdir = tmp_path / 'gpu_metrics'
+    assert (gdir / 'skypilot-prometheus-server-abc123.log').exists()
+    assert not (gdir /
+                'skypilot-prometheus-server-abc123.previous.log').exists()
+
+
+def test_context_prometheus_log_failure_is_recorded(tmp_path, k8s_apis):
+    """A non-400 failure reading the prometheus-server log is recorded (not
+    swallowed) so the dump's error manifest shows the gap."""
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('skypilot', 'skypilot-prometheus-server-abc123'))
+    k8s_apis.core.read_namespaced_pod_log.side_effect = _FakeApiException(403)
+
+    errors = _run_context(tmp_path)
+
+    resources = {e['resource'] for e in errors}
+    assert ('gpu_metrics/skypilot-prometheus-server-abc123.log' in resources)
 
 
 def test_context_gpu_metrics_absent_produces_no_dir(tmp_path, k8s_apis):

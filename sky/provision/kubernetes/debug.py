@@ -61,9 +61,17 @@ _KUEUE_QUEUE_NAME_LABEL = 'kueue.x-k8s.io/queue-name'
 # other half of the DCGM<->pod join) carries `kube-state-metrics` in its name.
 # DCGM exporter's namespace varies by installer, so it's matched by name
 # substring. See _dump_gpu_metrics_pods for the full object set (pods, the
-# prometheus config, the PVC, and the DCGM DaemonSet).
+# prometheus-server container logs, the prometheus config, the PVC, and the
+# DCGM DaemonSet).
 _GPU_METRICS_NAMESPACE = 'skypilot'
 _PROMETHEUS_SERVER_NAME_PREFIX = 'skypilot-prometheus-server'
+# The Prometheus container within the server pod (the chart runs a
+# `configmap-reload` sidecar alongside it); we collect this container's logs.
+_PROMETHEUS_SERVER_CONTAINER = 'prometheus-server'
+# Tail bound for the collected container logs -- enough to hold a full WAL
+# replay (roughly one line per segment) plus startup, without letting a chatty
+# or long-lived server bloat the dump.
+_PROMETHEUS_LOG_TAIL_LINES = 2000
 _KUBE_STATE_METRICS_NAME_SUBSTR = 'kube-state-metrics'
 _DCGM_EXPORTER_NAME_SUBSTR = 'dcgm-exporter'
 
@@ -161,6 +169,7 @@ def dump_context_resources(context: Optional[str],
                                # bare or unreachable context stays visible
           gpu_metrics/         # if present:
             prometheus-server.yaml
+            <pod>.log  <pod>.previous.log  # prometheus-server container logs
             dcgm-exporter.yaml
           kueue/               # if Kueue is installed on the context:
             localqueues.yaml  clusterqueues.yaml
@@ -249,6 +258,11 @@ def _fail_fast(api: Any) -> Any:
 def _write_yaml(path: str, obj: Any) -> None:
     with open(path, 'w', encoding='utf-8') as f:
         f.write(yaml_utils.dump_yaml_str(obj))
+
+
+def _write_text(path: str, text: str) -> None:
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text)
 
 
 def _strip_managed_fields(obj_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -457,6 +471,10 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
     Into ``<output_dir>/gpu_metrics/``:
       - prometheus-server: the metrics Prometheus server pod (helm release
         ``skypilot-prometheus`` in the ``skypilot`` namespace).
+      - ``<pod>.log`` / ``<pod>.previous.log``: the prometheus-server
+        container's own logs (current and, if it has restarted, the previous
+        instance) -- the WAL-replay progress and startup panics the pod
+        object's restart *reason* alone can't show.
       - kube-state-metrics: the chart's KSM pod -- the source of
         ``kube_pod_labels``, the other half of the DCGM<->pod join.
       - dcgm-exporter: the DCGM exporter pods, matched by name substring across
@@ -514,6 +532,40 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
             _write_yaml(
                 os.path.join(out_dir, filename),
                 [_with_type_meta(to_dict(p), 'v1', 'Pod') for p in matched])
+
+    # The prometheus-server container's own logs -- the only place the WAL
+    # replay progress ("Replaying WAL...", per-segment loads) and any
+    # panic/abort message surface; the pod object shows *that* it restarted,
+    # not *why* it died mid-startup. Grab the current container's tail and, when
+    # it has restarted, the previous (terminated) container's logs too -- the
+    # latter holds the boot-to-crash output of the instance that actually
+    # failed. Best-effort and tail-bounded.
+    for pod in prom_pods:
+        pod_name = pod.metadata.name
+        for previous in (False, True):
+            suffix = '.previous' if previous else ''
+            resource = f'gpu_metrics/{pod_name}{suffix}.log'
+            try:
+                pod_log = core.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=_GPU_METRICS_NAMESPACE,
+                    container=_PROMETHEUS_SERVER_CONTAINER,
+                    previous=previous,
+                    tail_lines=_PROMETHEUS_LOG_TAIL_LINES,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            except kubernetes.api_exception() as e:
+                # A 400 on previous=True just means the container has never
+                # restarted (no previous instance) -- expected, not an error.
+                if not (previous and e.status == 400):
+                    _record_error(errors, resource, e)
+                continue
+            except Exception as e:  # pylint: disable=broad-except
+                _record_error(errors, resource, e)
+                continue
+            if pod_log:
+                os.makedirs(out_dir, exist_ok=True)
+                _write_text(os.path.join(out_dir, f'{pod_name}{suffix}.log'),
+                            pod_log)
 
     # The config + topology behind the pods. The prometheus.yml ConfigMap and
     # the Prometheus PVC(s) are namespace-scoped (minimal RBAC); the
