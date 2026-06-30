@@ -24,12 +24,20 @@ _InternalItem = Tuple[Tuple[str, bool, bool], float]
 
 
 def _observe_queue_wait(schedule_type: str, enqueued_at: float) -> None:
-    """Record time the just-dequeued entry spent waiting in the queue."""
+    """Record time the just-dequeued entry spent waiting in the queue.
+
+    Metric emission must never disrupt the dequeue path, so any failure
+    (label mismatch, client error) is logged and swallowed.
+    """
     if not metrics_utils.METRICS_ENABLED:
         return
-    metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
-        schedule_type=schedule_type).observe(max(0,
-                                                 time.time() - enqueued_at))
+    try:
+        metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
+            schedule_type=schedule_type).observe(
+                max(0,
+                    time.time() - enqueued_at))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe queue wait metric: {e}')
 
 
 class QueueBackend(abc.ABC):
