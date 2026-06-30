@@ -1326,8 +1326,8 @@ def _wait_for_deployment_pod(context,
         'ready.')
 
 
-def _configure_runtime_class(pod_spec: Dict[str,
-                                            Any], nvidia_runtime_exists: bool,
+def _configure_runtime_class(context: Optional[str], pod_spec: Dict[str, Any],
+                             nvidia_runtime_exists: bool,
                              needs_gpus_nvidia: bool) -> None:
     """Sets or strips runtimeClassName on the pod spec in-place.
 
@@ -1338,6 +1338,7 @@ def _configure_runtime_class(pod_spec: Dict[str,
     runtimeClassName ('resource name may not be empty'), and it must
     also suppress the automatic 'nvidia' assignment below.
     """
+    del context
     spec = pod_spec['spec']
     if 'runtimeClassName' in spec and not spec['runtimeClassName']:
         del spec['runtimeClassName']
@@ -1509,7 +1510,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
-    _configure_runtime_class(pod_spec, nvidia_runtime_exists, needs_gpus_nvidia)
+    _configure_runtime_class(context, pod_spec, nvidia_runtime_exists,
+                             needs_gpus_nvidia)
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
