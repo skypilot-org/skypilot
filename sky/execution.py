@@ -123,7 +123,7 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
                     if ext_ctx is not None else None)
         if provider is None:
             names = ', '.join(
-                sorted(ref.name for ref in task.managed_secret_refs))
+                sorted(set(ref.name for ref in task.managed_secret_refs)))
             raise RuntimeError(
                 f'No value available for secret(s): {names}. A secret with '
                 'no inline value must be provided at launch with the '

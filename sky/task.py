@@ -727,9 +727,10 @@ class Task:
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_vars = config.get('envs', {})
-        secrets_for_subst = config.get('secrets', {})
-        if isinstance(secrets_for_subst, list):
-            secrets_for_subst = {}  # Array form has no inline values
+        secrets_for_subst = config.get('secrets')
+        if secrets_for_subst is None or isinstance(secrets_for_subst, list):
+            # ``secrets:`` (null) or array form have no inline values.
+            secrets_for_subst = {}
         else:
             # Null-valued secrets are managed references with no inline value
             # to substitute (their value is only known after resolution), so

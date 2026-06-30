@@ -409,6 +409,22 @@ def test_from_yaml_config_null_secret_becomes_managed_ref():
     assert refs[0].scope_override is None
 
 
+def test_from_yaml_config_null_or_empty_secrets_section():
+    """A null/empty ``secrets:`` section parses cleanly (no crash)."""
+    # ``secrets:`` with no value parses to None in YAML.
+    task_obj = task.Task.from_yaml_config({
+        'run': 'echo hello',
+        'secrets': None
+    })
+    assert task_obj.secrets == {}
+    assert not task_obj.managed_secret_refs
+
+    # Empty dict form.
+    task_obj = task.Task.from_yaml_config({'run': 'echo hello', 'secrets': {}})
+    assert task_obj.secrets == {}
+    assert not task_obj.managed_secret_refs
+
+
 def test_task_initialization_with_secrets():
     """Test Task initialization with secrets parameter."""
     secrets = {'API_KEY': 'secret123', 'DB_PASSWORD': 'password456'}
