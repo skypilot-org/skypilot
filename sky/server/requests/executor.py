@@ -250,7 +250,15 @@ class RequestWorker:
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
-            if metrics_utils.METRICS_ENABLED:
+            # Only record queue-wait time on the first dequeue (still PENDING).
+            # A request that pauses to wait on an external condition is parked
+            # in WAITING and re-enqueued once ready; that wait is spent outside
+            # the queue (in the monitor thread), not contending for a worker.
+            # Observing it again would measure `now - created_at`, folding the
+            # entire wait into queue-wait time and inflating the metric, which
+            # is meant to reflect time spent queued for a free worker.
+            if (metrics_utils.METRICS_ENABLED and
+                    request.status == api_requests.RequestStatus.PENDING):
                 metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
                     schedule_type=self.schedule_type.value,).observe(
                         max(0,
