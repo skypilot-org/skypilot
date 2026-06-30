@@ -81,10 +81,13 @@ loop:
             $ sky sandbox create -n dev
             ✓ Sandbox dev is ready. Connecting via bash...
 
-            # Or keep it running with --detach, then manage it by name.
-            $ sky sandbox create --detach -n dev
-            $ sky sandbox ls
-            $ sky sandbox terminate dev
+        Or keep it running with ``--detach``, then manage it by name:
+
+        .. code-block:: bash
+
+            sky sandbox create --detach -n dev
+            sky sandbox ls
+            sky sandbox terminate dev
 
     .. tab-item:: Python
 

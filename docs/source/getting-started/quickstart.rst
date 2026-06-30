@@ -21,10 +21,10 @@ Let's define our very first task, a simple Hello, SkyPilot! program.
 
 Create a directory from anywhere on your machine:
 
-.. code-block:: console
+.. code-block:: bash
 
-  $ mkdir hello-sky
-  $ cd hello-sky
+  mkdir hello-sky
+  cd hello-sky
 
 .. tab-set::
 
@@ -141,9 +141,9 @@ Now we can launch a cluster to run a task:
 
     Use :code:`sky launch`:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-      $ sky launch -c mycluster hello_sky.yaml
+      sky launch -c mycluster hello_sky.yaml
 
     .. tip::
 
@@ -156,9 +156,9 @@ Now we can launch a cluster to run a task:
 
     Run the python script:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-      $ python hello_sky.py
+      python hello_sky.py
 
 .. tip::
 
@@ -187,18 +187,18 @@ Instead of launching a new cluster every time, we can execute tasks on an existi
 
     Using :code:`sky exec`:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-      $ sky exec mycluster hello_sky.yaml
+      sky exec mycluster hello_sky.yaml
 
     .. tip::
 
       Bash commands are also supported, such as:
 
-      .. code-block:: console
+      .. code-block:: bash
 
-        $ sky exec mycluster python train_cpu.py
-        $ sky exec mycluster --gpus=B200:8 python train_gpu.py
+        sky exec mycluster python train_cpu.py
+        sky exec mycluster --gpus=B200:8 python train_gpu.py
 
       For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
@@ -237,9 +237,9 @@ View all clusters
 
 Use :code:`sky status` to see all clusters (across regions and clouds) in a single table:
 
-.. code-block:: console
+.. code-block:: bash
 
-  $ sky status
+  sky status
 
 This may show multiple clusters, if you have created several:
 
@@ -264,12 +264,12 @@ SkyPilot offers a dashboard for all clusters and jobs launched with SkyPilot. To
 
     * Run the following commands to generate the dashboard build:
 
-    .. code-block:: console
+    .. code-block:: bash
 
       # Install all dependencies
-      $ npm --prefix sky/dashboard install
+      npm --prefix sky/dashboard install
       # Build
-      $ npm --prefix sky/dashboard run build
+      npm --prefix sky/dashboard run build
 
     * Start the dashboard with :code:`sky dashboard`.
 
@@ -291,22 +291,22 @@ SSH into clusters
 =================
 Simply run :code:`ssh <cluster_name>` to log into a cluster:
 
-.. code-block:: console
+.. code-block:: bash
 
-  $ ssh mycluster
+  ssh mycluster
 
 :ref:`Multi-node clusters <dist-jobs>` work too:
 
-.. code-block:: console
+.. code-block:: bash
 
   # Assuming 3 nodes.
 
   # Head node.
-  $ ssh mycluster
+  ssh mycluster
 
   # Worker nodes.
-  $ ssh mycluster-worker1
-  $ ssh mycluster-worker2
+  ssh mycluster-worker1
+  ssh mycluster-worker2
 
 The above are achieved by adding appropriate entries to ``~/.ssh/config``.
 
@@ -318,9 +318,9 @@ Transfer files
 
 After a task's execution,  use :code:`rsync` or :code:`scp` to download files (e.g., checkpoints):
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ rsync -Pavz mycluster:/remote/source /local/dest  # copy from remote VM
+    rsync -Pavz mycluster:/remote/source /local/dest  # copy from remote VM
 
 For uploading files to the cluster, see :ref:`Syncing Code and Artifacts <sync-code-artifacts>`.
 
@@ -336,9 +336,9 @@ When you are done, stop the cluster:
 
     Using :code:`sky stop`:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-      $ sky stop mycluster
+      sky stop mycluster
 
   .. tab-item:: Python
     :sync: python
@@ -363,9 +363,9 @@ Otherwise, terminate the cluster:
 
     Using :code:`sky down`:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-      $ sky down mycluster
+      sky down mycluster
 
   .. tab-item:: Python
     :sync: python
@@ -406,11 +406,11 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
 
     Using :code:`sky jobs launch`:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-      $ for i in $(seq 100) # launch 100 jobs
-          do sky jobs launch --detach-run --async --yes -n hello-$i hello_sky.yaml
-        done
+      for i in $(seq 100); do  # launch 100 jobs
+          sky jobs launch --detach-run --async --yes -n hello-$i hello_sky.yaml
+      done
 
   .. tab-item:: Python
     :sync: python
@@ -429,9 +429,9 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
 
 After you launch the jobs, open the SkyPilot dashboard and check job status(es) in the Jobs tab.
 
-.. code-block:: console
+.. code-block:: bash
 
-  $ sky dashboard # check the job status in Jobs tab.
+  sky dashboard # check the job status in Jobs tab.
 
 
 .. image:: ../images/managed-jobs-dashboard.png
