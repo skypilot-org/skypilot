@@ -3,6 +3,9 @@
   * `sky workspace use [<name>] [--clear]` (writes preferred via POST)
   * `sky launch -w/--workspace <name>` flag (sugar for
      `--config active_workspace=<name>`)
+  * `sky down -w/--workspace <name>` and `sky jobs cancel -w/--workspace
+     <name>` — same sugar, on commands that act on EXISTING resources the
+     server scopes by active workspace
   * AMBIGUOUS surfacing on the launch path
   * `sky api info` Preferred-workspace line (reads from /api/health user
      row — no extra round-trip)
@@ -191,6 +194,117 @@ class TestWorkspaceFlagCallback(unittest.TestCase):
                                                              value=None)
         apply_cli.assert_not_called()
         self.assertIsNone(returned)
+
+
+class TestWorkspaceFlagWiredOnMutatingCommands(unittest.TestCase):
+    """`-w/--workspace` is sugar for `--config active_workspace=<name>` and
+    must be wired identically on every command that carries it. Beyond
+    `sky launch` / `sky jobs launch` (which launch INTO a workspace), the
+    flag also gates operations on EXISTING resources that the server scopes
+    by active workspace:
+
+      * `sky down` — teardown runs `check_owner_identity`, which raises
+        ClusterOwnerIdentityMismatchError when the cluster's recorded
+        workspace differs from the active one
+        (sky/backends/backend_utils.py).
+      * `sky jobs cancel` — jobs whose workspace differs from the active
+        one are silently skipped (sky/jobs/utils.py), so a cross-workspace
+        cancel is a no-op without naming the workspace.
+
+    Without `-w`, users must fall back to the verbose
+    `--config active_workspace=<name>`. These tests pin the wiring so a
+    refactor can't silently drop it; the callback's behavior itself is
+    covered by TestWorkspaceFlagCallback above.
+    """
+
+    def setUp(self):
+        self.runner = CliRunner()
+
+    def _workspace_param(self, cmd):
+        params = [p for p in cmd.params if p.name == 'workspace']
+        self.assertEqual(
+            len(params), 1,
+            f'expected exactly one --workspace param, got {params}')
+        return params[0]
+
+    def _assert_wired(self, cmd, label):
+        param = self._workspace_param(cmd)
+        self.assertIn('--workspace', param.opts, label)
+        self.assertIn('-w', param.opts, label)
+        self.assertIs(param.callback, flags.apply_workspace_option_callback,
+                      label)
+        # expose_value=False keeps it out of the command's function
+        # signature — the callback does all the work via apply_cli_config,
+        # so no command-body change is needed.
+        self.assertFalse(param.expose_value, label)
+
+    def test_down_has_workspace_flag(self):
+        self._assert_wired(command.down, 'sky down')
+
+    def test_jobs_cancel_has_workspace_flag(self):
+        self._assert_wired(command.jobs_cancel, 'sky jobs cancel')
+
+    def test_launch_has_workspace_flag(self):
+        # Regression guard for the original command the others mirror.
+        self._assert_wired(command.launch, 'sky launch')
+
+    def test_short_flag_w_maps_only_to_workspace(self):
+        """`-w` must map ONLY to --workspace on these commands. `sky logs`
+        uses `-w` for `--worker`; a copy-paste slip could reintroduce that
+        kind of clash here, where it would shadow the workspace flag."""
+        for cmd, label in [(command.down, 'sky down'),
+                           (command.jobs_cancel, 'sky jobs cancel'),
+                           (command.launch, 'sky launch')]:
+            short_to_names = {}
+            for p in cmd.params:
+                for opt in p.opts:
+                    if len(opt) == 2 and opt.startswith('-'):
+                        short_to_names.setdefault(opt, []).append(p.name)
+            self.assertEqual(
+                short_to_names.get('-w'), ['workspace'],
+                f'{label}: -w maps to {short_to_names.get("-w")}, '
+                'expected only [\'workspace\']')
+
+    def test_down_invocation_applies_active_workspace(self):
+        """End-to-end: `sky down <c> -w team-b` rewrites into an
+        active_workspace config override before the teardown runs."""
+        from sky import skypilot_config
+        with mock.patch.object(command,
+                               '_down_or_stop_clusters') as mock_down, \
+             mock.patch.object(skypilot_config,
+                               'apply_cli_config') as apply_cli:
+            result = self.runner.invoke(
+                command.cli, ['down', 'my-cluster', '-w', 'team-b', '-y'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        apply_cli.assert_called_once_with(['active_workspace=team-b'])
+        mock_down.assert_called_once()
+
+    def test_jobs_cancel_invocation_applies_active_workspace(self):
+        """End-to-end: `sky jobs cancel <id> -w team-b` rewrites into an
+        active_workspace config override before the cancel RPC fires."""
+        from sky import skypilot_config
+        with mock.patch.object(command.managed_jobs,
+                               'cancel') as mock_cancel, \
+             mock.patch.object(command.sdk, 'stream_and_get'), \
+             mock.patch.object(skypilot_config,
+                               'apply_cli_config') as apply_cli:
+            result = self.runner.invoke(
+                command.cli, ['jobs', 'cancel', '1', '-w', 'team-b', '-y'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        apply_cli.assert_called_once_with(['active_workspace=team-b'])
+        mock_cancel.assert_called_once()
+
+    def test_down_without_flag_does_not_touch_config(self):
+        """No `-w` → the workspace callback must be a no-op (the server-side
+        per-user resolver handles the default), matching launch's behavior."""
+        from sky import skypilot_config
+        with mock.patch.object(command, '_down_or_stop_clusters'), \
+             mock.patch.object(skypilot_config,
+                               'apply_cli_config') as apply_cli:
+            result = self.runner.invoke(command.cli,
+                                        ['down', 'my-cluster', '-y'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        apply_cli.assert_not_called()
 
 
 class TestSkyWorkspaceInfoCommand(unittest.TestCase):
