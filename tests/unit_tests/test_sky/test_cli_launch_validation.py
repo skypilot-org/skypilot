@@ -3,6 +3,8 @@
 These tests cover validation that should fire *before* any server call,
 rejecting obviously-malformed flag values with actionable errors.
 """
+from unittest import mock
+
 from click import testing as cli_testing
 
 from sky.client.cli import command
@@ -18,6 +20,25 @@ def test_jobs_launch_num_jobs_must_be_positive():
             ['--pool', 'mypool', '--num-jobs', bad, 'echo', 'hi'])
         assert result.exit_code != 0
         assert '--num-jobs' in result.output
+
+
+def test_jobs_launch_num_jobs_allowed_without_pool():
+    # --num-jobs without --pool should be accepted: it submits N independent
+    # managed jobs, each on its own cluster. The CLI must not reject it with a
+    # usage error; it should reach the launch call with pool=None.
+    runner = cli_testing.CliRunner()
+    with mock.patch.object(command.managed_jobs, 'launch') as mock_launch, \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait:
+        mock_wait.return_value = ([1, 2], None)
+        result = runner.invoke(command.jobs_launch,
+                               ['--num-jobs', '2', '-y', 'echo', 'hi'])
+    assert 'Cannot specify --num-jobs without --pool' not in result.output
+    assert mock_launch.called
+    # launch(dag, name, pool, num_jobs, ...): pool positional is None,
+    # num_jobs positional is 2.
+    args, kwargs = mock_launch.call_args
+    assert args[2] is None  # pool
+    assert args[3] == 2  # num_jobs
 
 
 def test_env_file_must_exist():

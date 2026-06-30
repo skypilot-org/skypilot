@@ -881,9 +881,6 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-    if num_jobs and pool is None:
-        raise ValueError('Cannot specify num_jobs without pool.')
-
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
     # need to serialize the pool name in the dag. The dag object will be

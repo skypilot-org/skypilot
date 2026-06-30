@@ -5811,8 +5811,6 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
-    if pool is None and num_jobs is not None:
-        raise click.UsageError('Cannot specify --num-jobs without --pool.')
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
@@ -5891,6 +5889,11 @@ def jobs_launch(
                 f'pool, please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
         print_setup_fm_warning = False
+    elif num_jobs is not None and num_jobs > 1:
+        click.secho(
+            f'Submitting {colorama.Fore.CYAN}{num_jobs}'
+            f'{colorama.Style.RESET_ALL} managed jobs. Each job will be '
+            'launched on its own cluster.')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:

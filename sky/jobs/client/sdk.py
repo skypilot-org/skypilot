@@ -82,9 +82,6 @@ def launch(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
-    if pool is None and num_jobs is not None:
-        raise click.UsageError('Cannot specify num_jobs without pool.')
-
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
     if name is not None:
@@ -96,7 +93,8 @@ def launch(
             at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
-            job_identity = 'a managed job'
+            job_identity = ('a managed job'
+                            if num_jobs is None else f'{num_jobs} managed jobs')
             if pool is None:
                 optimize_request_id = sdk.optimize(dag)
                 sdk.stream_and_get(optimize_request_id)
@@ -112,8 +110,6 @@ def launch(
                 click.secho(
                     f'Use resources from pool {pool!r}: {job_resources_str}.',
                     fg='green')
-                if num_jobs is not None:
-                    job_identity = f'{num_jobs} managed jobs'
             prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
             if prompt is not None:
                 click.confirm(prompt,
