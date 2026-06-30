@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { ServerIcon } from '@/components/elements/icons';
 import {
   AlertTriangleIcon,
   RotateCwIcon,
@@ -789,6 +791,16 @@ export function ContextDetails({
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {nodesInContext.length === 0 && (
+            <div className="rounded-md border border-gray-200 shadow-sm">
+              <EmptyState
+                icon={<ServerIcon className="w-5 h-5" />}
+                title="No nodes found"
+                description="No nodes are available in this context."
+              />
             </div>
           )}
 
