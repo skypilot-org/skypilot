@@ -5940,16 +5940,32 @@ def jobs_launch(
         job_ids_str = ','.join(map(str, sorted(job_ids)))
         dashboard_hint = ''
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'pool',
-                'operator': ':',
-                'value': pool,
-            })
+            if pool is not None:
+                query = urllib.parse.urlencode({
+                    'property': 'pool',
+                    'operator': ':',
+                    'value': pool,
+                })
+                starting_page = f'jobs?{query}'
+                show_jobs_label = 'Show all jobs in the pool:'
+            else:
+                starting_page = 'jobs'
+                show_jobs_label = 'Show all jobs:'
             dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=f'jobs?{query}')
-            dashboard_hint = (
-                f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
-                f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                server_common.get_server_url(), starting_page=starting_page)
+            dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
+                              f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                              f'{ux_utils.RESET_BOLD}')
+        if pool is not None:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'{ux_utils.RESET_BOLD}')
+        else:
+            cancel_job_ids = ' '.join(map(str, sorted(job_ids)))
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all these jobs:'
+                f'\t{ux_utils.BOLD}sky jobs cancel {cancel_job_ids}'
                 f'{ux_utils.RESET_BOLD}')
         click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                     f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -5961,9 +5977,7 @@ def jobs_launch(
                     f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
                     f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
                     f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
-                    f'{ux_utils.RESET_BOLD}')
+                    f'{cancel_hint}')
 
 
 # Value the ``-s``/``--status`` option takes when given with no argument. It is
