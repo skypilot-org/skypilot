@@ -120,6 +120,102 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
+    """`sky jobs launch --num-jobs N` works without a pool.
+
+    Regression test for the lifted pool-only restriction on --num-jobs: with no
+    --pool, N independent managed jobs must be submitted, each on its own
+    cluster, with SKYPILOT_NUM_JOBS=N and a distinct SKYPILOT_JOB_RANK in
+    [0, N). It also checks the CLI output uses the non-pool variants (no
+    `--pool None` / `value=None` hints).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    num_jobs = 2
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    # The API server DB is shared across tests, so we can't assume the job IDs
+    # are 1..num_jobs. All num_jobs jobs share the same name (a known
+    # limitation), so we resolve their IDs by name from `sky jobs queue`.
+    ids_file = f'/tmp/num_jobs_no_pool_ids_{name}.txt'
+    job_config = textwrap.dedent("""\
+        run: |
+          echo "SKYPILOT_NUM_JOBS_VALUE=${SKYPILOT_NUM_JOBS}"
+          echo "SKYPILOT_JOB_RANK_VALUE=${SKYPILOT_JOB_RANK}"
+        """)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as job_yaml:
+        job_yaml.write(job_config)
+        job_yaml.flush()
+        # Launch num_jobs jobs without a pool and assert the output is the
+        # non-pool variant: no pool-only hints, and the multi-job notice.
+        launch_cmd = (
+            f's=$(sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {job_yaml.name} '
+            f'--num-jobs {num_jobs} -y -d); echo "$s"; '
+            # Non-pool multi-job notice is printed.
+            'echo "$s" | grep "Each job will be launched on its own cluster"; '
+            # No pool-specific hints leaked when there is no pool.
+            '! echo "$s" | grep -- "--pool None"; '
+            '! echo "$s" | grep "value=None"; '
+            '! echo "$s" | grep "in the pool"')
+        # Resolve the num_jobs job IDs by name (col 2 or 3 of `sky jobs queue`).
+        capture_ids_cmd = (
+            's=$(sky jobs queue); echo "$s"; echo "$s" | '
+            'awk -v n=' + name + ' \'($2==n)||($3==n){print $1}\' | '
+            f'sort -un > {ids_file}; cat {ids_file}; '
+            f'cnt=$(wc -l < {ids_file}); '
+            f'if [ "$cnt" -ne {num_jobs} ]; then '
+            f'  echo "Expected {num_jobs} jobs named {name}, found $cnt"; '
+            '  exit 1; fi')
+        # Wait for every job (by ID) to reach SUCCEEDED, failing fast on a bad
+        # status. Uses the controller log, like wait_until_job_status_by_id.
+        wait_all_cmd = (
+            f'start_time=$SECONDS; while read jid; do while true; do '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            '    echo "Timeout waiting for job $jid"; sky jobs queue; exit 1; fi; '
+            '  s=$(sky jobs logs --controller "$jid" --no-follow 2>&1); '
+            '  echo "$s"; '
+            '  if echo "$s" | grep -q "Job status: JobStatus.SUCCEEDED"; then '
+            '    break; fi; '
+            '  if echo "$s" | grep -qE "Job status: JobStatus.(FAILED|CANCELLED'
+            '|FAILED_SETUP|FAILED_CONTROLLER)"; then '
+            '    echo "Job $jid hit a bad status"; sky jobs queue; exit 1; fi; '
+            '  sleep 10; '
+            f'done; done < {ids_file}')
+        # Check each job logged SKYPILOT_NUM_JOBS=num_jobs, and that the set of
+        # SKYPILOT_JOB_RANK values is exactly {0, ..., num_jobs-1} (distinct).
+        check_envs_cmd = (
+            'ranks=""; while read jid; do '
+            '  s=$(sky jobs logs "$jid" --no-follow 2>&1); echo "$s"; '
+            f'  echo "$s" | grep "SKYPILOT_NUM_JOBS_VALUE={num_jobs}"; '
+            '  r=$(echo "$s" | sed -n '
+            '"s/.*SKYPILOT_JOB_RANK_VALUE=\\([0-9]*\\).*/\\1/p" | head -n1); '
+            '  ranks="$ranks $r"; '
+            f'done < {ids_file}; '
+            'sorted=$(echo $ranks | tr " " "\\n" | sort -un | tr "\\n" " " | '
+            'sed "s/ *$//"); echo "ranks: [$sorted]"; '
+            f'expected=$(seq 0 {num_jobs - 1} | tr "\\n" " " | sed "s/ *$//"); '
+            'if [ "$sorted" != "$expected" ]; then '
+            '  echo "Expected distinct ranks [$expected], got [$sorted]"; '
+            '  exit 1; fi; echo "Ranks are distinct and correct."')
+        test = smoke_tests_utils.Test(
+            'managed-jobs-num-jobs-without-pool',
+            [
+                launch_cmd,
+                capture_ids_cmd,
+                wait_all_cmd,
+                # Give the job logs a moment to be fully flushed.
+                'sleep 20',
+                check_envs_cmd,
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
     """Test that logs are accessible after a managed job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
