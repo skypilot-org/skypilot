@@ -19,7 +19,7 @@ _DASHBOARD_CONSTANTS = (_REPO_ROOT / 'sky' / 'dashboard' / 'src' / 'data' /
 
 
 def _extract_int(path: pathlib.Path, pattern: str) -> int:
-    match = re.search(pattern, path.read_text(), re.MULTILINE)
+    match = re.search(pattern, path.read_text(encoding='utf-8'), re.MULTILINE)
     assert match is not None, f'{pattern!r} not found in {path}'
     return int(match.group(1))
 
