@@ -87,6 +87,7 @@ class ManagedJobRuntime(Protocol):
         job_id: int,
         task_id: Optional[int],
         exit_codes: Optional[List[int]] = None,
+        job_id_on_pool_cluster: Optional[int] = None,
     ) -> None:
         """Hook invoked just before a managed job recovers.
 
@@ -96,9 +97,12 @@ class ManagedJobRuntime(Protocol):
         ``None`` handle and network timeouts gracefully. ``exit_codes``
         carries the failed run's per-node exit codes when recovery was
         triggered by a job failure (``None`` for an infra-level failure
-        such as preemption). Side-effecting; the return value is ignored,
-        and the caller swallows exceptions so a failure here never blocks
-        recovery."""
+        such as preemption). ``job_id_on_pool_cluster`` is the job's id on
+        the (possibly shared) pool cluster; pass it through to log
+        downloads so a pool cluster running multiple jobs returns this
+        job's log and not another's. Side-effecting; the return value is
+        ignored, and the caller swallows exceptions so a failure here
+        never blocks recovery."""
         ...
 
     def tail_logs(
@@ -225,6 +229,7 @@ def on_before_recovery(
     job_id: int,
     task_id: Optional[int],
     exit_codes: Optional[List[int]] = None,
+    job_id_on_pool_cluster: Optional[int] = None,
 ) -> None:
     if _current is None:
         return
@@ -238,7 +243,8 @@ def on_before_recovery(
         backend,
         job_id,
         task_id,
-        exit_codes=exit_codes)
+        exit_codes=exit_codes,
+        job_id_on_pool_cluster=job_id_on_pool_cluster)
 
 
 def tail_logs(

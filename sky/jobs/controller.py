@@ -1099,7 +1099,8 @@ class JobController:
                 try:
                     await asyncio.to_thread(
                         managed_job_runtime.on_before_recovery, handle,
-                        self._backend, self._job_id, task_id, exit_codes)
+                        self._backend, self._job_id, task_id, exit_codes,
+                        job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning('on_before_recovery hook failed (continuing '
                                    f'recovery): {e}')
