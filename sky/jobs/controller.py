@@ -153,30 +153,6 @@ def _build_task_specs(
     return base_specs
 
 
-def _cleanup_with_retries(operation: typing.Callable[[], Any],
-                          description: str,
-                          max_attempts: int = 6) -> None:
-    """Run a cleanup operation, retrying transient failures.
-
-    Cleanup must try hard before giving up: an abandoned cleanup can leak
-    the job's resources. Mirrors the retry treatment terminate_cluster
-    already applies to cluster termination. Raises the last error once all
-    attempts are exhausted.
-    """
-    backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=6)
-    for attempt in range(max_attempts):
-        try:
-            operation()
-            return
-        except Exception as e:  # pylint: disable=broad-except
-            if attempt == max_attempts - 1:
-                raise
-            logger.warning(f'Failed to {description} (attempt {attempt + 1}/'
-                           f'{max_attempts}), retrying: '
-                           f'{common_utils.format_exception(e)}')
-            time.sleep(backoff.current_backoff())
-
-
 # How many times to retry the emergency-recovery bookkeeping itself (each
 # individual DB call inside it additionally retries transient errors via
 # sky.utils.db.retries). Only when both layers are exhausted do we fall
@@ -2322,13 +2298,9 @@ class ControllerManager:
                     if pool_cluster_name is not None:
                         cluster_name = pool_cluster_name
                         if job_id_on_pool_cluster is not None:
-                            _cleanup_with_retries(
-                                lambda: core.cancel(
-                                    cluster_name=cluster_name,
-                                    job_ids=[job_id_on_pool_cluster],
-                                    _try_cancel_if_cluster_is_init=True),
-                                f'cancel job {job_id_on_pool_cluster} on '
-                                f'pool cluster {cluster_name}')
+                            core.cancel(cluster_name=cluster_name,
+                                        job_ids=[job_id_on_pool_cluster],
+                                        _try_cancel_if_cluster_is_init=True)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(
@@ -2352,9 +2324,7 @@ class ControllerManager:
                     'credentials expired/changed, or network connectivity '
                     'issues.')
             try:
-                _cleanup_with_retries(
-                    lambda: backend.teardown_ephemeral_storage(task),
-                    'teardown ephemeral storage')
+                backend.teardown_ephemeral_storage(task)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(f'Failed to teardown ephemeral storage: {e}')
