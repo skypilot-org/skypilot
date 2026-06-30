@@ -54,9 +54,9 @@ def test_jobs_launch_multi_job_output_without_pool_has_no_pool_hints():
             mock.patch.object(command.server_common, 'get_dashboard_url',
                               side_effect=lambda url, starting_page:
                               f'https://server/dashboard/{starting_page}'):
-        mock_wait.return_value = ([1, 2], None)
+        mock_wait.return_value = ([1, 2, 3], None)
         result = runner.invoke(command.jobs_launch,
-                               ['--num-jobs', '2', '-y', 'echo', 'hi'])
+                               ['--num-jobs', '3', '-y', 'echo', 'hi'])
     assert result.exit_code == 0, result.output
     # No pool-specific output.
     assert 'property=pool' not in result.output
@@ -65,7 +65,31 @@ def test_jobs_launch_multi_job_output_without_pool_has_no_pool_hints():
     assert 'in the pool' not in result.output
     # Non-pool variants are present instead.
     assert 'Show all jobs:' in result.output
-    assert 'sky jobs cancel 1 2' in result.output
+
+
+def test_jobs_launch_many_jobs_output_collapses_ids_and_uses_placeholder():
+    # With many jobs, the submitted-IDs line collapses contiguous IDs into a
+    # range, and the cancel hint uses a `<job-ids>` placeholder rather than
+    # dumping every id.
+    runner = cli_testing.CliRunner()
+    job_ids = list(range(2711, 3511))  # 800 contiguous ids, like the report
+    with mock.patch.object(command.managed_jobs, 'launch'), \
+            mock.patch.object(command, '_async_call_or_wait') as mock_wait, \
+            mock.patch.object(command.server_common, 'is_api_server_local',
+                              return_value=False), \
+            mock.patch.object(command.server_common, 'get_server_url',
+                              return_value='https://server'), \
+            mock.patch.object(command.server_common, 'get_dashboard_url',
+                              return_value='https://server/dashboard/jobs'):
+        mock_wait.return_value = (job_ids, None)
+        result = runner.invoke(command.jobs_launch,
+                               ['--num-jobs', '800', '-y', 'echo', 'hi'])
+    assert result.exit_code == 0, result.output
+    # Submitted IDs collapse to a single range.
+    assert 'Jobs submitted with IDs: 2711-3510' in result.output
+    # The cancel hint is a placeholder, not the full id list.
+    assert 'sky jobs cancel <job-ids>' in result.output
+    assert '2711 2712 2713' not in result.output
 
 
 def test_env_file_must_exist():

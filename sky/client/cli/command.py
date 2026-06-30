@@ -69,6 +69,7 @@ from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -5937,7 +5938,7 @@ def jobs_launch(
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
         # Sort job ids to ensure consistent ordering.
-        job_ids_str = ','.join(map(str, sorted(job_ids)))
+        job_ids_str = managed_job_utils.format_job_ids_as_ranges(job_ids)
         dashboard_hint = ''
         if not server_common.is_api_server_local():
             if pool is not None:
@@ -5962,10 +5963,9 @@ def jobs_launch(
                 f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
                 f'{ux_utils.RESET_BOLD}')
         else:
-            cancel_job_ids = ' '.join(map(str, sorted(job_ids)))
             cancel_hint = (
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all these jobs:'
-                f'\t{ux_utils.BOLD}sky jobs cancel {cancel_job_ids}'
+                f'\t{ux_utils.BOLD}sky jobs cancel <job-ids>'
                 f'{ux_utils.RESET_BOLD}')
         click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                     f'{job_ids_str}{colorama.Style.RESET_ALL}.'
