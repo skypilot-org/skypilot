@@ -163,6 +163,22 @@ const formatDuration = (durationSeconds) => {
   return result.trim() || '0s';
 };
 
+// Clusters are shared infra: default to All Clusters and remember the user's last My/All choice in localStorage.
+const OWNER_SCOPE_MINE = 'mine';
+const OWNER_SCOPE_ALL = 'all';
+const OWNER_SCOPE_STORAGE_KEY = 'skypilot-dashboard-clusters-owner-scope';
+
+const isOwnerScope = (value) =>
+  value === OWNER_SCOPE_MINE || value === OWNER_SCOPE_ALL;
+
+const readStoredOwnerScope = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const stored = window.localStorage.getItem(OWNER_SCOPE_STORAGE_KEY);
+  return isOwnerScope(stored) ? stored : null;
+};
+
 export function Clusters() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -196,10 +212,16 @@ export function Clusters() {
   };
 
   const getInitialUserScope = () => {
-    if (typeof window !== 'undefined' && router.isReady) {
-      return router.query.owner === 'all' ? 'all' : 'mine';
+    const owner = router.query.owner;
+    if (
+      typeof window !== 'undefined' &&
+      router.isReady &&
+      isOwnerScope(owner)
+    ) {
+      return owner;
     }
-    return 'mine';
+    // Fall back to the user's last choice, then to All Clusters.
+    return readStoredOwnerScope() ?? OWNER_SCOPE_ALL;
   };
 
   const [showHistory, setShowHistory] = useState(getInitialShowHistory);
@@ -218,13 +240,13 @@ export function Clusters() {
         if (info && info.id && info.id !== 'local') {
           setCurrentUser({ id: info.id, name: info.name });
         } else {
-          setUserScope('all');
+          setUserScope(OWNER_SCOPE_ALL);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setAuthResolved(true);
-          setUserScope('all');
+          setUserScope(OWNER_SCOPE_ALL);
         }
       });
     return () => {
@@ -271,9 +293,14 @@ export function Clusters() {
       }
 
       const isAnonymous = authResolved && !currentUser;
-      const forceAllScope = router.query.owner === 'all' || isAnonymous;
-      const expectedScope = forceAllScope ? 'all' : 'mine';
-      if (userScope !== expectedScope) {
+      const owner = router.query.owner;
+      let expectedScope = null;
+      if (isAnonymous) {
+        expectedScope = OWNER_SCOPE_ALL;
+      } else if (isOwnerScope(owner)) {
+        expectedScope = owner;
+      }
+      if (expectedScope !== null && userScope !== expectedScope) {
         setUserScope(expectedScope);
       }
     }
@@ -462,12 +489,11 @@ export function Clusters() {
 
   const selectScope = (scope) => {
     setUserScope(scope);
-    const query = { ...router.query };
-    if (scope === 'all') {
-      query.owner = 'all';
-    } else {
-      delete query.owner;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, scope);
     }
+    const query = { ...router.query };
+    query.owner = scope;
     router.replace(
       {
         pathname: router.pathname,
@@ -497,11 +523,11 @@ export function Clusters() {
         ? currentUser &&
           (String(explicitUserFilter.value) === currentUser.id ||
             String(explicitUserFilter.value) === currentUser.name)
-        : userScope === 'mine',
+        : userScope === OWNER_SCOPE_MINE,
     [explicitUserFilter, currentUser, userScope]
   );
 
-  const isEveryone = !explicitUserFilter && userScope === 'all';
+  const isEveryone = !explicitUserFilter && userScope === OWNER_SCOPE_ALL;
 
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
@@ -537,68 +563,6 @@ export function Clusters() {
             Sky Clusters
           </Link>
         </div>
-        <div
-          role="tablist"
-          aria-label="Filter clusters by activity"
-          className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-        >
-          <button
-            role="tab"
-            aria-selected={!showHistory}
-            onClick={() => selectHistoryTab(false)}
-            className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-              !showHistory
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Active
-          </button>
-          <button
-            role="tab"
-            aria-selected={showHistory}
-            onClick={() => selectHistoryTab(true)}
-            className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-              showHistory
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            All
-          </button>
-        </div>
-        {currentUser && (
-          <div
-            role="tablist"
-            aria-label="Filter clusters by owner"
-            className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-          >
-            <button
-              role="tab"
-              aria-selected={isMine}
-              onClick={() => selectScope('mine')}
-              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                isMine
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              My Clusters
-            </button>
-            <button
-              role="tab"
-              aria-selected={isEveryone}
-              onClick={() => selectScope('all')}
-              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                isEveryone
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              All Clusters
-            </button>
-          </div>
-        )}
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
@@ -609,29 +573,103 @@ export function Clusters() {
             filters={filters}
           />
         </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <div className="flex items-center gap-2">
-            {showHistory && (
-              <Select
-                value={historyDays.toString()}
-                onValueChange={(value) => {
-                  const newDays = parseInt(value);
-                  setHistoryDays(newDays);
-                  updateHistoryDaysURL(newDays);
-                }}
-              >
-                <SelectTrigger className="w-24 h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 day</SelectItem>
-                  <SelectItem value="5">5 days</SelectItem>
-                  <SelectItem value="10">10 days</SelectItem>
-                  <SelectItem value="30">30 days</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
+      </div>
+
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={updateURLParams}
+      />
+
+      {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
+          they read consistently across pages and stay clear of the search
+          box. Refresh/last-updated sit on the right of the same row. */}
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="tablist"
+            aria-label="Filter clusters by activity"
+            className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+          >
+            <button
+              role="tab"
+              aria-selected={!showHistory}
+              onClick={() => selectHistoryTab(false)}
+              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                !showHistory
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Active
+            </button>
+            <button
+              role="tab"
+              aria-selected={showHistory}
+              onClick={() => selectHistoryTab(true)}
+              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                showHistory
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              All
+            </button>
           </div>
+          {currentUser && (
+            <div
+              role="tablist"
+              aria-label="Filter clusters by owner"
+              className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
+            >
+              <button
+                role="tab"
+                aria-selected={isMine}
+                onClick={() => selectScope(OWNER_SCOPE_MINE)}
+                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                  isMine
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                My Clusters
+              </button>
+              <button
+                role="tab"
+                aria-selected={isEveryone}
+                onClick={() => selectScope(OWNER_SCOPE_ALL)}
+                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
+                  isEveryone
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                All Clusters
+              </button>
+            </div>
+          )}
+          {showHistory && (
+            <Select
+              value={historyDays.toString()}
+              onValueChange={(value) => {
+                const newDays = parseInt(value);
+                setHistoryDays(newDays);
+                updateHistoryDaysURL(newDays);
+              }}
+            >
+              <SelectTrigger className="w-24 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1 day</SelectItem>
+                <SelectItem value="5">5 days</SelectItem>
+                <SelectItem value="10">10 days</SelectItem>
+                <SelectItem value="30">30 days</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
@@ -652,12 +690,6 @@ export function Clusters() {
         </div>
       </div>
 
-      <Filters
-        filters={filters}
-        setFilters={setFilters}
-        updateURLParams={updateURLParams}
-      />
-
       <ClusterTable
         refreshInterval={REFRESH_INTERVAL}
         setLoading={setLoading}
@@ -665,7 +697,7 @@ export function Clusters() {
         filters={filters}
         userScope={userScope}
         currentUser={currentUser}
-        onViewAllClusters={() => selectScope('all')}
+        onViewAllClusters={() => selectScope(OWNER_SCOPE_ALL)}
         showHistory={showHistory}
         historyDays={historyDays}
         onOpenSSHModal={(cluster) => {
@@ -744,7 +776,7 @@ export function ClusterTable({
   // pulling everyone's clusters and filtering client-side. Falls back to all
   // users when the caller is anonymous or an explicit User filter is active.
   const allUsers = !(
-    userScope === 'mine' &&
+    userScope === OWNER_SCOPE_MINE &&
     currentUser &&
     !hasExplicitUserFilter
   );
@@ -929,7 +961,7 @@ export function ClusterTable({
   useEffect(() => {
     let cancelled = false;
     const scopedToMine =
-      userScope === 'mine' && currentUser && !hasExplicitUserFilter;
+      userScope === OWNER_SCOPE_MINE && currentUser && !hasExplicitUserFilter;
     if (!scopedToMine || hookLoading || !scopedEmpty) {
       setOthersTotal(0);
       return;
@@ -1379,7 +1411,7 @@ export function ClusterTable({
                   );
                 })
               ) : (
-                userScope === 'mine' &&
+                userScope === OWNER_SCOPE_MINE &&
                 currentUser &&
                 !hasExplicitUserFilter &&
                 othersTotal > 0 ? (
