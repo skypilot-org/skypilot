@@ -3,6 +3,7 @@
 from contextlib import suppress
 import os
 import select
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -969,3 +970,133 @@ class TestRsyncTimeout:
         assert 'timed out' in str(exc_info.value).lower()
         # Deadline tripped before max_retry was exhausted.
         assert len(calls) == 1
+
+
+def _extract_exclude_from_path(command: str):
+    """Return the path passed to rsync's --exclude-from, or None.
+
+    The path is shell-quoted in the command, so tokenize with shlex to undo
+    any quoting before splitting off the value.
+    """
+    for token in shlex.split(command):
+        if token.startswith('--exclude-from='):
+            return token.split('=', 1)[1]
+    return None
+
+
+class TestRsyncSkyignoreExclude:
+    """The rsync up path computes the exclude list in Python (honoring
+    .skyignore '!' negation) and passes it to rsync via --exclude-from."""
+
+    def _write_skyignore(self, src_dir, content: str) -> None:
+        skyignore = os.path.join(src_dir,
+                                 command_runner.constants.SKY_IGNORE_FILE)
+        with open(skyignore, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def _run_up(self, src_dir):
+        """Run an up-sync with run_with_log mocked.
+
+        Returns a dict capturing the rsync `command` and, while the temp file
+        still exists (i.e. inside the run_with_log call, before the finally
+        cleanup), the `exclude_path` and its `exclude_lines`.
+        """
+        captured = {'exclude_path': None, 'exclude_lines': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['command'] = command
+            path = _extract_exclude_from_path(command)
+            captured['exclude_path'] = path
+            if path is not None:
+                with open(path, encoding='utf-8') as f:
+                    captured['exclude_lines'] = f.read().splitlines()
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(str(src_dir), '/tmp/dst', up=True, stream_logs=False)
+        return captured
+
+    def test_negation_reincluded_file_not_excluded(self, tmp_path) -> None:
+        """A file re-included by '!' must not appear in the exclude file."""
+        (tmp_path / 'a.json').write_text('x')
+        (tmp_path / 'keep.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n!keep.json\n')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['exclude_path'] is not None
+        # Paths are anchored to the transfer root with a leading '/'.
+        assert '/a.json' in captured['exclude_lines']
+        assert '/keep.json' not in captured['exclude_lines']
+
+    def test_no_exclude_file_when_nothing_excluded(self, tmp_path) -> None:
+        """With nothing to exclude, no --exclude-from is passed and no temp
+        file is left behind."""
+        (tmp_path / 'a.json').write_text('x')
+        # An empty .skyignore excludes nothing; using .skyignore avoids the
+        # gitignore path needing a real git repo.
+        self._write_skyignore(tmp_path, '')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['exclude_path'] is None
+        assert '--exclude-from' not in captured['command']
+
+    def test_exclude_file_cleaned_up_on_success(self, tmp_path) -> None:
+        """The temp exclude file is removed after rsync finishes."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n')
+
+        captured = self._run_up(tmp_path)
+
+        assert captured['exclude_path'] is not None
+        assert not os.path.exists(captured['exclude_path'])
+
+    def test_exclude_file_cleaned_up_on_unexpected_error(self,
+                                                         tmp_path) -> None:
+        """Even if rsync raises an unexpected error, the finally block removes
+        the temp exclude file (no leak)."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n')
+
+        seen = {'path': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            seen['path'] = _extract_exclude_from_path(command)
+            raise RuntimeError('boom')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            with pytest.raises(RuntimeError):
+                runner.rsync(str(tmp_path),
+                             '/tmp/dst',
+                             up=True,
+                             stream_logs=False)
+
+        assert seen['path'] is not None
+        assert not os.path.exists(seen['path'])
+
+    def test_down_sync_does_not_compute_excludes(self, tmp_path) -> None:
+        """The exclude logic is up-only; a down-sync passes no --exclude-from
+        even when a .skyignore is present at the (local) source path."""
+        (tmp_path / 'a.json').write_text('x')
+        self._write_skyignore(tmp_path, '*.json\n')
+
+        captured = {'command': None}
+
+        def fake_run_with_log(command, *args, **kwargs):
+            captured['command'] = command
+            return 0, '', ''
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               side_effect=fake_run_with_log):
+            runner = command_runner.LocalProcessCommandRunner()
+            runner.rsync(str(tmp_path), '/tmp/dst', up=False, stream_logs=False)
+
+        assert '--exclude-from' not in captured['command']

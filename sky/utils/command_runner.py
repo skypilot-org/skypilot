@@ -59,6 +59,11 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 # TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
 # consistency between bucket upload and rsync.
+# NOTE(Hawon-Oh): _rsync() no longer uses these filters; it now relies on
+# storage_utils.get_excluded_files (which honors .skyignore negation '!') via
+# --exclude-from. These are only still used by
+# backend_utils.path_size_megabytes, so remove them once that caller is
+# migrated too.
 RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
 RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
@@ -466,24 +471,11 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
         rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
-        # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / constants.SKY_IGNORE_FILE).exists():
-            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
-        else:
-            rsync_command.append(RSYNC_FILTER_GITIGNORE)
-            if up:
-                # Build --exclude-from argument.
-                if (resolved_source / GIT_EXCLUDE).exists():
-                    # Ensure file exists; otherwise, rsync will error out.
-                    #
-                    # We shlex.quote() because the path may contain spaces:
-                    #   'my dir/.git/info/exclude'
-                    # Without quoting rsync fails.
-                    rsync_command.append(
-                        RSYNC_EXCLUDE_OPTION.format(
-                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+        # Set when uploading; the temp file is created in the `up` branch below,
+        # after the remote home-dir lookup, so a failure there cannot leak it.
+        exclude_file: Optional[str] = None
 
         if rsh_option is not None:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
@@ -502,6 +494,25 @@ class CommandRunner:
                         max_retry=max_retry,
                         get_remote_home_dir=get_remote_home_dir)
                     resolved_target = target.replace('~', remote_home_dir)
+            # --exclude-from: exclude files matched by .skyignore/.gitignore.
+            if resolved_source.is_dir():
+                # pylint: disable-next=import-outside-toplevel
+                from sky.data import storage_utils
+                excluded_files = storage_utils.get_excluded_files(
+                    str(resolved_source))
+                if excluded_files:
+                    fd, exclude_file = tempfile.mkstemp(prefix='skyignore-',
+                                                        suffix='.exclude')
+                    with os.fdopen(fd, 'w') as f:
+                        # Anchor each path to the rsync root with '/' so an
+                        # entry matches exactly that file/dir, not a same-named
+                        # path deeper in the tree.
+                        f.write('\n'.join('/' + p.replace(os.sep, '/')
+                                          for p in excluded_files))
+                    # We shlex.quote() the temp-file path because it may contain
+                    # spaces; without quoting rsync would fail to read it.
+                    rsync_command.append(
+                        RSYNC_EXCLUDE_OPTION.format(shlex.quote(exclude_file)))
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
@@ -539,55 +550,64 @@ class CommandRunner:
         # across many clusters (e.g. the debug dump).
         deadline = (time.monotonic() + timeout) if timeout is not None else None
         timed_out = False
-        while max_retry >= 0:
-            attempt_timeout: Optional[int] = None
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    # The deadline is exhausted before this attempt could run.
-                    # Set the outputs to reflect the timeout so the post-loop
-                    # error handling has defined (and accurate) values.
+        try:
+            while max_retry >= 0:
+                attempt_timeout: Optional[int] = None
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        # The deadline is exhausted before this attempt could
+                        # run. Set the outputs to reflect the timeout so the
+                        # post-loop error handling has defined (and accurate)
+                        # values.
+                        timed_out = True
+                        returncode = 255
+                        stdout = ''
+                        stderr = f'rsync timed out after {timeout} seconds.'
+                        break
+                    # run_with_log expects an int; clamp to >=1 so we never pass
+                    # 0, which would disable the timeout.
+                    attempt_timeout = max(1, int(remaining))
+                try:
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        command,
+                        log_path=log_path,
+                        stream_logs=stream_logs,
+                        shell=True,
+                        require_outputs=True,
+                        timeout=attempt_timeout)
+                except subprocess.TimeoutExpired:
+                    # run_with_log already terminated the rsync process tree.
+                    # The attempt consumed the remaining budget, so the overall
+                    # deadline is exhausted; stop instead of retrying.
                     timed_out = True
                     returncode = 255
                     stdout = ''
                     stderr = f'rsync timed out after {timeout} seconds.'
                     break
-                # run_with_log expects an int; clamp to >=1 so we never pass 0,
-                # which would disable the timeout.
-                attempt_timeout = max(1, int(remaining))
-            try:
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    command,
-                    log_path=log_path,
-                    stream_logs=stream_logs,
-                    shell=True,
-                    require_outputs=True,
-                    timeout=attempt_timeout)
-            except subprocess.TimeoutExpired:
-                # run_with_log already terminated the rsync process tree. The
-                # attempt consumed the remaining budget, so the overall
-                # deadline is exhausted; stop instead of retrying.
-                timed_out = True
-                returncode = 255
-                stdout = ''
-                stderr = f'rsync timed out after {timeout} seconds.'
-                break
-            if returncode == 0:
-                break
-            max_retry -= 1
-            sleep_time = backoff.current_backoff()
-            if deadline is not None:
-                # Do not let the backoff wait push us past the deadline.
-                new_remaining = deadline - time.monotonic()
-                if new_remaining <= 0 or sleep_time >= new_remaining:
-                    # The deadline will be exhausted by the time
-                    # this backoff wait completed; early exit.
-                    timed_out = True
-                    returncode = 255
-                    stdout = ''
-                    stderr = f'rsync timed out after {timeout} seconds.'
+                if returncode == 0:
                     break
-            time.sleep(sleep_time)
+                max_retry -= 1
+                sleep_time = backoff.current_backoff()
+                if deadline is not None:
+                    # Do not let the backoff wait push us past the deadline.
+                    new_remaining = deadline - time.monotonic()
+                    if new_remaining <= 0 or sleep_time >= new_remaining:
+                        # The deadline will be exhausted by the time
+                        # this backoff wait completed; early exit.
+                        timed_out = True
+                        returncode = 255
+                        stdout = ''
+                        stderr = f'rsync timed out after {timeout} seconds.'
+                        break
+                time.sleep(sleep_time)
+        finally:
+            # Always remove the exclude temp file, even if a rsync attempt
+            # raised unexpectedly. On the normal and failure paths this runs
+            # before handle_returncode below, so the file is cleaned up even
+            # when rsync exits non-zero.
+            if exclude_file is not None:
+                os.unlink(exclude_file)
 
         direction = 'up' if up else 'down'
         timeout_hint = (f'rsync timed out after {timeout} seconds. '
