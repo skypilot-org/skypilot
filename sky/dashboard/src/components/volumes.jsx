@@ -775,7 +775,7 @@ function VolumesTable({
                   colSpan={totalColSpan}
                   icon={<VolumeIcon className="w-5 h-5" />}
                   title="No volumes found"
-                  description="Create a volume to mount storage in your clusters and jobs."
+                  description="Create a volume to mount storage in your clusters and jobs"
                 />
               )}
             </TableBody>

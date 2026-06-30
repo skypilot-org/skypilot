@@ -2260,8 +2260,8 @@ function UsersTable({
           }
           description={
             filters.length > 0
-              ? 'Try adjusting your filters.'
-              : 'Add a user to grant them access.'
+              ? 'Try adjusting your filters'
+              : 'Add a user to grant them access'
           }
         />
       </Card>
@@ -3148,8 +3148,8 @@ function ServiceAccountTokensView({
             }
             description={
               searchQuery?.trim()
-                ? 'Try a different search term.'
-                : 'No service accounts have been created yet.'
+                ? 'Try a different search term'
+                : 'No service accounts have been created yet'
             }
           />
         </Card>

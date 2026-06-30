@@ -900,7 +900,7 @@ export function Workspaces() {
           <EmptyState
             icon={<BookDocIcon className="w-5 h-5" />}
             title="No workspaces found"
-            description="Create a workspace to organize your clusters and jobs."
+            description="Create a workspace to organize your clusters and jobs"
           />
         </Card>
       ) : (
@@ -1067,7 +1067,7 @@ export function Workspaces() {
                     colSpan={5}
                     icon={<BookDocIcon className="w-5 h-5" />}
                     title="No workspaces found"
-                    description="Create a workspace to organize your clusters and jobs."
+                    description="Create a workspace to organize your clusters and jobs"
                   />
                 )}
               </TableBody>

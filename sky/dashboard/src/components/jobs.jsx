@@ -2535,7 +2535,7 @@ export function ManagedJobsTable({
                           <EmptyState
                             icon={<BriefcaseIcon className="w-5 h-5" />}
                             title="No active jobs"
-                            description="Launch a managed job to run it with automatic recovery."
+                            description="Launch a managed job to run it with automatic recovery"
                             minHeight={0}
                           />
                         ))}
@@ -2948,7 +2948,7 @@ export function ClusterJobs({
                 colSpan={8}
                 icon={<BriefcaseIcon className="w-5 h-5" />}
                 title="No jobs found"
-                description="Submit a job to run it on this cluster."
+                description="Submit a job to run it on this cluster"
               />
             )}
           </TableBody>
@@ -3246,7 +3246,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 colSpan={poolColumnCount}
                 icon={<Layers size={20} strokeWidth={1.75} />}
                 title="No pools found"
-                description="Create a pool to share workers across jobs."
+                description="Create a pool to share workers across jobs"
               />
             )}
           </TableBody>

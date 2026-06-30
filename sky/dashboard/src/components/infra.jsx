@@ -799,7 +799,7 @@ export function ContextDetails({
               <EmptyState
                 icon={<ServerIcon className="w-5 h-5" />}
                 title="No nodes found"
-                description="No nodes are available in this context."
+                description="No nodes are available in this context"
               />
             </div>
           )}

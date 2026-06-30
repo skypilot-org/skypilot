@@ -1203,8 +1203,8 @@ export function ClusterTable({
                   }
                   description={
                     showHistory
-                      ? 'No clusters in the selected time range.'
-                      : 'Launch a cluster to run your workloads.'
+                      ? 'No clusters in the selected time range'
+                      : 'Launch a cluster to run your workloads'
                   }
                 />
               )}
