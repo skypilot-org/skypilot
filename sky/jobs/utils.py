@@ -1277,11 +1277,28 @@ def cancel_job_by_name(job_name: str,
                        current_workspace: Optional[str] = None,
                        graceful: bool = False,
                        graceful_timeout: Optional[int] = None) -> str:
-    """Cancel a job by name."""
-    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
+    """Cancel managed job(s) by name.
+
+    If ``job_name`` is a glob pattern (e.g. contains ``*``/``?``/``[``), it is
+    treated as a glob pattern and all running jobs whose name matches the
+    pattern are cancelled. Otherwise it is matched as an exact name, in which
+    case matching more than one running job is ambiguous and reported as an
+    error.
+
+    Glob detection uses the same ``ux_utils.is_glob_pattern`` helper as
+    ``sky down``, so a name is interpreted as a pattern under the same rules.
+    """
+    match_glob = ux_utils.is_glob_pattern(job_name)
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+        job_name, match_glob=match_glob)
     if not job_ids:
+        if match_glob:
+            return f'No running job found matching name pattern {job_name!r}.'
         return f'No running job found with name {job_name!r}.'
-    if len(job_ids) > 1:
+    if not match_glob and len(job_ids) > 1:
+        # Exact-name match is ambiguous when it hits multiple jobs; ask the
+        # user to disambiguate. With a glob pattern, matching multiple jobs is
+        # the expected behavior, so we cancel all of them.
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
@@ -1289,6 +1306,10 @@ def cancel_job_by_name(job_name: str,
                             current_workspace=current_workspace,
                             graceful=graceful,
                             graceful_timeout=graceful_timeout)
+    if match_glob:
+        plural = 's' if len(job_ids) > 1 else ''
+        return (f'Pattern {job_name!r} matched {len(job_ids)} '
+                f'running job{plural}. {msg}')
     return f'{job_name!r} {msg}'
 
 

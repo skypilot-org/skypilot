@@ -308,26 +308,6 @@ system_config_table = sqlalchemy.Table(
 )
 
 
-def _glob_to_similar(glob_pattern):
-    """Converts a glob pattern to a PostgreSQL LIKE pattern."""
-
-    # Escape special LIKE characters that are not special in glob
-    glob_pattern = glob_pattern.replace('%', '\\%').replace('_', '\\_')
-
-    # Convert glob wildcards to LIKE wildcards
-    like_pattern = glob_pattern.replace('*', '%').replace('?', '_')
-
-    # Handle character classes, including negation
-    def replace_char_class(match):
-        group = match.group(0)
-        if group.startswith('[!'):
-            return '[^' + group[2:-1] + ']'
-        return group
-
-    like_pattern = re.sub(r'\[(!)?.*?\]', replace_char_class, like_pattern)
-    return like_pattern
-
-
 def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -1604,16 +1584,8 @@ def get_glob_cluster_names(
     engine = _db_manager.get_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(engine) as session:
-        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
-            query = session.query(cluster_table.c.name).filter(
-                cluster_table.c.name.op('GLOB')(cluster_name))
-        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
-             ):
-            query = session.query(cluster_table.c.name).filter(
-                cluster_table.c.name.op('SIMILAR TO')(
-                    _glob_to_similar(cluster_name)))
-        else:
-            raise ValueError('Unsupported database dialect')
+        query = session.query(cluster_table.c.name).filter(
+            db_utils.glob_filter(engine, cluster_table.c.name, cluster_name))
         if workspaces_filter is not None:
             query = query.filter(
                 cluster_table.c.workspace.in_(workspaces_filter))
@@ -2830,16 +2802,9 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
     engine = _db_manager.get_engine()
     assert storage_name is not None, 'storage_name cannot be None'
     with orm.Session(engine) as session:
-        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
-            rows = session.query(storage_table).filter(
-                storage_table.c.name.op('GLOB')(storage_name)).all()
-        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
-             ):
-            rows = session.query(storage_table).filter(
-                storage_table.c.name.op('SIMILAR TO')(
-                    _glob_to_similar(storage_name))).all()
-        else:
-            raise ValueError('Unsupported database dialect')
+        rows = session.query(storage_table).filter(
+            db_utils.glob_filter(engine, storage_table.c.name,
+                                 storage_name)).all()
     return [row.name for row in rows]
 
 

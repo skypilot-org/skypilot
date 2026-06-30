@@ -1103,12 +1103,16 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 # ======== utility functions ========
 def get_nonterminal_job_ids_by_name(name: Optional[str],
                                     user_hash: Optional[str] = None,
-                                    all_users: bool = False) -> List[int]:
+                                    all_users: bool = False,
+                                    match_glob: bool = False) -> List[int]:
     """Get non-terminal job ids by name.
 
     If name is None:
     1. if all_users is False, get for the given user_hash
     2. otherwise, get for all users
+
+    If match_glob is True, ``name`` is treated as a glob pattern (e.g.
+    ``my-job-*``) and all jobs whose name matches the pattern are returned.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -1138,11 +1142,20 @@ def get_nonterminal_job_ids_by_name(name: Optional[str],
             # We match the job name from `job_info` for the jobs submitted after
             # #1982, and from `spot` for the jobs submitted before #1982, whose
             # job_info is not available.
+            if match_glob:
+                name_match = db_utils.glob_filter(engine, job_info_table.c.name,
+                                                  name)
+                task_name_match = db_utils.glob_filter(engine,
+                                                       spot_table.c.task_name,
+                                                       name)
+            else:
+                name_match = job_info_table.c.name == name
+                task_name_match = spot_table.c.task_name == name
             where_conditions.append(
                 sqlalchemy.or_(
-                    job_info_table.c.name == name,
+                    name_match,
                     sqlalchemy.and_(job_info_table.c.name.is_(None),
-                                    spot_table.c.task_name == name),
+                                    task_name_match),
                 ))
         query = query.where(sqlalchemy.and_(*where_conditions)).order_by(
             spot_table.c.spot_job_id.desc())

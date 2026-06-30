@@ -299,7 +299,7 @@ Cancel managed jobs.
 **Options:**
 
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
-- `--name`, `-n` — Managed job name to cancel.
+- `--name`, `-n` — Managed job name to cancel. Supports glob patterns, in which case all jobs whose name matches the pattern are cancelled.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
 - `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.

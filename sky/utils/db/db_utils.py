@@ -4,6 +4,7 @@ import contextlib
 import enum
 import os
 import pathlib
+import re
 import sqlite3
 import threading
 import typing
@@ -60,6 +61,55 @@ class UniqueConstraintViolationError(Exception):
 class SQLAlchemyDialect(enum.Enum):
     SQLITE = 'sqlite'
     POSTGRESQL = 'postgresql'
+
+
+def glob_to_sql_similar_pattern(glob_pattern: str) -> str:
+    """Converts a glob pattern to a PostgreSQL ``SIMILAR TO`` pattern.
+
+    PostgreSQL has no native glob operator (unlike SQLite's ``GLOB``), so we
+    translate glob wildcards into ``SIMILAR TO`` wildcards. ``SIMILAR TO``
+    supports character classes (``[...]``) with the same syntax as glob, so
+    those are passed through (with glob's ``[!...]`` negation rewritten to SQL's
+    ``[^...]``).
+    """
+    # ``SIMILAR TO`` is regex-like: besides the SQL wildcards '%'/'_', it treats
+    # '|', '+', '(', ')', '{', '}' as operators. None of these are special in
+    # glob, so escape them (and the escape character itself, first) to keep them
+    # literal -- otherwise a name like 'my-job-(1)' or 'job+v2' would cause a
+    # SQL syntax error or match incorrectly. We do this before translating the
+    # glob wildcards below so we don't escape the '%'/'_' we are about to emit.
+    glob_pattern = glob_pattern.replace('\\', '\\\\')
+    for char in ['%', '_', '|', '+', '(', ')', '{', '}']:
+        glob_pattern = glob_pattern.replace(char, '\\' + char)
+
+    # Convert glob wildcards to SIMILAR TO wildcards.
+    like_pattern = glob_pattern.replace('*', '%').replace('?', '_')
+
+    # Handle character classes, including negation ([!...] -> [^...]).
+    def replace_char_class(match):
+        group = match.group(0)
+        if group.startswith('[!'):
+            return '[^' + group[2:-1] + ']'
+        return group
+
+    like_pattern = re.sub(r'\[(!)?.*?\]', replace_char_class, like_pattern)
+    return like_pattern
+
+
+def glob_filter(engine: sqlalchemy.engine.Engine, column: 'sqlalchemy.Column',
+                glob_pattern: str) -> 'sqlalchemy.sql.elements.ColumnElement':
+    """Builds a SQLAlchemy filter matching ``column`` against a glob pattern.
+
+    Uses SQLite's native ``GLOB`` operator, or PostgreSQL's ``SIMILAR TO`` with
+    the pattern translated by :func:`glob_to_sql_similar_pattern`.
+    """
+    if engine.dialect.name == SQLAlchemyDialect.SQLITE.value:
+        return column.op('GLOB')(glob_pattern)
+    elif engine.dialect.name == SQLAlchemyDialect.POSTGRESQL.value:
+        return column.op('SIMILAR TO')(
+            glob_to_sql_similar_pattern(glob_pattern))
+    else:
+        raise ValueError(f'Unsupported database dialect: {engine.dialect.name}')
 
 
 @contextlib.contextmanager
