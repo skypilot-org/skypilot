@@ -542,6 +542,7 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
     # failed. Best-effort and tail-bounded.
     for pod in prom_pods:
         pod_name = pod.metadata.name
+        current_log = None
         for previous in (False, True):
             suffix = '.previous' if previous else ''
             resource = f'gpu_metrics/{pod_name}{suffix}.log'
@@ -553,6 +554,24 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
                     previous=previous,
                     tail_lines=_PROMETHEUS_LOG_TAIL_LINES,
                     _request_timeout=kubernetes.API_TIMEOUT)
+                if not pod_log:
+                    continue
+                if not previous:
+                    current_log = pod_log
+                elif pod_log == current_log:
+                    # In a fast crash-loop the two reads can land on the same
+                    # container instance: mid-CrashLoopBackOff (no running
+                    # container) kubelet resolves both previous=False and
+                    # previous=True to the last-terminated instance, and a
+                    # restart can also fall between the reads. Drop a previous
+                    # log that's a byte-for-byte duplicate of the current one --
+                    # it adds nothing.
+                    continue
+                # Keep the write inside the try so a local OSError (full disk,
+                # permissions) is recorded best-effort, not propagated.
+                os.makedirs(out_dir, exist_ok=True)
+                _write_text(os.path.join(out_dir, f'{pod_name}{suffix}.log'),
+                            pod_log)
             except kubernetes.api_exception() as e:
                 # A 400 on previous=True just means the container has never
                 # restarted (no previous instance) -- expected, not an error.
@@ -562,10 +581,6 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
             except Exception as e:  # pylint: disable=broad-except
                 _record_error(errors, resource, e)
                 continue
-            if pod_log:
-                os.makedirs(out_dir, exist_ok=True)
-                _write_text(os.path.join(out_dir, f'{pod_name}{suffix}.log'),
-                            pod_log)
 
     # The config + topology behind the pods. The prometheus.yml ConfigMap and
     # the Prometheus PVC(s) are namespace-scoped (minimal RBAC); the

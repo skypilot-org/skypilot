@@ -359,6 +359,44 @@ def test_context_prometheus_log_failure_is_recorded(tmp_path, k8s_apis):
     assert ('gpu_metrics/skypilot-prometheus-server-abc123.log' in resources)
 
 
+def test_context_prometheus_logs_dedupes_identical_previous(tmp_path, k8s_apis):
+    """A fast crash-loop can make the current and previous reads resolve to the
+    same container instance; a byte-identical previous log is dropped, not
+    written as a confusing duplicate."""
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('skypilot', 'skypilot-prometheus-server-abc123'))
+    # Both previous=False and previous=True return the same bytes.
+    k8s_apis.core.read_namespaced_pod_log.return_value = 'same boot log\n'
+
+    errors = _run_context(tmp_path)
+
+    assert not errors
+    gdir = tmp_path / 'gpu_metrics'
+    assert (gdir / 'skypilot-prometheus-server-abc123.log').read_text() == (
+        'same boot log\n')
+    assert not (gdir /
+                'skypilot-prometheus-server-abc123.previous.log').exists()
+
+
+def test_context_prometheus_log_write_error_is_recorded(tmp_path, k8s_apis,
+                                                        monkeypatch):
+    """A local write failure (e.g. full disk) is recorded best-effort rather
+    than propagating out and aborting the rest of the dump."""
+    k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
+        ('skypilot', 'skypilot-prometheus-server-abc123'))
+    k8s_apis.core.read_namespaced_pod_log.return_value = 'boot log\n'
+
+    def _boom(*_args, **_kwargs):
+        raise OSError('No space left on device')
+
+    monkeypatch.setattr(debug, '_write_text', _boom)
+
+    errors = _run_context(tmp_path)
+
+    resources = {e['resource'] for e in errors}
+    assert 'gpu_metrics/skypilot-prometheus-server-abc123.log' in resources
+
+
 def test_context_gpu_metrics_absent_produces_no_dir(tmp_path, k8s_apis):
     k8s_apis.core.list_pod_for_all_namespaces.return_value = _all_ns_pods(
         ('default', 'unrelated-pod'))
