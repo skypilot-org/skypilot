@@ -291,7 +291,9 @@ def read_catalog(filename: str,
                         tmp_path = f.name
                     os.rename(tmp_path, catalog_path)
                     with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
-                        f.write(hashlib.md5(r.text.encode()).hexdigest())
+                        f.write(
+                            hashlib.md5(r.text.encode(),
+                                        usedforsecurity=False).hexdigest())
             logger.debug(f'Updated {cloud} catalog {filename}.')
         return True
 

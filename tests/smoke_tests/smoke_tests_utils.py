@@ -853,9 +853,9 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── Waiting for task resources on 1 node.
     # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
     # (setup pid=1277) running setup
-    # (min, pid=1277) # conda environments:
-    # (min, pid=1277) #
-    # (min, pid=1277) base                  *  /opt/conda
+    # (min, pid=1277) Package    Version
+    # (min, pid=1277) ---------- -------
+    # (min, pid=1277) pip        24.0
     # (min, pid=1277)
     # (min, pid=1277) task run finish
     # ✓ Job finished (status: SUCCEEDED).
@@ -971,6 +971,45 @@ def launch_cluster_for_cloud_cmd(cloud: str,
         return (
             f'sky launch -y -c {cluster_name} --infra {cloud} {LOW_RESOURCE_ARG} --async'
         )
+
+
+def k8s_landed_context_file(name: str) -> str:
+    return f'/tmp/sky-smoke-k8s-context-{name}'
+
+
+def resolve_k8s_context_cmd(name: str) -> str:
+    """Resolve, once on the API-connected test driver, the kubeconfig context
+    the cluster landed on, and persist it so the cloud-cmd cluster can be pinned
+    to the same context. For Kubernetes a cluster's ``region`` is its context.
+
+    On a multi-context API server the cluster may land on any context. The
+    cloud-cmd helper is a regular (non-controller) cluster, so by default it
+    uses the Kubernetes SERVICE_ACCOUNT remote_identity: its ``kubectl`` runs
+    with the helper pod's own in-cluster credentials, which only reach the
+    helper's own cluster (the API server's multi-context kubeconfig is uploaded
+    only to controller clusters). Pinning the helper to the target's context
+    puts both on the same cluster, so the helper's ``kubectl`` can see the
+    target's resources.
+    """
+    # Write the context from within Python rather than redirecting stdout:
+    # importing sky may emit logs to stdout (e.g. LOG_TO_STDOUT=1), which would
+    # otherwise contaminate the captured value. A missing cluster or context
+    # raises, failing the step loudly rather than writing an empty context that
+    # would silently leave the cloud-cmd cluster unpinned.
+    resolve = (f"import sky; "
+               f"clusters = sky.get(sky.status(['{name}'])); "
+               f"ctx = clusters[0].region; "
+               f"open('{k8s_landed_context_file(name)}', 'w').write(ctx)")
+    return f'python -c {shlex.quote(resolve)}'
+
+
+def launch_cloud_cmd_on_landed_context(name: str) -> str:
+    """Launch the cloud-cmd cluster pinned to the context the target cluster
+    landed on (see :func:`resolve_k8s_context_cmd`), so its in-cluster kubectl
+    shares the target cluster.
+    """
+    return launch_cluster_for_cloud_cmd(
+        f'kubernetes/$(cat {k8s_landed_context_file(name)})', name)
 
 
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
@@ -1367,7 +1406,8 @@ def wait_for_managed_job_status_sdk(job_name: str,
     """
     start_time = time.time()
     while time.time() - start_time < timeout:
-        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        jobs_list = sky.get(
+            sky.jobs.queue_v2(refresh=False, fields=['job_name', 'status']))[0]
         for job in jobs_list:
             if job['job_name'] == job_name:
                 if job['status'] in target_statuses:

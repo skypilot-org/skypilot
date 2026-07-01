@@ -119,16 +119,17 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
             continue
 
         ext_ctx = plugins.get_extension_context()
-        if ext_ctx is None:
-            raise RuntimeError(
-                'Task references managed_secrets but no plugin system '
-                'is available.')
-        provider = ext_ctx.managed_secrets_provider
+        provider = (ext_ctx.managed_secrets_provider
+                    if ext_ctx is not None else None)
         if provider is None:
+            names = ', '.join(
+                sorted(set(ref.name for ref in task.managed_secret_refs)))
             raise RuntimeError(
-                'Task references managed_secrets but no managed secrets '
-                'provider is configured. Install a secrets management '
-                'plugin.')
+                f'No value available for secret(s): {names}. A secret with '
+                'no inline value must be provided at launch with the '
+                '--secret flag (e.g. --secret NAME=value), or resolved by a '
+                'managed secrets provider. No managed secrets provider is '
+                'configured.')
 
         # The provider.resolve() is async; run it from this sync context.
         resolved = asyncio.run(

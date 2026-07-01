@@ -1,0 +1,14 @@
+{{- if and .Values.prometheus.scrapeEndpointMetrics .Values.grafana.enabled .Values.grafana.sidecar.dashboards.enabled }}
+{{- $fullName := include "skypilot.fullname" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullName }}-autoscaling-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $fullName }}-api
+    grafana_dashboard: "true"
+data:
+  autoscaling-dashboard.json: |
+{{ .Files.Get "manifests/autoscaling-dashboard.json" | indent 4 }}
+{{- end }}

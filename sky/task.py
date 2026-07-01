@@ -301,8 +301,12 @@ def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
             pass
         else:
             task_yaml['secrets'] = {
-                k: (None if k.startswith('secrets:') else '<redacted>')
-                for k in raw_secrets
+                # Managed secret refs (``secrets:`` prefix or null value) have
+                # no inline value to redact; keep them null so the YAML stays
+                # launchable. Inline secret values are redacted.
+                k: (None if
+                    (k.startswith('secrets:') or v is None) else '<redacted>')
+                for k, v in raw_secrets.items()
             }
     docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
                                                        {})
@@ -714,24 +718,26 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
 
-        raw_secrets_check = config.get('secrets')
-        if isinstance(raw_secrets_check, dict):
-            for k, v in raw_secrets_check.items():
-                if v is None and not k.startswith('secrets:'):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Secret variable {k!r} is None. Please set a '
-                            'value for it in task YAML or with --secret flag.'
-                            f' To set it to be empty, use an empty string '
-                            f'({k}: "" in task YAML or '
-                            f'--secret {k}="" in CLI).')
+        # Unlike envs, a null-valued secret in dict form (e.g. ``API_KEY:``
+        # with no value) is not an error: it is treated as a managed secret
+        # reference, resolved at launch time from a CLI ``--secret`` override
+        # or a managed secrets provider. It is turned into a ManagedSecretRef
+        # below.
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_vars = config.get('envs', {})
-        secrets_for_subst = config.get('secrets', {})
-        if isinstance(secrets_for_subst, list):
-            secrets_for_subst = {}  # Array form has no inline values
+        secrets_for_subst = config.get('secrets')
+        if secrets_for_subst is None or isinstance(secrets_for_subst, list):
+            # ``secrets:`` (null) or array form have no inline values.
+            secrets_for_subst = {}
+        else:
+            # Null-valued secrets are managed references with no inline value
+            # to substitute (their value is only known after resolution), so
+            # exclude them from variable substitution.
+            secrets_for_subst = {
+                k: v for k, v in secrets_for_subst.items() if v is not None
+            }
         env_and_secrets = env_vars.copy()
         env_and_secrets.update(secrets_for_subst)
         if config.get('file_mounts') is not None:
@@ -772,7 +778,11 @@ class Task:
                 managed_from_secrets.append(
                     ManagedSecretRef(name=name, scope_override=scope))
         elif isinstance(raw_secrets, dict):
-            # Dict form: split inline values vs secrets: prefix refs
+            # Dict form: split inline values vs managed refs. A managed ref is
+            # either an explicit ``secrets:``-prefixed key or any key with a
+            # null value (no inline value means the value is resolved at launch
+            # time from a CLI ``--secret`` override or a managed secrets
+            # provider).
             for key, value in raw_secrets.items():
                 if key.startswith('secrets:'):
                     if value is not None:
@@ -785,6 +795,11 @@ class Task:
                                 '\'secrets:\' prefix.')
                     ref_name = key[len('secrets:'):]
                     name, scope = _parse_secret_name(ref_name)
+                    managed_from_secrets.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                elif value is None:
+                    # Bare ``KEY:`` with no value -> managed secret reference.
+                    name, scope = _parse_secret_name(key)
                     managed_from_secrets.append(
                         ManagedSecretRef(name=name, scope_override=scope))
                 else:

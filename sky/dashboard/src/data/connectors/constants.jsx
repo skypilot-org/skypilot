@@ -44,18 +44,19 @@ export const TIMEOUT = 10000;
 export const API_URL = '/api/v1';
 export const WS_API_URL = API_URL.replace(/^http/, 'ws');
 
-// The API_VERSION this dashboard build was written against. Sent on every
-// outgoing API request via the `X-SkyPilot-API-Version` header so the
-// server can identify the dashboard as a contemporary (non-legacy) client
-// and run the workspace resolver / surface new error types like
-// `WorkspaceAmbiguousError`. This is a deliberate hardcode — the dashboard
-// is bundled with the server release, so its API contract level is fixed at
-// build time; tracking the server's runtime API_VERSION instead would let
-// a cached old dashboard mis-report support for features it lacks.
-// Keep in sync with sky/server/constants.py:API_VERSION when (and only
-// when) this dashboard adds new server-side feature support that older
-// dashboard builds cannot handle.
-export const CLIENT_API_VERSION = '53';
+// The SkyPilot API version this dashboard advertises, sent on every outgoing
+// request via the `X-SkyPilot-API-Version` header so the server can identify
+// the dashboard as a contemporary (non-legacy) client and run the workspace
+// resolver / surface new error types like `WorkspaceAmbiguousError`.
+//
+// This MUST equal sky/server/constants.py:API_VERSION. The dashboard ships
+// with the server, so the two bump together (see the backward-compatibility
+// guideline). It is a build-time hardcode rather than the server's runtime
+// version on purpose: an already-loaded older dashboard kept across a server
+// upgrade then still reports its own build's version, not the new server's, so
+// it can't over-report support for wire formats its code doesn't handle.
+// Enforced by tests/unit_tests/test_api_version_consistency.py.
+export const CLIENT_API_VERSION = '55';
 // Header names expected by the server's APIVersionMiddleware. Mirrors
 // sky/server/constants.py:API_VERSION_HEADER / VERSION_HEADER.
 // The middleware (versions._check_version_compatibility) requires BOTH

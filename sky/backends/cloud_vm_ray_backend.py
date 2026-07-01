@@ -1326,6 +1326,10 @@ class RetryingVmProvisioner(object):
                         # No teardown happens for this error.
                         with ux_utils.print_exception_no_traceback():
                             raise
+                    except exceptions.ExecutionPausedError:
+                        # Pausing to wait on an external condition: keep the
+                        # resources for resume, do not tear down or fail over.
+                        raise
                     except config_lib.KubernetesError as e:
                         if e.insufficent_resources:
                             insufficient_resources = e.insufficent_resources
@@ -2007,8 +2011,18 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.is_grpc_enabled = True
+        # A handle is created before provisioning runs, so nothing is set up
+        # on the cluster yet; bulk_provision() fills in the real record on
+        # completion. Defaulting to no-Ray keeps teardown of a cluster that
+        # crashed or recovered mid-provisioning from attempting `ray stop` on
+        # a cluster where Ray never started.
         self.provision_runtime_metadata = (
-            provision_common.ProvisionRuntimeMetadata())
+            provision_common.ProvisionRuntimeMetadata(
+                has_ray=False,
+                has_skylet=False,
+                has_job_queue=False,
+                ssh_available=False,
+            ))
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -4667,12 +4681,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             logger.info('No jobs cancelled. They may be in terminal states.')
 
-    def sync_down_logs(
-            self,
-            handle: CloudVmRayResourceHandle,
-            job_ids: Optional[List[str]],
-            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+    def sync_down_logs(self,
+                       handle: CloudVmRayResourceHandle,
+                       job_ids: Optional[List[str]],
+                       local_dir: str = constants.SKY_LOGS_DIRECTORY,
+                       head_only: bool = False) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
+
+        Args:
+            head_only: if True, rsync only from the head node. The head's
+                ``run.log`` already aggregates every node's task output, so
+                this captures the full log without touching workers -- which
+                may be unreachable (e.g. a node died, triggering recovery).
 
         Returns:
             A dictionary mapping job_id to log path.
@@ -4748,6 +4768,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             local_log_dirs.append(local_log_dir)
 
         runners = handle.get_command_runners()
+        if head_only:
+            # Head's run.log already aggregates all nodes' output; rsyncing
+            # only the head avoids exec-ing into workers that may be gone.
+            runners = runners[:1]
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -6407,7 +6431,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 read_only = bool(storage_obj.mount_config and
                                  storage_obj.mount_config.read_only)
-                mount_cmd = store.mount_command(dst, read_only=read_only)
+                if isinstance(store, storage_lib.HuggingFaceStore):
+                    # getattr guards against MountConfig instances serialized
+                    # before hf_mount_args existed (and against a None config).
+                    hf_mount_args = getattr(storage_obj.mount_config,
+                                            'hf_mount_args', None)
+                    mount_cmd = store.mount_command(dst,
+                                                    read_only=read_only,
+                                                    hf_mount_args=hf_mount_args)
+                else:
+                    mount_cmd = store.mount_command(dst, read_only=read_only)
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED

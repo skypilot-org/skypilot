@@ -182,6 +182,10 @@ def bulk_provision(
             # This error is a user error instead of a provisioning failure.
             # And there is no possibility to fix it by teardown.
             raise
+        except exceptions.ExecutionPausedError:
+            # Pausing to wait on an external condition: keep the resources for
+            # resume, do not tear down.
+            raise
         except Exception as exc:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:

@@ -216,26 +216,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
 
 def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
-    if not job_ids:
-        return ''
-
-    if len(job_ids) == 1:
-        return str(job_ids[0])
-
-    job_ids = sorted(job_ids)
-    ranges = []
-    start = prev = job_ids[0]
-
-    for n in job_ids[1:]:
-        if n == prev + 1:
-            prev = n
-            continue
-        ranges.append(f'{start}-{prev}' if start != prev else str(start))
-        start = prev = n
-
-    # append last range
-    ranges.append(f'{start}-{prev}' if start != prev else str(start))
-    return ','.join(ranges)
+    return managed_job_utils.format_job_ids_as_ranges(job_ids)
 
 
 class _DefaultManagedJobRunner:
@@ -263,6 +244,8 @@ class _DefaultManagedJobRunner:
         fields: Optional[List[str]],
         sort_by: Optional[str],
         sort_order: Optional[str],
+        submitted_after: Optional[float],
+        submitted_before: Optional[float],
     ) -> Tuple[List[Dict[str, Any]], int,
                'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
                                                                         int]]:
@@ -283,7 +266,7 @@ class _DefaultManagedJobRunner:
             code = managed_job_utils.ManagedJobCodeGen.get_job_table(
                 skip_finished, accessible_workspaces, job_ids, workspace_match,
                 name_match, pool_match, page, limit, user_hashes, statuses,
-                fields, sort_by, sort_order)
+                fields, sort_by, sort_order, submitted_after, submitted_before)
         with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
             returncode, job_table_payload, stderr = backend.run_on_head(
                 handle,
@@ -391,6 +374,10 @@ def _consolidated_launch(
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
+    # a clean server env on the subprocess by default to keep per-request
+    # env pollution from leaking into the long-lived controller process
+    # tree. See LocalProcessCommandRunner.run for details.
     backend.run_on_head(local_handle, run_script, log_path=log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
@@ -875,9 +862,6 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-    if num_jobs and pool is None:
-        raise ValueError('Cannot specify num_jobs without pool.')
-
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
     # need to serialize the pool name in the dag. The dag object will be
@@ -1253,13 +1237,15 @@ def queue_v2_api(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
         name_match, pool_match, page, limit, statuses, fields, sort_by,
-        sort_order)
+        sort_order, submitted_after, submitted_before)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -1280,6 +1266,8 @@ def queue_v2(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -1377,6 +1365,8 @@ def queue_v2(
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
                 sort_by=sort_by,
                 sort_order=sort_order,
+                submitted_after=submitted_after,
+                submitted_before=submitted_before,
             )
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
@@ -1404,6 +1394,8 @@ def queue_v2(
          fields=fields,
          sort_by=sort_by,
          sort_order=sort_order,
+         submitted_after=submitted_after,
+         submitted_before=submitted_before,
      )
 
     if result_type == managed_job_utils.ManagedJobQueueResultType.DICT:
