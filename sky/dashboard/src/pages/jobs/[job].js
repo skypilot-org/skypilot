@@ -1381,6 +1381,10 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Recoveries</div>
+        <div className="text-base mt-1">{jobData.recoveries || 0}</div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">
           Requested Resources
         </div>
