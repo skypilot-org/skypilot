@@ -1416,3 +1416,92 @@ class TestSubmittedAtRecordedAtPending:
         assert jobs[0]['job_id'] == job_id
         assert jobs[0]['status'] == state.ManagedJobStatus.CANCELLED
         assert jobs[0]['submitted_at'] is not None
+
+
+class TestSubmittedAtPipelineScoping:
+    """For a multi-task (pipeline) job, `submitted_at` is stamped at
+    queue-entry (`set_pending`) only for task 0 -- the job/pipeline submission
+    time. Later tasks (task_id > 0) are left NULL at PENDING so they anchor on
+    their own start (via `set_starting_async`, or `set_started_async` for no-op
+    tasks) instead of inheriting the pipeline's queue-entry time, which would
+    inflate their per-task duration."""
+
+    async def _mock_callback(self, status: str):
+        pass
+
+    def _run(self, coro_factory):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro_factory())
+        finally:
+            loop.close()
+
+    def _make_pipeline_pending(self, name, num_tasks=2):
+        job_id = state.set_job_info_without_job_id(name=name,
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        for task_id in range(num_tasks):
+            state.set_pending(job_id,
+                              task_id=task_id,
+                              task_name=f'task{task_id}',
+                              resources_str='{}',
+                              metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        return job_id
+
+    def _submitted_at_by_task(self, job_id):
+        jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+        return {j['task_id']: j['submitted_at'] for j in jobs}
+
+    def test_task0_stamped_task1_null_at_pending(self,
+                                                 _mock_managed_jobs_db_conn):
+        # Right after set_pending: task 0 carries the queue-entry submitted_at;
+        # task 1 is still NULL (it will anchor on its own start).
+        job_id = self._make_pipeline_pending('pipe-pending')
+        submitted = self._submitted_at_by_task(job_id)
+        assert submitted[0] is not None
+        assert submitted[1] is None
+
+    def test_later_task_anchors_on_own_start(self, _mock_managed_jobs_db_conn):
+        # Task 1 going STARTING backfills its submitted_at with its OWN start
+        # time (set_starting_async's COALESCE), NOT the pipeline queue-entry
+        # time recorded for task 0.
+        job_id = self._make_pipeline_pending('pipe-starting')
+        task0_submitted = self._submitted_at_by_task(job_id)[0]
+        assert task0_submitted is not None
+        t1_start = task0_submitted + 5_000.0
+
+        async def run():
+            await state.set_starting_async(job_id, 1, 'run_1', t1_start, '{}',
+                                           {}, self._mock_callback)
+
+        self._run(lambda: run())
+        submitted = self._submitted_at_by_task(job_id)
+        # Task 1 anchors on its own start, not the pipeline queue-entry time.
+        assert submitted[1] == t1_start
+        assert submitted[1] != task0_submitted
+        # Task 0's queue-entry time is untouched.
+        assert submitted[0] == task0_submitted
+
+    def test_noop_later_task_backfilled_by_started(self,
+                                                   _mock_managed_jobs_db_conn):
+        # A no-op task (task.run is None) at position N>0 skips
+        # set_starting_async and goes PENDING -> RUNNING directly via
+        # set_started_async, which backfills the still-NULL submitted_at with
+        # the task's start time instead of leaving it blank.
+        job_id = self._make_pipeline_pending('pipe-noop')
+        assert self._submitted_at_by_task(job_id)[1] is None
+        t1_start = 7_777.0
+
+        async def run():
+            await state.set_started_async(job_id, 1, t1_start,
+                                          self._mock_callback)
+
+        self._run(lambda: run())
+        submitted = self._submitted_at_by_task(job_id)
+        assert submitted[1] is not None
+        assert submitted[1] == t1_start

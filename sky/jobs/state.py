@@ -511,8 +511,9 @@ class ManagedJobStatus(enum.Enum):
     # in this state.
     # TODO(cooperc): remove this in v0.12.0
     DEPRECATED_SUBMITTED = 'SUBMITTED'
-    # The submitted_at timestamp of the managed job in the 'spot' table will be
-    # set to the time when the job controller begins running.
+    # The submitted_at timestamp of the managed job in the 'spot' table is set
+    # when the job row is first inserted at queue-entry (set_pending) for the
+    # job/task 0; later pipeline tasks get it set at their own start.
     # STARTING: The controller process is launching the cluster for the managed
     # job.
     STARTING = 'STARTING'
@@ -880,15 +881,19 @@ def set_pending(
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
                   'Job submitted to queue')
 
-    # Record `submitted_at` once, when the task row is first inserted at
-    # PENDING (i.e. the moment the job entered the queue). Doing it here rather
-    # than at the PENDING -> STARTING transition ensures:
-    #   - No-op tasks (`task.run is None`) that short-circuit straight to
-    #     SUCCEEDED without ever going through STARTING still get a real
+    # Record `submitted_at` at queue-entry for task 0 only. Task 0's PENDING
+    # transition marks the job/pipeline submission time, so stamping it here
+    # (rather than at the PENDING -> STARTING transition) ensures:
+    #   - A no-op task 0 (`task.run is None`) that short-circuits straight to
+    #     SUCCEEDED without ever going through STARTING still gets a real
     #     submission time (previously NULL -> blank "Submitted" column).
     #   - Jobs that back off and re-enter STARTING keep their original
     #     submission time instead of having it clobbered with the latest
     #     attempt's timestamp.
+    # Later pipeline tasks (task_id > 0) are left NULL here so they anchor
+    # `submitted_at` on their own start (via `set_starting_async`'s COALESCE, or
+    # `set_started_async`'s COALESCE for no-op tasks) instead of inheriting the
+    # pipeline's queue-entry time, which would inflate their per-task duration.
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         session.execute(
@@ -898,7 +903,7 @@ def set_pending(
                 task_name=task_name,
                 resources=resources_str,
                 metadata=metadata,
-                submitted_at=time.time(),
+                submitted_at=(time.time() if task_id == 0 else None),
                 status=ManagedJobStatus.PENDING.value,
                 is_primary_in_job_group=is_primary_in_job_group,
             ))
@@ -1533,10 +1538,14 @@ def build_managed_jobs_with_filters_no_status_query(
 
     submitted_after / submitted_before are epoch seconds (matching the
     ``submitted_at`` column) and restrict the result to jobs submitted within
-    the inclusive window. A still-active job that hasn't been submitted yet
-    (NULL ``submitted_at``) is treated as submitted now, so it is kept or
-    dropped by the window like a job submitted at the current moment; a
-    terminal job that never got a ``submitted_at`` is excluded from the window.
+    the inclusive window. ``submitted_at`` is now set at queue-entry (task 0 in
+    ``set_pending``; later pipeline tasks at their own start via
+    ``set_starting_async``; no-op tasks backfilled in ``set_started_async``), so
+    new rows are non-NULL and filtered directly against the window. NULL only
+    occurs for legacy pre-upgrade rows (and a task N>0 that terminates while
+    still PENDING): a still-active such job is treated as submitted now (kept or
+    dropped like a job submitted at the current moment), while a terminal one
+    with no recoverable submission time is excluded from the window.
     """
     # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
@@ -2883,6 +2892,19 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     logger.info('Job started.')
 
     async def _op(session: sql_async.AsyncSession) -> int:
+        values = {
+            spot_table.c.status: ManagedJobStatus.RUNNING.value,
+            spot_table.c.start_at: start_time,
+            spot_table.c.last_recovered_at: start_time,
+            # Backfill `submitted_at` if it is still missing. No-op tasks
+            # (`task.run is None`) at any position skip `set_starting_async`
+            # and come straight here, so their queue-entry time was never
+            # recorded (task 0 excepted, which is stamped in `set_pending`).
+            # Use COALESCE so we only fill it when NULL and never clobber the
+            # original submission time for normal tasks (already non-NULL here).
+            spot_table.c.submitted_at: sqlalchemy.func.coalesce(
+                spot_table.c.submitted_at, start_time),
+        }
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2893,11 +2915,7 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                         ManagedJobStatus.PENDING.value
                     ]),
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                    spot_table.c.start_at: start_time,
-                    spot_table.c.last_recovered_at: start_time,
-                }))
+                )).values(values))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.RUNNING,
