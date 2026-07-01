@@ -991,8 +991,8 @@ class TestPopulateRecentContext:
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_skips_controller_clusters(self, mock_get_tasks,
-                                       mock_get_clusters, mock_queue_v2):
+    def test_skips_controller_clusters(self, mock_get_tasks, mock_get_clusters,
+                                       mock_queue_v2):
         """Controller clusters must not enter the context via the recent
         scan: every sky.jobs.*/sky.serve.* request carries its
         controller's cluster name, so a recently-active controller would
