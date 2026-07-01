@@ -170,6 +170,11 @@ export async function getClusterHistory(
     const requestBody = {
       days: days,
       dashboard_summary_response: true,
+      // Hide clusters that back managed jobs/services from the history view.
+      // These controller-launched clusters are already excluded from the
+      // active cluster list (sky.core.status), so excluding them here keeps
+      // the "Show history" view consistent.
+      exclude_managed_clusters: true,
     };
 
     // If a specific cluster hash is provided, include it in the request
@@ -561,20 +566,28 @@ export function useClusterData(options = {}) {
   // Serialize filters for stable dependency comparison
   const filtersKey = JSON.stringify(filters);
 
+  const { initialPage = 1, initialLimit = 10 } = options;
+
   const [data, setData] = useState([]);
   const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
+  const [page, setPage] = useState(initialPage);
+  const [limit, setLimit] = useState(initialLimit);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [hasNext, setHasNext] = useState(false);
   const [hasPrev, setHasPrev] = useState(false);
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
+  const isInitialMount = useRef(true);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change, but skip on initial mount
+  // so the page number read from the URL isn't overwritten.
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     setPage(1);
   }, [filtersKey]);
 

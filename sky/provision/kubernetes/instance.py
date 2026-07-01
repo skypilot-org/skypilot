@@ -798,27 +798,37 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             init_reason: Optional[str] = None
             if container_statuses is not None:
                 for container_status in container_statuses:
-                    waiting = (container_status.state.waiting
-                               if container_status.state else None)
-                    if waiting is None:
+                    if not container_status.state:
                         continue
-                    if waiting.reason == 'PodInitializing':
-                        running_init = _check_init_containers(pod)
-                        if running_init is not None:
-                            name, idx, total = running_init
-                            init_reason = (f'init container {name!r} '
-                                           f'running ({idx}/{total})')
-                        else:
-                            init_reason = 'init container running'
-                    elif waiting.reason != 'ContainerCreating':
-                        msg = waiting.message if (
-                            waiting.message) else str(waiting)
-                        unmasked = _unmask_crashloopbackoff_reason(
-                            container_status)
-                        reason_text = (unmasked if unmasked is not None else
-                                       (waiting.reason or 'Unknown'))
+                    waiting = container_status.state.waiting
+                    if waiting is not None:
+                        if waiting.reason == 'PodInitializing':
+                            running_init = _check_init_containers(pod)
+                            if running_init is not None:
+                                name, idx, total = running_init
+                                init_reason = (f'init container {name!r} '
+                                               f'running ({idx}/{total})')
+                            else:
+                                init_reason = 'init container running'
+                        elif waiting.reason != 'ContainerCreating':
+                            msg = waiting.message if (
+                                waiting.message) else str(waiting)
+                            unmasked = _unmask_crashloopbackoff_reason(
+                                container_status)
+                            reason_text = (unmasked if unmasked is not None else
+                                           (waiting.reason or 'Unknown'))
+                            raise config_lib.KubernetesError(
+                                f'{reason_text}: {msg}')
+                    terminated = container_status.state.terminated
+                    if terminated is not None and terminated.exit_code != 0:
+                        reason_str = (terminated.reason if terminated.reason
+                                      else f'exit({terminated.exit_code})')
                         raise config_lib.KubernetesError(
-                            f'{reason_text}: {msg}')
+                            f'Container in pod {pod.metadata.name} '
+                            f'terminated with error while pod is still '
+                            f'pending: {reason_str}. Run '
+                            f'`sky logs --provision {cluster_name}` '
+                            'for more details.')
 
             # Init container reason wins over all event-based reasons,
             # since events can retain stale "Pulling image" entries long
@@ -1103,6 +1113,78 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
+def _force_remove_terminating_pod(pod_name: str, namespace: str,
+                                  context: Optional[str]) -> None:
+    """Force-removes a stuck-terminating pod so a same-named pod can be created.
+
+    A terminating pod can block recreation with 409 ``object is being deleted``
+    for two reasons, both of which this handles:
+    1. Kueue keeps its ``kueue.x-k8s.io/managed`` finalizer on a pod-group pod
+       until it observes a replacement; the finalizer blocks garbage-collection.
+       Removing it is safe -- Kueue does not re-add it and admits the recreated
+       pod as the replacement.
+    2. Even with no finalizer, the object survives its
+       ``terminationGracePeriodSeconds`` (for Ray pods this is the
+       preemption-hook timeout, which can be minutes).
+
+    A force-delete with grace period 0 removes the object from the API server
+    before the call returns, so the caller can recreate the same name at once.
+    """
+    finalizers: List[str] = []
+    try:
+        pod = kubernetes.core_api(context).read_namespaced_pod(
+            pod_name, namespace)
+        # Only reached from the 409 "object is being deleted" branch, so the pod
+        # must be terminating; assert to catch misuse from any future caller.
+        assert pod.metadata.deletion_timestamp is not None, (
+            f'_force_remove_terminating_pod called on non-terminating pod '
+            f'{pod_name}')
+        finalizers = pod.metadata.finalizers or []
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            # Pod already gone (the goal).
+            return
+        # Best-effort: log and still attempt the force-delete below.
+        logger.warning(f'Failed to read terminating pod {pod_name}: {e}')
+    if k8s_constants.KUEUE_MANAGED_FINALIZER in finalizers:
+        remaining = [
+            f for f in finalizers if f != k8s_constants.KUEUE_MANAGED_FINALIZER
+        ]
+        # Use a JSON patch (list body), not the default strategic-merge patch:
+        # a strategic-merge patch with an empty/replacement finalizers list is a
+        # no-op for this field, so it would not actually remove the finalizer.
+        try:
+            kubernetes.core_api(context).patch_namespaced_pod(
+                pod_name,
+                namespace, [{
+                    'op': 'replace',
+                    'path': '/metadata/finalizers',
+                    'value': remaining
+                }],
+                _request_timeout=kubernetes.API_TIMEOUT)
+            logger.info(
+                f'Removed Kueue finalizer from terminating pod {pod_name}.')
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                # Pod already gone (the goal); skip the redundant force-delete.
+                return
+            # Best-effort: log and still attempt the force-delete below.
+            logger.warning(f'Failed to strip finalizer from terminating pod '
+                           f'{pod_name}: {e}')
+    # grace=0 is required: otherwise the finalizer-free object lingers for its
+    # (possibly minutes-long) terminationGracePeriodSeconds.
+    try:
+        kubernetes.core_api(context).delete_namespaced_pod(
+            pod_name,
+            namespace,
+            grace_period_seconds=0,
+            _request_timeout=config_lib.DELETION_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            logger.warning(
+                f'Force delete of terminating pod {pod_name} failed: {e}')
+
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
@@ -1189,27 +1271,16 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             assert match, f'Could not extract pod name from: {error_message}'
             pod_name = match.group(1)
             logger.info(
-                f'Pod {pod_name} from previous cluster is still being deleted. '
-                'Force deleting it and retrying pod creation.')
-            try:
-                # Since the pod is already being deleted,
-                # we can try force deleting it to make sure it's deleted,
-                # then retry the pod creation.
-                kubernetes.core_api(context).delete_namespaced_pod(
-                    pod_name,
-                    namespace,
-                    _request_timeout=config_lib.DELETION_TIMEOUT,
-                    grace_period_seconds=0)
-            except kubernetes.api_exception() as delete_exception:
-                logger.warning(
-                    f'Failed to force delete pod {pod_name}, but proceeding '
-                    f'to retry creation. Error: {delete_exception}')
+                f'Pod {pod_name} from previous cluster is still terminating. '
+                'Force-removing it and retrying pod creation.')
+            # Both the Kueue finalizer and the termination grace period can keep
+            # the old object around; _force_remove_terminating_pod clears both.
+            _force_remove_terminating_pod(pod_name, namespace, context)
             try:
                 pod = kubernetes.core_api(context).create_namespaced_pod(
                     namespace, pod_spec)
-                logger.info(
-                    f'Pod {pod.metadata.name} created successfully '
-                    'after force deleting the pod from previous cluster.')
+                logger.info(f'Pod {pod.metadata.name} created successfully '
+                            'after force-removing the terminating pod.')
                 return pod
             except kubernetes.api_exception() as retry_exception:
                 logger.warning(f'Failed to create pod {pod_name} on retry: '

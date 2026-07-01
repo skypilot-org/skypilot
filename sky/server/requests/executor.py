@@ -28,7 +28,7 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, TextIO, Tuple
 
 import psutil
 import setproctitle
@@ -40,6 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
+from sky.server import clean_env as clean_env_module
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -90,6 +91,10 @@ multiprocessing.set_start_method('spawn', force=True)
 # unlikely to be reached to allow higher concurrency while still prevent the
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
+
+# Max length of the retry reason in a request's backoff status message; the
+# reason comes from the exception message, so truncate to keep it readable.
+_RETRY_STATUS_MSG_REASON_MAX_LEN = 200
 
 _REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
 # A dedicated thread pool executor for synced requests execution in coroutine to
@@ -157,7 +162,8 @@ class RequestQueue:
 _queue_factory: Optional[queue_base.QueueBackendFactory] = None
 
 
-def executor_initializer(proc_group: str):
+def executor_initializer(proc_group: str,
+                         clean_env: Optional[Dict[str, str]] = None):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
     # Load plugins for executor process.
@@ -166,10 +172,27 @@ def executor_initializer(proc_group: str):
     # Same rationale as in sky.server.uvicorn.Server.run: reap this
     # executor's prometheus multiproc files when it exits.
     metrics_lib.register_multiproc_cleanup_atexit()
+    # The main API server process captures its env at startup and forwards
+    # it via initargs (see RequestWorker.run). Adopt that snapshot directly
+    # so the worker doesn't depend on its own spawn-time os.environ, which
+    # for a lazy-spawned burst worker could reflect a coroutine-path
+    # request mid-pollution in the main process.
+    if clean_env is not None:
+        clean_env_module.set_clean_server_env(clean_env)
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
                      daemon=True).start()
+
+
+def _request_is_gone_or_cancelled(request_id: str) -> bool:
+    """Cancellation check passed to ``ContinueCondition.wait()``.
+
+    A request cancelled (or gone) while paused must not be re-queued.
+    """
+    request = api_requests.get_request(request_id, fields=['status'])
+    return (request is None or
+            request.status == api_requests.RequestStatus.CANCELLED)
 
 
 class RequestWorker:
@@ -222,16 +245,10 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id,
-                                               fields=['status', 'created_at'])
+            request = api_requests.get_request(request_id, fields=['status'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
-            if metrics_utils.METRICS_ENABLED:
-                metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
-                    schedule_type=self.schedule_type.value,).observe(
-                        max(0,
-                            time.time() - request.created_at))
             del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
@@ -262,10 +279,32 @@ class RequestWorker:
                 f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    def _mark_executor_free(self) -> None:
+        """Increment the free-executor gauge for this worker's schedule type.
+
+        Called the instant the worker process is released (i.e. the future
+        completes), so the gauge stays accurate even while a retry/pause wait
+        is still running in this monitor thread.
+        """
+        if not metrics_utils.METRICS_ENABLED:
+            return
+        if self.schedule_type == api_requests.ScheduleType.LONG:
+            metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
+        elif self.schedule_type == api_requests.ScheduleType.SHORT:
+            metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
+
     def handle_task_result(self, fut: concurrent.futures.Future,
                            request_element: Tuple[str, bool, bool]) -> None:
         try:
-            fut.result()
+            try:
+                fut.result()
+            finally:
+                # The worker process is released the instant the future
+                # completes, before any retry/pause wait below. Account for it
+                # here so the free-executor gauge reflects the idle process
+                # during the wait, instead of staying decremented until the
+                # request finishes or reschedules.
+                self._mark_executor_free()
         except concurrent.futures.process.BrokenProcessPool as e:
             # Happens when the worker process dies unexpectedly, e.g. OOM
             # killed.
@@ -282,24 +321,49 @@ class RequestWorker:
                 queue = _get_queue(self.schedule_type)
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
-            time.sleep(e.retry_wait_seconds)
-            # Reset the request status to PENDING so it can be picked up again.
-            # Assume retryable since the error is ExecutionRetryableError.
             request_id, _, _ = request_element
+            # Clamp to avoid ValueError from time.sleep() on a negative wait.
+            retry_wait_seconds = max(0, e.retry_wait_seconds)
+            # A pause (ExecutionPausedError) may carry a continue condition that
+            # owns how to wait for the resume signal; without one, fall back to
+            # a fixed backoff. Either way the wait runs in this monitor thread,
+            # not an executor worker.
+            condition = getattr(e, 'continue_condition', None)
+            # Surface why we are retrying, not just the wait time. status_msg
+            # is a single-line field, so strip color and collapse whitespace.
+            reason = ' '.join(common_utils.remove_color(str(e)).split())
+            if len(reason) > _RETRY_STATUS_MSG_REASON_MAX_LEN:
+                reason = reason[:_RETRY_STATUS_MSG_REASON_MAX_LEN].rstrip(
+                ) + '...'
+            retry_suffix = ('waiting to resume' if condition is not None else
+                            f'retrying in {retry_wait_seconds}s')
+            status_msg = (f'{reason} ({retry_suffix})'
+                          if reason else retry_suffix.capitalize())
+            # Set request to WAITING status for visibility
             with api_requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.PENDING
-            # Reschedule the request.
-            queue = _get_queue(self.schedule_type)
-            queue.put(request_element)
-            logger.info(f'Rescheduled request {request_id} for retry')
-        finally:
-            # Increment the free executor count when a request finishes
-            if metrics_utils.METRICS_ENABLED:
-                if self.schedule_type == api_requests.ScheduleType.LONG:
-                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
-                elif self.schedule_type == api_requests.ScheduleType.SHORT:
-                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
+                request_task.status = api_requests.RequestStatus.WAITING
+                request_task.status_msg = status_msg
+            try:
+                if condition is not None:
+                    should_reschedule = condition.wait(
+                        is_cancelled=lambda: _request_is_gone_or_cancelled(
+                            request_id),
+                        fallback_wait_seconds=retry_wait_seconds)
+                else:
+                    time.sleep(retry_wait_seconds)
+                    should_reschedule = True
+            except Exception as wait_err:  # pylint: disable=broad-except
+                logger.error(
+                    f'Continue-condition wait failed for {request_id}: '
+                    f'{common_utils.format_exception(wait_err)}')
+                time.sleep(retry_wait_seconds)
+                should_reschedule = True
+            if should_reschedule:
+                # Reschedule the request.
+                queue = _get_queue(self.schedule_type)
+                queue.put(request_element)
+                logger.info(f'Rescheduled request {request_id} for retry')
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -316,11 +380,14 @@ class RequestWorker:
         # the overhead of forking a new process for each request, which can be
         # about 1s delay.
         try:
+            # Pass the main process's clean env snapshot so workers (incl.
+            # lazy-spawned burst workers) record the same pre-pollution env
+            # regardless of when they spawn.
             executor = process.BurstableExecutor(
                 garanteed_workers=self.garanteed_parallelism,
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
-                initargs=(proc_group,))
+                initargs=(proc_group, clean_env_module.get_clean_server_env()))
             # Initialize the appropriate gauge for the number of free executors
             total_executors = (self.garanteed_parallelism +
                                self.burstable_parallelism)
@@ -570,6 +637,30 @@ def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
+# Set by _request_execution_wrapper; read by _gated_sigterm_handler.
+_in_request_execution: bool = False
+
+
+def _gated_sigterm_handler(signum: int,
+                           frame: Optional['types.FrameType']) -> None:
+    """Raise KeyboardInterrupt only while actively executing a request.
+
+    SIGTERM landing on an idle worker (blocked in
+    concurrent.futures._process_worker's call_queue.get) would escape
+    _process_worker unhandled and break the entire pool. Swallow it; the
+    cancellation path already targets the worker by pid, so a stray SIGTERM
+    on an idle worker just means we lost the race with the request finishing.
+    """
+    del signum, frame
+    if _in_request_execution:
+        raise KeyboardInterrupt
+    # logger isn't async-signal-safe (re-entrant lock); use os.write.
+    try:
+        os.write(2, b'SIGTERM received while worker idle; ignored.\n')
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool,
                                num_db_connections_per_worker: int = 0) -> None:
@@ -591,7 +682,7 @@ def _request_execution_wrapper(request_id: str,
     # Only set up signal handlers in the main thread, as signal.signal() raises
     # ValueError if called from a non-main thread (e.g., in tests).
     if threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGTERM, _sigterm_handler)
+        signal.signal(signal.SIGTERM, _gated_sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 
@@ -625,19 +716,27 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    # Set _in_request_execution inside the try so `finally` always clears it,
+    # even if a SIGTERM lands before any wrapper code runs.
+    global _in_request_execution  # pylint: disable=global-statement
     try:
+        _in_request_execution = True
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
         # the try block to ensure we have the KeyboardInterrupt handling.
         with api_requests.update_request(request_id) as request_task:
             assert request_task is not None, request_id
-            if request_task.status != api_requests.RequestStatus.PENDING:
-                logger.debug(f'Request is already {request_task.status.value}, '
-                             f'skipping execution')
+            if (request_task.status
+                    not in api_requests.RequestStatus.executable_statuses()):
+                logger.warning(
+                    f'Request is already {request_task.status.value}, '
+                    f'skipping execution')
                 return
             log_path = request_task.log_path
             request_task.pid = pid
             request_task.status = api_requests.RequestStatus.RUNNING
+            # Clear any leftover retry-backoff message now that we are running.
+            request_task.status_msg = None
             func = request_task.entrypoint
             request_body = request_task.request_body
             request_name = request_task.name
@@ -713,6 +812,7 @@ def _request_execution_wrapper(request_id: str,
         _restore_output()
         logger.info(f'Request {request_id} finished')
     finally:
+        _in_request_execution = False
         _restore_output()
         try:
             # Capture the peak RSS before GC.

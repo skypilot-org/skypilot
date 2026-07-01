@@ -67,6 +67,7 @@ if typing.TYPE_CHECKING:
     from google.protobuf import json_format
     import grpc
     import psutil
+    import sqlalchemy
 
     import sky
     from sky import dag as dag_lib
@@ -978,6 +979,12 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     _collect_controller_system_log_paths(file_paths, errors,
                                          seen_controller_uuids)
 
+    # Submission logs (submit-job-*.log): each records the "Started N
+    # controllers" count for one submission (the controller over-count
+    # signal), scoped to the requested jobs like the controller_system
+    # logs above.
+    _collect_controller_submit_log_paths(file_paths, errors, job_ids)
+
     return {
         'inline_data': inline_data,
         'file_paths': file_paths,
@@ -1158,6 +1165,103 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
                 file_paths.append({
                     'remote_path': str(log_file),
                     'relative_path': f'managed_jobs/controller_system/'
+                                     f'{log_file.name}',
+                })
+
+
+def _parse_submit_log_job_ranges(job_ids_str: str) -> List[Tuple[int, int]]:
+    """Parse a submit-job log filename's id portion into inclusive ranges.
+
+    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list of
+    single ids (``584``) or inclusive ranges (``580-588``), returned as
+    (start, end) tuples. Ranges are kept intact rather than expanded into a set
+    of ints -- a filename like ``submit-job-1-100000000.log`` would otherwise
+    blow up memory. Raises ValueError on an unrecognized or inverted range so
+    the caller can skip the file.
+    """
+    ranges: List[Tuple[int, int]] = []
+    for token in job_ids_str.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        if '-' in token:
+            start_str, _, end_str = token.partition('-')
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                raise ValueError(f'Inverted range: {token!r}')
+            ranges.append((start, end))
+        else:
+            val = int(token)
+            ranges.append((val, val))
+    return ranges
+
+
+def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
+                                         errors: List[Dict[str, str]],
+                                         job_ids: List[int]) -> None:
+    """Collect managed-job submission log file paths (submit-job-*.log).
+
+    Each submission writes ``~/sky_logs/managed_jobs/submit-job-<ids>.log``
+    (see sky.jobs.server.core), where ``<ids>`` is the submission's job-id set
+    formatted as comma-separated singletons/ranges. This per-submission log
+    records the "Started N controllers" count -- the over-count signal that
+    pins leaked controllers to a specific submission -- and is not
+    reconstructable from the per-job ``<jobid>.log`` or ``job_info``.
+
+    Consolidation mode only: ``submit-job-*.log`` is written solely by
+    ``_consolidated_launch``. In non-consolidation mode the submission runs as a
+    Ray job on the controller cluster and its output goes to
+    ``~/sky_logs/managed_jobs/job-id-<N>/controller.log`` (what ``sky jobs logs
+    --controller`` downloads), which this path does not collect -- so the glob
+    below simply finds nothing. The over-count signal is not lost, though:
+    ``maybe_start_controllers`` also runs in the controller skylet's
+    reconciliation loop, logging "Started N controllers" to the controller
+    cluster's ``skylet.log``, which the dump already collects.
+    TODO(ishankaul1): also collect controller.log for non-consolidation mode.
+
+    Scoped to ``job_ids``: we list ``submit-job-*.log`` but only collect
+    submissions whose id-set intersects the requested jobs. Unlike
+    _collect_controller_system_log_paths -- which builds exact
+    ``controller_<uuid>.log`` paths from the relevant UUID set and never lists
+    the directory -- a job id cannot be mapped back to its submission filename
+    without listing: the job may have been submitted in a multi-job batch whose
+    file is range-named (e.g. ``submit-job-580-588.log``). So the listing is
+    unavoidable; what stays bounded is the expensive part -- the set of files
+    rsynced -- not the directory scan.
+    """
+    requested = set(job_ids)
+    if not requested:
+        return
+    prefix, suffix = 'submit-job-', '.log'
+    with _catch_to_errors(errors, 'managed_jobs', 'controller_submit_logs'):
+        submit_logs_dir = (
+            pathlib.Path(constants.SKY_LOGS_DIRECTORY).expanduser() /
+            'managed_jobs')
+        if not submit_logs_dir.is_dir():
+            return
+        for log_file in submit_logs_dir.glob(f'{prefix}*{suffix}'):
+            if not log_file.is_file():
+                continue
+            ids_str = log_file.name[len(prefix):-len(suffix)]
+            try:
+                submission_ranges = _parse_submit_log_job_ranges(ids_str)
+            except ValueError:
+                # The only writer is sky.jobs.server.core with a fixed format,
+                # so an unparseable name is unexpected -- surface it rather than
+                # silently guess which jobs the submission covered.
+                logger.warning('Skipping submit-job log with unrecognized '
+                               f'name: {log_file.name}')
+                continue
+            # Test if any requested job id is in the submission ranges.
+            # Requests and submission ranges are likely small,
+            # so nested check is likely OK.
+            # TODO (ishankaul1) - Add a more efficient check if needed.
+            if any(start <= req <= end
+                   for start, end in submission_ranges
+                   for req in requested):
+                file_paths.append({
+                    'remote_path': str(log_file),
+                    'relative_path': f'managed_jobs/controller_submit_logs/'
                                      f'{log_file.name}',
                 })
 
@@ -2208,12 +2312,14 @@ def dump_managed_job_queue(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
 ) -> str:
     return message_utils.encode_payload(
         get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
                               workspace_match, name_match, pool_match, page,
                               limit, user_hashes, statuses, fields, sort_by,
-                              sort_order))
+                              sort_order, submitted_after, submitted_before))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -2278,6 +2384,17 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
     for field in _NON_DB_FIELDS:
         if field in new_fields:
             new_fields.remove(field)
+    if cluster_handle_required:
+        # When a job has reached a terminal state, its cluster handle is gone,
+        # so infra/resources can no longer be read from the handle. Make sure
+        # the last-cached infra ('cloud'/'region'/'zone') and the requested
+        # 'resources' string are still selected from the DB so they can be used
+        # as a fallback in get_managed_job_queue. These are real DB columns
+        # ('cloud'/'region'/'zone' are also in _NON_DB_FIELDS and were removed
+        # above, so re-add them here).
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            if field not in new_fields:
+                new_fields.append(field)
     return new_fields, cluster_handle_required
 
 
@@ -2398,6 +2515,9 @@ def get_managed_job_queue(
     fields: Optional[List[str]] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
+    submitted_after: Optional[float] = None,
+    submitted_before: Optional[float] = None,
+    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -2415,6 +2535,10 @@ def get_managed_job_queue(
         fields: The fields to include in the response.
         sort_by: The field to sort by.
         sort_order: The sort order ('asc' or 'desc').
+        submitted_after: Only include jobs submitted at or after this epoch
+            time (seconds).
+        submitted_before: Only include jobs submitted at or before this epoch
+            time (seconds).
 
     Returns:
         A dictionary containing the managed job queue.
@@ -2440,6 +2564,9 @@ def get_managed_job_queue(
         pool_match=pool_match,
         user_hashes=user_hashes,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
+        status_expr=status_expr,
     )
 
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
@@ -2452,10 +2579,13 @@ def get_managed_job_queue(
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
+        submitted_after=submitted_after,
+        submitted_before=submitted_before,
         page=page,
         limit=limit,
         sort_by=sort_by,
         sort_order=sort_order,
+        status_expr=status_expr,
     )
 
     if cluster_handle_required:
@@ -2510,13 +2640,36 @@ def get_managed_job_queue(
                     'cluster_name': cluster_name,
                 })
             else:
-                # FIXME(zongheng): display the last cached values for these.
-                job['cluster_resources'] = '-'
-                job['cluster_resources_full'] = '-'
-                job['cloud'] = '-'
-                job['region'] = '-'
-                job['zone'] = '-'
-                job['infra'] = '-'
+                # The cluster handle is no longer available (e.g. the job has
+                # reached a terminal state and its cluster has been torn down),
+                # so infra/resources can no longer be read from the live
+                # handle. Fall back to the last-cached infra
+                # ('cloud'/'region'/'zone', persisted on each successful
+                # launch/recovery via set_job_infra) and the requested
+                # resources string from the jobs DB, so the dashboard/CLI can
+                # still show where the job last ran instead of a bare '-'.
+                cloud = job.get('cloud')
+                region = job.get('region')
+                zone = job.get('zone')
+                # formatted_str() returns '-' when cloud is None/empty (e.g.
+                # legacy jobs without persisted infra).
+                job['infra'] = infra_utils.InfraInfo(cloud, region,
+                                                     zone).formatted_str()
+                job['cloud'] = cloud if cloud else '-'
+                job['region'] = region if region else '-'
+                job['zone'] = zone if zone else '-'
+                # The launched cluster resources string is not persisted, so
+                # fall back to the requested resources string from the DB.
+                # Only do so if the job was actually launched at least once
+                # (i.e. the infra was persisted); otherwise (e.g. PENDING
+                # jobs, or jobs that failed before launching) showing the
+                # requested resources as the launched resources is
+                # misleading.
+                cached_resources = job.get('resources') if cloud else None
+                job['cluster_resources'] = (cached_resources
+                                            if cached_resources else '-')
+                job['cluster_resources_full'] = (cached_resources
+                                                 if cached_resources else '-')
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
                 job['internal_services'] = None
@@ -2710,6 +2863,36 @@ def _get_job_status_from_tasks(
             # confusing.
             break
     return managed_task_status, current_task_id
+
+
+def format_job_ids_as_ranges(job_ids: Optional[List[int]]) -> str:
+    """Formats job IDs as a compact comma-separated list of ranges.
+
+    Contiguous IDs are collapsed into ``start-end`` ranges, e.g.
+    ``[1, 2, 3, 5, 6]`` becomes ``'1-3,5-6'``. This keeps the output readable
+    when many jobs are submitted at once (e.g. ``sky jobs launch --num-jobs``).
+    Returns an empty string for empty input.
+    """
+    if not job_ids:
+        return ''
+
+    if len(job_ids) == 1:
+        return str(job_ids[0])
+
+    job_ids = sorted(job_ids)
+    ranges = []
+    start = prev = job_ids[0]
+
+    for n in job_ids[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append(f'{start}-{prev}' if start != prev else str(start))
+        start = prev = n
+
+    # append last range
+    ranges.append(f'{start}-{prev}' if start != prev else str(start))
+    return ','.join(ranges)
 
 
 @typing.overload
@@ -3256,6 +3439,8 @@ class ManagedJobCodeGen:
         fields: Optional[List[str]] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        submitted_after: Optional[float] = None,
+        submitted_before: Optional[float] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
         # Filter out is_primary_in_job_group for older controllers (< 15)
@@ -3307,7 +3492,7 @@ class ManagedJobCodeGen:
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r},
                                 fields=_fields)
-        else:
+        elif managed_job_version < 22:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -3322,6 +3507,23 @@ class ManagedJobCodeGen:
                                 fields=_fields,
                                 sort_by={sort_by!r},
                                 sort_order={sort_order!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields=_fields,
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r},
+                                submitted_after={submitted_after!r},
+                                submitted_before={submitted_before!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)

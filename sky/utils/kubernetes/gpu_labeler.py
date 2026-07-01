@@ -71,7 +71,8 @@ def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
 
 def get_node_hash(node_name: str):
     # Generates a 32 character md5 hash from a string
-    md5_hash = hashlib.md5(node_name.encode()).hexdigest()
+    md5_hash = hashlib.md5(node_name.encode(),
+                           usedforsecurity=False).hexdigest()
     return md5_hash[:32]
 
 

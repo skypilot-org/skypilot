@@ -299,22 +299,55 @@ sleep 2
 # Note: service account token is stored base64-encoded in the secret but must
 # be plaintext in kubeconfig.
 SA_TOKEN=$(kubectl get -n ${NAMESPACE} secrets/${SA_SECRET_NAME} -o "jsonpath={.data['token']}" | base64 ${BASE64_DECODE_FLAG})
-CA_CERT=$(kubectl get -n ${NAMESPACE} secrets/${SA_SECRET_NAME} -o "jsonpath={.data['ca\.crt']}")
 
 # Extract cluster IP from the current context
 CURRENT_CONTEXT=$(kubectl config current-context)
 CURRENT_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name == \"${CURRENT_CONTEXT}\"})].context.cluster}")
 CURRENT_CLUSTER_ADDR=$(kubectl config view -o jsonpath="{.clusters[?(@.name == \"${CURRENT_CLUSTER}\"})].cluster.server}")
 
+# Mirror the TLS trust config from the user's current kubeconfig context rather
+# than the Service Account secret's ca.crt. The SA secret's ca.crt is the
+# *internal* cluster CA: it only verifies the API server's own serving cert.
+# When the external endpoint terminates TLS at a CDN/proxy that presents a
+# different (often publicly-trusted) certificate -- e.g. clusters fronted by
+# Cloudflare -- that internal CA does not match what the endpoint serves, so
+# embedding it makes every request fail with
+# "x509: certificate signed by unknown authority". kubectl already reaches
+# ${CURRENT_CLUSTER_ADDR} successfully using the current context's TLS config,
+# and the generated kubeconfig reuses the same server URL, so reusing the same
+# TLS config is guaranteed to verify. "--raw" keeps kubectl from redacting
+# certificate-authority-data; "--flatten" inlines any certificate-authority
+# file reference into certificate-authority-data (resolving relative paths
+# against the kubeconfig's directory), so the generated kubeconfig is
+# self-contained even when the source pins its CA via a file path.
+SRC_CA_DATA=$(kubectl config view --raw --flatten -o jsonpath="{.clusters[?(@.name == \"${CURRENT_CLUSTER}\")].cluster.certificate-authority-data}")
+SRC_INSECURE=$(kubectl config view --raw -o jsonpath="{.clusters[?(@.name == \"${CURRENT_CLUSTER}\")].cluster.insecure-skip-tls-verify}")
+
+# Build the cluster TLS line to embed, including its trailing newline so the
+# heredoc emits no blank line when there is nothing to pin. An empty value
+# means no CA pinning in the source context, so the generated kubeconfig
+# relies on the system CA store (the correct trust anchor for CDN-fronted,
+# publicly-signed endpoints).
+if [ -n "${SRC_CA_DATA}" ]; then
+  CLUSTER_TLS=$'    certificate-authority-data: '"${SRC_CA_DATA}"$'\n'
+  TLS_MODE="mirrored certificate-authority-data from context '${CURRENT_CONTEXT}'"
+elif [ "${SRC_INSECURE}" = "true" ]; then
+  CLUSTER_TLS=$'    insecure-skip-tls-verify: true\n'
+  TLS_MODE="mirrored insecure-skip-tls-verify from context '${CURRENT_CONTEXT}'"
+else
+  CLUSTER_TLS=""
+  TLS_MODE="no CA pinning in source context; using system CA store"
+fi
+
 echo ""
 echo "[3/3] Generating kubeconfig file..."
+echo "      TLS: ${TLS_MODE}"
 
 cat > kubeconfig <<EOF
 apiVersion: v1
 clusters:
 - cluster:
-    certificate-authority-data: ${CA_CERT}
-    server: ${CURRENT_CLUSTER_ADDR}
+${CLUSTER_TLS}    server: ${CURRENT_CLUSTER_ADDR}
   name: ${CURRENT_CLUSTER}
 contexts:
 - context:
