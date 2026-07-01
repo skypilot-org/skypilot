@@ -204,8 +204,11 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         """Extract user info from OAuth2 proxy response headers."""
         email_header = response.headers.get('X-Auth-Request-Email')
         if email_header:
-            user_hash = hashlib.md5(email_header.encode()).hexdigest(
-            )[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user id from the (non-secret) SSO
+            # email; auth itself is done by oauth2-proxy. Not a security use.
+            email_hash = hashlib.md5(email_header.encode(),
+                                     usedforsecurity=False).hexdigest()
+            user_hash = email_hash[:common_utils.USER_HASH_LENGTH]
             return models.User(id=user_hash,
                                name=email_header,
                                user_type=models.UserType.SSO.value)

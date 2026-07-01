@@ -16,7 +16,7 @@ import Link from 'next/link';
 import Head from 'next/head';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { YamlEditor } from '@/components/ui/yaml-editor';
 import { CircularProgress } from '@mui/material';
 import {
   SaveIcon,
@@ -843,13 +843,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </div>
                         </div>
 
-                        <Textarea
+                        <YamlEditor
                           value={yamlValue}
-                          onChange={(e) => handleYamlChange(e.target.value)}
-                          className="font-mono text-sm flex-1 resize-none"
-                          style={{ minHeight: '350px' }}
-                          spellCheck={false}
-                          placeholder={`# Enter workspace configuration in YAML format`}
+                          onChange={(val) => handleYamlChange(val)}
+                          height="400px"
                         />
 
                         {/* Action buttons */}

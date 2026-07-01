@@ -3,6 +3,7 @@ import contextlib
 import datetime
 import json
 import os
+import posixpath
 import time
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
@@ -11,12 +12,17 @@ import zipfile
 
 import pytest
 
+from sky import clouds
+from sky import exceptions
 from sky.jobs import utils as managed_job_utils
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
+from sky.skylet import constants as skylet_constants
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
+from sky.utils import status_lib
 
 
 def _make_context(
@@ -2764,3 +2770,593 @@ class TestDumpClusterInfo:
             data = json.load(f)
         assert len(data) == 1
         assert data[0]['request_id'] == 'req-a'
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_up_cluster_collects_skylet_log(self, mock_get_cluster, mock_events,
+                                            mock_requests, tmp_path):
+        """An UP cluster with a handle should rsync the skylet log."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        # Head node resolves the skylet log path against $HOME.
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'live-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.UP,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'live-cluster'}, str(tmp_path), errors)
+
+        # Pulled the skylet log off the head node (runners[0]) into the
+        # cluster dump dir, using the remotely-resolved source path.
+        runner.rsync.assert_called_once()
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/home/sky/.sky/skylet.log'
+        assert kwargs['target'] == str(tmp_path / 'clusters' / 'live-cluster' /
+                                       'skylet.log')
+        assert kwargs['up'] is False
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_stopped_cluster_skips_skylet_log(self, mock_get_cluster,
+                                              mock_events, mock_requests,
+                                              tmp_path):
+        """A STOPPED cluster has no reachable node, so we don't attempt it."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        mock_get_cluster.return_value = {
+            'name': 'stopped-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.STOPPED,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'stopped-cluster'}, str(tmp_path),
+                                       errors)
+
+        handle.get_command_runners.assert_not_called()
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_init_cluster_collects_skylet_log(self, mock_get_cluster,
+                                              mock_events, mock_requests,
+                                              tmp_path):
+        """An INIT (possibly degraded) cluster is still attempted."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'init-cluster',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.INIT,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'init-cluster'}, str(tmp_path), errors)
+
+        runner.rsync.assert_called_once()
+        assert not errors
+
+
+class TestCollectClusterSkyletLog:
+    """Tests for the _collect_cluster_skylet_log helper."""
+
+    def test_rsyncs_skylet_log_from_head(self, tmp_path):
+        """Pulls the remotely-resolved skylet log off the first (head) runner."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner, mock.Mock()]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        # Only the head runner (index 0) is used.
+        runner.rsync.assert_called_once()
+        handle.get_command_runners.return_value[1].rsync.assert_not_called()
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/home/sky/.sky/skylet.log'
+        assert kwargs['target'] == os.path.join(str(tmp_path), 'skylet.log')
+        # Bounded by a total timeout so one stalled node can't hang the dump.
+        assert kwargs['timeout'] == debug_utils._SKYLET_LOG_RSYNC_TIMEOUT
+        assert not errors
+
+    def test_uses_relocated_runtime_dir(self, tmp_path):
+        """A relocated SKY_RUNTIME_DIR (Slurm/devspaces) is honored because the
+        path is resolved on the remote node, not from a Python attribute."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        _, kwargs = runner.rsync.call_args
+        assert kwargs['source'] == '/scratch/rt/.sky/skylet.log'
+        assert not errors
+
+    def test_missing_log_is_not_an_error(self, tmp_path):
+        """A not-found rsync (code 23) is silently skipped, not recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            exceptions.RSYNC_FILE_NOT_FOUND_CODE, 'rsync', 'not found', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert not errors
+
+    def test_other_rsync_failure_is_recorded(self, tmp_path):
+        """A non-23 rsync failure is recorded in errors."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'clusters'
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_runners_is_noop(self, tmp_path):
+        """No runners (e.g. headless cluster) is a safe no-op."""
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = []
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert not errors
+
+    def test_get_command_runners_failure_is_recorded(self, tmp_path):
+        """A failure obtaining runners is recorded but does not raise."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('unreachable')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log('c', str(tmp_path), handle,
+                                                errors)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_init_rsync_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, a (non-23) rsync failure is expected and is
+        debug-logged, not recorded as a dump error."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_init_get_runners_failure_is_demoted_not_recorded(self, tmp_path):
+        """For an INIT cluster, an unreachable node (no runners yet) is
+        expected and not recorded."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('not up yet')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.INIT)
+
+        assert not errors
+
+    def test_up_rsync_failure_is_recorded(self, tmp_path):
+        """For an UP cluster, a (non-23) rsync failure is genuinely worth
+        surfacing and is recorded."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        runner.rsync.side_effect = exceptions.CommandError(
+            255, 'rsync', 'connection refused', None)
+        handle = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'c/skylet_log'
+
+    def test_empty_exception_message_falls_back_to_type_name(self, tmp_path):
+        """A recorded error never has a blank message: an exception whose
+        str() is empty falls back to the exception type name."""
+        handle = mock.Mock()
+        handle.get_command_runners.side_effect = RuntimeError('')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_cluster_skylet_log(
+            'c',
+            str(tmp_path),
+            handle,
+            errors,
+            status=status_lib.ClusterStatus.UP)
+
+        assert len(errors) == 1
+        assert errors[0]['error'] == 'RuntimeError'
+
+
+class TestResolveRemoteSkyletLogPath:
+    """Tests for the _resolve_remote_skylet_log_path helper."""
+
+    def test_returns_resolved_remote_path(self):
+        """Returns the path echoed by the remote shell."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/scratch/rt/.sky/skylet.log\n', '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == '/scratch/rt/.sky/skylet.log'
+        _, kwargs = runner.run.call_args
+        # Resolved with source_bashrc to match how skylet is started.
+        assert kwargs['source_bashrc'] is True
+        assert kwargs['require_outputs'] is True
+        # Bounded by a connect timeout so an unreachable node fails fast.
+        assert kwargs['connect_timeout'] == (
+            debug_utils._SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
+
+    def test_takes_last_non_empty_line(self):
+        """bashrc banner/warning lines before the echo are ignored."""
+        runner = mock.Mock()
+        runner.run.return_value = (0,
+                                   'motd banner\n\n/home/sky/.sky/skylet.log\n',
+                                   '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == '/home/sky/.sky/skylet.log'
+
+    def test_falls_back_on_nonzero_returncode(self):
+        """A failed resolution command falls back to ~/.sky/skylet.log."""
+        runner = mock.Mock()
+        runner.run.return_value = (1, '', 'boom')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_falls_back_on_empty_output(self):
+        """Empty stdout falls back to ~/.sky/skylet.log."""
+        runner = mock.Mock()
+        runner.run.return_value = (0, '   \n', '')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+    def test_falls_back_on_exception(self):
+        """A raising runner.run falls back instead of propagating."""
+        runner = mock.Mock()
+        runner.run.side_effect = RuntimeError('unreachable')
+
+        path = debug_utils._resolve_remote_skylet_log_path(runner, 'c')
+
+        assert path == posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+
+
+class TestCollectClusterKubernetesResources:
+    """Tests for the _collect_cluster_kubernetes_resources helper."""
+
+    def _k8s_handle(self, runners):
+        handle = mock.Mock()
+        handle.launched_resources.cloud = clouds.Kubernetes()
+        handle.cluster_name_on_cloud = 'cluster-abc'
+        handle.get_command_runners.return_value = runners
+        return handle
+
+    def _k8s_runner(self, context, namespace, pod_name):
+        runner = mock.MagicMock(spec=command_runner.KubernetesCommandRunner)
+        runner.context = context
+        runner.namespace = namespace
+        runner.pod_name = pod_name
+        return runner
+
+    def test_non_kubernetes_cluster_is_noop(self, tmp_path):
+        """A cluster on another cloud must not touch the k8s code path."""
+        handle = mock.Mock()
+        handle.launched_resources.cloud = mock.Mock()  # not a Kubernetes cloud
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
+                       ) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'c', str(tmp_path), handle, errors)
+
+        dump.assert_not_called()
+        handle.get_command_runners.assert_not_called()
+        assert not errors
+
+    def test_delegates_with_coordinates_from_runners(self, tmp_path):
+        """Context/namespace are pulled off the k8s runners and passed through;
+        the dump finds the cluster's objects by label, so no pod names needed."""
+        runners = [
+            self._k8s_runner('ctx', 'ns', 'pod-head'),
+            self._k8s_runner('ctx', 'ns', 'pod-worker'),
+        ]
+        handle = self._k8s_handle(runners)
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
+                        return_value=[]) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        dump.assert_called_once_with(context='ctx',
+                                     namespace='ns',
+                                     cluster_name_on_cloud='cluster-abc',
+                                     output_dir=os.path.join(
+                                         str(tmp_path), 'kubernetes'))
+        assert not errors
+        # A context.json mapping is dropped pointing at the per-context dump.
+        with open(os.path.join(str(tmp_path), 'kubernetes', 'context.json'),
+                  encoding='utf-8') as f:
+            mapping = json.load(f)
+        assert mapping['context'] == 'ctx'
+        assert mapping['namespace'] == 'ns'
+        assert mapping['cluster_name_on_cloud'] == 'cluster-abc'
+        assert mapping['context_dir'].startswith('kubernetes_contexts/')
+
+    def test_provider_errors_are_prefixed_with_cluster(self, tmp_path):
+        """Errors from the provider are re-tagged with component + cluster."""
+        handle = self._k8s_handle([self._k8s_runner('ctx', 'ns', 'pod-head')])
+        provider_errors = [{
+            'resource': 'kubernetes/pods/pod-head',
+            'error': 'boom',
+            'traceback': 'tb',
+        }]
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
+                        return_value=provider_errors):
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        assert errors == [{
+            'component': 'clusters',
+            'resource': 'mycluster/kubernetes/pods/pod-head',
+            'error': 'boom',
+            'traceback': 'tb',
+        }]
+
+    def test_get_command_runners_failure_is_recorded(self, tmp_path):
+        """A k8s cluster whose runners can't be built records one error."""
+        handle = self._k8s_handle([])
+        handle.get_command_runners.side_effect = RuntimeError('unreachable')
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
+                       ) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        dump.assert_not_called()
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'mycluster/kubernetes'
+        assert errors[0]['component'] == 'clusters'
+
+    def test_no_kubernetes_runners_is_noop(self, tmp_path):
+        """A k8s-cloud handle whose runners aren't KubernetesCommandRunners
+        (e.g. cluster info unavailable) is skipped without error."""
+        handle = self._k8s_handle([mock.Mock()])  # plain runner, wrong type
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
+                       ) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        dump.assert_not_called()
+        assert not errors
+
+
+class TestSanitizeContextName:
+    """Tests for _sanitize_context_name (context -> safe dir name)."""
+
+    def test_none_maps_to_in_cluster(self):
+        assert debug_utils._sanitize_context_name(None) == 'in-cluster'
+
+    def test_unsafe_chars_replaced_and_hash_suffixed(self):
+        out = debug_utils._sanitize_context_name(
+            'gke_proj_us-central1-c_my-cluster')
+        # Path-safe, and a short hash distinguishes contexts that would
+        # otherwise collide after sanitization.
+        assert '/' not in out
+        assert out.startswith('gke_proj_us-central1-c_my-cluster-')
+
+    def test_distinct_contexts_get_distinct_dirs(self):
+        # Two contexts that sanitize to the same prefix still differ via hash.
+        a = debug_utils._sanitize_context_name('a/b')
+        b = debug_utils._sanitize_context_name('a:b')
+        assert a != b
+
+    def test_stable_for_same_input(self):
+        assert (debug_utils._sanitize_context_name('ctx-x') ==
+                debug_utils._sanitize_context_name('ctx-x'))
+
+
+class TestDumpKubeContextsInfo:
+    """Tests for _dump_kube_contexts_info.
+
+    Source of truth is Kubernetes.existing_allowed_contexts() (not the dumped
+    clusters), so these patch that classmethod.
+    """
+
+    @staticmethod
+    def _patch_allowed(contexts):
+        return mock.patch.object(debug_utils.clouds.Kubernetes,
+                                 'existing_allowed_contexts',
+                                 return_value=contexts)
+
+    def test_dumps_each_allowed_context(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-a', 'ctx-b']), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=[]) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        fetched = {c.kwargs['context'] for c in dump.call_args_list}
+        assert fetched == {'ctx-a', 'ctx-b'}
+        assert not errors
+
+    def test_allowed_context_with_no_clusters_is_still_dumped(self, tmp_path):
+        """The whole point of Ask #1: a context in allowed_contexts is scraped
+        even with zero SkyPilot clusters on it (fresh-onboarding case). No
+        cluster state is consulted at all."""
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-fresh']), \
+             mock.patch.object(debug_utils.global_user_state,
+                               'get_cluster_from_name') as get_cluster, \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=[]) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_called_once()
+        assert dump.call_args.kwargs['context'] == 'ctx-fresh'
+        # The per-context path no longer derives contexts from clusters.
+        get_cluster.assert_not_called()
+
+    def test_dedupes_repeated_contexts(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-a', 'ctx-a']), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=[]) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_called_once()
+        assert dump.call_args.kwargs['context'] == 'ctx-a'
+
+    def test_in_cluster_none_maps_to_in_cluster_dir(self, tmp_path):
+        """existing_allowed_contexts returns None for in-cluster auth."""
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed([None]), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=[]) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_called_once()
+        assert dump.call_args.kwargs['context'] is None
+        assert dump.call_args.kwargs['output_dir'].endswith(
+            os.path.join('kubernetes_contexts', 'in-cluster'))
+
+    def test_provider_errors_are_prefixed_with_context(self, tmp_path):
+        provider_errors = [{
+            'resource': 'gpu_metrics',
+            'error': 'forbidden',
+            'traceback': 'tb',
+        }]
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-a']), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        return_value=provider_errors):
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'kubernetes_contexts'
+        # Prefixed with the sanitized context dir name.
+        assert errors[0]['resource'].endswith('/gpu_metrics')
+        assert errors[0]['resource'].startswith('ctx-a-')
+        assert errors[0]['error'] == 'forbidden'
+
+    def test_one_broken_context_does_not_abort_others(self, tmp_path):
+        """run_in_parallel re-raises the first exception; the per-context task
+        must swallow it so a broken context can't abort the others' dumps."""
+
+        def _dump(context, output_dir):
+            del output_dir
+            if context == 'ctx-bad':
+                raise RuntimeError('context timed out')
+            return []
+
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed(['ctx-good', 'ctx-bad']), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources',
+                        side_effect=_dump):
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        # The bad context's failure is recorded, the good one still ran.
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'kubernetes_contexts'
+        assert errors[0]['resource'].startswith('ctx-bad-')
+        assert 'timed out' in errors[0]['error']
+
+    def test_no_allowed_contexts_is_noop(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with self._patch_allowed([]), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
+                       ) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+        dump.assert_not_called()
+        assert not (tmp_path / 'kubernetes_contexts').exists()
+        assert not errors
+
+    def test_allowed_contexts_lookup_failure_is_recorded(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with mock.patch.object(debug_utils.clouds.Kubernetes,
+                               'existing_allowed_contexts',
+                               side_effect=RuntimeError('kubeconfig boom')), \
+             mock.patch('sky.provision.kubernetes.debug.dump_context_resources'
+                       ) as dump:
+            debug_utils._dump_kube_contexts_info(str(tmp_path), errors)
+
+        dump.assert_not_called()
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'allowed_contexts'
+        assert 'boom' in errors[0]['error']

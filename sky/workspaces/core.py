@@ -49,6 +49,9 @@ class WorkspaceConfigComparison:
         allowed_users_new: New allowed users list
         removed_users: Users removed from allowed_users
         added_users: Users added to allowed_users
+        additive_allowed_contexts: True if the only non-user-access change is an
+            additive kubernetes.allowed_contexts change (old contexts remain a
+            subset of the new contexts)
     """
     only_user_access_changes: bool
     private_changed: bool
@@ -59,6 +62,7 @@ class WorkspaceConfigComparison:
     allowed_users_new: List[str]
     removed_users: List[str]
     added_users: List[str]
+    additive_allowed_contexts: bool = False
 
 
 # =========================
@@ -163,6 +167,49 @@ def _validate_workspace_config(workspace_name: str,
         raise ValueError(str(e)) from e
 
 
+def _extract_k8s_allowed_contexts(
+        config: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
+    """Split out kubernetes.allowed_contexts from a workspace config.
+
+    Returns a tuple of (config_without_that_field, allowed_contexts_value). The
+    value is None when the field is absent. The input config is not mutated.
+    """
+    # The kubernetes block may be missing or explicitly null (e.g. a bare
+    # `kubernetes:` in YAML), so guard against non-dict values.
+    kubernetes_config = config.get('kubernetes')
+    if (not isinstance(kubernetes_config, dict) or
+            'allowed_contexts' not in kubernetes_config):
+        return config, None
+    remaining = dict(config)
+    remaining['kubernetes'] = {
+        k: v for k, v in kubernetes_config.items() if k != 'allowed_contexts'
+    }
+    return remaining, kubernetes_config['allowed_contexts']
+
+
+def _is_additive_contexts(current_allowed_contexts: Any,
+                          new_allowed_contexts: Any) -> bool:
+    """Return True if allowed_contexts only grew (no existing context dropped).
+
+    Additive cases:
+    - list -> list where the old contexts are a subset of the new contexts.
+    - list -> 'all' (broadening to every kubeconfig context).
+
+    Everything else (no change, 'all' -> list, absent/None on either side,
+    removals, or reorders that drop a context) is not additive.
+    """
+    if current_allowed_contexts == new_allowed_contexts:
+        return False
+    # list -> 'all' is broadening.
+    if new_allowed_contexts == 'all':
+        return isinstance(current_allowed_contexts, list)
+    # list -> list must keep old as a subset of new.
+    if (isinstance(current_allowed_contexts, list) and
+            isinstance(new_allowed_contexts, list)):
+        return set(current_allowed_contexts).issubset(set(new_allowed_contexts))
+    return False
+
+
 def _compare_workspace_configs(
     current_config: Dict[str, Any],
     new_config: Dict[str, Any],
@@ -222,6 +269,18 @@ def _compare_workspace_configs(
 
     only_user_access_changes = current_without_access == new_without_access
 
+    # Extract kubernetes.allowed_contexts once, getting back both the remaining
+    # config and the value. Same pattern as above: if the remaining configs are
+    # equal, then allowed_contexts is the ONLY non-user-access change (fails
+    # fast on namespace, context_configs, other clouds, etc.).
+    current_without_contexts, current_allowed_contexts = (
+        _extract_k8s_allowed_contexts(current_without_access))
+    new_without_contexts, new_allowed_contexts = (
+        _extract_k8s_allowed_contexts(new_without_access))
+    additive_allowed_contexts = (
+        current_without_contexts == new_without_contexts and
+        _is_additive_contexts(current_allowed_contexts, new_allowed_contexts))
+
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,
         private_changed=private_changed,
@@ -231,7 +290,8 @@ def _compare_workspace_configs(
         allowed_users_old=allowed_users_old,
         allowed_users_new=allowed_users_new,
         removed_users=removed_users,
-        added_users=added_users)
+        added_users=added_users,
+        additive_allowed_contexts=additive_allowed_contexts)
 
 
 def _validate_workspace_config_changes_with_lock(
@@ -269,13 +329,18 @@ def _validate_workspace_config_changes(
     """Validate workspace configuration changes based on active resources.
 
     This function implements the logic:
-    - If only allowed_users or private changed:
+    - If only allowed_users or private changed, or the only non-user-access
+      change is an additive kubernetes.allowed_contexts change:
       - If private changed from true to false: allow it
       - If private changed from false to true: check that all active resources
         belong to allowed_users
       - If private didn't change: check that removed users don't have active
         resources
     - Otherwise: check that workspace has no active resources
+
+    Additive kubernetes.allowed_contexts changes (old contexts remain a subset
+    of the new contexts) are safe because every existing context stays allowed,
+    so running clusters and jobs keep resolving to a still-allowed context.
 
     Args:
         workspace_name: The name of the workspace.
@@ -297,8 +362,16 @@ def _validate_workspace_config_changes(
                                                    new_config,
                                                    resolver=resolver)
 
-    if config_comparison.only_user_access_changes:
-        # Only user access settings changed
+    if (config_comparison.only_user_access_changes or
+            config_comparison.additive_allowed_contexts):
+        # Only user access settings changed, and/or allowed_contexts grew
+        # additively. Both are safe for active resources; still run the
+        # user-access validation below (a no-op when only contexts changed).
+        if config_comparison.additive_allowed_contexts:
+            logger.info(
+                f'Workspace {workspace_name!r} only adds Kubernetes '
+                'allowed_contexts; existing contexts remain allowed. Skipping '
+                'the active-resource check for this change.')
         if config_comparison.private_changed:
             if (config_comparison.private_old and
                     not config_comparison.private_new):

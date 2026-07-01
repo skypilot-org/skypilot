@@ -210,7 +210,8 @@ def _build_sky_wheel() -> pathlib.Path:
         # wheel content hash doesn't change.
         with open(wheel_path, 'rb') as f:
             contents = f.read()
-        hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
+        hash_of_latest_wheel = hashlib.md5(contents,
+                                           usedforsecurity=False).hexdigest()
 
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)

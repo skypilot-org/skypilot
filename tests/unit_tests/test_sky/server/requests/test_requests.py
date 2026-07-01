@@ -9,11 +9,13 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky import core
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
+from sky.server.requests.serializers import encoders
 
 
 def dummy():
@@ -1838,3 +1840,178 @@ async def test_get_requests_with_prefix(isolated_database, test_async):
         assert req.finished_at is None
         assert req.should_retry is False
         assert req.status_msg is None
+
+
+def _raising_encoder(value):
+    raise RuntimeError('encoder boom')
+
+
+def _dummy_for_encoder_test():
+    return None
+
+
+def test_set_return_value_swallows_encoder_failure():
+    """Encoder failure must not propagate; return_value drops to None."""
+    req = requests.Request(
+        request_id='encoder-failure',
+        name='test',
+        entrypoint=_dummy_for_encoder_test,
+        request_body=payloads.RequestBody(),
+        status=RequestStatus.RUNNING,
+        created_at=0.0,
+        user_id='u',
+    )
+    with mock.patch('sky.server.requests.serializers.encoders.get_encoder',
+                    return_value=_raising_encoder):
+        req.set_return_value({'some': 'unencodable'})
+    assert req.return_value is None
+
+
+def test_waiting_status_ordering_and_color():
+    """WAITING sits between PENDING and RUNNING and has a color mapping."""
+    from sky.server.requests.requests import _STATUS_TO_COLOR
+
+    assert RequestStatus.PENDING < RequestStatus.WAITING
+    assert RequestStatus.WAITING < RequestStatus.RUNNING
+    # Not terminal: the `> RUNNING` finished-check must not catch WAITING.
+    assert not RequestStatus.WAITING > RequestStatus.RUNNING
+    # Every status must have a color, or colored_str() raises KeyError.
+    for status in RequestStatus:
+        assert status in _STATUS_TO_COLOR
+    RequestStatus.WAITING.colored_str()  # must not raise
+
+
+def test_active_statuses_includes_waiting():
+    """The active set used by listing/kill/blob-GC filters must include WAITING."""
+    active = RequestStatus.active_statuses()
+    assert RequestStatus.WAITING in active
+    assert RequestStatus.PENDING in active
+    assert RequestStatus.RUNNING in active
+    assert not set(active) & set(RequestStatus.finished_status())
+
+
+def _waiting_request():
+    return requests.Request(request_id='waiting-req',
+                            name='test-request',
+                            entrypoint=dummy,
+                            request_body=payloads.RequestBody(),
+                            status=RequestStatus.WAITING,
+                            created_at=time.time(),
+                            user_id='user-1')
+
+
+@pytest.fixture()
+def remote_api_version():
+    """Set/restore the per-request client API version contextvar."""
+    from sky.server import versions
+
+    tokens = []
+
+    def _set(value):
+        tokens.append(versions._remote_api_version.set(value))
+
+    yield _set
+    for token in reversed(tokens):
+        versions._remote_api_version.reset(token)
+
+
+@pytest.mark.parametrize('client_version,expected', [
+    (None, 'WAITING'),
+    (server_constants.MIN_WAITING_STATUS_API_VERSION - 1, 'RUNNING'),
+    (server_constants.MIN_WAITING_STATUS_API_VERSION, 'WAITING'),
+])
+def test_encode_downgrades_waiting_for_old_clients(remote_api_version,
+                                                   client_version, expected):
+    """The server downgrades WAITING -> RUNNING only for old clients.
+
+    Covers all three encode paths (encode_requests, readable_encode, encode)
+    that put status on the wire.
+    """
+    from sky import models
+
+    remote_api_version(client_version)
+    request = _waiting_request()
+    mock_user = models.User(id='user-1', name='User One')
+    with mock.patch('sky.global_user_state.get_all_users',
+                    return_value=[mock_user]), \
+            mock.patch('sky.global_user_state.get_user',
+                       return_value=mock_user):
+        assert requests.encode_requests([request])[0].status == expected
+        assert request.readable_encode().status == expected
+        assert request.encode().status == expected
+
+
+def test_to_row_keeps_true_status_for_old_clients(remote_api_version):
+    """to_row() (the DB path) must never persist the wire-downgraded status.
+
+    encode() downgrades WAITING -> RUNNING for old clients; to_row() feeds the
+    database, so it must store the true WAITING status regardless of the
+    request context, or the WAITING state would be silently lost.
+    """
+    remote_api_version(server_constants.MIN_WAITING_STATUS_API_VERSION - 1)
+    request = _waiting_request()
+    status_idx = requests.REQUEST_COLUMNS.index('status')
+
+    # Same context: the wire encoding downgrades, the DB row does not.
+    assert request.encode().status == 'RUNNING'
+    assert request.to_row()[status_idx] == 'WAITING'
+
+
+def test_decode_entrypoint_resolves_known_symbol():
+    """A resolvable entrypoint decodes back to the original callable."""
+    encoded = encoders.pickle_and_encode(core.down)
+    assert requests.Request._decode_entrypoint(encoded) is core.down
+
+
+def test_decode_entrypoint_falls_back_when_unresolvable(monkeypatch):
+    """An entrypoint referencing a symbol this client lacks decodes to the
+    placeholder instead of raising.
+
+    Regression for the client/server version-skew break: the `/down` entrypoint
+    became `core.user_initiated_down` in #9916. The entrypoint is pickled by
+    reference in `Request.encode` and unpickled by the client in
+    `Request.decode`, so a client predating the symbol crashed with
+    `AttributeError: Can't get attribute 'user_initiated_down'`. The entrypoint
+    is never invoked on the client, so #9946 falls back to a placeholder.
+    """
+    # Encode while the symbol exists (mirrors the newer server) ...
+    encoded = encoders.pickle_and_encode(core.user_initiated_down)
+    # ... then simulate an older client whose `sky.core` lacks it.
+    monkeypatch.delattr(core, 'user_initiated_down')
+
+    decoded = requests.Request._decode_entrypoint(encoded)
+
+    assert decoded is requests._unresolved_entrypoint
+    # The placeholder is never called on the client, but guards that case.
+    with pytest.raises(RuntimeError, match='client/server version mismatch'):
+        decoded()
+
+
+def test_decode_tolerates_unresolvable_entrypoint(monkeypatch):
+    """`Request.decode` succeeds end-to-end when the entrypoint is unresolvable.
+
+    The whole request must still decode -- status, body, ids intact -- with only
+    the unused entrypoint falling back to the placeholder. Before #9946 the
+    unresolved entrypoint raised and failed the entire request (so `sky down`
+    crashed on an older client against a newer server).
+    """
+    request = requests.Request(request_id='down-req',
+                               name='down',
+                               entrypoint=core.user_initiated_down,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               finished_at=1.0,
+                               user_id='test-user')
+    # Encoded by the newer server, which has the symbol.
+    payload = request.encode()
+
+    # Older client: `sky.core` has no `user_initiated_down`.
+    monkeypatch.delattr(core, 'user_initiated_down')
+
+    decoded = requests.Request.decode(payload)
+
+    assert decoded.entrypoint is requests._unresolved_entrypoint
+    assert decoded.request_id == 'down-req'
+    assert decoded.name == 'down'
+    assert decoded.status == RequestStatus.SUCCEEDED

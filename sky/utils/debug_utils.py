@@ -1,11 +1,14 @@
 """Debug dump utilities for troubleshooting SkyPilot issues."""
 import collections
 import datetime
+import hashlib
 import json
 import logging
 import os
 import pathlib
 import platform
+import posixpath
+import re
 import shutil
 import time
 import traceback
@@ -14,23 +17,29 @@ import zipfile
 
 import sky
 from sky import check as sky_check
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core as managed_jobs_core
+from sky.provision.kubernetes import debug as kubernetes_debug
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants as skylet_constants
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import message_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import ux_utils
@@ -899,6 +908,358 @@ def _dump_request_id_info(
     logger.debug('Exiting _dump_request_id_info')
 
 
+# Short connection timeout for the skylet-log-path resolution command. The
+# debug dump may run against many clusters, some of which are still
+# provisioning or otherwise unreachable; we want such a node to fail fast
+# rather than hang the dump waiting to connect.
+_SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT = 10
+
+# Total wall-clock timeout for the skylet-log rsync. Reachability is already
+# gated by the resolve step above (connect_timeout), so this is a backstop
+# for a connected-but-stalled transfer (flaky network, oversized rotated
+# log): generous enough not to trip on a healthy node + small log, tight
+# enough that one bad node can't hang the whole dump.
+_SKYLET_LOG_RSYNC_TIMEOUT = 60
+
+
+def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
+    """Resolve the absolute skylet log path on the head node.
+
+    Skylet writes its log to ``$SKY_RUNTIME_DIR/.sky/skylet.log``, where
+    SKY_RUNTIME_DIR defaults to ``$HOME`` (see
+    runtime_utils.get_runtime_dir_path, used by skylet/attempt_skylet.py to
+    place the log). The runtime dir can be
+    relocated off ``$HOME`` -- Slurm moves it off the NFS home, and devspaces
+    override it via the pod env -- and not every command runner exposes that
+    location as a Python attribute. Rather than special-casing each provider, we
+    resolve the path on the remote node using the same env var, in the same
+    ``source_bashrc`` environment that instance_setup uses to start skylet (see
+    start_skylet_on_head_node), so it is correct for every runner.
+
+    Bounded by a short connect timeout so an unreachable node (e.g. a cluster
+    still provisioning) fails fast instead of hanging the dump. Falls back to
+    ``~/.sky/skylet.log`` if the resolution command fails; rsync then handles a
+    missing file best-effort. posixpath (not os.path) is used for the fallback
+    because this is a remote *nix path resolved on the cluster.
+    """
+    default_path = posixpath.join('~', skylet_constants.SKYLET_LOG_FILE)
+    # Mirror the shell form of the runtime dir (constants.SKY_RUNTIME_DIR) so
+    # the remote shell expands the same env var skylet read.
+    cmd = (f'echo "${{{skylet_constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}:-$HOME}}/'
+           f'{skylet_constants.SKYLET_LOG_FILE}"')
+    try:
+        returncode, stdout, _ = runner.run(
+            cmd,
+            require_outputs=True,
+            stream_logs=False,
+            source_bashrc=True,
+            connect_timeout=_SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to resolve skylet log path on cluster '
+                     f'{cluster_name!r}, falling back to {default_path!r}: {e}')
+        return default_path
+    # sourcing bashrc can emit banner/warning lines before our echo; the path is
+    # the last non-empty line.
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if returncode != 0 or not lines:
+        logger.debug(f'Could not resolve skylet log path on cluster '
+                     f'{cluster_name!r} (rc={returncode}), falling back to '
+                     f'{default_path!r}')
+        return default_path
+    return lines[-1]
+
+
+def _collect_cluster_skylet_log(
+        cluster_name: str,
+        cluster_dir: str,
+        handle: Any,
+        errors: Optional[List[Dict[str, str]]] = None,
+        status: Optional['status_lib.ClusterStatus'] = None) -> None:
+    """Rsync the head node's skylet log into the cluster dump dir.
+
+    Skylet runs only on the head node (see
+    instance_setup.start_skylet_on_head_node), so we pull it off the first
+    command runner (runners[0] is always the head; ClusterInfo.ip_tuples()
+    guarantees head-first ordering). The log path is resolved on the remote node
+    (see _resolve_remote_skylet_log_path) to honor a relocated SKY_RUNTIME_DIR.
+
+    Best-effort: the dump is never aborted. For an INIT cluster, collection
+    failures are *expected* (the node may not be reachable or provisioned yet),
+    so they are logged at debug level rather than recorded as dump errors --
+    otherwise a fleet with some always-launching clusters would fill ``errors``
+    with benign connection-refused noise. For other statuses a failure is
+    genuinely worth surfacing, so it is recorded in ``errors``.
+    """
+    # INIT clusters are expected to sometimes be unreachable; don't treat a
+    # collection failure as a real dump error in that case.
+    expected_failure = (status == status_lib.ClusterStatus.INIT)
+
+    def _record_failure(message: str, exc: BaseException) -> None:
+        # str(exc) is empty for some exceptions (e.g. FetchClusterInfoError);
+        # fall back to the type name so the entry is never blank.
+        detail = str(exc) or type(exc).__name__
+        if expected_failure:
+            logger.debug(f'{message} (expected for {status} cluster '
+                         f'{cluster_name!r}): {detail}')
+            return
+        logger.warning(f'{message}: {detail}')
+        if errors is not None:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/skylet_log',
+                'error': detail,
+                'traceback': _full_traceback()
+            })
+
+    try:
+        runners = handle.get_command_runners()
+    except Exception as e:  # pylint: disable=broad-except
+        _record_failure(
+            f'Failed to get command runners for cluster {cluster_name}', e)
+        return
+
+    if not runners:
+        logger.debug(f'No command runners for cluster {cluster_name!r}; '
+                     f'skipping skylet log')
+        return
+
+    runner = runners[0]  # Head node; skylet runs only there.
+    remote_path = _resolve_remote_skylet_log_path(runner, cluster_name)
+    target = os.path.join(cluster_dir, 'skylet.log')
+    try:
+        runner.rsync(source=remote_path,
+                     target=target,
+                     up=False,
+                     stream_logs=False,
+                     timeout=_SKYLET_LOG_RSYNC_TIMEOUT)
+        logger.debug(f'Collected skylet log for cluster {cluster_name!r}')
+    except exceptions.CommandError as e:
+        if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+            logger.debug(f'No skylet log found on cluster {cluster_name!r}')
+        else:
+            _record_failure(
+                f'Failed to rsync skylet log for cluster {cluster_name}', e)
+    except Exception as e:  # pylint: disable=broad-except
+        _record_failure(
+            f'Failed to collect skylet log for cluster {cluster_name}', e)
+
+
+def _kube_coordinates_for_handle(
+        handle: Any) -> Optional[Tuple[Optional[str], str]]:
+    """Resolve a cluster handle's (kube context, namespace), or None.
+
+    Returns None for clusters that aren't on Kubernetes (or whose runners can't
+    be resolved). For a Kubernetes cluster every command runner is a
+    KubernetesCommandRunner carrying its pod's (context, namespace); they're
+    cluster-wide identical, so runners[0] suffices. get_command_runners()
+    rebuilds from the cached cluster_info (no live API call), so this is cheap
+    and safe even when the context is defunct.
+    """
+    launched_resources = getattr(handle, 'launched_resources', None)
+    cloud = getattr(launched_resources, 'cloud', None)
+    if not isinstance(cloud, clouds.Kubernetes):
+        return None
+
+    runners = handle.get_command_runners()
+    k8s_runners: List[Any] = [
+        r for r in runners
+        if isinstance(r, command_runner.KubernetesCommandRunner)
+    ]
+    if not k8s_runners:
+        return None
+    runner = k8s_runners[0]
+    assert isinstance(runner, command_runner.KubernetesCommandRunner), runner
+    # .context/.namespace are set via tuple-unpacking mypy can't track.
+    return runner.context, runner.namespace  # type: ignore[attr-defined]
+
+
+def _sanitize_context_name(context: Optional[str]) -> str:
+    """Map a kube context to a filesystem-safe directory name.
+
+    The in-cluster context (``None``) maps to ``in-cluster``. Otherwise we
+    replace path/colon/whitespace chars and append a short hash of the raw name
+    so two contexts that sanitize to the same string don't collide.
+    """
+    if context is None:
+        return 'in-cluster'
+    safe = re.sub(r'[^A-Za-z0-9._-]', '_', context)
+    digest = hashlib.sha1(context.encode('utf-8')).hexdigest()[:8]
+    return f'{safe}-{digest}'
+
+
+def _collect_cluster_kubernetes_resources(
+        cluster_name: str,
+        cluster_dir: str,
+        handle: Any,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Snapshot a Kubernetes cluster's per-cluster k8s objects into the dump.
+
+    For clusters on Kubernetes, capture the pods, their events, the resources
+    SkyPilot created (Services, etc.), and this cluster's Kueue Workload -- the
+    same things you'd reach for with ``kubectl get -o yaml`` when debugging.
+    No-op for clusters on other clouds.
+
+    These calls are all namespace-scoped, so they work under SkyPilot's minimal
+    (namespace-only) RBAC. Cluster-WIDE objects shared across SkyPilot clusters
+    (GPU-metrics pods, the Kueue quota config) are collected once per context by
+    ``_dump_kube_contexts_info`` instead; we drop a ``context.json`` here so a
+    reader can find them.
+
+    Unlike the skylet log (which is rsynced off a reachable node and so only
+    works on UP clusters), these come from the kube API server, which answers
+    even when the cluster is broken -- pod events on a failed launch are exactly
+    what we want -- so the caller doesn't gate this on cluster status.
+
+    Best-effort: every failure is recorded in ``errors`` and never aborts the
+    dump.
+    """
+    try:
+        coords = _kube_coordinates_for_handle(handle)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get command runners for cluster '
+                       f'{cluster_name}: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/kubernetes',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
+        return
+
+    if coords is None:
+        logger.debug(
+            f'Cluster {cluster_name!r} is not on Kubernetes (or has no '
+            f'k8s runners); skipping k8s resource dump')
+        return
+
+    context, namespace = coords
+    output_dir = os.path.join(cluster_dir, 'kubernetes')
+
+    k8s_errors = kubernetes_debug.dump_cluster_resources(
+        context=context,
+        namespace=namespace,
+        cluster_name_on_cloud=handle.cluster_name_on_cloud,
+        output_dir=output_dir)
+
+    # Drop a mapping file pointing at the per-context dump of this cluster's
+    # cluster-wide objects. Best-effort -- never let it abort the dump.
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, 'context.json'),
+                  'w',
+                  encoding='utf-8') as f:
+            json.dump(
+                {
+                    'context': context,
+                    'namespace': namespace,
+                    'cluster_name_on_cloud': handle.cluster_name_on_cloud,
+                    'context_dir': f'kubernetes_contexts/'
+                                   f'{_sanitize_context_name(context)}',
+                },
+                f,
+                indent=2,
+                default=str)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to write context.json for {cluster_name!r}: {e}')
+
+    if errors is not None:
+        for err in k8s_errors:
+            errors.append({
+                'component': 'clusters',
+                'resource': f'{cluster_name}/{err["resource"]}',
+                'error': err['error'],
+                'traceback': err['traceback'],
+            })
+
+
+def _dump_kube_contexts_info(dump_dir: str,
+                             errors: Optional[List[Dict[str,
+                                                        str]]] = None) -> None:
+    """Dump cluster-WIDE k8s objects once per allowed kube context.
+
+    The GPU-metrics pods (Prometheus server, DCGM exporter) and the non-Workload
+    Kueue objects (ClusterQueues / LocalQueues / ResourceFlavors / Topologies)
+    are shared across all SkyPilot clusters on a kube context, so we fetch them
+    once per context into ``kubernetes_contexts/<sanitized-context>/``.
+
+    Source of truth is ``Kubernetes.existing_allowed_contexts()`` -- the same
+    set ``sky check`` uses -- *not* contexts derived from the dumped clusters. A
+    context with no SkyPilot clusters (e.g. a freshly onboarded tenant) is still
+    scraped, so its GPU-metrics / Kueue config can be debugged before anything
+    runs there. ``None`` in the list means in-cluster auth (see
+    _sanitize_context_name).
+
+    We additionally always include the API server's own in-cluster context
+    (when running in-cluster), even if ``existing_allowed_contexts()`` drops it
+    -- which it does when ``allowed_contexts`` is an explicit list that omits
+    it, or ``SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false`` hides
+    it as a compute target. Its GPU-manager / Kueue config is worth dumping.
+
+    Robustness (tenants can have defunct contexts that time out): every call is
+    5s-bounded, the per-context fetch fast-fails on the first connection error,
+    and contexts are fetched in parallel -- so N dead contexts cost ~5s, not
+    ~5s*calls*N. Best-effort: errors are recorded, never aborts the dump.
+    """
+    try:
+        contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to list allowed Kubernetes contexts: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'kubernetes_contexts',
+                'resource': 'allowed_contexts',
+                'error': str(e),
+                'traceback': _full_traceback(),
+            })
+        return
+
+    # Always dump the API server's own in-cluster context, even when it's been
+    # excluded as a compute target (explicit allowed_contexts list, or
+    # SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false). The dedupe
+    # below drops it if existing_allowed_contexts() already surfaced it.
+    if kubernetes_utils.is_incluster_config_available():
+        contexts = list(contexts) + [kubernetes.in_cluster_context_name()]
+
+    # Dedupe defensively while preserving order (None = in-cluster is allowed).
+    unique_contexts = list(dict.fromkeys(contexts))
+    if not unique_contexts:
+        return
+
+    contexts_root = os.path.join(dump_dir, 'kubernetes_contexts')
+    os.makedirs(contexts_root, exist_ok=True)
+
+    def _dump_one(context: Optional[str]) -> List[Dict[str, str]]:
+        # run_in_parallel re-raises the first exception, so swallow everything
+        # into the returned error list.
+        try:
+            output_dir = os.path.join(contexts_root,
+                                      _sanitize_context_name(context))
+            return kubernetes_debug.dump_context_resources(
+                context=context, output_dir=output_dir)
+        except Exception as e:  # pylint: disable=broad-except
+            return [{
+                'resource': 'kubernetes_contexts',
+                'error': str(e),
+                'traceback': _full_traceback(),
+            }]
+
+    num_threads = min(len(unique_contexts), 8)
+    results = subprocess_utils.run_in_parallel(_dump_one, unique_contexts,
+                                               num_threads)
+
+    if errors is not None:
+        for context, ctx_errors in zip(unique_contexts, results):
+            sanitized = _sanitize_context_name(context)
+            for err in ctx_errors:
+                errors.append({
+                    'component': 'kubernetes_contexts',
+                    'resource': f'{sanitized}/{err["resource"]}',
+                    'error': err['error'],
+                    'traceback': err['traceback'],
+                })
+
+
 def _dump_cluster_info(cluster_names: Set[str],
                        dump_dir: str,
                        errors: Optional[List[Dict[str, str]]] = None) -> None:
@@ -996,6 +1357,30 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'error': str(e),
                     'traceback': _full_traceback()
                 })
+
+        # Pull the skylet log from the head node. We attempt this for both UP
+        # and INIT clusters: an INIT cluster may be degraded (failed setup,
+        # partial provisioning) but still have a reachable node with a skylet
+        # log, which is exactly when the log is most useful. The only status we
+        # skip is STOPPED, which has no reachable node. A not-yet-provisioned
+        # cluster simply fails the rsync, which is handled best-effort.
+        status = cluster_record.get('status') if cluster_record else None
+        handle = cluster_record.get('handle') if cluster_record else None
+
+        if status != status_lib.ClusterStatus.STOPPED and handle is not None:
+            _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
+                                        errors, status)
+        else:
+            logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
+                         f'(status={status})')
+
+        # For Kubernetes clusters, also snapshot the related k8s objects (pods,
+        # events, Services, Kueue Workload, ...). Gated only on having a handle,
+        # not on status: these come from the kube API server, so they're
+        # reachable -- and most useful -- even when the cluster isn't UP.
+        if handle is not None:
+            _collect_cluster_kubernetes_resources(cluster_name, cluster_dir,
+                                                  handle, errors)
 
     logger.debug('Exiting _dump_cluster_info')
 
@@ -1288,6 +1673,10 @@ def _build_debug_dump(
     # Dump all sections
     errors = debug_dump_context['errors']
     _dump_server_info(dump_dir, errors=errors)
+    # Cluster-wide k8s objects (GPU-metrics pods, Kueue quota config), fetched
+    # once per allowed kube context (source of truth: existing_allowed_contexts,
+    # so a context with no SkyPilot clusters is still captured).
+    _dump_kube_contexts_info(dump_dir, errors=errors)
     _dump_request_id_info(debug_dump_context['request_ids'],
                           dump_dir,
                           errors=errors)

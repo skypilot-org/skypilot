@@ -286,7 +286,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     state.scheduler_set_done(job_c)
 
-    # Job D: terminal but end_at is None -> does not qualify
+    # Job D: terminal with end_at None (e.g. cancelled while PENDING) -> still
+    # qualifies, so its controller log row is cleaned rather than re-scanned
+    # forever.
     job_d = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
         engine,
@@ -301,7 +303,7 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
 
     res = state.get_controller_logs_to_clean(retention, batch_size=10)
     job_ids = {r['job_id'] for r in res}
-    assert job_ids == {job_a}
+    assert job_ids == {job_a, job_d}
 
     # Batch size respected: clone more qualifying jobs
     job_e = _insert_job_info(engine, controller_logs_cleaned_at=None)
@@ -329,6 +331,55 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
 
     res2 = state.get_controller_logs_to_clean(retention, batch_size=2)
     assert len(res2) == 2
+
+
+def test_get_controller_logs_to_clean_without_local_log_file(
+        _mock_managed_jobs_db_conn):
+    """Controller logs are cleaned even when no task log was downloaded.
+
+    Jobs that terminate without a downloaded task log must still be eligible for
+    controller-log GC despite local_log_file being NULL:
+    - FAILED_CONTROLLER on a controller crash: end_at is set, controller log
+      exists on disk.
+    - Cancelled while still PENDING (set_pending_cancelled): end_at is never
+      set, so max(end_at) is NULL; it must be cleaned immediately rather than
+      filtered out and re-scanned forever.
+    """
+    now = time.time()
+    retention = 60
+    engine = state._db_manager.get_engine()
+
+    # Job cancelled before the task ran: terminal, end_at never set, no local
+    # log (mirrors set_pending_cancelled, which leaves end_at NULL).
+    job_cancelled = _insert_job_info(engine, controller_logs_cleaned_at=None)
+    _insert_task(
+        engine,
+        job_cancelled,
+        0,
+        status=ManagedJobStatus.CANCELLED,
+        end_at=None,
+        local_log_file=None,
+        logs_cleaned_at=None,
+    )
+    state.scheduler_set_done(job_cancelled)
+
+    # Job that crashed the controller: terminal, old end_at, no local log.
+    job_failed_controller = _insert_job_info(engine,
+                                             controller_logs_cleaned_at=None)
+    _insert_task(
+        engine,
+        job_failed_controller,
+        0,
+        status=ManagedJobStatus.FAILED_CONTROLLER,
+        end_at=now - 150,
+        local_log_file=None,
+        logs_cleaned_at=None,
+    )
+    state.scheduler_set_done(job_failed_controller)
+
+    res = state.get_controller_logs_to_clean(retention, batch_size=10)
+    job_ids = {r['job_id'] for r in res}
+    assert job_ids == {job_cancelled, job_failed_controller}
 
 
 def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
