@@ -1213,6 +1213,24 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'traceback': _full_traceback()
                 })
 
+        # Live cluster record for the skylet-log and Kubernetes sections
+        # below. None for terminated clusters, which have no reachable
+        # node or handle (their history/events were dumped above).
+        cluster_record = None
+        try:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get cluster record for '
+                           f'{cluster_name}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{cluster_name}/cluster_record',
+                    'error': str(e),
+                    'traceback': _full_traceback()
+                })
+
         # Pull the skylet log from the head node. We attempt this for both UP
         # and INIT clusters: an INIT cluster may be degraded (failed setup,
         # partial provisioning) but still have a reachable node with a skylet
