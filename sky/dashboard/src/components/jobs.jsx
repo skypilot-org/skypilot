@@ -493,6 +493,19 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+function JobNameLink({ href, name }) {
+  return (
+    <NonCapitalizedTooltip content={name}>
+      <Link
+        href={href}
+        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
+      >
+        {name}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 export function ManagedJobsTable({
   refreshInterval,
   setLoading,
@@ -1493,9 +1506,7 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
-                    {item.name}
-                  </Link>
+                  <JobNameLink href={`/jobs/${jobId}`} name={item.name} />
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
@@ -1534,9 +1545,7 @@ export function ManagedJobsTable({
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                  {item.name}
-                </Link>
+                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
