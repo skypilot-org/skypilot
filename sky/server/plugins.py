@@ -497,6 +497,39 @@ def plugins_loaded() -> bool:
     return _plugins_loaded
 
 
+def preload_plugin_modules() -> None:
+    """Import the modules of all configured plugins without initializing them.
+
+    This is intended for the multiprocessing ``forkserver`` preload. Importing
+    the plugin modules is the expensive part (it pulls in their dependencies)
+    and is side-effect-free, so doing it once in the fork server lets every
+    forked worker inherit the imported modules copy-on-write. In contrast,
+    ``load_plugins`` also instantiates and installs the plugins, which may
+    start threads, acquire locks, or open connections -- state that must be
+    created per worker rather than shared via the fork server. Therefore only
+    the imports are done here; ``load_plugins`` still runs in each worker's
+    initializer.
+
+    Errors are swallowed so that a misconfigured or environment-specific plugin
+    does not prevent the fork server from starting; the worker's own
+    ``load_plugins`` will surface any real problem.
+    """
+    config = _load_plugin_config()
+    if not config:
+        return
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config.get('class')
+        if not class_path:
+            continue
+        module_path = class_path.rsplit('.', 1)[0]
+        try:
+            importlib.import_module(module_path)
+        except Exception:  # pylint: disable=broad-except
+            logger.debug('Forkserver preload: skipping module %s',
+                         module_path,
+                         exc_info=True)
+
+
 def load_plugins(extension_context: ExtensionContext):
     """Load and initialize plugins from the config."""
     global _EXTENSION_CONTEXT, _plugins_loaded
