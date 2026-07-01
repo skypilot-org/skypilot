@@ -121,7 +121,7 @@ class TestEmergencyRecoveryState:
     """State transitions and budget bookkeeping on a real SQLite DB."""
 
     @pytest.mark.asyncio
-    async def test_set_emergency_recovering_saves_prior_status(
+    async def test_set_emergency_recovering_labels_episode(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, status='RUNNING')
@@ -133,9 +133,9 @@ class TestEmergencyRecoveryState:
         assert applied is True
         row = _get_task_row(engine)
         # Visible status is the normal RECOVERING; the emergency cause is on
-        # the event (recovery_source) and the saved prior status.
+        # the event and, for the duration of the episode, on the row.
         assert row['status'] == 'RECOVERING'
-        assert row['status_before_emergency'] == 'RUNNING'
+        assert row['recovery_source'] == state.RecoverySource.EMERGENCY.value
         assert calls == ['RECOVERING']
         events = state.get_job_events(1)
         assert any(e['new_status'] == state.ManagedJobStatus.RECOVERING and
@@ -145,21 +145,33 @@ class TestEmergencyRecoveryState:
         assert recovering_events == [state.RecoverySource.EMERGENCY.value]
 
     @pytest.mark.asyncio
-    async def test_set_emergency_recovering_rerun_keeps_saved_status(
+    async def test_set_emergency_recovering_keeps_open_episode_source(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
-        _seed_job(engine, status='RUNNING')
         callback, _ = _make_callback()
 
+        # Re-running the bookkeeping (e.g. after a transient DB failure on a
+        # later step) keeps the episode labeled EMERGENCY.
+        _seed_job(engine, job_id=1, status='RUNNING')
         assert await state.set_emergency_recovering_async(
             1, 0, reason='first', callback_func=callback)
-        # Re-running the bookkeeping (e.g. after a transient DB failure on a
-        # later step) must not overwrite the saved pre-emergency status.
         assert await state.set_emergency_recovering_async(
             1, 0, reason='re-run', callback_func=callback)
+        assert _get_task_row(engine, 1)['recovery_source'] == \
+            state.RecoverySource.EMERGENCY.value
 
-        row = _get_task_row(engine)
-        assert row['status_before_emergency'] == 'RUNNING'
+        # An emergency that interrupts an in-flight FAILURE recovery must not
+        # relabel the episode: the eventual completion still counts as a
+        # genuine failure recovery.
+        _seed_job(engine, job_id=2, status='RUNNING')
+        await state.set_recovering_async(2,
+                                         0,
+                                         force_transit_to_recovering=False,
+                                         callback_func=callback)
+        assert await state.set_emergency_recovering_async(
+            2, 0, reason='emergency mid-recovery', callback_func=callback)
+        assert _get_task_row(engine, 2)['recovery_source'] == \
+            state.RecoverySource.FAILURE.value
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('status', ['CANCELLING', 'SUCCEEDED', 'FAILED'])
@@ -175,7 +187,7 @@ class TestEmergencyRecoveryState:
         assert applied is False
         row = _get_task_row(engine)
         assert row['status'] == status
-        assert row['status_before_emergency'] is None
+        assert row['recovery_source'] is None
         assert not calls
         assert not state.get_job_events(1)
 
@@ -207,8 +219,8 @@ class TestEmergencyRecoveryState:
         engine = _mock_managed_jobs_db_conn
         callback, _ = _make_callback()
 
-        # Default source is FAILURE (preemption/failure), and a normal
-        # recovery does not set the emergency marker.
+        # Default source is FAILURE (preemption/failure); the episode is
+        # labeled on both the event and the row.
         _seed_job(engine, job_id=1, status='RUNNING')
         await state.set_recovering_async(1,
                                          0,
@@ -216,7 +228,8 @@ class TestEmergencyRecoveryState:
                                          callback_func=callback)
         assert _get_recovering_events(
             engine, 1) == [state.RecoverySource.FAILURE.value]
-        assert _get_task_row(engine, 1)['status_before_emergency'] is None
+        assert _get_task_row(engine, 1)['recovery_source'] == \
+            state.RecoverySource.FAILURE.value
 
         # An HA-tagged force recovery records HA.
         _seed_job(engine, job_id=2, status='STARTING')
@@ -228,12 +241,15 @@ class TestEmergencyRecoveryState:
             recovery_source=state.RecoverySource.HA)
         assert _get_recovering_events(engine,
                                       2) == [state.RecoverySource.HA.value]
+        assert _get_task_row(engine, 2)['recovery_source'] == \
+            state.RecoverySource.HA.value
 
     @pytest.mark.asyncio
-    async def test_emergency_marker_cleared_on_terminal_and_running(
-            self, _mock_managed_jobs_db_conn):
-        # A stale status_before_emergency must not survive into a later
-        # unrelated recovery; every exit transition clears it.
+    async def test_recovery_source_cleared_on_exits(self,
+                                                    _mock_managed_jobs_db_conn):
+        # A stale recovery_source must not survive into a later unrelated
+        # recovery (it would mislabel that episode's recovery_count
+        # accounting); every exit transition clears it.
         engine = _mock_managed_jobs_db_conn
         callback, _ = _make_callback()
 
@@ -243,10 +259,10 @@ class TestEmergencyRecoveryState:
                                                        0,
                                                        reason='x',
                                                        callback_func=callback)
-            assert _get_task_row(engine, 1)['status_before_emergency'] == \
-                'RUNNING'
+            assert _get_task_row(engine, 1)['recovery_source'] == \
+                state.RecoverySource.EMERGENCY.value
             await setter()
-            assert _get_task_row(engine, 1)['status_before_emergency'] is None
+            assert _get_task_row(engine, 1)['recovery_source'] is None
             # reset for the next sub-case
             with engine.connect() as conn:
                 conn.execute(state.spot_table.delete())
@@ -265,42 +281,67 @@ class TestEmergencyRecoveryState:
             callback_func=callback))
 
     @pytest.mark.asyncio
-    async def test_set_emergency_recovered_restores_running(
+    async def test_recovery_count_only_counts_failure_episodes(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
-        _seed_job(engine, status='RUNNING')
-        callback, calls = _make_callback()
-        await state.set_emergency_recovering_async(1,
-                                                   0,
-                                                   reason='test',
-                                                   callback_func=callback)
-
-        restored_time = time.time()
-        await state.set_emergency_recovered_async(1,
-                                                  0,
-                                                  restored_time=restored_time,
-                                                  callback_func=callback)
-
-        row = _get_task_row(engine)
-        assert row['status'] == 'RUNNING'
-        assert row['status_before_emergency'] is None
-        assert row['last_recovered_at'] == restored_time
-        # recovery_count counts cluster recoveries; a re-attach is not one.
-        assert row['recovery_count'] == 0
-        assert calls == ['RECOVERING', 'EMERGENCY_RECOVERED']
-
-    @pytest.mark.asyncio
-    async def test_set_emergency_recovered_requires_emergency_status(
-            self, _mock_managed_jobs_db_conn):
-        engine = _mock_managed_jobs_db_conn
-        _seed_job(engine, status='RUNNING')
         callback, _ = _make_callback()
 
-        with pytest.raises(exceptions.ManagedJobStatusError):
-            await state.set_emergency_recovered_async(1,
-                                                      0,
-                                                      restored_time=time.time(),
-                                                      callback_func=callback)
+        # FAILURE episode: counts.
+        _seed_job(engine, job_id=1, status='RUNNING')
+        await state.set_recovering_async(1,
+                                         0,
+                                         force_transit_to_recovering=False,
+                                         callback_func=callback)
+        await state.set_recovered_async(1,
+                                        0,
+                                        recovered_time=time.time(),
+                                        callback_func=callback)
+        assert _get_task_row(engine, 1)['recovery_count'] == 1
+
+        # EMERGENCY episode (always relaunched): system-driven, not counted.
+        _seed_job(engine, job_id=2, status='RUNNING')
+        await state.set_emergency_recovering_async(2,
+                                                   0,
+                                                   reason='x',
+                                                   callback_func=callback)
+        await state.set_recovered_async(2,
+                                        0,
+                                        recovered_time=time.time(),
+                                        callback_func=callback)
+        assert _get_task_row(engine, 2)['recovery_count'] == 0
+
+        # HA episode (forced recovery on controller restart): not counted.
+        _seed_job(engine, job_id=3, status='STARTING')
+        await state.set_recovering_async(
+            3,
+            0,
+            force_transit_to_recovering=True,
+            callback_func=callback,
+            recovery_source=state.RecoverySource.HA)
+        await state.set_recovered_async(3,
+                                        0,
+                                        recovered_time=time.time(),
+                                        callback_func=callback)
+        assert _get_task_row(engine, 3)['recovery_count'] == 0
+
+        # Legacy row (RECOVERING written before the column existed): NULL
+        # source is treated as FAILURE for back-compat.
+        _seed_job(engine, job_id=4, status='RECOVERING')
+        await state.set_recovered_async(4,
+                                        0,
+                                        recovered_time=time.time(),
+                                        callback_func=callback)
+        assert _get_task_row(engine, 4)['recovery_count'] == 1
+
+        # count_recovery=False (kept-STARTING resume whose relaunch retry
+        # drifted the row to RECOVERING): never counted.
+        _seed_job(engine, job_id=5, status='RECOVERING')
+        await state.set_recovered_async(5,
+                                        0,
+                                        recovered_time=time.time(),
+                                        callback_func=callback,
+                                        count_recovery=False)
+        assert _get_task_row(engine, 5)['recovery_count'] == 0
 
     @pytest.mark.asyncio
     async def test_budget_roundtrip(self, _mock_managed_jobs_db_conn):
@@ -338,13 +379,6 @@ class TestEmergencyRecoveryState:
         await state.normalize_schedule_state_for_emergency_retry_async(1)
 
         assert _get_job_info_row(engine)['schedule_state'] == expected
-
-    @pytest.mark.asyncio
-    async def test_get_status_before_emergency_unset(
-            self, _mock_managed_jobs_db_conn):
-        engine = _mock_managed_jobs_db_conn
-        _seed_job(engine)
-        assert await state.get_status_before_emergency_async(1, 0) is None
 
 
 class _RetryLoopHarness:

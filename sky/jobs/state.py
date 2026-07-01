@@ -107,15 +107,13 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('is_primary_in_job_group',
                       sqlalchemy.Boolean,
                       server_default=None),
-    # For a RECOVERING task, the status it had immediately before an
-    # *emergency* recovery (unexpected controller error). Non-NULL is the
-    # marker that distinguishes an emergency-origin RECOVERING from an
-    # ordinary preemption/failure recovery, and lets the resume logic
-    # re-attach to a healthy RUNNING cluster instead of tearing it down.
-    # NULL for non-emergency recoveries and once the task leaves RECOVERING.
-    sqlalchemy.Column('status_before_emergency',
-                      sqlalchemy.Text,
-                      server_default=None),
+    # For a RECOVERING task, why the current recovery episode began (a
+    # RecoverySource value: FAILURE / EMERGENCY / HA). Set when the episode
+    # opens and cleared on every exit from recovery; used to decide whether
+    # completing the episode counts toward recovery_count (only genuine
+    # FAILURE recoveries do — NULL is treated as FAILURE for rows written
+    # before this column existed). NULL when the task is not recovering.
+    sqlalchemy.Column('recovery_source', sqlalchemy.Text, server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -545,10 +543,9 @@ class ManagedJobStatus(enum.Enum):
     # recovery (the cluster was preempted or failed), controller-restart
     # recovery (HA / rollout resume), and emergency recovery (the controller
     # hit an unexpected internal error and is restarting job management). The
-    # cause is recorded as a RecoverySource on the RECOVERING job event; the
-    # emergency case additionally saves the pre-emergency task status in
-    # status_before_emergency so the resume logic can re-attach to a healthy
-    # cluster without restarting the workload.
+    # cause is recorded as a RecoverySource on the RECOVERING job event and,
+    # for the duration of the episode, on spot.recovery_source (which decides
+    # whether the completed recovery counts toward recovery_count).
     RECOVERING = 'RECOVERING'
     # CANCELLING: The job is requested to be cancelled by the user, and the
     # controller is cleaning up the cluster.
@@ -1041,8 +1038,8 @@ def set_failed(
     fields_to_set: Dict[str, Any] = {
         spot_table.c.status: failure_type.value,
         spot_table.c.failure_reason: failure_reason,
-        # Clear any emergency marker on reaching a terminal state.
-        spot_table.c.status_before_emergency: None,
+        # Close any open recovery episode on reaching a terminal state.
+        spot_table.c.recovery_source: None,
     }
     updated = False
     with orm.Session(engine) as session:
@@ -2802,8 +2799,8 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
                     spot_table.c.status: ManagedJobStatus.RUNNING.value,
                     spot_table.c.start_at: start_time,
                     spot_table.c.last_recovered_at: start_time,
-                    # Defensive: clear any emergency marker on reaching RUNNING.
-                    spot_table.c.status_before_emergency: None,
+                    # Defensive: no recovery episode is open once RUNNING.
+                    spot_table.c.recovery_source: None,
                 }))
         return result.rowcount
 
@@ -2849,8 +2846,10 @@ async def set_recovering_async(
     """Set the task to recovering state, and update the job duration.
 
     recovery_source records why the job is recovering (defaults to FAILURE,
-    i.e. preemption/failure); it is stored on the RECOVERING job event so
-    consumers can count only failure-driven recoveries.
+    i.e. preemption/failure). It is stored on the RECOVERING job event so
+    consumers can count only failure-driven recoveries, and on the spot row
+    for the duration of the episode so set_recovered_async can decide
+    whether the completed recovery counts toward recovery_count.
     """
     # Build code and reason from external failures for the event log.
     # Prefer external_failures over cluster_event_reason to avoid
@@ -2904,6 +2903,7 @@ async def set_recovering_async(
                     spot_table.c.end_at.is_(None),
                 )).values({
                     spot_table.c.status: ManagedJobStatus.RECOVERING.value,
+                    spot_table.c.recovery_source: recovery_source.value,
                     spot_table.c.job_duration: sqlalchemy.case(
                         (should_accumulate_duration, spot_table.c.job_duration +
                          current_time - spot_table.c.last_recovered_at),
@@ -2921,11 +2921,32 @@ async def set_recovering_async(
     await callback_func('RECOVERING')
 
 
-async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
-                              callback_func: AsyncCallbackType):
-    """Set the task to recovered."""
+async def set_recovered_async(job_id: int,
+                              task_id: int,
+                              recovered_time: float,
+                              callback_func: AsyncCallbackType,
+                              count_recovery: bool = True):
+    """Set the task to recovered.
+
+    recovery_count only counts genuine failure recoveries: the increment is
+    gated on the episode's recovery_source being FAILURE (NULL, i.e. a row
+    written before the column existed, is treated as FAILURE). System-driven
+    episodes (EMERGENCY / HA) complete without inflating the user-visible
+    count. Callers pass count_recovery=False when completing a RECOVERING
+    status that never was a recovery episode at all (e.g. a kept-STARTING
+    resume whose relaunch retry moved the row to RECOVERING).
+    """
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has recovered')
+    if count_recovery:
+        count_expr = spot_table.c.recovery_count + sqlalchemy.case(
+            (sqlalchemy.or_(
+                spot_table.c.recovery_source.is_(None),
+                spot_table.c.recovery_source
+                == RecoverySource.FAILURE.value), 1),
+            else_=0)
+    else:
+        count_expr = spot_table.c.recovery_count
 
     async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
@@ -2939,11 +2960,10 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
             values({
                 spot_table.c.status: ManagedJobStatus.RUNNING.value,
                 spot_table.c.last_recovered_at: recovered_time,
-                spot_table.c.recovery_count: spot_table.c.recovery_count + 1,
-                # Clear the emergency marker: this task has left RECOVERING,
-                # so a future recovery must not be misread as emergency-
-                # origin (the resume logic keys off this column being set).
-                spot_table.c.status_before_emergency: None,
+                spot_table.c.recovery_count: count_expr,
+                # Close the episode: this task has left RECOVERING, so a
+                # future recovery must open (and label) a fresh episode.
+                spot_table.c.recovery_source: None,
             }))
         return result.rowcount
 
@@ -2956,15 +2976,17 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
 async def set_emergency_recovering_async(
         job_id: int, task_id: int, reason: str,
         callback_func: AsyncCallbackType) -> bool:
-    """Set the task to RECOVERING (emergency), saving the prior status.
+    """Set the task to RECOVERING due to an unexpected controller error.
 
     Used when the controller hits an unexpected internal error and will
-    retry managing the job in place. The visible status is the normal
-    RECOVERING; the emergency cause is recorded on the RECOVERING job event
-    (recovery_source=EMERGENCY), and the prior status is saved into
-    status_before_emergency so the resume logic can re-attach to a healthy
-    RUNNING cluster instead of tearing it down. status_before_emergency
-    being non-NULL is *the* signal that a RECOVERING task is emergency-origin.
+    retry managing the job in place (the retry tears down and relaunches
+    the cluster, like any other forced recovery). The visible status is the
+    normal RECOVERING; the emergency cause is recorded on the RECOVERING
+    job event and on spot.recovery_source. The row stamp is
+    save-only-if-unset: an emergency that interrupts an already-open
+    recovery episode (e.g. a preemption recovery) must not relabel it —
+    the episode keeps its original source, so a genuine FAILURE recovery
+    still counts toward recovery_count when it eventually completes.
 
     Returns True if the task is now RECOVERING; False if it was left
     untouched because it is CANCELLING or terminal (those paths own the task
@@ -2998,17 +3020,15 @@ async def set_emergency_recovering_async(
                 )).
             values({
                 spot_table.c.status: ManagedJobStatus.RECOVERING.value,
-                # Save the prior status, but only when it is not already set.
-                # The visible status (RECOVERING) is now ambiguous between an
-                # emergency and a real preemption, so we key idempotency off
-                # status_before_emergency itself: a re-run (or an emergency
-                # that hits a job already in a preemption recovery) must not
-                # overwrite the saved status, which would corrupt the resume
-                # re-attach decision.
-                spot_table.c.status_before_emergency: sqlalchemy.case(
-                    (spot_table.c.status_before_emergency.isnot(None),
-                     spot_table.c.status_before_emergency),
-                    else_=spot_table.c.status),
+                # Label the episode EMERGENCY, but only when no episode is
+                # already open: a re-run of this bookkeeping, or an emergency
+                # that hits a task already in a preemption recovery, must not
+                # relabel the episode (a genuine FAILURE recovery must still
+                # count toward recovery_count when it completes).
+                spot_table.c.recovery_source: sqlalchemy.case(
+                    (spot_table.c.recovery_source.isnot(None),
+                     spot_table.c.recovery_source),
+                    else_=RecoverySource.EMERGENCY.value),
                 spot_table.c.job_duration: sqlalchemy.case(
                     (should_accumulate_duration, spot_table.c.job_duration +
                      current_time - spot_table.c.last_recovered_at),
@@ -3033,49 +3053,6 @@ async def set_emergency_recovering_async(
     logger.info('=== Emergency recovering... ===')
     await callback_func('RECOVERING')
     return True
-
-
-async def set_emergency_recovered_async(job_id: int, task_id: int,
-                                        restored_time: float,
-                                        callback_func: AsyncCallbackType):
-    """Restore an emergency-origin RECOVERING task back to RUNNING.
-
-    Only used when the saved pre-emergency status was RUNNING and the
-    resume logic re-attached to the still-healthy cluster: the workload was
-    never interrupted, so recovery_count (which counts cluster recoveries)
-    is not incremented. The task is matched on RECOVERING with a non-NULL
-    status_before_emergency (the emergency-origin marker), which the same
-    write then clears.
-    """
-    await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
-                              'Re-attached after emergency recovery')
-
-    async def _op(session: sql_async.AsyncSession) -> int:
-        result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.RECOVERING.value,
-                    spot_table.c.status_before_emergency.isnot(None),
-                    spot_table.c.end_at.is_(None),
-                )).
-            values({
-                spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                spot_table.c.status_before_emergency: None,
-                # Stamp last_recovered_at so job_duration accounting
-                # resumes from now; the transition into emergency
-                # recovery already accumulated the duration up to the
-                # emergency.
-                spot_table.c.last_recovered_at: restored_time,
-            }))
-        return result.rowcount
-
-    await _retry_task_status_update(
-        job_id, task_id, ManagedJobStatus.RUNNING, _op,
-        'Failed to restore the task after emergency recovery.')
-    logger.info('==== Re-attached after emergency recovery. ====')
-    await callback_func('EMERGENCY_RECOVERED')
 
 
 @db_retries.retry_async
@@ -3141,26 +3118,6 @@ async def normalize_schedule_state_for_emergency_retry_async(
         await session.commit()
 
 
-@db_retries.retry_async
-async def get_status_before_emergency_async(
-        job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
-    """Return the task status saved when entering emergency recovery.
-
-    Non-NULL identifies a RECOVERING task as emergency-origin (vs an ordinary
-    preemption/failure recovery).
-    """
-    engine = await _db_manager.get_async_engine()
-    async with sql_async.AsyncSession(engine) as session:
-        result = await session.execute(
-            sqlalchemy.select(spot_table.c.status_before_emergency).where(
-                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                spot_table.c.task_id == task_id)))
-        row = result.fetchone()
-        if row is None or row[0] is None:
-            return None
-        return ManagedJobStatus(row[0])
-
-
 def set_winding_down(job_id: int, task_id: int) -> None:
     """Transition task from RUNNING to WINDING_DOWN (sync).
 
@@ -3202,12 +3159,14 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                         ManagedJobStatus.WINDING_DOWN.value,
                     ]),
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
-                    spot_table.c.end_at: end_time,
-                    # Clear any emergency marker on reaching a terminal state.
-                    spot_table.c.status_before_emergency: None,
-                }))
+                )).
+            values({
+                spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
+                spot_table.c.end_at: end_time,
+                # Close any open recovery episode on reaching a terminal
+                # state.
+                spot_table.c.recovery_source: None,
+            }))
         return result.rowcount
 
     await _retry_task_status_update(job_id, task_id, ManagedJobStatus.SUCCEEDED,
@@ -3235,8 +3194,8 @@ async def set_failed_async(
         fields_to_set: Dict[str, Any] = {
             spot_table.c.status: failure_type.value,
             spot_table.c.failure_reason: failure_reason,
-            # Clear any emergency marker on reaching a terminal state.
-            spot_table.c.status_before_emergency: None,
+            # Close any open recovery episode on reaching a terminal state.
+            spot_table.c.recovery_source: None,
         }
         # Get previous status
         result = await session.execute(
@@ -3363,12 +3322,14 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.status == ManagedJobStatus.CANCELLING.value,
-                )).values({
-                    spot_table.c.status: ManagedJobStatus.CANCELLED.value,
-                    spot_table.c.end_at: time.time(),
-                    # Clear any emergency marker on reaching a terminal state.
-                    spot_table.c.status_before_emergency: None,
-                }))
+                )).
+            values({
+                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                spot_table.c.end_at: time.time(),
+                # Close any open recovery episode on reaching a terminal
+                # state.
+                spot_table.c.recovery_source: None,
+            }))
         count = result.rowcount
         await session.commit()
         return count > 0

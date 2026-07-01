@@ -603,51 +603,10 @@ class JobController:
         # If resuming from a controller failure, check the previous state
         # and determine if we need to force recovery.
         force_transit_to_recovering = False
-        # If we end up forcing recovery on resume, why: a controller-restart
-        # resume is HA; an emergency-origin RECOVERING is EMERGENCY. (Only
-        # consumed when force_transit_to_recovering is True.)
-        resume_recovery_source = managed_job_state.RecoverySource.HA
-        # When a controller restarts while a task is still STARTING (it never
-        # reached RUNNING), keep the status STARTING through the forced
-        # relaunch rather than flipping STARTING -> RECOVERING — it is still
-        # starting, not recovering. The cluster is still cleaned up first.
-        resume_keep_starting = False
         if is_resume:
             prev_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
                     job_id=self._job_id, task_id=task_id))
-
-            # A RECOVERING task with a saved pre-emergency status is
-            # emergency-origin (the controller hit an unexpected error while
-            # managing it). Resume based on the status the task had when the
-            # emergency began: a task that was RUNNING re-attaches to its
-            # (likely still healthy) cluster without restarting the workload;
-            # anything else falls through to forced recovery below, which
-            # cleans up the cluster before relaunching. Checked before the
-            # terminal/CANCELLING handling below, which still uses the real
-            # current status (the marker can linger on a CANCELLING row until
-            # set_cancelled clears it, so we gate on status == RECOVERING).
-            emergency_origin = False
-            if prev_status == managed_job_state.ManagedJobStatus.RECOVERING:
-                saved_status = await (
-                    managed_job_state.get_status_before_emergency_async(
-                        job_id=self._job_id, task_id=task_id))
-                if saved_status is not None:
-                    emergency_origin = True
-                    resume_recovery_source = (
-                        managed_job_state.RecoverySource.EMERGENCY)
-                    logger.info(f'Task {task_id} is in emergency recovery; '
-                                f'status before the emergency: {saved_status}')
-                    if (saved_status ==
-                            managed_job_state.ManagedJobStatus.RUNNING):
-                        await managed_job_state.set_emergency_recovered_async(
-                            self._job_id,
-                            task_id,
-                            restored_time=time.time(),
-                            callback_func=managed_job_utils.event_callback_func(
-                                job_id=self._job_id, task_id=task_id,
-                                task=task))
-                    prev_status = saved_status
 
             if prev_status is not None:
                 if prev_status.is_terminal():
@@ -663,12 +622,14 @@ class JobController:
                                 're-raising cancellation')
                     raise asyncio.CancelledError()
             if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+                # Force recovery (cleanup + relaunch). This covers both an
+                # interrupted in-flight recovery and an emergency retry: an
+                # emergency always relaunches the cluster, even if the task
+                # was RUNNING when the error hit — the error may be caused
+                # by the cluster's own state, so re-attaching could just
+                # keep hitting it. Relaunching is always safe (managed jobs
+                # are idempotent); it only costs time.
                 force_transit_to_recovering = True
-                # A non-emergency resume of a still-STARTING task keeps the
-                # STARTING status (no STARTING -> RECOVERING blip).
-                if (not emergency_origin and prev_status
-                        == managed_job_state.ManagedJobStatus.STARTING):
-                    resume_keep_starting = True
 
             await self._strategy_executor.on_resume(cluster_name)
 
@@ -685,8 +646,6 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
-            resume_recovery_source=resume_recovery_source,
-            resume_keep_starting=resume_keep_starting,
         )
         if result is not None:
             return result
@@ -699,8 +658,6 @@ class JobController:
             callback_func=callback_func,
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
-            resume_recovery_source=resume_recovery_source,
-            resume_keep_starting=resume_keep_starting,
         )
 
     async def _run_batch_coordinator_task(
@@ -800,9 +757,6 @@ class JobController:
         callback_func: Optional[typing.Callable] = None,
         cleanup_cluster_on_success: bool = True,
         force_transit_to_recovering: bool = False,
-        resume_recovery_source: managed_job_state.RecoverySource = (
-            managed_job_state.RecoverySource.HA),
-        resume_keep_starting: bool = False,
         on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
     ) -> bool:
         """Monitor a single task until completion with recovery support.
@@ -1192,35 +1146,48 @@ class JobController:
             # failed or the job status is failed to be fetched.
             logger.info(f'Starting recovery for task {task_id}, '
                         f'it is currently {job_status}')
-            # The forced recovery on the first post-resume iteration is
-            # controller-restart-driven (HA) or emergency-origin; any later
-            # recovery in this loop is a real preemption/failure (FAILURE).
-            recovery_source = (resume_recovery_source
-                               if force_transit_to_recovering else
-                               managed_job_state.RecoverySource.FAILURE)
-            # Two forced-resume cases skip the RECOVERING flip:
-            # - emergency-origin: the controller's exception handler already
-            #   transitioned the task to RECOVERING (with the specific
-            #   emergency reason) before backing off; re-announcing it would
-            #   only emit a duplicate, less-informative event.
-            # - keep-starting: a still-STARTING task stays STARTING through
-            #   the relaunch (it never reached RUNNING — it is starting, not
-            #   recovering); no RECOVERING event at all.
-            # In both, the cleanup + recover() below still run.
-            keep_starting = (force_transit_to_recovering and
-                             resume_keep_starting)
-            emergency_already_recovering = (
-                force_transit_to_recovering and
-                recovery_source == managed_job_state.RecoverySource.EMERGENCY)
-            if not (emergency_already_recovering or keep_starting):
+            # How to announce this recovery. The forced first post-resume
+            # iteration derives it from the task's current status:
+            # - RECOVERING: a recovery episode is already open (an
+            #   interrupted preemption recovery, or an emergency retry whose
+            #   exception handler already announced it with the specific
+            #   reason) — re-announcing would only emit a duplicate, less
+            #   informative event, and would relabel the episode.
+            # - STARTING: the task never reached RUNNING; keep it STARTING
+            #   through the relaunch (it is starting, not recovering) — no
+            #   RECOVERING event at all.
+            # - anything else: this recovery exists only because the
+            #   controller restarted — open an HA-sourced episode.
+            # Any later (non-forced) recovery in this loop is a real
+            # preemption/failure. In all cases the cleanup + recover() run.
+            keep_starting = False
+            if force_transit_to_recovering:
+                cur_status = await (
+                    managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id))
+                keep_starting = (
+                    cur_status == managed_job_state.ManagedJobStatus.STARTING)
+                already_recovering = (
+                    cur_status == managed_job_state.ManagedJobStatus.RECOVERING)
+                if not (keep_starting or already_recovering):
+                    await managed_job_state.set_recovering_async(
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        force_transit_to_recovering=True,
+                        callback_func=callback_func,
+                        external_failures=external_failures,
+                        cluster_event_reason=cluster_event_reason,
+                        recovery_source=managed_job_state.RecoverySource.HA,
+                    )
+            else:
                 await managed_job_state.set_recovering_async(
                     job_id=self._job_id,
                     task_id=task_id,
-                    force_transit_to_recovering=force_transit_to_recovering,
+                    force_transit_to_recovering=False,
                     callback_func=callback_func,
                     external_failures=external_failures,
                     cluster_event_reason=cluster_event_reason,
-                    recovery_source=recovery_source,
+                    recovery_source=managed_job_state.RecoverySource.FAILURE,
                 )
 
             recovered_time = await executor.recover()
@@ -1237,7 +1204,9 @@ class JobController:
                 # The task stayed STARTING (kept-starting resume). Reaching
                 # RUNNING is its first start -> set_started. If the relaunch
                 # itself had to retry, set_restarting_async will have moved it
-                # to RECOVERING, in which case complete via set_recovered.
+                # to RECOVERING; complete via set_recovered but don't count it
+                # toward recovery_count — a launch retry is not a recovery
+                # (fresh launches that retry don't count either).
                 cur_status = await (
                     managed_job_state.get_job_status_with_task_id_async(
                         job_id=self._job_id, task_id=task_id))
@@ -1247,7 +1216,8 @@ class JobController:
                         self._job_id,
                         task_id,
                         recovered_time=recovered_time,
-                        callback_func=callback_func)
+                        callback_func=callback_func,
+                        count_recovery=False)
                 else:
                     await managed_job_state.set_started_async(
                         self._job_id,
@@ -1269,9 +1239,6 @@ class JobController:
 
             # Reset force flag after first recovery
             force_transit_to_recovering = False
-            # keep-starting and the emergency/HA source only apply to the
-            # first (forced) iteration; later recoveries are real failures.
-            resume_keep_starting = False
 
     async def _prepare_job_group_task_for_launch(
         self, task: 'sky.Task', task_id: int, job_group_name: str,
@@ -1359,9 +1326,6 @@ class JobController:
         job_group_name: str,
         all_tasks_handles: List[Tuple['sky.Task', typing.Any]],
         force_transit_to_recovering: bool = False,
-        resume_recovery_source: managed_job_state.RecoverySource = (
-            managed_job_state.RecoverySource.HA),
-        resume_keep_starting: bool = False,
     ) -> bool:
         """Monitor a single task in a JobGroup until completion.
 
@@ -1414,8 +1378,6 @@ class JobController:
             job_id_on_pool_cluster=None,
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
-            resume_recovery_source=resume_recovery_source,
-            resume_keep_starting=resume_keep_starting,
             on_recovery=on_recovery,
         )
         if result is not None:
@@ -1428,8 +1390,6 @@ class JobController:
             job_id_on_pool_cluster=None,
             cleanup_cluster_on_success=False,  # JobGroup cleans up all at end
             force_transit_to_recovering=force_transit_to_recovering,
-            resume_recovery_source=resume_recovery_source,
-            resume_keep_starting=resume_keep_starting,
             on_recovery=on_recovery,
         )
 
@@ -1477,50 +1437,10 @@ class JobController:
         task_resume_info: Dict[int, Tuple[
             Optional[managed_job_state.ManagedJobStatus], bool]] = {}
 
-        # Per-task recovery source for any task that ends up force-recovering
-        # on resume (HA by default; EMERGENCY for emergency-origin tasks).
-        task_recovery_source: Dict[int, managed_job_state.RecoverySource] = {}
-        # Per-task: a non-emergency resume of a still-STARTING task keeps the
-        # STARTING status through the relaunch (no STARTING -> RECOVERING blip).
-        task_keep_starting: Dict[int, bool] = {}
-
         for task_id, task in enumerate(tasks):
             task_status = await (
                 managed_job_state.get_job_status_with_task_id_async(
                     job_id=self._job_id, task_id=task_id))
-            task_recovery_source[task_id] = (
-                managed_job_state.RecoverySource.HA)
-            task_keep_starting[task_id] = False
-            emergency_origin = False
-
-            if task_status == managed_job_state.ManagedJobStatus.RECOVERING:
-                # A RECOVERING task with a saved pre-emergency status is
-                # emergency-origin; see the same logic in _run_one_task.
-                # RUNNING tasks are restored and re-attached; anything else is
-                # classified below from the saved status (forced recovery).
-                saved_status = await (
-                    managed_job_state.get_status_before_emergency_async(
-                        job_id=self._job_id, task_id=task_id))
-                if saved_status is not None:
-                    emergency_origin = True
-                    task_recovery_source[task_id] = (
-                        managed_job_state.RecoverySource.EMERGENCY)
-                    logger.info(f'Task {task_id} is in emergency recovery; '
-                                f'status before the emergency: {saved_status}')
-                    if (saved_status ==
-                            managed_job_state.ManagedJobStatus.RUNNING):
-                        await managed_job_state.set_emergency_recovered_async(
-                            self._job_id,
-                            task_id,
-                            restored_time=time.time(),
-                            callback_func=managed_job_utils.event_callback_func(
-                                job_id=self._job_id, task_id=task_id,
-                                task=task))
-                    task_status = saved_status
-
-            if (not emergency_origin and
-                    task_status == managed_job_state.ManagedJobStatus.STARTING):
-                task_keep_starting[task_id] = True
 
             if task_status is None or task_status == (
                     managed_job_state.ManagedJobStatus.PENDING):
@@ -1745,9 +1665,7 @@ class JobController:
             assert executor is not None
             coro = self._monitor_job_group_task(task_id, task, cluster_name,
                                                 executor, job_group_name,
-                                                tasks_handles, force_recovery,
-                                                task_recovery_source[task_id],
-                                                task_keep_starting[task_id])
+                                                tasks_handles, force_recovery)
             monitor_async_tasks[task_id] = asyncio.create_task(
                 coro, name=f'monitor_{task.name}')
 

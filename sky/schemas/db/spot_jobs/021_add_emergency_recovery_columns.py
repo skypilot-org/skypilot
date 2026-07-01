@@ -6,10 +6,10 @@ These columns support automatic recovery from unexpected controller errors
   episode (bounded retry budget).
 - job_info.last_emergency_recovery_at: timestamp of the most recent attempt,
   used for backoff and budget decay.
-- spot.status_before_emergency: the task status immediately before an
-  emergency recovery; non-NULL marks a RECOVERING task as emergency-origin so
-  the resume logic can re-attach to a healthy cluster instead of tearing it
-  down.
+- spot.recovery_source: for a RECOVERING task, why the current recovery
+  episode began (FAILURE / EMERGENCY / HA); cleared when the task leaves
+  RECOVERING. Decides whether completing the episode increments
+  recovery_count (only FAILURE episodes do; NULL is treated as FAILURE).
 - job_events.recovery_source: for RECOVERING events, why the job is
   recovering (FAILURE / EMERGENCY / HA). NULL on other events and on
   RECOVERING events written before this column existed (treated as FAILURE).
@@ -46,7 +46,7 @@ def upgrade():
                                              sa.Float(),
                                              server_default=None)
         db_utils.add_column_to_table_alembic('spot',
-                                             'status_before_emergency',
+                                             'recovery_source',
                                              sa.Text(),
                                              server_default=None)
         db_utils.add_column_to_table_alembic('job_events',
