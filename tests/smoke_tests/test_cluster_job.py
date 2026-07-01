@@ -3456,11 +3456,14 @@ def test_kubernetes_pod_config_sidecar():
         test = smoke_tests_utils.Test(
             'kubernetes_pod_config_sidecar',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
-                # Launch SkyPilot cluster with sidecar
+                # Launch SkyPilot cluster with sidecar first; it may land on
+                # any context on a multi-context API server.
                 f'sky launch -y -c {name} --infra kubernetes '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify pod has 2 containers (ray-node and sidecar)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
