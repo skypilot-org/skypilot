@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sky import exceptions
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
+from sky.jobs import scheduler
 from sky.jobs import state
 
 _PID = 1234
@@ -379,6 +380,54 @@ class TestEmergencyRecoveryState:
         await state.normalize_schedule_state_for_emergency_retry_async(1)
 
         assert _get_job_info_row(engine)['schedule_state'] == expected
+
+    @pytest.mark.asyncio
+    async def test_launch_slot_released_when_launch_raises(
+            self, _mock_managed_jobs_db_conn):
+        # An unexpected error escaping the launch (the emergency-recovery
+        # trigger) must release the in-memory launching slot (the
+        # LAUNCHES_PER_WORKER gate) on the way out, so the job never holds a
+        # slot during the emergency backoff. The stuck DB LAUNCHING state it
+        # leaves behind is released by the emergency bookkeeping.
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='STARTING', schedule_state='LAUNCHING')
+
+        starting: set = set()
+        lock = asyncio.Lock()
+        signal = asyncio.Condition(lock=lock)
+        with pytest.raises(RuntimeError):
+            async with scheduler.scheduled_launch(1, starting, lock, signal):
+                assert 1 in starting
+                raise RuntimeError('boom')
+        assert not starting
+        # The launch never completed, so the job is still LAUNCHING in the
+        # DB...
+        assert _get_job_info_row(engine)['schedule_state'] == 'LAUNCHING'
+        # ...until the emergency bookkeeping normalizes it back to an alive,
+        # non-launching state for the duration of the backoff.
+        await state.normalize_schedule_state_for_emergency_retry_async(1)
+        assert _get_job_info_row(engine)['schedule_state'] == 'ALIVE'
+
+    def test_backoff_schedule_states_block_controller_autostop(
+            self, _mock_managed_jobs_db_conn):
+        # The controller-VM autostop keep-alive
+        # (sky/skylet/events.py::AutostopEvent) does not consider the
+        # controller idle while get_num_alive_jobs() > 0. Every schedule
+        # state a job can hold during an emergency backoff must count, so a
+        # backoff longer than the 10-minute idle window cannot let the
+        # controller autostop out from under the pending retry.
+        engine = _mock_managed_jobs_db_conn
+        backoff_states = ('ALIVE', 'ALIVE_BACKOFF', 'ALIVE_WAITING',
+                          'LAUNCHING')
+        for i, schedule_state in enumerate(backoff_states, start=1):
+            _seed_job(engine, job_id=i, schedule_state=schedule_state)
+        assert state.get_num_alive_jobs() == len(backoff_states)
+
+        # Sanity-check the complement: WAITING/DONE jobs do not keep the
+        # controller alive.
+        _seed_job(engine, job_id=10, schedule_state='WAITING')
+        _seed_job(engine, job_id=11, schedule_state='DONE')
+        assert state.get_num_alive_jobs() == len(backoff_states)
 
 
 class _RetryLoopHarness:

@@ -81,18 +81,27 @@ MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
 #
 # Max attempts in one episode before giving up and marking the job
 # FAILED_CONTROLLER (with full resource cleanup).
-EMERGENCY_RECOVERY_MAX_ATTEMPTS = 5
+EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
 # Backoff before attempt N is
-# min(BASE * 2^(N-1), CAP) = 1m, 2m, 4m, 8m, 8m.
-# The cap is intentionally below the jobs-controller's 10-minute idle
-# autostop window so that a retry cycle always re-enters an alive schedule
-# state before the autostop idle timer can elapse.
+# min(BASE * 2^(N-1), CAP) = 1m, 2m, 4m, 8m, 16m, then 30m (capped) —
+# ~3h of total backoff across a full episode. The backoff may exceed the
+# jobs-controller's 10-minute idle autostop window: that is safe because
+# the job's schedule_state stays in an "alive" state (ALIVE /
+# ALIVE_BACKOFF / ALIVE_WAITING) throughout the backoff, and the skylet
+# autostop check (sky/skylet/events.py::AutostopEvent, via
+# managed_job_state.get_num_alive_jobs) does not consider the controller
+# idle while any such job exists. Nor does a backing-off job hold one of
+# the LAUNCHES_PER_WORKER launching slots: the slot is the in-memory
+# `starting` set, which scheduled_launch's finally releases when the error
+# escapes the launch. (The job's own cluster may be reaped by the
+# 10-minute autodown backstop during a long backoff; that is fine — the
+# retry always relaunches from scratch.)
 EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS = 60
-EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 480
+EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # If the previous emergency recovery attempt is older than this window, the
 # attempt counter restarts at 1: a long-running job that hits a rare
 # incident every few days should recover every time, while a tight crash
-# loop exhausts the budget in ~25 minutes.
+# loop exhausts the budget in a few hours.
 EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
 
 # Prefix used for service-account tokens issued to managed jobs that opt in
