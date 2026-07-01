@@ -1,4 +1,5 @@
 """Tests for sky.utils.debug_utils module."""
+import contextlib
 import datetime
 import json
 import os
@@ -13,10 +14,12 @@ import pytest
 
 from sky import clouds
 from sky import exceptions
+from sky.jobs import utils as managed_job_utils
 from sky.server import constants as server_constants
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
+from sky.utils import common
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 from sky.utils import status_lib
@@ -526,6 +529,289 @@ class TestGetClustersFromManagedJobs:
 
 
 # ---------------------------------------------------------------------------
+# Tests for _managed_job_cluster_names_from_records
+# ---------------------------------------------------------------------------
+class TestManagedJobClusterNamesFromRecords:
+    """Resolution of a managed job's underlying cluster name(s)."""
+
+    def test_pool_job_uses_current_cluster_name(self):
+        """A pool job's cluster is the assigned pool worker."""
+        records = [{
+            'job_id': 1,
+            'task_name': 'train',
+            'current_cluster_name': 'my-pool-worker-1',
+            'pool': 'my-pool',
+        }]
+        result = debug_utils._managed_job_cluster_names_from_records(records)
+        assert result == {1: {'my-pool-worker-1'}}
+
+    def test_non_pool_job_uses_generated_name(self):
+        """A non-pool job's cluster name is generated deterministically."""
+        records = [{
+            'job_id': 2,
+            'task_name': 'train',
+            'current_cluster_name': None,
+            'pool': None,
+        }]
+        result = debug_utils._managed_job_cluster_names_from_records(records)
+        expected = managed_job_utils.generate_managed_job_cluster_name(
+            'train', 2)
+        assert result == {2: {expected}}
+        assert expected.endswith('-2')
+
+    def test_multi_task_job_has_one_cluster_per_task(self):
+        """A pipeline launches one cluster per task."""
+        records = [
+            {
+                'job_id': 3,
+                'task_name': 'pipe-0',
+                'current_cluster_name': None,
+                'pool': None,
+            },
+            {
+                'job_id': 3,
+                'task_name': 'pipe-1',
+                'current_cluster_name': None,
+                'pool': None,
+            },
+        ]
+        result = debug_utils._managed_job_cluster_names_from_records(records)
+        assert len(result[3]) == 2
+
+    def test_unassigned_pool_job_has_no_cluster(self):
+        """A pool job not yet assigned to a worker has no cluster."""
+        records = [{
+            'job_id': 4,
+            'task_name': 'train',
+            'current_cluster_name': None,
+            'pool': 'my-pool',
+        }]
+        result = debug_utils._managed_job_cluster_names_from_records(records)
+        assert 4 not in result
+
+
+# ---------------------------------------------------------------------------
+# Tests for _get_managed_jobs_from_clusters
+# ---------------------------------------------------------------------------
+class TestGetManagedJobsFromClusters:
+    """Cluster -> job cross-linking (runs first; sees only user seeds)."""
+
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_requested_cluster_matches_job_cluster(self, mock_queue):
+        """A requested per-job cluster name pulls in its job."""
+        mock_queue.return_value = ([{
+            'job_id': 7,
+            'task_name': 'train',
+            'current_cluster_name': None,
+            'pool': None,
+        }], 0, {}, 0)
+        name = managed_job_utils.generate_managed_job_cluster_name('train', 7)
+        ctx = _make_context(cluster_names={name})
+
+        debug_utils._get_managed_jobs_from_clusters(ctx)
+
+        assert ctx['managed_job_ids'] == {7}
+
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_requested_pool_worker_matches_its_jobs(self, mock_queue):
+        """A requested pool worker pulls in the jobs that ran on it, but
+        not jobs on other workers."""
+        mock_queue.return_value = ([
+            {
+                'job_id': 1,
+                'task_name': 'a',
+                'current_cluster_name': 'worker-1',
+                'pool': 'p',
+            },
+            {
+                'job_id': 2,
+                'task_name': 'b',
+                'current_cluster_name': 'worker-1',
+                'pool': 'p',
+            },
+            {
+                'job_id': 3,
+                'task_name': 'c',
+                'current_cluster_name': 'worker-2',
+                'pool': 'p',
+            },
+        ], 0, {}, 0)
+        ctx = _make_context(cluster_names={'worker-1'})
+
+        debug_utils._get_managed_jobs_from_clusters(ctx)
+
+        assert ctx['managed_job_ids'] == {1, 2}
+
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_empty_cluster_names_is_noop(self, mock_queue):
+        """Without cluster names in the context, no job lookup happens.
+
+        Note this helper runs FIRST in _build_debug_dump, so the context
+        only ever contains user-requested cluster names here — cluster
+        names added later (recent-activity scan, job -> cluster,
+        request -> cluster) are never expanded into jobs. That ordering
+        is pinned by TestCrossLinkOrdering.
+        """
+        ctx = _make_context()
+
+        debug_utils._get_managed_jobs_from_clusters(ctx)
+
+        assert ctx['managed_job_ids'] == set()
+        mock_queue.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_queue_failure_records_error(self, mock_queue):
+        mock_queue.side_effect = RuntimeError('controller down')
+        errors: List[Dict[str, str]] = []
+        ctx = _make_context(cluster_names={'c1'}, errors=errors)
+
+        debug_utils._get_managed_jobs_from_clusters(ctx)
+
+        assert ctx['managed_job_ids'] == set()
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'managed_jobs_from_clusters'
+
+
+# ---------------------------------------------------------------------------
+# Tests for _get_job_clusters_from_managed_jobs
+# ---------------------------------------------------------------------------
+class TestGetJobClustersFromManagedJobs:
+    """Job -> cluster cross-linking (per-task names, consolidation only)."""
+
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_adds_per_task_clusters(self, mock_queue, mock_consolidation):
+        """Each task's cluster name should be added in consolidation
+        mode."""
+        mock_consolidation.return_value = True
+        mock_queue.return_value = ([
+            {
+                'job_id': 5,
+                'task_name': 'pipe-0',
+                'current_cluster_name': None,
+                'pool': None,
+            },
+            {
+                'job_id': 5,
+                'task_name': 'pipe-1',
+                'current_cluster_name': None,
+                'pool': None,
+            },
+        ], 0, {}, 0)
+        ctx = _make_context(managed_job_ids={5})
+
+        debug_utils._get_job_clusters_from_managed_jobs(ctx)
+
+        expected = {
+            managed_job_utils.generate_managed_job_cluster_name('pipe-0', 5),
+            managed_job_utils.generate_managed_job_cluster_name('pipe-1', 5),
+        }
+        assert ctx['cluster_names'] == expected
+        mock_queue.assert_called_once_with(refresh=False,
+                                           job_ids=[5],
+                                           all_users=True)
+
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_pool_job_adds_assigned_worker(self, mock_queue,
+                                           mock_consolidation):
+        mock_consolidation.return_value = True
+        mock_queue.return_value = ([{
+            'job_id': 6,
+            'task_name': 'train',
+            'current_cluster_name': 'worker-9',
+            'pool': 'p',
+        }], 0, {}, 0)
+        ctx = _make_context(managed_job_ids={6})
+
+        debug_utils._get_job_clusters_from_managed_jobs(ctx)
+
+        assert ctx['cluster_names'] == {'worker-9'}
+
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_noop_in_non_consolidation_mode(self, mock_queue,
+                                            mock_consolidation):
+        """In non-consolidation mode job clusters live on the remote
+        controller; the controller-side manifest collects them instead."""
+        mock_consolidation.return_value = False
+        ctx = _make_context(managed_job_ids={5})
+
+        debug_utils._get_job_clusters_from_managed_jobs(ctx)
+
+        assert ctx['cluster_names'] == set()
+        mock_queue.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.is_consolidation_mode')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_queue_failure_records_error(self, mock_queue, mock_consolidation):
+        mock_consolidation.return_value = True
+        mock_queue.side_effect = RuntimeError('db down')
+        errors: List[Dict[str, str]] = []
+        ctx = _make_context(managed_job_ids={5}, errors=errors)
+
+        debug_utils._get_job_clusters_from_managed_jobs(ctx)
+
+        assert ctx['cluster_names'] == set()
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'job_clusters_from_managed_jobs'
+
+
+# ---------------------------------------------------------------------------
+# Tests for the cross-link ordering in _build_debug_dump
+# ---------------------------------------------------------------------------
+class TestCrossLinkOrdering:
+    """The cross-link order in _build_debug_dump is load-bearing.
+
+    In particular, the jobs controller cluster (added by
+    _get_clusters_from_managed_jobs) must only enter the context after
+    _get_requests_from_clusters and _get_managed_jobs_from_requests have
+    run: every sky.jobs.* request carries the controller cluster name, so
+    expanding the controller cluster into requests (or those requests into
+    jobs) would pull every managed-jobs request / job into the dump.
+    """
+
+    _HELPERS = [
+        # cluster -> job runs before _populate_recent_context (and every
+        # other cluster-name producer), so only user-requested clusters
+        # expand into jobs — the guard against a pool worker fanning out
+        # into all of its jobs is this ordering, not a parameter.
+        '_get_managed_jobs_from_clusters',
+        '_populate_recent_context',
+        '_get_managed_jobs_from_requests',
+        '_get_job_clusters_from_managed_jobs',
+        '_get_requests_from_clusters',
+        '_get_requests_from_managed_jobs',
+        '_get_clusters_from_requests',
+        '_get_clusters_from_managed_jobs',
+    ]
+
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    def test_cross_link_call_order(self, _mock_server, _mock_requests,
+                                   _mock_clusters, _mock_jobs, tmp_path):
+        calls: List[str] = []
+        with contextlib.ExitStack() as stack:
+            for helper in self._HELPERS:
+                stack.enter_context(
+                    mock.patch(f'sky.utils.debug_utils.{helper}',
+                               side_effect=lambda *a, _h=helper, **kw: calls.
+                               append(_h)))
+            ctx = _make_context(managed_job_ids={1})
+            # recent_minutes is set so _populate_recent_context runs and
+            # its position in the sequence is pinned.
+            debug_utils._build_debug_dump(str(tmp_path),
+                                          ctx,
+                                          recent_minutes=60,
+                                          client_info=None,
+                                          requested={})
+
+        assert calls == self._HELPERS
+
+
+# ---------------------------------------------------------------------------
 # Tests for _get_managed_jobs_from_requests
 # ---------------------------------------------------------------------------
 class TestGetManagedJobsFromRequests:
@@ -701,6 +987,42 @@ class TestPopulateRecentContext:
 
         assert 'active-cluster' in ctx['cluster_names']
         assert 'old-cluster' not in ctx['cluster_names']
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skips_controller_clusters(self, mock_get_tasks, mock_get_clusters,
+                                       mock_queue_v2):
+        """Controller clusters must not enter the context via the recent
+        scan: every sky.jobs.*/sky.serve.* request carries its
+        controller's cluster name, so a recently-active controller would
+        make _get_requests_from_clusters pull every such request into the
+        dump."""
+        now = time.time()
+        mock_get_tasks.return_value = []
+        mock_get_clusters.return_value = [
+            {
+                'name': common.JOB_CONTROLLER_NAME,
+                'status_updated_at': now - 60,
+                'launched_at': now - 60,
+            },
+            {
+                'name': common.SKY_SERVE_CONTROLLER_NAME,
+                'status_updated_at': now - 60,
+                'launched_at': now - 60,
+            },
+            {
+                'name': 'active-cluster',
+                'status_updated_at': now - 60,
+                'launched_at': now - 60,
+            },
+        ]
+        mock_queue_v2.return_value = ([], 0, {}, 0)
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
+
+        assert ctx['cluster_names'] == {'active-cluster'}
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
@@ -1010,6 +1332,15 @@ class TestCreateDebugDump:
         with mock.patch(
                 'sky.utils.debug_utils.requests_lib.get_requests_with_prefix',
                 side_effect=_fake_prefix_lookup):
+            yield
+
+    @pytest.fixture(autouse=True)
+    def _mock_job_cluster_crosslinks(self):
+        """Mock the job<->cluster cross-link helpers (they call queue_v2)."""
+        with mock.patch(
+                'sky.utils.debug_utils._get_managed_jobs_from_clusters'), \
+             mock.patch(
+                'sky.utils.debug_utils._get_job_clusters_from_managed_jobs'):
             yield
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')

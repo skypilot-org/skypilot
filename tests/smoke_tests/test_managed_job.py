@@ -120,6 +120,107 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+# Defining workspaces requires loading a server config, which means restarting
+# the API server -- not possible against a remote server or in the dependency
+# test (see test_workspaces.py for the same constraints).
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_managed_jobs_queue_workspace_column(generic_cloud: str):
+    """Regression test for the `sky jobs queue` WORKSPACE column.
+
+    `sky jobs queue` renders a WORKSPACE column whenever the listed jobs span
+    more than one workspace (see `format_job_table` in sky/jobs/utils.py). That
+    extra column shifts the position of the NAME column, which used to break the
+    status-wait helper's awk parsing (it matched the name in a fixed column).
+
+    Launch two managed jobs in two different workspaces to force the WORKSPACE
+    column to appear, assert it is actually present, and confirm the helper can
+    still find each job's status despite the shifted NAME column.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    ws1 = f'{name}-wsa'
+    ws2 = f'{name}-wsb'
+    # A server config that defines the two workspaces the jobs run in. The
+    # client-side `workspaces:` key is ignored, so this must be loaded on the
+    # API server -- hence the restart below (and the no_remote_server marker).
+    server_config_content = textwrap.dedent(f"""\
+        workspaces:
+            {ws1}: {{}}
+            {ws2}: {{}}
+    """)
+    with tempfile.NamedTemporaryFile(prefix='jobs_ws_column_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    # Broad status set: the job may already be RUNNING/SUCCEEDED by the time we
+    # poll. We only care that the helper *finds* the status, not which one.
+    job_statuses = [
+        sky.ManagedJobStatus.PENDING,
+        sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
+        sky.ManagedJobStatus.STARTING,
+        sky.ManagedJobStatus.RUNNING,
+        sky.ManagedJobStatus.SUCCEEDED,
+    ]
+    wait_timeout = 360 if generic_cloud in [
+        'azure', 'gcp', 'kubernetes', 'nebius'
+    ] else 120
+
+    def _launch(job_name: str, workspace: str) -> str:
+        return (f'sky jobs launch -n {job_name} --workspace {workspace} '
+                f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'examples/managed_job.yaml -y -d')
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-queue-workspace-column',
+        [
+            # Load the two-workspace config onto the API server.
+            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && '
+            f'{smoke_tests_utils.SKY_API_RESTART}',
+            _launch(f'{name}-1', ws1),
+            _launch(f'{name}-2', ws2),
+            # With jobs in two workspaces, `sky jobs queue` must render the
+            # WORKSPACE column -- otherwise this test would not exercise the
+            # column-shift scenario, so fail loudly if it is missing.
+            's=$(sky jobs queue); echo "$s"; echo "$s" | grep -q WORKSPACE',
+            # The actual regression guard: the helper must find each job's
+            # status even though the WORKSPACE column shifted the NAME column.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-1',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+        ],
+        # Cancel each job in its own workspace (cancel is workspace-scoped),
+        # then restore the server to its default (no-workspace) config.
+        teardown=
+        (f'sky jobs cancel -y -n {name}-1 --config active_workspace={ws1} || true; '
+         f'sky jobs cancel -y -n {name}-2 --config active_workspace={ws2} || true; '
+         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+         f'{smoke_tests_utils.SKY_API_RESTART}'),
+        # Use the dict form (config_dict) rather than LOW_CONTROLLER_RESOURCE_ENV
+        # (which points SKYPILOT_GLOBAL_CONFIG at a file): the env form would
+        # collide with the SKYPILOT_GLOBAL_CONFIG export used above to load the
+        # workspaces onto the server. config_dict is merged into the client
+        # config, so the controller still launches with low resources.
+        config_dict=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        timeout=20 * 60,
+    )
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        os.unlink(server_config_path)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
     """`sky jobs launch --num-jobs N` works without a pool.
 
@@ -397,11 +498,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a non-numeric value is rejected by Click's
-            # built-in int parser. Negative ints (and 0) are valid
-            # synonyms for "all lines".
+            # --tail with a non-numeric value is rejected by the integer
+            # parser. Negative ints (and 0) are valid synonyms for "all
+            # lines".
             f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
-            f'grep "is not a valid integer"',
+            f'grep -iE "invalid.*(int|num|tail)|not a valid"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
