@@ -604,6 +604,23 @@ function JobDetails() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {/* Slot for plugins to add extra log filters beside the
+                        node picker. jobId/taskId mirror the jobs.detail.logs
+                        context exactly (the per-task object's id for
+                        multi-task jobs) so a plugin can key shared state on
+                        the same identity as the log pane below. */}
+                    <PluginSlot
+                      name="jobs.detail.logfilters"
+                      context={{
+                        jobId: (isMultiTask
+                          ? allTasks[selectedTaskIndex]
+                          : detailJobData
+                        )?.id,
+                        taskId: isMultiTask ? selectedTaskIndex : null,
+                        isController: false,
+                        refreshTrigger: refreshLogsFlag,
+                      }}
+                    />
                     {!logsSlotHasPlugin && (
                       <span className="text-xs text-gray-500">
                         (Logs are not streaming; click refresh to fetch the
