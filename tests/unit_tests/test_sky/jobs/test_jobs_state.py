@@ -15,6 +15,21 @@ from sky.jobs import state
 from sky.skylet import constants
 
 
+def _force_submitted_at(engine, job_id, submitted_at):
+    """Overwrite a job's submitted_at to a deterministic value for tests.
+
+    `submitted_at` is recorded at set_pending (queue-entry) time using
+    time.time(); tests that need exact, comparable timestamps overwrite it
+    directly here.
+    """
+    import sqlalchemy
+    with engine.begin() as conn:
+        conn.execute(
+            sqlalchemy.update(state.spot_table).where(
+                state.spot_table.c.spot_job_id == job_id).values(
+                    submitted_at=submitted_at))
+
+
 @pytest.fixture
 def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
     """Create a temporary SQLite DB for managed jobs state and monkeypatch engines.
@@ -903,10 +918,12 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
                               task_name='task0',
                               resources_str='{}',
                               metadata='{}')
+            # submitted_at is recorded at set_pending (queue-entry) time; force
+            # it to the explicit, deterministic submit_time for these tests.
+            _force_submitted_at(_mock_managed_jobs_db_conn, job_id, submit_time)
             state.scheduler_set_waiting([job_id], f'/tmp/dag-{key}.yaml',
                                         f'/tmp/user-{key}.yaml',
                                         f'/tmp/env-{key}', None, 100)
-            # submitted_at is written here from the explicit submit_time.
             await state.set_starting_async(job_id, 0, f'run-{key}', submit_time,
                                            '{}', {}, mock_callback)
             await state.set_started_async(job_id, 0, submit_time, mock_callback)
@@ -922,7 +939,8 @@ def _seed_timed_jobs(_mock_managed_jobs_db_conn):
 
 @pytest.fixture
 def _seed_pending_job(_mock_managed_jobs_db_conn):
-    """Seed one job left in PENDING, so its submitted_at stays NULL."""
+    """Seed one job left in PENDING; submitted_at is recorded at set_pending
+    (queue-entry), so it carries a non-NULL submitted_at of ~now."""
     job_id = state.set_job_info_without_job_id(name='job-pending',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -939,8 +957,13 @@ def _seed_pending_job(_mock_managed_jobs_db_conn):
 
 @pytest.fixture
 def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
-    """Seed a job cancelled while PENDING: terminal, with a NULL submitted_at
-    (it never reached STARTING)."""
+    """Seed a legacy terminal row with a NULL submitted_at.
+
+    Such rows only exist before this change (pre-upgrade): they were created
+    before `submitted_at` was recorded at queue-entry (`set_pending`) and never
+    reached STARTING, so they never got a `submitted_at`. We simulate one by
+    cancelling a PENDING job and then forcing `submitted_at` back to NULL.
+    """
     job_id = state.set_job_info_without_job_id(name='job-cancelled',
                                                workspace='ws1',
                                                entrypoint='ep',
@@ -955,6 +978,8 @@ def _seed_terminal_no_submit(_mock_managed_jobs_db_conn):
     state.scheduler_set_waiting([job_id], '/tmp/dag-c.yaml', '/tmp/user-c.yaml',
                                 '/tmp/env-c', None, 100)
     state.set_pending_cancelled(job_id)
+    # Simulate a legacy pre-upgrade row that never recorded a submitted_at.
+    _force_submitted_at(_mock_managed_jobs_db_conn, job_id, None)
     return job_id
 
 
@@ -1017,12 +1042,15 @@ class TestSubmittedAtRangeFilter:
         counts = state.get_status_count_with_filters(submitted_after=_T200)
         assert counts == {state.ManagedJobStatus.RUNNING.value: 2}
 
-    # A pending job (NULL submitted_at) is treated as submitted "now", so the
-    # window keeps or drops it the same way it would a job submitted right now.
+    # A pending job records its `submitted_at` at queue-entry time (when the
+    # task row is first inserted), which for these tests is ~now. The window
+    # therefore keeps or drops it the same way it would a job submitted right
+    # now -- the outcomes below are identical to the previous NULL-as-now
+    # behavior, only now the row carries a real (non-NULL) submission time.
     def test_pending_kept_by_past_lower_bound(self, _seed_pending_job):
         jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
         assert total == 1
-        assert jobs[0]['submitted_at'] is None
+        assert jobs[0]['submitted_at'] is not None
 
     def test_pending_dropped_by_past_upper_bound(self, _seed_pending_job):
         jobs, total = state.get_managed_jobs_with_filters(
@@ -1034,7 +1062,7 @@ class TestSubmittedAtRangeFilter:
         jobs, total = state.get_managed_jobs_with_filters(
             submitted_before=_FAR_FUTURE)
         assert total == 1
-        assert jobs[0]['submitted_at'] is None
+        assert jobs[0]['submitted_at'] is not None
 
     def test_pending_dropped_by_future_lower_bound(self, _seed_pending_job):
         jobs, total = state.get_managed_jobs_with_filters(
@@ -1042,9 +1070,11 @@ class TestSubmittedAtRangeFilter:
         assert jobs == []
         assert total == 0
 
-    # A terminal job that never got a submitted_at (cancelled/failed before
-    # STARTING) has no submission time, so it is excluded from any window —
-    # it must not be treated as submitted "now" like a still-pending job.
+    # A legacy terminal row (pre-upgrade) that never recorded a submitted_at
+    # has no recoverable submission time, so it is excluded from any window —
+    # it must not be treated as submitted "now" like a still-active job.
+    # (Post-change rows always carry a submitted_at from set_pending, so they
+    # never hit this branch; see TestPendingTerminalRetainsSubmittedAt.)
     def test_terminal_no_submit_present_without_filter(
             self, _seed_terminal_no_submit):
         jobs, total = state.get_managed_jobs_with_filters()
@@ -1250,3 +1280,228 @@ class TestStatusExprSeam:
             fields=['job_id', 'status', 'task_id'])
         seq_d = [refined[j['job_id']] for j in desc]
         assert seq_d == sorted(seq_d, reverse=True), seq_d
+
+
+class TestSubmittedAtRecordedAtPending:
+    """`submitted_at` is recorded once when the task row is first inserted at
+    PENDING (queue-entry time), not at the PENDING -> STARTING transition. This
+    fixes no-op jobs (which never go through STARTING) and prevents the
+    submission time from drifting on backoff/recovery re-entry."""
+
+    async def _mock_callback(self, status: str):
+        pass
+
+    def _run(self, coro_factory):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro_factory())
+        finally:
+            loop.close()
+
+    def _make_pending_job(self, name):
+        job_id = state.set_job_info_without_job_id(name=name,
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        state.set_pending(job_id,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        return job_id
+
+    def test_set_pending_records_submitted_at(self, _mock_managed_jobs_db_conn):
+        # A freshly-queued (still PENDING) job already has a non-NULL
+        # submitted_at, set at insertion time.
+        before = time.time()
+        job_id = self._make_pending_job('queued-job')
+        after = time.time()
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['job_id'] == job_id
+        assert jobs[0]['submitted_at'] is not None
+        assert before <= jobs[0]['submitted_at'] <= after
+
+    def test_noop_job_has_submitted_at(self, _mock_managed_jobs_db_conn):
+        # A no-op job goes PENDING -> RUNNING -> SUCCEEDED without STARTING;
+        # it must still carry the submitted_at recorded at PENDING.
+        job_id = self._make_pending_job('noop-job')
+        submitted_at_at_pending = state.get_managed_jobs_with_filters(
+        )[0][0]['submitted_at']
+
+        async def run():
+            await state.set_started_async(job_id, 0, time.time(),
+                                          self._mock_callback)
+            await state.set_succeeded_async(job_id, 0, time.time(),
+                                            self._mock_callback)
+
+        self._run(lambda: run())
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['status'] == state.ManagedJobStatus.SUCCEEDED
+        assert jobs[0]['submitted_at'] == submitted_at_at_pending
+        assert jobs[0]['submitted_at'] is not None
+
+    def test_starting_does_not_clobber_submitted_at(self,
+                                                    _mock_managed_jobs_db_conn):
+        # The PENDING -> STARTING transition must NOT overwrite the queue-entry
+        # submitted_at (so backoff/recovery re-entry can't push it forward).
+        job_id = self._make_pending_job('starting-job')
+        submitted_at_at_pending = state.get_managed_jobs_with_filters(
+        )[0][0]['submitted_at']
+        # Use a clearly-different submit_time argument; it must be ignored
+        # because submitted_at is already set.
+        later = submitted_at_at_pending + 10_000.0
+
+        async def run():
+            await state.set_starting_async(job_id, 0, 'run-x', later, '{}', {},
+                                           self._mock_callback)
+
+        self._run(lambda: run())
+        jobs, _ = state.get_managed_jobs_with_filters()
+        assert jobs[0]['status'] == state.ManagedJobStatus.STARTING
+        # Unchanged: still the original queue-entry time, not `later`.
+        assert jobs[0]['submitted_at'] == submitted_at_at_pending
+
+    def test_starting_backfills_null_submitted_at(self,
+                                                  _mock_managed_jobs_db_conn):
+        # Defensive: a legacy row with a NULL submitted_at gets backfilled by
+        # the STARTING transition (COALESCE only-write-if-null).
+        job_id = self._make_pending_job('legacy-job')
+        # Simulate a legacy row by forcing submitted_at back to NULL.
+        _force_submitted_at(_mock_managed_jobs_db_conn, job_id, None)
+        backfill = 4242.0
+
+        async def run():
+            await state.set_starting_async(job_id, 0, 'run-x', backfill, '{}',
+                                           {}, self._mock_callback)
+
+        self._run(lambda: run())
+        jobs, _ = state.get_managed_jobs_with_filters()
+        assert jobs[0]['submitted_at'] == backfill
+
+    def test_cancelled_while_pending_retains_submitted_at(
+            self, _mock_managed_jobs_db_conn):
+        # A job cancelled while still PENDING was still submitted (queued), so
+        # it keeps the submitted_at recorded by set_pending. Cancelling it must
+        # not clear or change the submission time.
+        job_id = self._make_pending_job('cancel-pending')
+        submitted_at_at_pending = state.get_managed_jobs_with_filters(
+        )[0][0]['submitted_at']
+        assert submitted_at_at_pending is not None
+        state.set_pending_cancelled(job_id)
+        jobs, total = state.get_managed_jobs_with_filters()
+        assert total == 1
+        assert jobs[0]['status'] == state.ManagedJobStatus.CANCELLED
+        assert jobs[0]['submitted_at'] == submitted_at_at_pending
+
+    def test_terminal_while_pending_included_by_submitted_window(
+            self, _mock_managed_jobs_db_conn):
+        # A job that cancels/fails while still PENDING (never started) keeps a
+        # non-NULL submitted_at, so the submitted-window filter includes it the
+        # same as any other submitted job -- it is no longer excluded.
+        job_id = self._make_pending_job('cancel-pending-window')
+        submitted_at_at_pending = state.get_managed_jobs_with_filters(
+        )[0][0]['submitted_at']
+        assert submitted_at_at_pending is not None
+        state.set_pending_cancelled(job_id)
+        # A submitted_after bound in the past (the row was submitted ~now)
+        # includes the cancelled-while-pending job.
+        jobs, total = state.get_managed_jobs_with_filters(submitted_after=_T100)
+        assert total == 1
+        assert jobs[0]['job_id'] == job_id
+        assert jobs[0]['status'] == state.ManagedJobStatus.CANCELLED
+        assert jobs[0]['submitted_at'] is not None
+
+
+class TestSubmittedAtPipelineScoping:
+    """For a multi-task (pipeline) job, `submitted_at` is stamped at
+    queue-entry (`set_pending`) only for task 0 -- the job/pipeline submission
+    time. Later tasks (task_id > 0) are left NULL at PENDING so they anchor on
+    their own start (via `set_starting_async`, or `set_started_async` for no-op
+    tasks) instead of inheriting the pipeline's queue-entry time, which would
+    inflate their per-task duration."""
+
+    async def _mock_callback(self, status: str):
+        pass
+
+    def _run(self, coro_factory):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro_factory())
+        finally:
+            loop.close()
+
+    def _make_pipeline_pending(self, name, num_tasks=2):
+        job_id = state.set_job_info_without_job_id(name=name,
+                                                   workspace='ws1',
+                                                   entrypoint='ep',
+                                                   pool=None,
+                                                   pool_hash=None,
+                                                   user_hash='user1')
+        for task_id in range(num_tasks):
+            state.set_pending(job_id,
+                              task_id=task_id,
+                              task_name=f'task{task_id}',
+                              resources_str='{}',
+                              metadata='{}')
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 100)
+        return job_id
+
+    def _submitted_at_by_task(self, job_id):
+        jobs, _ = state.get_managed_jobs_with_filters(job_ids=[job_id])
+        return {j['task_id']: j['submitted_at'] for j in jobs}
+
+    def test_task0_stamped_task1_null_at_pending(self,
+                                                 _mock_managed_jobs_db_conn):
+        # Right after set_pending: task 0 carries the queue-entry submitted_at;
+        # task 1 is still NULL (it will anchor on its own start).
+        job_id = self._make_pipeline_pending('pipe-pending')
+        submitted = self._submitted_at_by_task(job_id)
+        assert submitted[0] is not None
+        assert submitted[1] is None
+
+    def test_later_task_anchors_on_own_start(self, _mock_managed_jobs_db_conn):
+        # Task 1 going STARTING backfills its submitted_at with its OWN start
+        # time (set_starting_async's COALESCE), NOT the pipeline queue-entry
+        # time recorded for task 0.
+        job_id = self._make_pipeline_pending('pipe-starting')
+        task0_submitted = self._submitted_at_by_task(job_id)[0]
+        assert task0_submitted is not None
+        t1_start = task0_submitted + 5_000.0
+
+        async def run():
+            await state.set_starting_async(job_id, 1, 'run_1', t1_start, '{}',
+                                           {}, self._mock_callback)
+
+        self._run(lambda: run())
+        submitted = self._submitted_at_by_task(job_id)
+        # Task 1 anchors on its own start, not the pipeline queue-entry time.
+        assert submitted[1] == t1_start
+        assert submitted[1] != task0_submitted
+        # Task 0's queue-entry time is untouched.
+        assert submitted[0] == task0_submitted
+
+    def test_noop_later_task_backfilled_by_started(self,
+                                                   _mock_managed_jobs_db_conn):
+        # A no-op task (task.run is None) at position N>0 skips
+        # set_starting_async and goes PENDING -> RUNNING directly via
+        # set_started_async, which backfills the still-NULL submitted_at with
+        # the task's start time instead of leaving it blank.
+        job_id = self._make_pipeline_pending('pipe-noop')
+        assert self._submitted_at_by_task(job_id)[1] is None
+        t1_start = 7_777.0
+
+        async def run():
+            await state.set_started_async(job_id, 1, t1_start,
+                                          self._mock_callback)
+
+        self._run(lambda: run())
+        submitted = self._submitted_at_by_task(job_id)
+        assert submitted[1] is not None
+        assert submitted[1] == t1_start
