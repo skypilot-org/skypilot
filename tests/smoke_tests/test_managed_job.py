@@ -220,7 +220,7 @@ def test_managed_jobs_queue_workspace_column(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
-@pytest.mark.no_shadeform  # Shadeform does not support host controllers        
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
     """`sky jobs launch --num-jobs N` works without a pool.
 
