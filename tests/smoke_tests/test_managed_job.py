@@ -140,19 +140,20 @@ def test_managed_jobs_queue_workspace_column(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     ws1 = f'{name}-wsa'
     ws2 = f'{name}-wsb'
-    # A server config that defines the two workspaces the jobs run in. The
-    # client-side `workspaces:` key is ignored, so this must be loaded on the
-    # API server -- hence the restart below (and the no_remote_server marker).
-    server_config_content = textwrap.dedent(f"""\
-        workspaces:
-            {ws1}: {{}}
-            {ws2}: {{}}
-    """)
-    with tempfile.NamedTemporaryFile(prefix='jobs_ws_column_',
-                                     delete=False,
-                                     mode='w') as f:
-        f.write(server_config_content)
-        server_config_path = f.name
+    # Define the two workspaces (and the low controller resources) via
+    # config_dict. This matters: config_dict is *overlaid* onto the existing
+    # server config by override_sky_config (which writes the merged result to
+    # SKYPILOT_GLOBAL_CONFIG), whereas pointing SKYPILOT_GLOBAL_CONFIG at a
+    # hand-written workspaces-only file would *replace* the server config on
+    # restart and drop settings the test env relies on (e.g. jobs controller
+    # consolidation). The SKY_API_RESTART below then loads the merged config.
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            ws1: {},
+            ws2: {},
+        },
+    }
 
     # Broad status set: the job may already be RUNNING/SUCCEEDED by the time we
     # poll. We only care that the helper *finds* the status, not which one.
@@ -175,9 +176,10 @@ def test_managed_jobs_queue_workspace_column(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed-jobs-queue-workspace-column',
         [
-            # Load the two-workspace config onto the API server.
-            f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && '
-            f'{smoke_tests_utils.SKY_API_RESTART}',
+            # Restart so the server picks up the merged config (existing server
+            # config + the two workspaces + low controller resources) that
+            # override_sky_config wrote to SKYPILOT_GLOBAL_CONFIG.
+            smoke_tests_utils.SKY_API_RESTART,
             _launch(f'{name}-1', ws1),
             _launch(f'{name}-2', ws2),
             # With jobs in two workspaces, `sky jobs queue` must render the
@@ -198,24 +200,16 @@ def test_managed_jobs_queue_workspace_column(generic_cloud: str):
                 timeout=wait_timeout),
         ],
         # Cancel each job in its own workspace (cancel is workspace-scoped),
-        # then restore the server to its default (no-workspace) config.
+        # then restart onto the original server config to drop our workspaces.
         teardown=
         (f'sky jobs cancel -y -n {name}-1 --config active_workspace={ws1} || true; '
          f'sky jobs cancel -y -n {name}-2 --config active_workspace={ws2} || true; '
          f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
          f'{smoke_tests_utils.SKY_API_RESTART}'),
-        # Use the dict form (config_dict) rather than LOW_CONTROLLER_RESOURCE_ENV
-        # (which points SKYPILOT_GLOBAL_CONFIG at a file): the env form would
-        # collide with the SKYPILOT_GLOBAL_CONFIG export used above to load the
-        # workspaces onto the server. config_dict is merged into the client
-        # config, so the controller still launches with low resources.
-        config_dict=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        config_dict=config_dict,
         timeout=20 * 60,
     )
-    try:
-        smoke_tests_utils.run_one_test(test)
-    finally:
-        os.unlink(server_config_path)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.managed_jobs
