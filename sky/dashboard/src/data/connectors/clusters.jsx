@@ -101,8 +101,14 @@ export async function getClusters({ clusterNames = null } = {}) {
       if (region_or_zone && region_or_zone.length > 25) {
         region_or_zone = truncateMiddle(region_or_zone, 25);
       }
+      // INIT is overloaded: a cluster in INIT is either actively launching or
+      // stuck in an abnormal/unhealthy state. The backend disambiguates via
+      // init_kind so we can render a distinct "UNHEALTHY" badge (and a detail-
+      // page banner) instead of a misleading "LAUNCHING".
+      const isUnhealthy =
+        cluster.status === 'INIT' && cluster.init_kind === 'unhealthy';
       return {
-        status: clusterStatusMap[cluster.status],
+        status: isUnhealthy ? 'UNHEALTHY' : clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
         user_hash: cluster.user_hash,
@@ -126,7 +132,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
-          cluster.status === 'INIT' ? cluster.launch_status_reason : null,
+          cluster.status === 'INIT' ? cluster.init_status_reason : null,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},

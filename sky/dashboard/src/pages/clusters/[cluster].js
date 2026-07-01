@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { Status2Actions } from '@/components/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   useClusterDetails,
   getClusterHistory,
@@ -416,6 +417,19 @@ function ActiveTab({
 
   return (
     <div>
+      {/* Surface the underlying infra problem when a cluster is stuck in an
+          abnormal INIT state (rendered as UNHEALTHY), instead of leaving the
+          misleading LAUNCHING badge as the only signal. */}
+      {clusterData.status === 'UNHEALTHY' && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertDescription>
+            <span className="font-semibold">This cluster is not healthy.</span>{' '}
+            {clusterData.statusTooltip ||
+              'A status refresh found the cluster in an abnormal state. ' +
+                'Try `sky status --refresh`, or `sky down` and relaunch.'}
+          </AlertDescription>
+        </Alert>
+      )}
       {/* Cluster Info Card */}
       <div className="mb-6">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
