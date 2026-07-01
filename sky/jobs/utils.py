@@ -971,8 +971,7 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
                 seen_cluster_names.add(cluster_name)
                 job_prefix = f'managed_jobs/{job_id}'
                 _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                                inline_data, file_paths,
-                                                errors)
+                                                inline_data, file_paths, errors)
 
     # Collect controller system log paths (shared, not per-job). Scope to
     # the controllers that actually ran the requested jobs — globbing the

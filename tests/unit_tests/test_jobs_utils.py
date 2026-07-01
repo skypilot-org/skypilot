@@ -806,9 +806,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_events,
         mock_get_task_ids,
         mock_get_pool,
-        mock_get_cluster,
-        mock_serialize,
-        mock_cluster_events,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
     ):
         """A multi-task (pipeline) job launches one cluster per task; the
         manifest should collect all of them, not just the first task's."""
@@ -821,9 +820,8 @@ class TestCollectDebugDumpManifestParallel:
             (1, 'pipe-1', 'RUNNING', None, None),
         ]
         mock_get_pool.return_value = (None, None)  # not a pool job
-        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
-        mock_serialize.side_effect = lambda r: {'name': r['name']}
-        mock_cluster_events.return_value = []
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
 
         result = utils.collect_debug_dump_manifest([1])
 
@@ -842,9 +840,9 @@ class TestCollectDebugDumpManifestParallel:
         assert found_names == expected_names
         assert len(result['errors']) == 0
 
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
-    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
     @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
     @mock.patch('sky.jobs.utils.managed_job_state'
                 '.get_all_task_ids_names_statuses_logs')
