@@ -204,7 +204,12 @@ def test_managed_jobs_queue_workspace_column(generic_cloud: str):
          f'sky jobs cancel -y -n {name}-2 --config active_workspace={ws2} || true; '
          f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
          f'{smoke_tests_utils.SKY_API_RESTART}'),
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        # Use the dict form (config_dict) rather than LOW_CONTROLLER_RESOURCE_ENV
+        # (which points SKYPILOT_GLOBAL_CONFIG at a file): the env form would
+        # collide with the SKYPILOT_GLOBAL_CONFIG export used above to load the
+        # workspaces onto the server. config_dict is merged into the client
+        # config, so the controller still launches with low resources.
+        config_dict=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
         timeout=20 * 60,
     )
     try:
