@@ -11,10 +11,15 @@ from sky.workspaces import utils as workspaces_utils
 logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
-# Cannot access workspace CUD operations
+# Cannot access workspace CUD operations. Both GET and POST of
+# /workspaces/config are admin-only: the payload includes the entire admin
+# config (e.g. provider tokens), so reads are blocked too.
 _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/config',
     'method': 'POST'
+}, {
+    'path': '/workspaces/config',
+    'method': 'GET'
 }, {
     'path': '/workspaces/update',
     'method': 'POST'

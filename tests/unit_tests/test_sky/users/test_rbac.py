@@ -19,6 +19,22 @@ class TestRoleEnum:
         assert 'user' in roles
 
 
+class TestGetRolePermissions:
+    """rbac.get_role_permissions exposes the default user blocklist."""
+
+    def test_workspaces_config_get_is_blocked_for_user(self):
+        # The config payload exposes provider tokens, so both reads and
+        # writes are admin-only for the default user role.
+        with mock.patch('sky.skypilot_config.get_nested', return_value={}):
+            permissions = rbac.get_role_permissions()
+        user_blocklist = permissions['user']['permissions']['blocklist']
+        assert {'path': '/workspaces/config', 'method': 'GET'} in user_blocklist
+        assert {
+            'path': '/workspaces/config',
+            'method': 'POST'
+        } in user_blocklist
+
+
 class TestGetViewerAllowlist:
     """rbac.get_viewer_allowlist composes defaults + config + plugin entries."""
 

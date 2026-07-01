@@ -651,24 +651,26 @@ export function TopBar() {
                 {/* Version Display */}
                 <UpgradeHint />
 
-                {/* Config Button */}
-                <CustomTooltip
-                  content="Configuration"
-                  className="text-sm text-muted-foreground"
-                >
-                  <Link
-                    href="/settings"
-                    className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
-                      isActivePath('/settings')
-                        ? 'text-blue-600 hover:bg-gray-100'
-                        : 'text-gray-600 hover:bg-gray-100'
-                    }`}
-                    title="Configuration"
-                    prefetch={false}
+                {/* Config Button (admin-only: the config exposes secrets) */}
+                {userRole === 'admin' && (
+                  <CustomTooltip
+                    content="Configuration"
+                    className="text-sm text-muted-foreground"
                   >
-                    <Settings className="w-5 h-5" />
-                  </Link>
-                </CustomTooltip>
+                    <Link
+                      href="/settings"
+                      className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
+                        isActivePath('/settings')
+                          ? 'text-blue-600 hover:bg-gray-100'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                      title="Configuration"
+                      prefetch={false}
+                    >
+                      <Settings className="w-5 h-5" />
+                    </Link>
+                  </CustomTooltip>
+                )}
               </>
             )}
 

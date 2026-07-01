@@ -16,8 +16,11 @@ import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { trackSettingsAction } from '@/lib/analytics';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useSidebar } from '@/components/elements/sidebar';
 
 export function Config() {
+  const { userRole } = useSidebar();
+  const isAdmin = userRole === 'admin';
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,6 +30,12 @@ export function Config() {
   const successTimeoutRef = useRef(null);
 
   useEffect(() => {
+    // The config payload includes admin-only secrets, so only admins may
+    // fetch it. Non-admins receive a 403, so skip the request entirely.
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     loadConfig();
 
     // Check Grafana availability
@@ -38,7 +47,7 @@ export function Config() {
     if (typeof window !== 'undefined') {
       checkGrafana();
     }
-  }, []);
+  }, [isAdmin]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -148,6 +157,35 @@ export function Config() {
       successTimeoutRef.current = null;
     }
   };
+
+  // User role is still resolving.
+  if (userRole === null) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <CircularProgress size={20} />
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
+
+  // The API server configuration exposes admin-only secrets, so it is
+  // restricted to admins.
+  if (!isAdmin) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="text-base font-normal">
+            API Server Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-600">
+            You must be an admin to view the API server configuration.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <>
