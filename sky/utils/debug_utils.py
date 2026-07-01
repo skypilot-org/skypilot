@@ -468,21 +468,24 @@ def _managed_job_cluster_names_from_records(
     return cluster_names
 
 
-def _get_managed_jobs_from_clusters(debug_dump_context: DebugDumpContext,
-                                    seed_cluster_names: Set[str]) -> None:
-    """Get managed job IDs whose underlying cluster was explicitly requested.
+def _get_managed_jobs_from_clusters(
+        debug_dump_context: DebugDumpContext) -> None:
+    """Get managed job IDs whose underlying cluster is in the context.
 
-    Only cluster names the user explicitly passed to the debug dump are
-    matched — NOT names that entered the context some other way (e.g. the
-    recent-activity scan). This keeps the expansion intentional: a pool
-    worker is shared by many jobs, so mapping it back to all of its jobs
-    is only reasonable when the user asked about that cluster
-    specifically.
+    This must run FIRST in _build_debug_dump — before the recent-activity
+    scan and before any other cross-link expansion — so the cluster names
+    it sees are exactly the ones the user explicitly requested. That keeps
+    the cluster -> job expansion intentional: a pool worker is shared by
+    many jobs, so mapping it back to all of its jobs is only reasonable
+    when the user asked about that cluster specifically. Clusters that
+    enter the context later — via the recent-activity scan, job ->
+    cluster, or request -> cluster — are never expanded into jobs.
     """
-    if not seed_cluster_names:
+    if not debug_dump_context['cluster_names']:
         return
-    logger.debug(f'Getting managed jobs for {len(seed_cluster_names)} '
-                 f'explicitly requested clusters')
+    logger.debug(
+        f'Getting managed jobs for '
+        f'{len(debug_dump_context["cluster_names"])} requested clusters')
     try:
         jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
                                                    all_users=True)
@@ -497,7 +500,7 @@ def _get_managed_jobs_from_clusters(debug_dump_context: DebugDumpContext,
         })
         return
     for job_id, names in job_cluster_names.items():
-        matched = names & seed_cluster_names
+        matched = names & debug_dump_context['cluster_names']
         if matched:
             logger.debug(f'Cross-link: cluster(s) {sorted(matched)} -> '
                          f'managed job {job_id}')
@@ -604,6 +607,21 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             launched_at = cluster.get('launched_at') or 0
             if status_updated_at >= cutoff_time or launched_at >= cutoff_time:
                 cluster_name = cluster.get('name')
+                if cluster_name and controller_utils.Controllers.from_name(
+                        cluster_name) is not None:
+                    # Skip controller clusters: every sky.jobs.* /
+                    # sky.serve.* request stores its controller's cluster
+                    # name, so letting a controller into the context here
+                    # would make _get_requests_from_clusters pull every
+                    # such request ever made into any recent-activity
+                    # dump. The jobs controller's cluster record is still
+                    # dumped whenever managed jobs are in the context —
+                    # _get_clusters_from_managed_jobs adds it after
+                    # request expansion — and explicitly requesting a
+                    # controller with -c still works.
+                    logger.debug(f'Recent: skipping controller cluster '
+                                 f'{cluster_name!r}')
+                    continue
                 if cluster_name:
                     reasons = []
                     if status_updated_at >= cutoff_time:
@@ -1214,7 +1232,6 @@ def _collect_controller_debug_data(
 def _build_debug_dump(
     dump_dir: str,
     debug_dump_context: DebugDumpContext,
-    seed_cluster_names: Set[str],
     recent_minutes: Optional[float],
     client_info: Optional[Dict[str, Any]],
     requested: Dict[str, Any],
@@ -1224,25 +1241,21 @@ def _build_debug_dump(
     Populates context via cross-linking, then dumps all sections
     (server info, requests, clusters, managed jobs, client info,
     errors, summary).
-
-    seed_cluster_names are the cluster names the user explicitly
-    requested; some cross-link expansions are restricted to these (see
-    _get_managed_jobs_from_clusters).
     """
-
-    # Populate from recent activity if requested
-    if recent_minutes is not None:
-        _populate_recent_context(debug_dump_context, recent_minutes)
-
-    # Collect all related resources (cross-linking). Each helper runs
-    # exactly once, and the order is load-bearing:
-    # 1. Discover managed jobs first — from explicitly seeded clusters
-    #    and from seeded/recent requests — so the job -> cluster
-    #    expansion sees the full job set.
-    # 2. Add the jobs' own clusters BEFORE expanding clusters into
+    # Populate the context and cross-link related resources. Each helper
+    # runs exactly once, and the order is load-bearing:
+    # 1. Expand clusters -> jobs BEFORE anything else adds cluster names
+    #    to the context (the recent-activity scan, job -> cluster,
+    #    request -> cluster), so only user-requested clusters expand into
+    #    jobs. A pool worker maps to every job that ever ran on it, so a
+    #    later-added worker (e.g. via a pool job's job -> cluster link,
+    #    or the recent scan) must not fan back out into all of its jobs.
+    # 2. Discover the remaining managed jobs (recent scan, seeded/recent
+    #    requests) so the job -> cluster expansion sees the full job set.
+    # 3. Add the jobs' own clusters BEFORE expanding clusters into
     #    requests, so requests referencing those clusters are included.
-    # 3. Expand clusters -> requests and jobs -> requests.
-    # 4. Map requests -> clusters last (requests found via a cluster are
+    # 4. Expand clusters -> requests and jobs -> requests.
+    # 5. Map requests -> clusters last (requests found via a cluster are
     #    skipped there; see _get_clusters_from_requests). The jobs
     #    controller cluster is also added last: every sky.jobs.* request
     #    carries the controller cluster name, so expanding requests from
@@ -1254,7 +1267,9 @@ def _build_debug_dump(
     # _get_clusters_from_requests, a cluster shared by many requests
     # (e.g. the controller) cannot drag unrelated jobs or clusters in.
     logger.debug('Cross-linking related resources')
-    _get_managed_jobs_from_clusters(debug_dump_context, seed_cluster_names)
+    _get_managed_jobs_from_clusters(debug_dump_context)
+    if recent_minutes is not None:
+        _populate_recent_context(debug_dump_context, recent_minutes)
     _get_managed_jobs_from_requests(debug_dump_context)
     _get_job_clusters_from_managed_jobs(debug_dump_context)
     _get_requests_from_clusters(debug_dump_context)
@@ -1412,9 +1427,8 @@ def create_debug_dump(
             }
             _build_debug_dump(dump_dir,
                               debug_dump_context,
-                              seed_cluster_names=set(cluster_names or []),
-                              recent_minutes=recent_minutes,
-                              client_info=client_info,
+                              recent_minutes,
+                              client_info,
                               requested=original_requested)
         finally:
             sky_root_logger.removeHandler(debug_handler)
