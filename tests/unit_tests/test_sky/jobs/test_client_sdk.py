@@ -36,7 +36,7 @@ def test_queue_v2_defaults_to_lightweight_fields():
     # A high remote API version avoids the version-based field stripping so we
     # can assert the full default field set is sent.
     body = _call_raw_queue_v2(refresh=False)
-    assert body['fields'] == DEFAULT_MANAGED_JOB_FIELDS
+    assert body['fields'] == list(DEFAULT_MANAGED_JOB_FIELDS)
     # The lightweight default must not pull heavy fields.
     assert 'node_names' not in body['fields']
     assert 'metadata' not in body['fields']

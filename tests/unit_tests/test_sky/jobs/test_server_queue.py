@@ -30,7 +30,7 @@ def test_v1_queue_handler_defaults_to_lightweight_fields():
                   all_users=False,
                   job_ids=None)
     _, kwargs = mock_queue_v2.call_args
-    assert kwargs['fields'] == DEFAULT_MANAGED_JOB_FIELDS
+    assert kwargs['fields'] == list(DEFAULT_MANAGED_JOB_FIELDS)
 
 
 def _make_job(job_id: int,

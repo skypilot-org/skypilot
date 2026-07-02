@@ -166,15 +166,13 @@ def launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(18)
-# DEFAULT_MANAGED_JOB_FIELDS is a module-level, read-only constant and is
-# never mutated here, so the mutable-default warning is a false positive.
-def queue_v2(  # pylint: disable=dangerous-default-value
+def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
-    fields: Optional[List[str]] = DEFAULT_MANAGED_JOB_FIELDS,
+    fields: Optional[Sequence[str]] = DEFAULT_MANAGED_JOB_FIELDS,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
     statuses: Optional[List[str]] = None,
@@ -268,7 +266,7 @@ def queue_v2(  # pylint: disable=dangerous-default-value
         all_users=all_users,
         job_ids=job_ids,
         limit=limit,
-        fields=fields,
+        fields=list(fields) if fields is not None else None,
         sort_by=sort_by,
         sort_order=sort_order,
         statuses=statuses,

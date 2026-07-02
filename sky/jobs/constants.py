@@ -16,12 +16,12 @@ JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 # specify `fields`. This intentionally excludes heavy fields (e.g. the task
 # YAML) so the default queue payload stays small even with many jobs. Callers
 # that need every field must pass `fields=None` explicitly.
-DEFAULT_MANAGED_JOB_FIELDS = [
-    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group', 'batch_total_batches',
-    'batch_completed_batches'
-]
+# Defined as a tuple so it is immutable and safe to use as a default argument.
+DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
+                              'task_name', 'resources', 'submitted_at',
+                              'end_at', 'job_duration', 'recovery_count',
+                              'status', 'pool', 'is_primary_in_job_group',
+                              'batch_total_batches', 'batch_completed_batches')
 
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 

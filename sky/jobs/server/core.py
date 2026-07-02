@@ -1224,7 +1224,7 @@ def queue(refresh: bool,
         skip_finished,
         all_users,
         job_ids,
-        fields=managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
+        fields=list(managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS))
 
     return jobs
 
