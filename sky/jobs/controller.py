@@ -2148,15 +2148,17 @@ class JobController:
         # recovery runs the same cleanup again, so a failure here only
         # delays the teardown. (No-op for pool jobs: they have no dedicated
         # cluster — _cleanup_cluster guards on self._pool.)
-        try:
-            await self._cleanup_cluster(
-                managed_job_utils.generate_managed_job_cluster_name(
-                    self._dag.tasks[task_id].name, self._job_id))
-        except Exception as cleanup_error:  # pylint: disable=broad-except
-            logger.warning(
-                'Best-effort cluster teardown before the emergency backoff '
-                'failed; the retry will clean up instead: '
-                f'{common_utils.format_exception(cleanup_error)}')
+        task_name = self._dag.tasks[task_id].name
+        if task_name is not None:  # Always filled for managed jobs.
+            try:
+                await self._cleanup_cluster(
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task_name, self._job_id))
+            except Exception as cleanup_error:  # pylint: disable=broad-except
+                logger.warning(
+                    'Best-effort cluster teardown before the emergency '
+                    'backoff failed; the retry will clean up instead: '
+                    f'{common_utils.format_exception(cleanup_error)}')
 
         # 4. If the error escaped mid-launch, the job may be stuck in a
         # launch-adjacent schedule state (LAUNCHING / ALIVE_WAITING /
