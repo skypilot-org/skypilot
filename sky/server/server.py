@@ -690,6 +690,73 @@ async def cleanup_download_tmp():
                          f'{common_utils.format_exception(e)}')
 
 
+def _prune_sky_logs(cutoff: float) -> int:
+    """Remove expired ~/sky_logs artifacts by mtime; returns count removed.
+
+    Restricting the top-level sweep to ``sky-*`` directories spares the
+    job/request log trees that share ~/sky_logs (api_server/, jobs_controller/,
+    managed_jobs/, numbered job dirs like '1-my-job').
+    """
+    sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+    if not os.path.isdir(sky_logs_dir):
+        return 0
+    removed = 0
+    for entry in os.scandir(sky_logs_dir):
+        if not entry.name.startswith('sky-') or not entry.is_dir(
+                follow_symlinks=False):
+            continue
+        try:
+            if entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry.path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            pass
+    # Literal rather than importing sky.client.common.FILE_UPLOAD_LOGS_DIR:
+    # the dependency direction is client -> server, not the reverse.
+    file_uploads_dir = os.path.join(
+        os.path.expanduser(constants.SKY_LOGS_DIRECTORY), 'file_uploads')
+    if os.path.isdir(file_uploads_dir):
+        for entry in os.scandir(file_uploads_dir):
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    os.remove(entry.path)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+async def cleanup_sky_logs():
+    """Delete expired per-operation artifacts under ~/sky_logs.
+
+    Each launch/exec/provision leaves a ~/sky_logs/sky-<timestamp> directory
+    and each upload a ~/sky_logs/file_uploads/*.log file; nothing else GCs
+    them, so they grow unbounded. Prune anything older than
+    api_server.logs_retention_hours (negative disables the GC).
+    """
+    while True:
+        # Reread config each iteration so operators can retune (or disable)
+        # the GC without restarting the API server.
+        skypilot_config.reload_config()
+        retention_hours = skypilot_config.get_nested(
+            ('api_server', 'logs_retention_hours'),
+            server_constants.DEFAULT_LOGS_RETENTION_HOURS)
+        retention_seconds = retention_hours * 3600
+        try:
+            if retention_seconds >= 0:
+                cutoff = time.time() - retention_seconds
+                removed = await asyncio.to_thread(_prune_sky_logs, cutoff)
+                if removed:
+                    logger.info(f'Cleaned up {removed} ~/sky_logs artifact(s) '
+                                f'older than {retention_hours} hours')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_sky_logs: '
+                         f'{common_utils.format_exception(e)}')
+        await asyncio.sleep(max(retention_seconds, 3600))
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -3557,6 +3624,7 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         # managed-job-status-refresh runs as a thread inside this

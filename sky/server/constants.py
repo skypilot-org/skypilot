@@ -158,6 +158,12 @@ REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 # Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
 DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 
+# Default retention (hours) for per-operation artifacts under ~/sky_logs on
+# the API server. Nothing else cleans them up, so without a GC they grow
+# unbounded on a busy server. Configurable via api_server.logs_retention_hours;
+# a negative value disables the GC.
+DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
+
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
