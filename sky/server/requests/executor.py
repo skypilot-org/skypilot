@@ -110,6 +110,12 @@ def _get_executor_mp_context() -> multiprocessing.context.BaseContext:
     ('spawn') so the behavior is unchanged unless explicitly opted in.
     """
     method = os.environ.get(EXECUTOR_START_METHOD_ENV, 'spawn').strip().lower()
+    supported = multiprocessing.get_all_start_methods()
+    if method not in supported:
+        logger.warning(
+            'Unsupported executor start method %r (supported on this '
+            'platform: %s); falling back to %r.', method, supported, 'spawn')
+        method = 'spawn'
     ctx = multiprocessing.get_context(method)
     if method == 'forkserver':
         # Preload sky (and plugins) into the fork server so forked workers
