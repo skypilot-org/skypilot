@@ -1152,12 +1152,13 @@ class JobController:
             #   interrupted preemption recovery, or an emergency retry whose
             #   exception handler already announced it with the specific
             #   reason) — re-announcing would only emit a duplicate, less
-            #   informative event, and would relabel the episode.
+            #   informative event, and would overwrite the episode's
+            #   failure credit (spot.recovering_from_failure).
             # - STARTING: the task never reached RUNNING; keep it STARTING
             #   through the relaunch (it is starting, not recovering) — no
             #   RECOVERING event at all.
             # - anything else: this recovery exists only because the
-            #   controller restarted — open an HA-sourced episode.
+            #   controller restarted — open a RESTART-sourced episode.
             # Any later (non-forced) recovery in this loop is a real
             # preemption/failure. In all cases the cleanup + recover() run.
             keep_starting = False
@@ -1177,7 +1178,8 @@ class JobController:
                         callback_func=callback_func,
                         external_failures=external_failures,
                         cluster_event_reason=cluster_event_reason,
-                        recovery_source=managed_job_state.RecoverySource.HA,
+                        recovery_source=managed_job_state.RecoverySource.
+                        RESTART,
                     )
             else:
                 await managed_job_state.set_recovering_async(
@@ -2036,11 +2038,10 @@ class JobController:
         """One round of the emergency-recovery bookkeeping.
 
         Sequence: spend one unit of the bounded retry budget, mark the
-        latest task RECOVERING with recovery_source=EMERGENCY (saving its
-        prior status for the resume logic), and release any stuck LAUNCHING
-        schedule state. Every step is idempotent so that the outer retry in
-        _handle_unexpected_error can safely re-run the whole sequence after
-        a transient failure.
+        latest task RECOVERING (recovery_source=EMERGENCY on the event),
+        and release any stuck LAUNCHING schedule state. Every step is
+        idempotent so that the outer retry in _handle_unexpected_error can
+        safely re-run the whole sequence after a transient failure.
 
         Returns None to retry managing the job in place, or a failure note
         to fail the job (budget exhausted).
@@ -2651,34 +2652,9 @@ class ControllerManager:
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
                     if job_id in self.job_tasks:
-                        task = self.job_tasks[job_id]
-
-                        if task.done():
-                            # The job loop already finished, so cancelling
-                            # the task would do nothing and would silently
-                            # swallow the signal. If the job is terminal,
-                            # the cancel is moot: consume the signal.
-                            # Otherwise (e.g. this controller stood down
-                            # from the job), leave the signal for whoever
-                            # manages the job next.
-                            status = await managed_job_state.get_status_async(
-                                job_id)
-                            if status is not None and status.is_terminal():
-                                signal_path = os.path.join(
-                                    jobs_constants.CONSOLIDATED_SIGNAL_PATH,
-                                    cancel)
-                                with filelock.FileLock(signal_path + '.lock'):
-                                    try:
-                                        os.remove(signal_path)
-                                    except OSError:
-                                        # Already consumed elsewhere.
-                                        pass
-                                logger.info(
-                                    f'Job {job_id} is already terminal; '
-                                    'removed its cancel signal.')
-                            continue
-
                         logger.info(f'Cancelling job {job_id}')
+
+                        task = self.job_tasks[job_id]
 
                         signal_path = os.path.join(
                             jobs_constants.CONSOLIDATED_SIGNAL_PATH, cancel)

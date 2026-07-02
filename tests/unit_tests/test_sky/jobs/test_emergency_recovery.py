@@ -134,9 +134,10 @@ class TestEmergencyRecoveryState:
         assert applied is True
         row = _get_task_row(engine)
         # Visible status is the normal RECOVERING; the emergency cause is on
-        # the event and, for the duration of the episode, on the row.
+        # the event. The episode is open but carries no failure credit.
         assert row['status'] == 'RECOVERING'
-        assert row['recovery_source'] == state.RecoverySource.EMERGENCY.value
+        assert row['recovering_from_failure'] is not None
+        assert not row['recovering_from_failure']
         assert calls == ['RECOVERING']
         events = state.get_job_events(1)
         assert any(e['new_status'] == state.ManagedJobStatus.RECOVERING and
@@ -146,24 +147,26 @@ class TestEmergencyRecoveryState:
         assert recovering_events == [state.RecoverySource.EMERGENCY.value]
 
     @pytest.mark.asyncio
-    async def test_set_emergency_recovering_keeps_open_episode_source(
+    async def test_emergency_preserves_failure_credit(
             self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         callback, _ = _make_callback()
 
         # Re-running the bookkeeping (e.g. after a transient DB failure on a
-        # later step) keeps the episode labeled EMERGENCY.
+        # later step) keeps the episode open and uncredited.
         _seed_job(engine, job_id=1, status='RUNNING')
         assert await state.set_emergency_recovering_async(
             1, 0, reason='first', callback_func=callback)
         assert await state.set_emergency_recovering_async(
             1, 0, reason='re-run', callback_func=callback)
-        assert _get_task_row(engine, 1)['recovery_source'] == \
-            state.RecoverySource.EMERGENCY.value
+        row1 = _get_task_row(engine, 1)
+        assert row1['recovering_from_failure'] is not None
+        assert not row1['recovering_from_failure']
 
-        # An emergency that interrupts an in-flight FAILURE recovery must not
-        # relabel the episode: the eventual completion still counts as a
-        # genuine failure recovery.
+        # An emergency that interrupts an in-flight FAILURE recovery is a
+        # system-driven interruption: it must not erase the episode's failure
+        # credit — the eventual completion still counts as a genuine failure
+        # recovery. (The event log records both occurrences separately.)
         _seed_job(engine, job_id=2, status='RUNNING')
         await state.set_recovering_async(2,
                                          0,
@@ -171,8 +174,11 @@ class TestEmergencyRecoveryState:
                                          callback_func=callback)
         assert await state.set_emergency_recovering_async(
             2, 0, reason='emergency mid-recovery', callback_func=callback)
-        assert _get_task_row(engine, 2)['recovery_source'] == \
-            state.RecoverySource.FAILURE.value
+        assert _get_task_row(engine, 2)['recovering_from_failure']
+        assert _get_recovering_events(engine, 2) == [
+            state.RecoverySource.FAILURE.value,
+            state.RecoverySource.EMERGENCY.value,
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('status', ['CANCELLING', 'SUCCEEDED', 'FAILED'])
@@ -188,7 +194,7 @@ class TestEmergencyRecoveryState:
         assert applied is False
         row = _get_task_row(engine)
         assert row['status'] == status
-        assert row['recovery_source'] is None
+        assert row['recovering_from_failure'] is None
         assert not calls
         assert not state.get_job_events(1)
 
@@ -229,27 +235,27 @@ class TestEmergencyRecoveryState:
                                          callback_func=callback)
         assert _get_recovering_events(
             engine, 1) == [state.RecoverySource.FAILURE.value]
-        assert _get_task_row(engine, 1)['recovery_source'] == \
-            state.RecoverySource.FAILURE.value
+        assert _get_task_row(engine, 1)['recovering_from_failure']
 
-        # An HA-tagged force recovery records HA.
+        # A RESTART-tagged force recovery records RESTART.
         _seed_job(engine, job_id=2, status='STARTING')
         await state.set_recovering_async(
             2,
             0,
             force_transit_to_recovering=True,
             callback_func=callback,
-            recovery_source=state.RecoverySource.HA)
-        assert _get_recovering_events(engine,
-                                      2) == [state.RecoverySource.HA.value]
-        assert _get_task_row(engine, 2)['recovery_source'] == \
-            state.RecoverySource.HA.value
+            recovery_source=state.RecoverySource.RESTART)
+        assert _get_recovering_events(
+            engine, 2) == [state.RecoverySource.RESTART.value]
+        row2 = _get_task_row(engine, 2)
+        assert row2['recovering_from_failure'] is not None
+        assert not row2['recovering_from_failure']
 
     @pytest.mark.asyncio
-    async def test_recovery_source_cleared_on_exits(self,
-                                                    _mock_managed_jobs_db_conn):
-        # A stale recovery_source must not survive into a later unrelated
-        # recovery (it would mislabel that episode's recovery_count
+    async def test_failure_credit_cleared_on_exits(self,
+                                                   _mock_managed_jobs_db_conn):
+        # A stale recovering_from_failure must not survive into a later
+        # unrelated recovery (it would corrupt that episode's recovery_count
         # accounting); every exit transition clears it.
         engine = _mock_managed_jobs_db_conn
         callback, _ = _make_callback()
@@ -260,10 +266,11 @@ class TestEmergencyRecoveryState:
                                                        0,
                                                        reason='x',
                                                        callback_func=callback)
-            assert _get_task_row(engine, 1)['recovery_source'] == \
-                state.RecoverySource.EMERGENCY.value
+            assert _get_task_row(engine, 1)['recovering_from_failure'] \
+                is not None
             await setter()
-            assert _get_task_row(engine, 1)['recovery_source'] is None
+            assert _get_task_row(engine, 1)['recovering_from_failure'] \
+                is None
             # reset for the next sub-case
             with engine.connect() as conn:
                 conn.execute(state.spot_table.delete())
@@ -311,14 +318,14 @@ class TestEmergencyRecoveryState:
                                         callback_func=callback)
         assert _get_task_row(engine, 2)['recovery_count'] == 0
 
-        # HA episode (forced recovery on controller restart): not counted.
+        # RESTART episode (forced recovery on controller restart): not counted.
         _seed_job(engine, job_id=3, status='STARTING')
         await state.set_recovering_async(
             3,
             0,
             force_transit_to_recovering=True,
             callback_func=callback,
-            recovery_source=state.RecoverySource.HA)
+            recovery_source=state.RecoverySource.RESTART)
         await state.set_recovered_async(3,
                                         0,
                                         recovered_time=time.time(),
