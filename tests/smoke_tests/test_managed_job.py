@@ -2449,7 +2449,9 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
     def check_labels_in_queue():
         """Check that labels are present in the job queue."""
         # Get the job queue using SDK
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'labels'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         # Parse the queue response
@@ -2541,7 +2543,9 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
 
     def check_git_commit_in_queue():
         """Check that git_commit is present in the job queue metadata."""
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'metadata'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         if isinstance(queue_records, tuple):
