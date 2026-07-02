@@ -245,7 +245,7 @@ function NodeGpuAllocationGrid({ perNodeGPUs }) {
                           content={node.node_name}
                           className="text-sm text-muted-foreground"
                         >
-                          <span className="text-xs font-medium truncate">
+                          <span className="text-xs font-medium block truncate">
                             {node.node_name}
                           </span>
                         </NonCapitalizedTooltip>
