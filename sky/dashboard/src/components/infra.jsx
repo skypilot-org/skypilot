@@ -736,9 +736,9 @@ export function InfrastructureSection({
           </div>
           {!isSSH && !isSlurm && (
             <NodeGpuAllocationGrid
-              perNodeGPUs={Object.entries(groupedPerNodeGPUs || {})
-                .filter(([context]) => !context.startsWith('ssh-'))
-                .flatMap(([, nodes]) => nodes)}
+              perNodeGPUs={safeContexts.flatMap(
+                (context) => (groupedPerNodeGPUs || {})[context] || []
+              )}
             />
           )}
         </div>
