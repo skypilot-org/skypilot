@@ -701,11 +701,11 @@ def _prune_sky_logs(cutoff: float) -> int:
         return 0
     removed = 0
     for entry in os.scandir(sky_logs_dir):
-        if not entry.name.startswith('sky-') or not entry.is_dir(
-                follow_symlinks=False):
+        if not entry.name.startswith('sky-'):
             continue
         try:
-            if entry.stat().st_mtime < cutoff:
+            if (entry.is_dir(follow_symlinks=False) and
+                    entry.stat().st_mtime < cutoff):
                 shutil.rmtree(entry.path, ignore_errors=True)
                 removed += 1
         except OSError:
@@ -715,10 +715,9 @@ def _prune_sky_logs(cutoff: float) -> int:
     file_uploads_dir = os.path.join(sky_logs_dir, 'file_uploads')
     if os.path.isdir(file_uploads_dir):
         for entry in os.scandir(file_uploads_dir):
-            if not entry.is_file(follow_symlinks=False):
-                continue
             try:
-                if entry.stat().st_mtime < cutoff:
+                if (entry.is_file(follow_symlinks=False) and
+                        entry.stat().st_mtime < cutoff):
                     os.remove(entry.path)
                     removed += 1
             except OSError:
