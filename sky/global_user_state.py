@@ -219,6 +219,13 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # Whether the cluster was launched by a controller (managed job or
+    # service). Mirrors the `is_managed` column on the clusters table so that
+    # history queries (e.g. the dashboard's cost report) can filter out
+    # controller-backed clusters even after they are terminated, since at that
+    # point the clusters table row is gone and the join can no longer supply
+    # the flag.
+    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
 )
 
 
@@ -929,6 +936,7 @@ def add_or_update_cluster(cluster_name: str,
             region=region,
             zone=zone,
             node_names=node_names,
+            is_managed=int(is_managed),
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -951,6 +959,12 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
                 cluster_history_table.c.node_names: node_names,
+                # Intentionally do not update is_managed here (mirrors the
+                # clusters table above, which only sets it on insert).
+                # add_or_update_cluster is called multiple times during a
+                # managed-job launch and is_managed defaults to False on
+                # subsequent calls; overwriting it would reset the flag to 0
+                # and leak managed-job clusters into the history view.
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1142,6 +1156,53 @@ def get_last_cluster_event_of_type_multiple(
         ).filter(ranked.c.rn == 1).all()
 
     return {row.cluster_hash: row.reason for row in rows}
+
+
+def get_last_status_change_times(
+        cluster_hashes: Set[str],
+        ending_status: status_lib.ClusterStatus) -> Dict[str, int]:
+    """Latest STATUS_CHANGE.transitioned_at per cluster for an ending_status.
+
+    Returns a mapping from cluster_hash to the epoch-seconds at which that
+    cluster most recently transitioned into ``ending_status``. Clusters
+    with no matching STATUS_CHANGE row are omitted.
+
+    Chunks the ``cluster_hash IN (...)`` predicate by
+    ``_CLUSTER_IN_QUERY_CHUNK_SIZE`` to stay under SQLite's 999-parameter
+    cap (PostgreSQL has no such cap but the chunking is harmless there).
+    """
+    if not cluster_hashes:
+        return {}
+    engine = _db_manager.get_engine()
+    hashes_list = list(cluster_hashes)
+    result: Dict[str, int] = {}
+    with orm.Session(engine) as session:
+        for offset in range(0, len(hashes_list), _CLUSTER_IN_QUERY_CHUNK_SIZE):
+            batch = hashes_list[offset:offset + _CLUSTER_IN_QUERY_CHUNK_SIZE]
+            row_number = sqlalchemy.func.row_number().over(
+                partition_by=cluster_event_table.c.cluster_hash,
+                order_by=cluster_event_table.c.transitioned_at.desc()).label(
+                    'rn')
+
+            ranked = session.query(
+                cluster_event_table.c.cluster_hash,
+                cluster_event_table.c.transitioned_at,
+                row_number,
+            ).filter(
+                cluster_event_table.c.cluster_hash.in_(batch),
+                cluster_event_table.c.type ==
+                ClusterEventType.STATUS_CHANGE.value,
+                cluster_event_table.c.ending_status == ending_status.value,
+            ).subquery()
+
+            rows = session.query(
+                ranked.c.cluster_hash,
+                ranked.c.transitioned_at,
+            ).filter(ranked.c.rn == 1).all()
+
+            for row in rows:
+                result[row.cluster_hash] = int(row.transitioned_at)
+    return result
 
 
 def cleanup_cluster_events_with_retention(retention_hours: float,
@@ -2275,7 +2336,8 @@ def get_clusters_from_history(
         days: Optional[int] = None,
         abbreviate_response: bool = False,
         cluster_hashes: Optional[List[str]] = None,
-        cluster_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        cluster_names: Optional[List[str]] = None,
+        exclude_managed_clusters: bool = False) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -2290,6 +2352,9 @@ def get_clusters_from_history(
               specified, rows matching either are returned (logical OR).
               Note that a single cluster name can map to multiple history
               records when a name is reused across launches.
+        exclude_managed_clusters: If True, exclude clusters launched by a
+              controller (managed jobs and services). Rows recorded before the
+              is_managed column existed are treated as not managed.
 
     Returns:
         List of cluster records with history information.
@@ -2303,34 +2368,39 @@ def get_clusters_from_history(
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
+    # last_creation_yaml / last_creation_command hold the full task YAML and
+    # launch command for each history row. In aggregate these are by far the
+    # largest columns (a 30-day report can span thousands of clusters), yet
+    # only targeted by-hash / by-name lookups (e.g. a single cluster's detail
+    # view) actually read them. Bulk reports such as `sky cost-report` and the
+    # dashboard history list never use them, so fetch them only for filtered
+    # queries to avoid loading every cluster's YAML into memory.
+    include_creation_yaml = (not abbreviate_response and
+                             (cluster_hashes is not None or
+                              cluster_names is not None))
+
     with orm.Session(engine) as session:
-        # Explicitly select columns from both tables to avoid ambiguity
-        if abbreviate_response:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
-        else:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
+        # Explicitly select columns from both tables to avoid ambiguity.
+        selected_columns = [
+            cluster_history_table.c.cluster_hash,
+            cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.workspace.label('history_workspace'),
+            cluster_history_table.c.last_activity_time,
+            cluster_history_table.c.launched_at,
+            cluster_history_table.c.node_names,
+            cluster_table.c.status,
+            cluster_table.c.workspace,
+        ]
+        if include_creation_yaml:
+            selected_columns.extend([
                 cluster_history_table.c.last_creation_yaml,
                 cluster_history_table.c.last_creation_command,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
+            ])
+        query = session.query(*selected_columns)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
@@ -2359,6 +2429,12 @@ def get_clusters_from_history(
                 cluster_history_table.c.name.in_(cluster_names))
         if identifier_filters:
             query = query.filter(sqlalchemy.or_(*identifier_filters))
+        if exclude_managed_clusters:
+            # Treat NULL (rows predating the is_managed column) as not managed.
+            query = query.filter(
+                sqlalchemy.or_(
+                    cluster_history_table.c.is_managed.is_(None),
+                    cluster_history_table.c.is_managed == int(False)))
         rows = query.all()
 
     usage_intervals_dict = {}
@@ -2428,9 +2504,16 @@ def get_clusters_from_history(
             'last_event': last_event,
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        if not abbreviate_response:
+        if include_creation_yaml:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
+        elif not abbreviate_response:
+            # Preserve the dict schema for non-abbreviated callers: these keys
+            # were always present (possibly None) before we stopped fetching
+            # the heavy columns on bulk paths. The columns were not selected
+            # here, so this is None at zero memory cost.
+            record['last_creation_yaml'] = None
+            record['last_creation_command'] = None
 
         records.append(record)
 

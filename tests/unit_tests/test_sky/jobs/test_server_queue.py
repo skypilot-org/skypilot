@@ -1,14 +1,37 @@
 """Unit tests for the jobs server queue."""
 import time
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 import pytest
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
 from sky.skylet import constants as skylet_constants
+
+
+def _unwrap(fn):
+    while hasattr(fn, '__wrapped__'):
+        fn = fn.__wrapped__
+    return fn
+
+
+def test_v1_queue_handler_defaults_to_lightweight_fields():
+    """The deprecated v1 queue path (core.queue) must narrow fields so old
+    clients hitting /jobs/queue don't trigger a full-payload pull."""
+    raw_queue = _unwrap(jobs_core.queue)
+    with mock.patch.object(jobs_core, 'queue_v2',
+                           return_value=([], 0, {}, 0)) as mock_queue_v2:
+        raw_queue(refresh=False,
+                  skip_finished=False,
+                  all_users=False,
+                  job_ids=None)
+    _, kwargs = mock_queue_v2.call_args
+    assert kwargs['fields'] == list(
+        managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 
 
 def _make_job(job_id: int,
@@ -225,10 +248,21 @@ class TestQueue:
             # Match fake_get_workspaces so queue_v2 sees the same workspace set
             return set(fake_get_workspaces().keys())
 
-        def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
-                               workspace_match, name_match, pool_match, page,
-                               limit, user_hashes, statuses, fields, sort_by,
-                               sort_order):
+        def fake_get_job_table(skip_finished,
+                               accessible_workspaces,
+                               job_ids,
+                               workspace_match,
+                               name_match,
+                               pool_match,
+                               page,
+                               limit,
+                               user_hashes,
+                               statuses,
+                               fields,
+                               sort_by,
+                               sort_order,
+                               submitted_after=None,
+                               submitted_before=None):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
@@ -244,6 +278,8 @@ class TestQueue:
                 'fields': fields,
                 'sort_by': sort_by,
                 'sort_order': sort_order,
+                'submitted_after': submitted_after,
+                'submitted_before': submitted_before,
             }
 
         def fake_load_managed_job_queue(payload):
@@ -677,7 +713,10 @@ class TestDumpManagedJobQueue:
                                                page,
                                                limit,
                                                sort_by=None,
-                                               sort_order=None):
+                                               sort_order=None,
+                                               submitted_after=None,
+                                               submitted_before=None,
+                                               status_expr=None):
             # Apply pre-filters aligned with utils.get_managed_job_queue
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,
@@ -693,11 +732,17 @@ class TestDumpManagedJobQueue:
                                                         statuses=statuses)
             return filtered, total
 
-        def fake_get_status_count_with_filters(fields, job_ids,
+        def fake_get_status_count_with_filters(fields,
+                                               job_ids,
                                                accessible_workspaces,
-                                               workspace_match, name_match,
-                                               pool_match, user_hashes,
-                                               skip_finished):
+                                               workspace_match,
+                                               name_match,
+                                               pool_match,
+                                               user_hashes,
+                                               skip_finished,
+                                               submitted_after=None,
+                                               submitted_before=None,
+                                               status_expr=None):
             # Compute status counts after applying non-paginated filters
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,

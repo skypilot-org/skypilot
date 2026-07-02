@@ -125,35 +125,69 @@ class Server(uvicorn.Server):
 
     def _graceful_shutdown(self, sig: int, frame: Union[FrameType,
                                                         None]) -> None:
-        """Perform graceful shutdown."""
-        time.sleep(_GRACE_WAIT_SECONDS)
-        # Block new requests so that we can wait until all on-going requests
-        # are finished. Note that /api/$verb operations are still allowed in
-        # this stage to ensure the client can still operate the on-going
-        # requests, e.g. /api/logs, /api/cancel, etc.
-        logger.info('Block new requests being submitted in worker '
-                    f'{os.getpid()}.')
-        state.set_block_requests(True)
-        # Ensure the shutting_down are set on all workers before next step.
-        # TODO(aylei): hacky, need a reliable solution.
-        time.sleep(1)
+        """Perform graceful shutdown.
 
-        lock = filelock.FileLock(_GRACEFUL_SHUTDOWN_LOCK_PATH)
-        # Elect a coordinator process to handle on-going requests check
-        with lock.acquire():
-            logger.info(f'Worker {os.getpid()} elected as shutdown coordinator')
-            self._wait_requests()
+        Runs in a separate daemon thread. This must *always* end by setting
+        ``should_exit`` and forwarding the exit to the parent handler, even if
+        draining on-going requests fails or hangs. ``set_block_requests(True)``
+        is set early so new requests are rejected while we drain; if we then
+        failed to exit (e.g. the request backend / database is unreachable and
+        the drain raises), the worker would stay up rejecting every request
+        forever. The try/finally below guarantees the process still exits and
+        gets restarted, clearing the block.
+        """
+        try:
+            time.sleep(_GRACE_WAIT_SECONDS)
+            # Block new requests so that we can wait until all on-going
+            # requests are finished. Note that /api/$verb operations are still
+            # allowed in this stage to ensure the client can still operate the
+            # on-going requests, e.g. /api/logs, /api/cancel, etc.
+            logger.info('Block new requests being submitted in worker '
+                        f'{os.getpid()}.')
+            state.set_block_requests(True)
+            # Ensure the shutting_down are set on all workers before next step.
+            # TODO(aylei): hacky, need a reliable solution.
+            time.sleep(1)
 
-        logger.info('Shutting down server...')
-        self.should_exit = True
-        super().handle_exit(sig, frame)
+            lock = filelock.FileLock(_GRACEFUL_SHUTDOWN_LOCK_PATH)
+            # Elect a coordinator process to handle on-going requests check.
+            # Bound the wait: a coordinator stuck draining (e.g. blocked on an
+            # unreachable database) must not keep the other workers from
+            # exiting.
+            try:
+                with lock.acquire(timeout=_WAIT_REQUESTS_TIMEOUT_SECONDS):
+                    logger.info(
+                        f'Worker {os.getpid()} elected as shutdown coordinator')
+                    self._wait_requests()
+            except filelock.Timeout:
+                logger.warning(
+                    f'Worker {os.getpid()} timed out waiting for the shutdown '
+                    'coordinator lock; proceeding to exit without draining.')
+        except Exception:  # pylint: disable=broad-except
+            # A drain failure must never prevent the worker from exiting.
+            logger.exception('Error during graceful shutdown drain; '
+                             'proceeding to exit anyway.')
+        finally:
+            logger.info('Shutting down server...')
+            self.should_exit = True
+            super().handle_exit(sig, frame)
 
     def _wait_requests(self) -> None:
-        """Wait until all on-going requests are finished or cancelled."""
+        """Wait until all on-going requests are finished or cancelled.
+
+        Best-effort: if the request backend is unreachable (e.g. database
+        outage) we log and stop draining so the shutdown can still proceed.
+        """
         start_time = time.time() - _GRACE_WAIT_SECONDS
         while True:
-            requests = (request_storage.get_request_backend().
-                        get_shutdown_active_requests())
+            try:
+                requests = (request_storage.get_request_backend().
+                            get_shutdown_active_requests())
+            except Exception:  # pylint: disable=broad-except
+                logger.exception(
+                    'Failed to query on-going requests during shutdown; '
+                    'stopping drain and proceeding to exit.')
+                break
             if not requests:
                 break
             logger.info(f'{len(requests)} on-going requests '

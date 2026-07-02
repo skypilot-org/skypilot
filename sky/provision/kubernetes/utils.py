@@ -5085,7 +5085,8 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
         config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
-    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    hashed = hashlib.sha1(normalized.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()
     path = os.path.expanduser(
         f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
     )

@@ -18,6 +18,7 @@ import pytest
 
 from sky.jobs import state as managed_job_state
 from sky.jobs.controller import ControllerManager
+from sky.jobs.controller import JobController
 from sky.utils import common
 
 
@@ -1077,3 +1078,71 @@ class TestDownloadLogsForCancelledJob:
                 0, mock_handle_0, None)
             controller.download_log_and_stream.assert_any_call(
                 1, mock_handle_1, None)
+
+
+class TestJobGroupResumeDoesNotReissueStarting:
+    """Regression: a resumed JobGroup task must not be re-issued STARTING.
+
+    On controller restart, ``_run_job_group`` resumes every non-terminal task.
+    A task that was already past PENDING (STARTING/RUNNING/RECOVERING) must NOT
+    have ``set_starting`` re-issued: ``set_starting`` only transitions
+    PENDING->STARTING, so re-issuing it matches no rows and raises
+    ``ManagedJobStatusError``, which the controller escalates to
+    FAILED_CONTROLLER and tears the whole group down. The single-task path
+    already guards this with ``if not is_resume``; the JobGroup path mirrors it
+    via ``set_starting=needs_launch(task_id)``.
+    """
+
+    def _make_controller(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._dag = MagicMock()
+        task = MagicMock()
+        task.name = 'job-a'
+        task.envs = {}
+        task.run = 'echo hi'
+        controller._dag.tasks = [task]
+        controller._backend = MagicMock()
+        controller._backend.run_timestamp = 'run-ts'
+        controller.starting = set()
+        controller.starting_lock = MagicMock()
+        controller.starting_signal = MagicMock()
+        return controller, task
+
+    async def _prepare(self, controller, task, set_starting):
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.recovery_strategy') as recovery, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.backend_utils'), \
+             patch('sky.jobs.controller._build_task_specs', return_value={}):
+            net.generate_wait_for_networking_script.return_value = ''
+            net.generate_inline_networking_setup_script.return_value = ''
+            utils.generate_managed_job_cluster_name.return_value = 'job-a-1'
+            recovery.StrategyExecutor.make.return_value = MagicMock()
+            state.get_file_mounts_blob_id.return_value = None
+            state.set_starting_async = AsyncMock()
+
+            cluster_name, _ = await (
+                JobController._prepare_job_group_task_for_launch(
+                    controller, task, 0, 'group', [],
+                    set_starting=set_starting))
+            return cluster_name, state.set_starting_async
+
+    @pytest.mark.asyncio
+    async def test_resume_skips_set_starting(self):
+        """set_starting=False (resumed task) must not call set_starting."""
+        controller, task = self._make_controller()
+        cluster_name, set_starting_async = await self._prepare(
+            controller, task, set_starting=False)
+        assert cluster_name == 'job-a-1'
+        set_starting_async.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fresh_launch_sets_starting(self):
+        """set_starting=True (fresh launch) must call set_starting."""
+        controller, task = self._make_controller()
+        _, set_starting_async = await self._prepare(controller,
+                                                    task,
+                                                    set_starting=True)
+        set_starting_async.assert_awaited_once()

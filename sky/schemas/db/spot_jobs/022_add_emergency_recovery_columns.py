@@ -16,8 +16,8 @@ These columns support automatic recovery from unexpected controller errors
   recovering (FAILURE / EMERGENCY / RESTART). NULL on other events and on
   RECOVERING events written before this column existed (treated as FAILURE).
 
-Revision ID: 021
-Revises: 020
+Revision ID: 022
+Revises: 021
 Create Date: 2026-06-12
 
 """
@@ -30,8 +30,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '021'
-down_revision: Union[str, Sequence[str], None] = '020'
+revision: str = '022'
+down_revision: Union[str, Sequence[str], None] = '021'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

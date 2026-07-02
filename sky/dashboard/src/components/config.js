@@ -16,6 +16,7 @@ import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { trackSettingsAction } from '@/lib/analytics';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { YamlEditor } from '@/components/ui/yaml-editor';
 
 export function Config() {
   const [editableConfig, setEditableConfig] = useState('');
@@ -292,15 +293,11 @@ export function Config() {
           )}
 
           <div className="w-full">
-            <textarea
+            <YamlEditor
               value={editableConfig}
-              onChange={(e) => setEditableConfig(e.target.value)}
-              className="w-full h-96 p-3 border border-gray-300 rounded font-mono text-sm resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder={
-                loading
-                  ? 'Loading configuration...'
-                  : '# Enter SkyPilot configuration in YAML format\n# Example:\n# kubernetes:\n#   allowed_contexts: [default, my-context]'
-              }
+              onChange={(val) => setEditableConfig(val)}
+              minHeight="384px"
+              maxHeight="600px"
               disabled={loading || saving}
             />
           </div>

@@ -296,6 +296,55 @@ def test_requests_scheduling(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Regression: a --retry-until-up launch that exhausts launchable resources
+# parks its request in WAITING and re-enqueues it; the worker must re-execute
+# it (previously it ran only PENDING requests, so the re-enqueued one was
+# dropped). Kubernetes-only and size-independent: 1-CPU nodes fit any node's
+# capacity (pass feasibility) but 100 of them fit no single smoke node, so the
+# pods stay Pending and provisioning fails into the retry/WAITING path.
+@pytest.mark.kubernetes
+def test_retry_until_up_waiting_request_is_reexecuted(generic_cloud: str):
+    del generic_cloud  # Kubernetes-specific.
+    name = smoke_tests_utils.get_cluster_name()
+    req_file = f'/tmp/{name}.req'
+    # Capture the async launch's request id so we can poll its status.
+    launch = (
+        f'req=$(sky launch -c {name} --infra kubernetes --cpus 1 '
+        f'--num-nodes 100 --retry-until-up -y --async "echo regression" '
+        f"| grep -oE 'request: [0-9a-f-]+' | head -1 | awk '{{print $2}}'); "
+        f'echo "captured request id: $req"; test -n "$req"; '
+        f'echo "$req" > {req_file}')
+
+    def _wait_for_status(status: str, timeout: int) -> str:
+        # -a so WAITING (hidden by the default active filter) is shown.
+        return (f'req=$(cat {req_file}); start=$SECONDS; '
+                f'until sky api status -a "$req" | grep -qw {status}; do '
+                f'  if [ $((SECONDS - start)) -gt {timeout} ]; then '
+                f'    echo "timed out waiting for request to reach {status}"; '
+                f'    sky api status -a "$req"; exit 1; '
+                f'  fi; '
+                f'  sleep 5; '
+                f'done; echo "request reached {status}"')
+
+    test = smoke_tests_utils.Test(
+        'test_retry_until_up_waiting_request_is_reexecuted',
+        [
+            launch,
+            # 1st attempt fails to schedule 100 nodes -> parks in WAITING.
+            _wait_for_status('WAITING', timeout=300),
+            # The fix: any RUNNING after WAITING is the re-execution. Pre-fix
+            # the request is stranded in WAITING and this times out.
+            _wait_for_status('RUNNING', timeout=300),
+        ],
+        teardown=(f'req=$(cat {req_file} 2>/dev/null); '
+                  f'sky api cancel -y "$req" 2>/dev/null || true; '
+                  f'sky down -y {name} 2>/dev/null || true; '
+                  f'rm -f {req_file}'),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
 # ---- Test recent request tracking -----
 # We mark this test as no_remote_server since it requires a dedicated API server
 # for the test otherwise we can't make any guarantees about the most recent

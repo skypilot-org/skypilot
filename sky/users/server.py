@@ -287,8 +287,12 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
 
     # Create user
     password_hash = server_common.crypt_ctx.hash(password)
+    # MD5 here only derives a stable user identifier from the (non-secret)
+    # username; it is not used for any security purpose (passwords use bcrypt
+    # via crypt_ctx).
     user_hash = hashlib.md5(
-        username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        username.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
         # Check if user already exists
         if global_user_state.get_user_by_name(username):
@@ -627,8 +631,11 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
                 # Password is plain text, hash it
                 password_hash = server_common.crypt_ctx.hash(password)
 
-            user_hash = hashlib.md5(
-                username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user identifier from the (non-secret)
+            # username; not a security use (passwords use bcrypt via crypt_ctx).
+            user_hash = hashlib.md5(username.encode(),
+                                    usedforsecurity=False).hexdigest()
+            user_hash = user_hash[:common_utils.USER_HASH_LENGTH]
 
             with _user_lock(user_hash):
                 global_user_state.add_or_update_user(

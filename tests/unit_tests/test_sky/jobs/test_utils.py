@@ -105,11 +105,14 @@ class TestUpdateFields:
         updated_fields, _ = jobs_utils._update_fields(fields)
         # These are _NON_DB_FIELDS and should be removed
         assert 'cluster_resources' not in updated_fields
-        assert 'cloud' not in updated_fields
         assert 'user_name' not in updated_fields
         assert 'details' not in updated_fields
         # But job_id should remain
         assert 'job_id' in updated_fields
+        # 'cloud' is a non-DB handle field, but because a cluster handle is
+        # required here it is re-added as a DB column for the cached infra
+        # fallback (see _update_fields).
+        assert 'cloud' in updated_fields
 
     def test_cluster_handle_required_false_when_no_handle_fields(self):
         """Test that cluster_handle_required is False when no cluster handle fields."""
@@ -161,10 +164,38 @@ class TestUpdateFields:
         # Always added
         assert 'status' in updated_fields
         assert 'job_id' in updated_fields
-        # Cloud should be removed (non-DB field)
-        assert 'cloud' not in updated_fields
+        # 'cloud' is re-added as a DB column for the cached infra fallback
+        # since a cluster handle is required.
+        assert 'cloud' in updated_fields
         # Should be true due to cloud
         assert cluster_handle_required is True
+
+    def test_adds_cached_infra_fields_when_handle_required(self):
+        """Cached infra/resources fields are re-added for the fallback.
+
+        When a cluster handle is required, the last-cached infra columns
+        ('cloud'/'region'/'zone') and the requested 'resources' string must be
+        selected from the DB so get_managed_job_queue can fall back to them for
+        finished jobs whose cluster handle is gone.
+        """
+        fields = ['job_id', 'cluster_resources']
+        updated_fields, cluster_handle_required = jobs_utils._update_fields(
+            fields)
+        assert cluster_handle_required is True
+        # cluster_resources itself is a non-DB field and is removed.
+        assert 'cluster_resources' not in updated_fields
+        # The DB-backed fallback fields are present.
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            assert field in updated_fields
+
+    def test_does_not_add_cached_infra_fields_when_handle_not_required(self):
+        """Fallback fields are not force-added when no handle is required."""
+        fields = ['job_id', 'status']
+        updated_fields, cluster_handle_required = jobs_utils._update_fields(
+            fields)
+        assert cluster_handle_required is False
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            assert field not in updated_fields
 
 
 class TestGetManagedJobQueue:
@@ -312,6 +343,80 @@ class TestGetManagedJobQueue:
         # For finished job: duration = end_at - (last_recovered_at - job_duration)
         expected_duration = (current_time - 50) - (current_time - 200 - 50)
         assert job['job_duration'] == expected_duration
+
+    def test_finished_job_falls_back_to_cached_infra(self, monkeypatch):
+        """A finished job with no live handle shows last-cached infra/resources.
+
+        When the cluster handle is gone (e.g. the job finished and the cluster
+        was torn down), infra/resources should fall back to the values
+        persisted in the jobs DB instead of a bare '-'.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                cloud='AWS',
+                region='us-east-1',
+                zone='us-east-1a',
+                resources='1x[Spot]A100:8',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cloud'] == 'AWS'
+        assert job['region'] == 'us-east-1'
+        assert job['zone'] == 'us-east-1a'
+        assert job['infra'] == 'AWS (us-east-1a)'
+        assert job['cluster_resources'] == '1x[Spot]A100:8'
+        assert job['cluster_resources_full'] == '1x[Spot]A100:8'
+
+    def test_finished_job_without_cached_infra_shows_dash(self, monkeypatch):
+        """Legacy finished jobs without persisted infra still show '-'."""
+        jobs = [
+            self._make_test_job(
+                1, status=managed_job_state.ManagedJobStatus.SUCCEEDED)
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cloud'] == '-'
+        assert job['region'] == '-'
+        assert job['zone'] == '-'
+        assert job['infra'] == '-'
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+
+    def test_unlaunched_job_does_not_show_requested_resources(
+            self, monkeypatch):
+        """A job that never launched does not show requested resources.
+
+        The cached resources fallback only applies when the job was actually
+        launched (infra persisted); a PENDING job with a requested resources
+        string should still show '-' for cluster resources.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.PENDING,
+                resources='1x[CPU:1+]',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+        assert job['infra'] == '-'
 
     def test_status_converted_to_string(self, monkeypatch):
         """Test that status is converted from enum to string."""
@@ -991,6 +1096,7 @@ class TestFormatJobDetails:
                  failure_reason=None,
                  status='RECOVERING',
                  recovery_reason=None,
+                 pending_reason=None,
                  cloud=None):
         job = {
             'schedule_state': schedule_state,
@@ -1000,7 +1106,8 @@ class TestFormatJobDetails:
         }
         jobs_utils._format_job_details(job=job,
                                        highest_blocking_priority=0,
-                                       recovery_reason=recovery_reason)
+                                       recovery_reason=recovery_reason,
+                                       pending_reason=pending_reason)
         return job['details']
 
     def test_recovery_reason_surfaced(self):
@@ -1057,6 +1164,38 @@ class TestFormatJobDetails:
         # No cloud info -> surface the reason without a (possibly wrong) hint.
         result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
         assert result == 'Recovering: podX OOMKilled (exit code 137)'
+
+    def test_pending_reason_surfaced(self):
+        # A PENDING reason is surfaced in details when nothing else applies.
+        assert self._details(
+            schedule_state='INACTIVE',
+            status='PENDING',
+            pending_reason='Job submitted to queue') == 'Job submitted to queue'
+
+    def test_pending_reason_multiline_collapsed(self):
+        result = self._details(schedule_state='INACTIVE',
+                               status='PENDING',
+                               pending_reason='Rate limited.\nRetrying soon.')
+        assert '\n' not in result
+        assert result == 'Rate limited. Retrying soon.'
+
+    def test_no_pending_reason_is_none(self):
+        assert self._details(schedule_state='INACTIVE',
+                             status='PENDING',
+                             pending_reason=None) is None
+
+    def test_failure_reason_takes_precedence_over_pending(self):
+        assert self._details(status='PENDING',
+                             failure_reason='boom',
+                             pending_reason='ignored') == 'Failure: boom'
+
+    def test_backoff_state_takes_precedence_over_pending(self):
+        # The schedule-state-derived message is more informative than the raw
+        # PENDING event reason, so it wins.
+        assert self._details(
+            schedule_state='ALIVE_BACKOFF',
+            status='PENDING',
+            pending_reason='ignored') == 'In backoff, waiting for resources'
 
 
 class TestReadProvisionStatusFromLog:
