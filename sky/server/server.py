@@ -691,11 +691,10 @@ async def cleanup_download_tmp():
 
 
 def _prune_sky_logs(cutoff: float) -> int:
-    """Remove expired ~/sky_logs artifacts by mtime; returns count removed.
+    """Remove ~/sky_logs artifacts older than cutoff; returns count removed.
 
-    Restricting the top-level sweep to ``sky-*`` directories spares the
-    job/request log trees that share ~/sky_logs (api_server/, jobs_controller/,
-    managed_jobs/, numbered job dirs like '1-my-job').
+    Only sky-* dirs are swept, sparing the job/request log trees that share
+    ~/sky_logs (api_server/, jobs_controller/, managed_jobs/, <job_id>-*).
     """
     sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
     if not os.path.isdir(sky_logs_dir):
@@ -711,10 +710,9 @@ def _prune_sky_logs(cutoff: float) -> int:
                 removed += 1
         except OSError:
             pass
-    # Literal rather than importing sky.client.common.FILE_UPLOAD_LOGS_DIR:
-    # the dependency direction is client -> server, not the reverse.
-    file_uploads_dir = os.path.join(
-        os.path.expanduser(constants.SKY_LOGS_DIRECTORY), 'file_uploads')
+    # sky.client.common.FILE_UPLOAD_LOGS_DIR; not imported since the server
+    # should not depend on the client.
+    file_uploads_dir = os.path.join(sky_logs_dir, 'file_uploads')
     if os.path.isdir(file_uploads_dir):
         for entry in os.scandir(file_uploads_dir):
             if not entry.is_file(follow_symlinks=False):
@@ -729,24 +727,21 @@ def _prune_sky_logs(cutoff: float) -> int:
 
 
 async def cleanup_sky_logs():
-    """Delete expired per-operation artifacts under ~/sky_logs.
+    """Hourly GC of expired per-operation ~/sky_logs artifacts.
 
-    Each launch/exec/provision leaves a ~/sky_logs/sky-<timestamp> directory
-    and each upload a ~/sky_logs/file_uploads/*.log file; nothing else GCs
-    them, so they grow unbounded. Prune anything older than
-    api_server.logs_retention_hours (negative disables the GC).
+    Nothing else cleans up the per-operation sky-<timestamp> dirs and
+    file_uploads/*.log files, so they grow unbounded on a busy server.
     """
     while True:
-        # Reread config each iteration so operators can retune (or disable)
-        # the GC without restarting the API server.
-        skypilot_config.reload_config()
-        retention_hours = skypilot_config.get_nested(
-            ('api_server', 'logs_retention_hours'),
-            server_constants.DEFAULT_LOGS_RETENTION_HOURS)
-        retention_seconds = retention_hours * 3600
         try:
-            if retention_seconds >= 0:
-                cutoff = time.time() - retention_seconds
+            # Use the latest config.
+            skypilot_config.reload_config()
+            retention_hours = skypilot_config.get_nested(
+                ('api_server', 'logs_retention_hours'),
+                server_constants.DEFAULT_LOGS_RETENTION_HOURS)
+            # Negative value disables the GC.
+            if retention_hours >= 0:
+                cutoff = time.time() - retention_hours * 3600
                 removed = await asyncio.to_thread(_prune_sky_logs, cutoff)
                 if removed:
                     logger.info(f'Cleaned up {removed} ~/sky_logs artifact(s) '
@@ -754,7 +749,7 @@ async def cleanup_sky_logs():
         except Exception as e:  # pylint: disable=broad-except
             logger.error('Error in cleanup_sky_logs: '
                          f'{common_utils.format_exception(e)}')
-        await asyncio.sleep(max(retention_seconds, 3600))
+        await asyncio.sleep(3600)
 
 
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,

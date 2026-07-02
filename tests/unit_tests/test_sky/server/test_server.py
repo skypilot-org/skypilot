@@ -899,7 +899,6 @@ def test_prune_sky_logs_removes_only_expired_provision_dirs(
     now = 1_000_000.0
     old = _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
     fresh = _touch_dir(tmp_path / 'sky-2020-01-02-00-00-00-000000', now - 100)
-    # Directories that must never be touched by the GC.
     job_dir = _touch_dir(tmp_path / '1-my-job', now - 10_000)
     api_dir = _touch_dir(tmp_path / 'api_server', now - 10_000)
 
