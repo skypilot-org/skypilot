@@ -13,7 +13,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
-from sky.jobs.constants import DEFAULT_MANAGED_JOB_FIELDS
+from sky.jobs import constants as managed_job_constants
 from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
@@ -172,7 +172,8 @@ def queue_v2(
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
-    fields: Optional[Sequence[str]] = DEFAULT_MANAGED_JOB_FIELDS,
+    fields: Optional[
+        Sequence[str]] = managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
     statuses: Optional[List[str]] = None,

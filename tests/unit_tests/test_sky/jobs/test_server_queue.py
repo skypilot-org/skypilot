@@ -5,9 +5,9 @@ from unittest import mock
 
 import pytest
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
-from sky.jobs.constants import DEFAULT_MANAGED_JOB_FIELDS
 # Target under test
 from sky.jobs.server import core as jobs_core
 from sky.skylet import constants as skylet_constants
@@ -30,7 +30,8 @@ def test_v1_queue_handler_defaults_to_lightweight_fields():
                   all_users=False,
                   job_ids=None)
     _, kwargs = mock_queue_v2.call_args
-    assert kwargs['fields'] == list(DEFAULT_MANAGED_JOB_FIELDS)
+    assert kwargs['fields'] == list(
+        managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 
 
 def _make_job(job_id: int,

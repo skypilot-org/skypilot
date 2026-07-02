@@ -3,9 +3,9 @@ from unittest import mock
 
 import pytest
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.client import sdk_async as jobs_sdk_async
-from sky.jobs.constants import DEFAULT_MANAGED_JOB_FIELDS
 
 
 def _unwrap(fn):
@@ -36,7 +36,8 @@ def test_queue_v2_defaults_to_lightweight_fields():
     # A high remote API version avoids the version-based field stripping so we
     # can assert the full default field set is sent.
     body = _call_raw_queue_v2(refresh=False)
-    assert body['fields'] == list(DEFAULT_MANAGED_JOB_FIELDS)
+    assert body['fields'] == list(
+        managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
     # The lightweight default must not pull heavy fields.
     assert 'node_names' not in body['fields']
     assert 'metadata' not in body['fields']
