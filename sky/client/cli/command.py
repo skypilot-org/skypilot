@@ -69,6 +69,7 @@ from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -134,12 +135,8 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
-_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
-    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group', 'batch_total_batches',
-    'batch_completed_batches'
-]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = (
+    managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
     'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',

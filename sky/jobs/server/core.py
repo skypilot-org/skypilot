@@ -1216,7 +1216,15 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
+    # The deprecated v1 queue body cannot request specific fields, so default
+    # to the lightweight field set to avoid returning heavy fields (e.g. the
+    # task YAML) for every job, which is expensive with many jobs.
+    jobs, _, _, _ = queue_v2(
+        refresh,
+        skip_finished,
+        all_users,
+        job_ids,
+        fields=managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 
     return jobs
 

@@ -8,6 +8,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk_async
 from sky.jobs.client import sdk
+from sky.jobs.constants import DEFAULT_MANAGED_JOB_FIELDS
 from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -47,13 +48,13 @@ async def launch(
 
 
 @usage_lib.entrypoint
-async def queue_v2(
+async def queue_v2(  # pylint: disable=dangerous-default-value
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
+    fields: Optional[List[str]] = DEFAULT_MANAGED_JOB_FIELDS,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
