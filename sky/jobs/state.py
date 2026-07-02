@@ -895,14 +895,18 @@ def set_pending(
         session.commit()
 
 
-async def set_backoff_pending_async(job_id: int, task_id: int):
-    """Set the task to PENDING state if it is in backoff.
+async def set_backoff_pending_async(job_id: int,
+                                    task_id: int,
+                                    reason: str = 'Job is in backoff'):
+    """Set the task to PENDING state if its launch is waiting to continue.
+
+    This is used while the launch is in retry backoff, or while the launch
+    request is parked waiting to resume (e.g. waiting for external admission).
 
     This should only be used to transition from STARTING or RECOVERING back to
     PENDING.
     """
-    await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING,
-                              'Job is in backoff')
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING, reason)
 
     async def _op(session: sql_async.AsyncSession) -> int:
         result = await session.execute(
