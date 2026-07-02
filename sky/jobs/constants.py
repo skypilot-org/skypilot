@@ -101,7 +101,13 @@ EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # If the previous emergency recovery attempt is older than this window, the
 # attempt counter restarts at 1: a long-running job that hits a rare
 # incident every few days should recover every time, while a tight crash
-# loop exhausts the budget in a few hours.
+# loop exhausts the budget in a few hours. A successful recovery does NOT
+# reset the counter — only an emergency-free gap longer than this window
+# does. An error that keeps recurring inside the window (even with healthy
+# runs in between) is deliberately charged as one escalating episode: a
+# recovery alone doesn't prove the underlying problem is gone, and
+# resetting on success would let a recurring-but-recoverable error relaunch
+# the cluster forever.
 EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
 
 # Prefix used for service-account tokens issued to managed jobs that opt in
