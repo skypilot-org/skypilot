@@ -227,7 +227,7 @@ function NodeGpuAllocationGrid({ perNodeGPUs }) {
                 {nodes.map((node) => {
                   const nodeTotal = node.gpu_total || 0;
                   const nodeFree = node.gpu_free || 0;
-                  const nodeUsed = nodeTotal - nodeFree;
+                  const nodeUsed = Math.max(0, nodeTotal - nodeFree);
                   const isFragmented = nodeUsed > 0 && nodeFree > 0;
                   const isUnavailable =
                     node.is_ready === false || node.is_cordoned === true;
