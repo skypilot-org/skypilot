@@ -2111,12 +2111,10 @@ class JobController:
         await managed_job_state.record_emergency_recovery_attempt_async(
             self._job_id, attempt, now)
 
-        # 2. Mark the latest task RECOVERING (recovery_source=EMERGENCY),
-        # saving its prior status so the resume logic can re-attach to a
-        # healthy RUNNING cluster instead of tearing it down. Use the latest
-        # task (it is the only one that can be mid-flight in a chain DAG; for
-        # job groups the resume classification handles the other tasks from
-        # their raw statuses).
+        # 2. Mark the latest task RECOVERING (recovery_source=EMERGENCY on
+        # the event). Use the latest task (it is the only one that can be
+        # mid-flight in a chain DAG; for job groups the resume classification
+        # handles the other tasks from their raw statuses).
         task_id, _ = (await managed_job_state.get_latest_task_id_status_async(
             self._job_id))
         if task_id is None:
@@ -2142,8 +2140,29 @@ class JobController:
             await asyncio.to_thread(self._load_dag)
             return None
 
-        # 3. If the error escaped mid-launch, the job may still hold a
-        # LAUNCHING slot; release it so the retry can acquire a slot cleanly.
+        # 3. Tear down the task's cluster now (best-effort) instead of
+        # leaving it to the retry's forced recovery: the retry always
+        # relaunches from scratch, so the cluster is doomed anyway — don't
+        # leave it running (and billing) through a backoff that can be up to
+        # 30 minutes. terminate_cluster is idempotent and the retry's forced
+        # recovery runs the same cleanup again, so a failure here only
+        # delays the teardown. (No-op for pool jobs: they have no dedicated
+        # cluster — _cleanup_cluster guards on self._pool.)
+        try:
+            await self._cleanup_cluster(
+                managed_job_utils.generate_managed_job_cluster_name(
+                    self._dag.tasks[task_id].name, self._job_id))
+        except Exception as cleanup_error:  # pylint: disable=broad-except
+            logger.warning(
+                'Best-effort cluster teardown before the emergency backoff '
+                'failed; the retry will clean up instead: '
+                f'{common_utils.format_exception(cleanup_error)}')
+
+        # 4. If the error escaped mid-launch, the job may be stuck in a
+        # launch-adjacent schedule state (LAUNCHING / ALIVE_WAITING /
+        # ALIVE_BACKOFF); reset it to ALIVE so it neither holds launch
+        # accounting nor blocks lower-priority jobs' scheduling during the
+        # backoff. The retry re-enters LAUNCHING cleanly when it launches.
         await (managed_job_state.
                normalize_schedule_state_for_emergency_retry_async(self._job_id))
 

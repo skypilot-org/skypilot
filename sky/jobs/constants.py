@@ -97,8 +97,9 @@ EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
 # min(BASE * 2^(N-1), CAP) = 1m, 2m, 4m, 8m, 16m, then 30m (capped) —
 # ~3h of total backoff across a full episode. The backoff may exceed the
 # jobs-controller's 10-minute idle autostop window: that is safe because
-# the job's schedule_state stays in an "alive" state (ALIVE /
-# ALIVE_BACKOFF / ALIVE_WAITING) throughout the backoff, and the skylet
+# the job's schedule_state stays ALIVE throughout the backoff (the
+# emergency bookkeeping resets launch-adjacent states back to ALIVE, which
+# also keeps the job out of the scheduler's blocking-priority set), and the skylet
 # autostop check (sky/skylet/events.py::AutostopEvent, via
 # managed_job_state.get_num_alive_jobs) does not consider the controller
 # idle while any such job exists. Nor does a backing-off job hold one of

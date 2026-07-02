@@ -3232,12 +3232,17 @@ async def record_emergency_recovery_attempt_async(job_id: int,
 @db_retries.retry_async
 async def normalize_schedule_state_for_emergency_retry_async(
         job_id: int) -> None:
-    """Release a stuck LAUNCHING schedule state before an emergency retry.
+    """Reset launch-adjacent schedule states to ALIVE for an emergency retry.
 
-    If the unexpected error escaped mid-launch, the job may still hold a
-    LAUNCHING slot, which counts against the scheduler's launch limits.
-    Move it back to ALIVE so the retry's scheduled_launch can acquire a slot
-    cleanly.
+    If the unexpected error escaped mid-launch (or while waiting or backing
+    off for a launch), the job may be left in LAUNCHING, ALIVE_WAITING, or
+    ALIVE_BACKOFF for the whole emergency backoff (up to 30 minutes).
+    Besides LAUNCHING's launch-slot accounting, all three states make the
+    job look like an active launcher to the scheduler's
+    highest-blocking-priority computation, which would block lower-priority
+    jobs from scheduling until the retry runs. Reset them to ALIVE; the
+    retry's scheduled_launch re-enters LAUNCHING cleanly when it actually
+    launches.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -3245,8 +3250,11 @@ async def normalize_schedule_state_for_emergency_retry_async(
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state ==
-                    ManagedJobScheduleState.LAUNCHING.value,
+                    job_info_table.c.schedule_state.in_([
+                        ManagedJobScheduleState.LAUNCHING.value,
+                        ManagedJobScheduleState.ALIVE_WAITING.value,
+                        ManagedJobScheduleState.ALIVE_BACKOFF.value,
+                    ]),
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.ALIVE.value,

@@ -371,12 +371,15 @@ class TestEmergencyRecoveryState:
     @pytest.mark.parametrize(
         'schedule_state,expected',
         [
-            # Stuck LAUNCHING: released back to ALIVE.
+            # Stuck launch-adjacent states: reset back to ALIVE (they
+            # hold launch accounting / block lower-priority scheduling).
             ('LAUNCHING', 'ALIVE'),
+            ('ALIVE_WAITING', 'ALIVE'),
+            ('ALIVE_BACKOFF', 'ALIVE'),
             # Already ALIVE: no-op.
             ('ALIVE', 'ALIVE'),
-            # Reset by something else (e.g. HA recovery): left untouched
-            # (only a stuck LAUNCHING slot is released).
+            # Reset by something else (e.g. restart recovery): left
+            # untouched.
             ('WAITING', 'WAITING'),
         ])
     async def test_normalize_schedule_state(self, _mock_managed_jobs_db_conn,
@@ -450,9 +453,11 @@ class _RetryLoopHarness:
         dag.is_job_group.return_value = False
         dag.tasks = [task]
         jc._dag = dag
+        jc._pool = None
         jc._emergency_backoff_seconds = None
         jc._run_one_task = AsyncMock(side_effect=body_effects)
         jc._update_failed_task_state = AsyncMock()
+        jc._cleanup_cluster = AsyncMock()
         # The real _load_dag reloads from the DB; the harness keeps the
         # mocked dag.
         jc._load_dag = MagicMock()
@@ -510,6 +515,9 @@ class TestEmergencyRetryLoop:
         assert h.sleeps == [
             jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
         ]
+        # The doomed cluster is torn down during the bookkeeping (before the
+        # backoff), not left running until the retry's forced recovery.
+        h.jc._cleanup_cluster.assert_awaited_once()
         # Normal finally ran exactly once.
         h.set_cancelling.assert_awaited_once()
         h.set_cancelled.assert_awaited_once()
