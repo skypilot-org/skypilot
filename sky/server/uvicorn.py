@@ -8,11 +8,12 @@ import asyncio
 import logging
 import os
 import signal
+import socket
 import sys
 import threading
 import time
 from types import FrameType
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import filelock
 import uvicorn
@@ -55,6 +56,49 @@ _RETRIABLE_REQUEST_NAMES = {
     'sky.jobs.logs',
     'sky.serve.logs',
 }
+
+
+def _reuse_port_enabled() -> bool:
+    """Whether to bind a per-worker SO_REUSEPORT socket.
+
+    With uvicorn's default multiprocess model the parent binds a single
+    listening socket and all workers inherit that one fd, so they share a
+    single kernel accept queue. The kernel wakes waiters on that queue in
+    LIFO order, which tends to hand new connections to the same few "warm"
+    workers repeatedly and leaves the rest idle. With SO_REUSEPORT each worker
+    binds its own socket on the same address and the kernel distributes new
+    connections across the per-socket queues by a 4-tuple hash, spreading the
+    load evenly.
+
+    Opt-in via env var, and only on platforms that support SO_REUSEPORT.
+    """
+    if not hasattr(socket, 'SO_REUSEPORT'):
+        return False
+    return os.environ.get(constants.ENV_VAR_SERVER_REUSE_PORT,
+                          '').lower() in ('1', 'true', 'yes')
+
+
+def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
+    """Bind a listening socket with SO_REUSEPORT for the given config.
+
+    Mirrors ``uvicorn.Config.bind_socket`` for the TCP host/port case but also
+    sets SO_REUSEPORT so that multiple workers can bind the same address and
+    the kernel load-balances new connections across them.
+    """
+    family = socket.AF_INET
+    if config.host and ':' in config.host:
+        # It's an IPv6 address.
+        family = socket.AF_INET6
+    sock = socket.socket(family=family)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    try:
+        sock.bind((config.host, config.port))
+    except OSError as exc:
+        logger.error(exc)
+        sys.exit(1)
+    sock.set_inheritable(True)
+    return sock
 
 
 def add_timestamp_prefix_for_server_logs() -> None:
@@ -232,10 +276,16 @@ class Server(uvicorn.Server):
         logger.info(
             f'Request {request_id} interrupted and will be retried by client.')
 
-    def run(self, *args, **kwargs):
+    def run(self, sockets: Optional[List[socket.socket]] = None, **kwargs):
         """Run the server process."""
         if self.max_db_connections is not None:
             db_utils.set_max_connections(self.max_db_connections)
+        # When reuse-port is enabled the parent does not pre-bind a shared
+        # socket; each worker binds its own SO_REUSEPORT socket here instead.
+        # This also covers workers restarted by the multiprocess supervisor,
+        # which re-invoke run() with the same (empty) socket list.
+        if _reuse_port_enabled() and not sockets:
+            sockets = [_bind_reuse_port_socket(self.config)]
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
@@ -260,7 +310,7 @@ class Server(uvicorn.Server):
         monitor.start()
         try:
             with self.capture_signals():
-                asyncio.run(self.serve(*args, **kwargs))
+                asyncio.run(self.serve(sockets=sockets, **kwargs))
         finally:
             stop_monitor.set()
             monitor.join()
@@ -276,9 +326,19 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
-            sock = config.bind_socket()
+            sockets: List[socket.socket]
+            if _reuse_port_enabled():
+                # Do not pre-bind a shared socket in the parent: each worker
+                # binds its own SO_REUSEPORT socket in Server.run() so the
+                # kernel spreads connections across workers. An empty socket
+                # list is forwarded to every (re)started worker.
+                logger.info('SO_REUSEPORT enabled: each worker binds its own '
+                            'listening socket.')
+                sockets = []
+            else:
+                sockets = [config.bind_socket()]
             SlowStartMultiprocess(config, target=server.run,
-                                  sockets=[sock]).run()
+                                  sockets=sockets).run()
         else:
             server.run()
     finally:
