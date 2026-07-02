@@ -727,19 +727,13 @@ def _prune_sky_logs(cutoff: float) -> int:
 
 
 async def cleanup_sky_logs():
-    """Hourly GC of expired per-operation ~/sky_logs artifacts.
-
-    Nothing else cleans up the per-operation sky-<timestamp> dirs and
-    file_uploads/*.log files, so they grow unbounded on a busy server.
-    """
+    """Hourly GC of expired per-operation ~/sky_logs artifacts."""
     while True:
         try:
-            # Use the latest config.
             skypilot_config.reload_config()
             retention_hours = skypilot_config.get_nested(
                 ('api_server', 'logs_retention_hours'),
                 server_constants.DEFAULT_LOGS_RETENTION_HOURS)
-            # Negative value disables the GC.
             if retention_hours >= 0:
                 cutoff = time.time() - retention_hours * 3600
                 removed = await asyncio.to_thread(_prune_sky_logs, cutoff)
