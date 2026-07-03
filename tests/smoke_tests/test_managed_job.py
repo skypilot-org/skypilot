@@ -252,8 +252,11 @@ def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
             '! echo "$s" | grep "value=None"; '
             '! echo "$s" | grep "in the pool"')
         # Resolve the num_jobs job IDs by name (col 2 or 3 of `sky jobs queue`).
+        # Use --all: on a shared server the default queue is truncated to the
+        # latest 50 jobs, so the just-launched jobs can fall outside the window
+        # and the name lookup finds 0.
         capture_ids_cmd = (
-            's=$(sky jobs queue); echo "$s"; echo "$s" | '
+            's=$(sky jobs queue --all); echo "$s"; echo "$s" | '
             'awk -v n=' + name + ' \'($2==n)||($3==n){print $1}\' | '
             f'sort -un > {ids_file}; cat {ids_file}; '
             f'cnt=$(wc -l < {ids_file}); '
