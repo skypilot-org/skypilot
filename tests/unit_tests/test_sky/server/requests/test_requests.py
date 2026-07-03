@@ -2028,7 +2028,11 @@ def test_request_id_prefix_where_matches_like():
     rows += ['ab9', 'ab9a', 'abaa', 'de-', 'de-x', 'deadbeef']
     for r in rows:
         conn.execute('INSERT OR IGNORE INTO requests VALUES (?)', (r,))
-    for prefix in ['', 'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8]]:
+    # '\U0010ffff' exercises the max-code-point upper-bound fallback.
+    for prefix in [
+            '', 'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8], '\U0010ffff',
+            'a\U0010ffff'
+    ]:
         like = {
             x[0] for x in conn.execute(
                 'SELECT request_id FROM requests WHERE request_id LIKE ?', (

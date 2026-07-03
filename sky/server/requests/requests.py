@@ -759,15 +759,22 @@ def _request_id_prefix_where(prefix: str) -> Tuple[str, Tuple[str, ...]]:
     (verified with EXPLAIN QUERY PLAN: ``LIKE`` -> ``SCAN``, range -> ``SEARCH
     ... USING INDEX``), which made every request lookup O(table size). Request
     ids are lowercase UUIDs, so a case-sensitive prefix range matches exactly
-    the same rows.
+    the same rows; this also matches the Postgres request backend, which
+    already looks up request ids with a case-sensitive ``=``.
 
     An empty prefix matches all rows (a full scan), preserving the previous
     behavior of ``LIKE '%'`` (used for empty-input completion).
     """
     if not prefix:
         return 'request_id LIKE ?', ('%',)
+    last = prefix[-1]
+    if ord(last) >= 0x10FFFF:
+        # Can't form an upper bound past the maximum code point; fall back to a
+        # scan. Real request ids are ASCII UUIDs, so this only guards against
+        # malformed input rather than crashing on chr(0x110000).
+        return 'request_id LIKE ?', (prefix + '%',)
     # Smallest string strictly greater than every string starting with prefix.
-    upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+    upper = prefix[:-1] + chr(ord(last) + 1)
     return 'request_id >= ? AND request_id < ?', (prefix, upper)
 
 
