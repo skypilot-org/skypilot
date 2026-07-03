@@ -1847,6 +1847,9 @@ def get_config_schema():
                 'use_ssm': {
                     'type': 'boolean',
                 },
+                'ssm_profile': {
+                    'type': 'string',
+                },
                 'post_provision_runcmd': {
                     'type': 'array',
                     'items': {

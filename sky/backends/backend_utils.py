@@ -948,7 +948,16 @@ def write_cluster_config(
                 use_ssm = True
 
         if use_ssm:
-            aws_profile = os.environ.get('AWS_PROFILE', None)
+            # An explicit ssm_profile lets deployments whose default
+            # credentials are an ambient role (e.g. pod identity) run SSM
+            # under a named profile without setting AWS_PROFILE process-wide.
+            aws_profile = skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=region.name,
+                keys=('ssm_profile',),
+                default_value=None)
+            if aws_profile is None:
+                aws_profile = os.environ.get('AWS_PROFILE', None)
             profile_str = f'--profile {aws_profile}' if aws_profile else ''
             ip_address_filter = ('Name=private-ip-address,Values=%h'
                                  if use_internal_ips else

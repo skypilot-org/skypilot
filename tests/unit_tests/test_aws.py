@@ -625,3 +625,69 @@ def test_subnet_names_multi_az_no_error(monkeypatch):
     # Only the subnet in the chosen AZ should remain
     assert len(result_subnets) == 1
     assert result_subnets[0].availability_zone == 'us-east-1a'
+
+
+def _write_cluster_config_with_ssm(monkeypatch, aws_config):
+    """Run write_cluster_config with the given aws config and capture the
+    template vars passed to fill_template (aborting before file I/O)."""
+    monkeypatch.setattr(common_utils, 'make_cluster_name_on_cloud',
+                        lambda *args, **kwargs: args[0])
+    monkeypatch.setattr(backend_utils, '_get_yaml_path_from_cluster_name',
+                        lambda *args, **kwargs: '/tmp/fake-yaml-path')
+    monkeypatch.setattr(resources.Resources, 'make_deploy_variables',
+                        lambda *args, **kwargs: {'region': 'us-east-1'})
+    monkeypatch.setattr(logs, 'get_logging_agent', lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        skypilot_config, '_get_loaded_config', lambda *args, **kwargs:
+        config_utils.Config.from_dict({'aws': aws_config}))
+
+    captured = {}
+
+    def fill_template_side_effect(*args, **kwargs):
+        captured.update(args[1])
+        raise RuntimeError('fake-error')
+
+    monkeypatch.setattr(common_utils, 'fill_template',
+                        fill_template_side_effect)
+    with pytest.raises(RuntimeError):
+        backend_utils.write_cluster_config(
+            to_provision=resources.Resources(cloud=AWS(),
+                                             instance_type='c2.xlarge'),
+            num_nodes=1,
+            cluster_config_template='aws-ray.yml.j2',
+            cluster_name='fake-cluster',
+            local_wheel_path=pathlib.Path('fake-wheel-path'),
+            wheel_hash='fake-wheel-hash',
+            region=Region(name='fake-region'),
+            zones=[Zone(name='fake-zone')])
+    return captured
+
+
+def test_ssm_profile_from_config(monkeypatch):
+    """aws.ssm_profile takes precedence over the AWS_PROFILE env var."""
+    monkeypatch.setenv('AWS_PROFILE', 'env-profile')
+    template_vars = _write_cluster_config_with_ssm(monkeypatch, {
+        'use_ssm': True,
+        'ssm_profile': 'config-profile',
+    })
+    proxy_command = template_vars['ssh_proxy_command']
+    assert '--profile config-profile' in proxy_command
+    assert 'env-profile' not in proxy_command
+
+
+def test_ssm_profile_falls_back_to_env(monkeypatch):
+    """Without aws.ssm_profile, the AWS_PROFILE env var is used."""
+    monkeypatch.setenv('AWS_PROFILE', 'env-profile')
+    template_vars = _write_cluster_config_with_ssm(monkeypatch,
+                                                   {'use_ssm': True})
+    assert '--profile env-profile' in template_vars['ssh_proxy_command']
+
+
+def test_ssm_no_profile(monkeypatch):
+    """Without aws.ssm_profile or AWS_PROFILE, no --profile is passed."""
+    monkeypatch.delenv('AWS_PROFILE', raising=False)
+    template_vars = _write_cluster_config_with_ssm(monkeypatch,
+                                                   {'use_ssm': True})
+    proxy_command = template_vars['ssh_proxy_command']
+    assert 'aws ssm start-session' in proxy_command
+    assert '--profile' not in proxy_command
