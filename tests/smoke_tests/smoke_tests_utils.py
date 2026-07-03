@@ -291,13 +291,39 @@ def get_cmd_wait_until_job_status_contains_matching_job_name(
 
 # Managed job functions
 
-_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
-    'sky queue {cluster_name}', 'sky jobs queue').replace(
-        'awk "\\$2 == \\"{job_name}\\"',
-        'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
-            _ALL_JOB_STATUSES,
-            _ALL_MANAGED_JOB_STATUSES).replace('sleep 10',
-                                               'sleep {gap_seconds}')
+# Unlike `sky queue`, the `sky jobs queue` table has a variable number of
+# leading columns: the TASK column can be empty and a WORKSPACE column is
+# rendered whenever the displayed jobs span more than one workspace (see
+# `format_job_table` in sky/jobs/utils.py). Both shift the position of the
+# NAME column, so we match {job_name} in *any* column via an awk loop rather
+# than a fixed column index. This keeps the wait robust regardless of which
+# columns the server renders (e.g. on a shared server where jobs from
+# multiple workspaces are listed and the WORKSPACE column appears).
+_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = (
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
+    'fi; '
+    'current_queue=$(sky jobs queue); '
+    'current_status=$(echo "$current_queue" | '
+    r'awk "{{name_found=0; '
+    r'for (i=1; i<=NF; i++) if (\$i == \"{job_name}\") name_found=1; '
+    r'if (name_found) for (i=1; i<=NF; i++) if (\$i ~ /^(' +
+    _ALL_MANAGED_JOB_STATUSES + r')$/) print \$i}}"); '
+    'found=0; '
+    'while read -r line; do '
+    '  if [[ "$line" =~ {job_status} ]]; then '
+    '    echo "Target job status {job_status} reached."; '
+    '    found=1; '
+    '    break; '
+    '  fi; '
+    'done <<< "$current_status"; '
+    'if [ "$found" -eq 1 ]; then break; fi; '
+    'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
+    'echo "Current queue: $current_queue"; '
+    'sleep {gap_seconds}; '
+    'done')
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(

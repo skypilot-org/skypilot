@@ -787,16 +787,62 @@ class TestCollectDebugDumpManifestParallel:
         cluster_idx = (job_id - 1) // 10
         return f'cluster-{cluster_idx}', job_id
 
-    def _mock_get_cluster_from_name(self, cluster_name):
-        return {
-            'name': cluster_name,
-            'cluster_hash': f'hash-{cluster_name}',
-            'handle': None,
-        }
+    def _mock_get_cluster_dump_data(self, cluster_name):
+        return [('cluster_info.json', {'name': cluster_name})]
 
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
-    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
+    @mock.patch('sky.jobs.utils.managed_job_state'
+                '.get_all_task_ids_names_statuses_logs')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_job_events')
+    @mock.patch('sky.jobs.utils.managed_job_state.get_managed_job_tasks')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.redact_task_yaml')
+    def test_multi_task_job_collects_all_task_clusters(
+        self,
+        mock_redact,
+        mock_get_tasks,
+        mock_get_events,
+        mock_get_task_ids,
+        mock_get_pool,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
+    ):
+        """A multi-task (pipeline) job launches one cluster per task; the
+        manifest should collect all of them, not just the first task's."""
+        mock_redact.side_effect = lambda y: y
+        mock_get_tasks.side_effect = self._mock_get_managed_job_tasks
+        mock_get_events.side_effect = self._mock_get_job_events
+        # Two tasks with distinct names -> two generated cluster names.
+        mock_get_task_ids.return_value = [
+            (0, 'pipe-0', 'SUCCEEDED', None, None),
+            (1, 'pipe-1', 'RUNNING', None, None),
+        ]
+        mock_get_pool.return_value = (None, None)  # not a pool job
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
+
+        result = utils.collect_debug_dump_manifest([1])
+
+        cluster_paths = [
+            p['relative_path']
+            for p in result['inline_data']
+            if '/clusters/' in p['relative_path']
+        ]
+        expected_names = {
+            utils.generate_managed_job_cluster_name('pipe-0', 1),
+            utils.generate_managed_job_cluster_name('pipe-1', 1),
+        }
+        found_names = {
+            p.split('/clusters/')[1].split('/')[0] for p in cluster_paths
+        }
+        assert found_names == expected_names
+        assert len(result['errors']) == 0
+
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
     @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
     @mock.patch('sky.jobs.utils.managed_job_state'
                 '.get_all_task_ids_names_statuses_logs')
@@ -810,9 +856,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_events,
         mock_get_task_ids,
         mock_get_pool,
-        mock_get_cluster,
-        mock_serialize,
-        mock_cluster_events,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
     ):
         """All jobs collected, cluster info deduplicated, no data lost."""
         mock_redact.side_effect = lambda y: y
@@ -821,9 +866,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_task_ids.side_effect = (
             self._mock_get_all_task_ids_names_statuses_logs)
         mock_get_pool.side_effect = self._mock_get_pool_submit_info
-        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
-        mock_serialize.side_effect = lambda r: {'name': r['name']}
-        mock_cluster_events.return_value = []
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
 
         job_ids = list(range(1, self.NUM_JOBS + 1))
         result = utils.collect_debug_dump_manifest(job_ids)
@@ -850,9 +894,9 @@ class TestCollectDebugDumpManifestParallel:
         # No errors
         assert len(result['errors']) == 0
 
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_events_data')
-    @mock.patch('sky.jobs.utils.debug_dump_helpers.serialize_cluster_record')
-    @mock.patch('sky.jobs.utils.global_user_state.get_cluster_from_name')
+    @mock.patch('sky.jobs.utils.global_user_state'
+                '.get_cluster_history_provision_log_path')
+    @mock.patch('sky.jobs.utils.debug_dump_helpers.get_cluster_dump_data')
     @mock.patch('sky.jobs.utils.managed_job_state.get_pool_submit_info')
     @mock.patch('sky.jobs.utils.managed_job_state'
                 '.get_all_task_ids_names_statuses_logs')
@@ -866,9 +910,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_events,
         mock_get_task_ids,
         mock_get_pool,
-        mock_get_cluster,
-        mock_serialize,
-        mock_cluster_events,
+        mock_cluster_dump_data,
+        mock_provision_log_path,
     ):
         """A failing job doesn't break collection for other jobs."""
         mock_redact.side_effect = lambda y: y
@@ -883,9 +926,8 @@ class TestCollectDebugDumpManifestParallel:
         mock_get_task_ids.side_effect = (
             self._mock_get_all_task_ids_names_statuses_logs)
         mock_get_pool.side_effect = self._mock_get_pool_submit_info
-        mock_get_cluster.side_effect = self._mock_get_cluster_from_name
-        mock_serialize.side_effect = lambda r: {'name': r['name']}
-        mock_cluster_events.return_value = []
+        mock_cluster_dump_data.side_effect = self._mock_get_cluster_dump_data
+        mock_provision_log_path.return_value = None
 
         job_ids = list(range(1, self.NUM_JOBS + 1))
         result = utils.collect_debug_dump_manifest(job_ids)

@@ -1096,6 +1096,7 @@ class TestFormatJobDetails:
                  failure_reason=None,
                  status='RECOVERING',
                  recovery_reason=None,
+                 pending_reason=None,
                  cloud=None):
         job = {
             'schedule_state': schedule_state,
@@ -1105,7 +1106,8 @@ class TestFormatJobDetails:
         }
         jobs_utils._format_job_details(job=job,
                                        highest_blocking_priority=0,
-                                       recovery_reason=recovery_reason)
+                                       recovery_reason=recovery_reason,
+                                       pending_reason=pending_reason)
         return job['details']
 
     def test_recovery_reason_surfaced(self):
@@ -1162,6 +1164,38 @@ class TestFormatJobDetails:
         # No cloud info -> surface the reason without a (possibly wrong) hint.
         result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
         assert result == 'Recovering: podX OOMKilled (exit code 137)'
+
+    def test_pending_reason_surfaced(self):
+        # A PENDING reason is surfaced in details when nothing else applies.
+        assert self._details(
+            schedule_state='INACTIVE',
+            status='PENDING',
+            pending_reason='Job submitted to queue') == 'Job submitted to queue'
+
+    def test_pending_reason_multiline_collapsed(self):
+        result = self._details(schedule_state='INACTIVE',
+                               status='PENDING',
+                               pending_reason='Rate limited.\nRetrying soon.')
+        assert '\n' not in result
+        assert result == 'Rate limited. Retrying soon.'
+
+    def test_no_pending_reason_is_none(self):
+        assert self._details(schedule_state='INACTIVE',
+                             status='PENDING',
+                             pending_reason=None) is None
+
+    def test_failure_reason_takes_precedence_over_pending(self):
+        assert self._details(status='PENDING',
+                             failure_reason='boom',
+                             pending_reason='ignored') == 'Failure: boom'
+
+    def test_backoff_state_takes_precedence_over_pending(self):
+        # The schedule-state-derived message is more informative than the raw
+        # PENDING event reason, so it wins.
+        assert self._details(
+            schedule_state='ALIVE_BACKOFF',
+            status='PENDING',
+            pending_reason='ignored') == 'In backoff, waiting for resources'
 
 
 class TestReadProvisionStatusFromLog:

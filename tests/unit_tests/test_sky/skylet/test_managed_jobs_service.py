@@ -340,7 +340,10 @@ class TestGetJobTable:
         assert target_job.recovery_count == 0
         assert target_job.metadata == {}
         assert target_job.workspace == 'ws1'
-        assert not target_job.HasField('details')
+        # job_id1 is PENDING with schedule_state INACTIVE, so there is no
+        # schedule-state message; _format_job_details surfaces the latest
+        # PENDING event reason (from set_pending) in details instead.
+        assert target_job.details == 'Job submitted to queue'
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'
@@ -404,7 +407,10 @@ class TestGetJobTable:
         assert target_job.recovery_count == 0
         assert target_job.metadata == {}
         assert target_job.workspace == 'ws1'
-        assert not target_job.HasField('details')
+        # job_id1 is PENDING with schedule_state INACTIVE, so there is no
+        # schedule-state message; _format_job_details surfaces the latest
+        # PENDING event reason (from set_pending) in details instead.
+        assert target_job.details == 'Job submitted to queue'
         assert not target_job.HasField('failure_reason')
         assert not target_job.HasField('user_name')
         assert target_job.user_hash == 'abcd1234'

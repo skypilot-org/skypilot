@@ -373,14 +373,21 @@ def _get_managed_jobs_from_requests(
     If any request in the context is a managed job request (launch, cancel,
     logs), extract the job IDs from its body and add them to the context.
 
+    This runs before any cluster -> request expansion, so only user-seeded
+    and recent-context requests are expanded into jobs. In particular,
+    requests found via a cluster never seed jobs: every sky.jobs.* request
+    carries the jobs controller cluster name, so allowing that chain would
+    turn any dump touching the controller cluster into a dump of every
+    managed job.
+
     Skips requests that were themselves added because they reference a
     job — that's a same-type re-expansion (job -> request -> job) which
     would let an over-broad matcher (body.name, body.all_users, body.all)
     drag every sibling job of a batch-style request into the dump.
     """
     # Requests added by _get_requests_from_managed_jobs must not re-seed
-    # managed_job_ids here. Other origins (user seed, recent context,
-    # _get_requests_from_clusters) remain free to expand.
+    # managed_job_ids here. (With the current cross-link ordering that
+    # helper runs after this one, so the subtraction is defensive.)
     request_ids = (debug_dump_context['request_ids'] -
                    debug_dump_context['request_ids_via_job'])
     if not request_ids:
@@ -436,13 +443,134 @@ def _get_managed_jobs_from_requests(
             })
 
 
+def _managed_job_cluster_names_from_records(
+        job_records: List[Dict[str, Any]]) -> Dict[int, Set[str]]:
+    """Map job IDs to the underlying cluster name(s) of their tasks.
+
+    A job assigned to a pool records the pool worker it runs on in
+    current_cluster_name. Non-pool jobs use a deterministic per-task
+    cluster name (a multi-task pipeline launches one cluster per task,
+    so a job can have several). Mirrors the resolution in
+    jobs.utils.queue_v2 and jobs.server.core._get_job_cluster_names.
+
+    job_records are queue_v2 records: one record per task, so a
+    multi-task job contributes one name per task.
+    """
+    cluster_names: Dict[int, Set[str]] = collections.defaultdict(set)
+    for job in job_records:
+        job_id = job.get('job_id')
+        if job_id is None:
+            continue
+        current_cluster_name = job.get('current_cluster_name')
+        if current_cluster_name:
+            cluster_names[job_id].add(current_cluster_name)
+            continue
+        if job.get('pool'):
+            # Pool job not yet assigned to a worker — no cluster yet.
+            continue
+        task_name = job.get('task_name')
+        if not task_name:
+            continue
+        cluster_names[job_id].add(
+            managed_job_utils.generate_managed_job_cluster_name(
+                task_name, job_id))
+    return cluster_names
+
+
+def _get_managed_jobs_from_clusters(
+        debug_dump_context: DebugDumpContext) -> None:
+    """Get managed job IDs whose underlying cluster is in the context.
+
+    This must run FIRST in _build_debug_dump — before the recent-activity
+    scan and before any other cross-link expansion — so the cluster names
+    it sees are exactly the ones the user explicitly requested. That keeps
+    the cluster -> job expansion intentional: a pool worker is shared by
+    many jobs, so mapping it back to all of its jobs is only reasonable
+    when the user asked about that cluster specifically. Clusters that
+    enter the context later — via the recent-activity scan, job ->
+    cluster, or request -> cluster — are never expanded into jobs.
+    """
+    if not debug_dump_context['cluster_names']:
+        return
+    logger.debug(
+        f'Getting managed jobs for '
+        f'{len(debug_dump_context["cluster_names"])} requested clusters')
+    try:
+        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                   all_users=True)
+        job_cluster_names = _managed_job_cluster_names_from_records(jobs)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get managed jobs for clusters: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'cross_link',
+            'resource': 'managed_jobs_from_clusters',
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
+        return
+    for job_id, names in job_cluster_names.items():
+        matched = names & debug_dump_context['cluster_names']
+        if matched:
+            logger.debug(f'Cross-link: cluster(s) {sorted(matched)} -> '
+                         f'managed job {job_id}')
+            debug_dump_context['managed_job_ids'].add(job_id)
+
+
+def _get_job_clusters_from_managed_jobs(
+        debug_dump_context: DebugDumpContext) -> None:
+    """Get the underlying per-job cluster names from managed jobs.
+
+    Only meaningful in consolidation mode, where job clusters are recorded
+    in this API server's own state. In non-consolidation mode they live on
+    the remote controller and are collected via the controller-side
+    manifest in _dump_managed_job_info instead.
+
+    Must run BEFORE _get_requests_from_clusters so that requests
+    referencing these clusters are cross-linked into the dump. The jobs
+    controller cluster is deliberately NOT added here — see
+    _get_clusters_from_managed_jobs for why it must come after request
+    expansion.
+    """
+    if not debug_dump_context['managed_job_ids']:
+        return
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    job_ids = list(debug_dump_context['managed_job_ids'])
+    logger.debug(f'Getting job clusters for {len(job_ids)} managed jobs')
+    try:
+        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                   job_ids=job_ids,
+                                                   all_users=True)
+        job_cluster_names = _managed_job_cluster_names_from_records(jobs)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get job clusters for managed jobs: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'cross_link',
+            'resource': 'job_clusters_from_managed_jobs',
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
+        return
+    for job_id, names in job_cluster_names.items():
+        for name in sorted(names):
+            logger.debug(f'Cross-link: managed job {job_id} -> '
+                         f'cluster {name!r}')
+            debug_dump_context['cluster_names'].add(name)
+
+
 def _get_clusters_from_managed_jobs(
         debug_dump_context: DebugDumpContext) -> None:
-    """Get underlying cluster names from managed jobs.
+    """Add the jobs controller cluster for any managed jobs in the context.
 
-    In non-consolidation mode, the actual job clusters live on the remote
-    controller and aren't available on the API server. We just include the
-    jobs controller itself; _dump_managed_job_info handles per-job details.
+    This must stay AFTER _get_requests_from_clusters in the cross-link
+    order: every sky.jobs.* request stores the controller cluster name in
+    its cluster_name column, so expanding requests from the controller
+    cluster would pull every managed-jobs request ever made (and,
+    transitively, unrelated resources) into any dump that touches a single
+    job. The controller cluster is included for its cluster record and
+    events only.
+
+    Per-job clusters are handled by _get_job_clusters_from_managed_jobs.
     """
     if not debug_dump_context['managed_job_ids']:
         return
@@ -488,6 +616,21 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             launched_at = cluster.get('launched_at') or 0
             if status_updated_at >= cutoff_time or launched_at >= cutoff_time:
                 cluster_name = cluster.get('name')
+                if cluster_name and controller_utils.Controllers.from_name(
+                        cluster_name) is not None:
+                    # Skip controller clusters: every sky.jobs.* /
+                    # sky.serve.* request stores its controller's cluster
+                    # name, so letting a controller into the context here
+                    # would make _get_requests_from_clusters pull every
+                    # such request ever made into any recent-activity
+                    # dump. The jobs controller's cluster record is still
+                    # dumped whenever managed jobs are in the context —
+                    # _get_clusters_from_managed_jobs adds it after
+                    # request expansion — and explicitly requesting a
+                    # controller with -c still works.
+                    logger.debug(f'Recent: skipping controller cluster '
+                                 f'{cluster_name!r}')
+                    continue
                 if cluster_name:
                     reasons = []
                     if status_updated_at >= cutoff_time:
@@ -1134,22 +1277,21 @@ def _dump_cluster_info(cluster_names: Set[str],
         cluster_dir = os.path.join(clusters_dir, cluster_name)
         os.makedirs(cluster_dir, exist_ok=True)
 
-        # Get cluster info from DB
-        cluster_record = None
+        # Get cluster info, history, and events. Cluster history and
+        # events outlive the cluster row, so terminated clusters still
+        # produce data here.
         try:
-            cluster_record = global_user_state.get_cluster_from_name(
-                cluster_name)
-            if cluster_record is not None:
-                cluster_info = debug_dump_helpers.serialize_cluster_record(
-                    cluster_record)
-                cluster_info_path = os.path.join(cluster_dir,
-                                                 'cluster_info.json')
-                with open(cluster_info_path, 'w', encoding='utf-8') as f:
-                    json.dump(cluster_info, f, indent=2, default=str)
+            dump_data = debug_dump_helpers.get_cluster_dump_data(cluster_name)
+            for filename, content in dump_data:
+                file_path = os.path.join(cluster_dir, filename)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(content, f, indent=2, default=str)
+            if dump_data:
                 logger.debug(f'Dumped cluster {cluster_name!r} '
-                             f'(status={cluster_record.get("status")})')
+                             f'({len(dump_data)} files)')
             else:
-                logger.debug(f'Cluster {cluster_name!r} not found in DB')
+                logger.debug(f'Cluster {cluster_name!r} not found in DB or '
+                             f'cluster history')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for cluster '
                            f'{cluster_name}: {e}')
@@ -1161,27 +1303,26 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'traceback': _full_traceback()
                 })
 
-        # Get cluster events
+        # Copy the provision log if available. The path is recorded in
+        # cluster history, so this also works for terminated clusters.
         try:
-            cluster_hash = (cluster_record.get('cluster_hash')
-                            if cluster_record else None)
-            if cluster_hash:
-                for event_data in debug_dump_helpers.get_cluster_events_data(
-                        cluster_hash):
-                    event_file = f'events_{event_data["event_type"]}.json'
-                    event_path = os.path.join(cluster_dir, event_file)
-                    with open(event_path, 'w', encoding='utf-8') as f:
-                        json.dump(event_data['events'],
-                                  f,
-                                  indent=2,
-                                  default=str)
+            provision_log_path = (
+                global_user_state.get_cluster_history_provision_log_path(
+                    cluster_name))
+            if provision_log_path:
+                provision_log = pathlib.Path(provision_log_path).expanduser()
+                if provision_log.is_file():
+                    shutil.copy2(provision_log,
+                                 os.path.join(cluster_dir, 'provision.log'))
+                    logger.debug(
+                        f'Copied provision log for cluster {cluster_name!r}')
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get events for cluster '
+            logger.warning(f'Failed to copy provision log for cluster '
                            f'{cluster_name}: {e}')
             if errors is not None:
                 errors.append({
                     'component': 'clusters',
-                    'resource': f'{cluster_name}/events',
+                    'resource': f'{cluster_name}/provision_log',
                     'error': str(e),
                     'traceback': _full_traceback()
                 })
@@ -1211,6 +1352,24 @@ def _dump_cluster_info(cluster_names: Set[str],
                 errors.append({
                     'component': 'clusters',
                     'resource': f'{cluster_name}/associated_requests',
+                    'error': str(e),
+                    'traceback': _full_traceback()
+                })
+
+        # Live cluster record for the skylet-log and Kubernetes sections
+        # below. None for terminated clusters, which have no reachable
+        # node or handle (their history/events were dumped above).
+        cluster_record = None
+        try:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get cluster record for '
+                           f'{cluster_name}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{cluster_name}/cluster_record',
                     'error': str(e),
                     'traceback': _full_traceback()
                 })
@@ -1484,16 +1643,38 @@ def _build_debug_dump(
     (server info, requests, clusters, managed jobs, client info,
     errors, summary).
     """
-
-    # Populate from recent activity if requested
+    # Populate the context and cross-link related resources. Each helper
+    # runs exactly once, and the order is load-bearing:
+    # 1. Expand clusters -> jobs BEFORE anything else adds cluster names
+    #    to the context (the recent-activity scan, job -> cluster,
+    #    request -> cluster), so only user-requested clusters expand into
+    #    jobs. A pool worker maps to every job that ever ran on it, so a
+    #    later-added worker (e.g. via a pool job's job -> cluster link,
+    #    or the recent scan) must not fan back out into all of its jobs.
+    # 2. Discover the remaining managed jobs (recent scan, seeded/recent
+    #    requests) so the job -> cluster expansion sees the full job set.
+    # 3. Add the jobs' own clusters BEFORE expanding clusters into
+    #    requests, so requests referencing those clusters are included.
+    # 4. Expand clusters -> requests and jobs -> requests.
+    # 5. Map requests -> clusters last (requests found via a cluster are
+    #    skipped there; see _get_clusters_from_requests). The jobs
+    #    controller cluster is also added last: every sky.jobs.* request
+    #    carries the controller cluster name, so expanding requests from
+    #    it would pull every managed-jobs request into the dump (see
+    #    _get_clusters_from_managed_jobs).
+    # Note requests found via a cluster are never expanded into jobs:
+    # _get_managed_jobs_from_requests runs before
+    # _get_requests_from_clusters. Combined with the via_cluster skip in
+    # _get_clusters_from_requests, a cluster shared by many requests
+    # (e.g. the controller) cannot drag unrelated jobs or clusters in.
+    logger.debug('Cross-linking related resources')
+    _get_managed_jobs_from_clusters(debug_dump_context)
     if recent_minutes is not None:
         _populate_recent_context(debug_dump_context, recent_minutes)
-
-    # Collect all related resources (cross-linking)
-    logger.debug('Cross-linking related resources')
+    _get_managed_jobs_from_requests(debug_dump_context)
+    _get_job_clusters_from_managed_jobs(debug_dump_context)
     _get_requests_from_clusters(debug_dump_context)
     _get_requests_from_managed_jobs(debug_dump_context)
-    _get_managed_jobs_from_requests(debug_dump_context)
     _get_clusters_from_requests(debug_dump_context)
     _get_clusters_from_managed_jobs(debug_dump_context)
 

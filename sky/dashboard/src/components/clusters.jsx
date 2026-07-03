@@ -33,7 +33,9 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { isForceEmpty } from '@/lib/utils';
 import {
   getClusters,
   getClusterHistory,
@@ -42,6 +44,7 @@ import {
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
+import { ServerIcon } from '@/components/elements/icons';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -1179,7 +1182,7 @@ export function ClusterTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((item, index) => {
                   return (
                     <TableRow key={index}>
@@ -1192,14 +1195,18 @@ export function ClusterTable({
                   );
                 })
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    {showHistory ? 'No clusters found' : 'No active clusters'}
-                  </TableCell>
-                </TableRow>
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<ServerIcon className="w-5 h-5" />}
+                  title={
+                    showHistory ? 'No clusters found' : 'No active clusters'
+                  }
+                  description={
+                    showHistory
+                      ? 'No clusters in the selected time range'
+                      : 'Launch a cluster to run your workloads'
+                  }
+                />
               )}
             </TableBody>
           </Table>

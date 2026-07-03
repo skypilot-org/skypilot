@@ -17,11 +17,14 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { isForceEmpty } from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
+import { VolumeIcon } from '@/components/elements/icons';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import {
@@ -757,7 +760,7 @@ function VolumesTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((volume) => (
                   <TableRow key={volume.name}>
                     {visibleColumns.map((col) =>
@@ -768,14 +771,12 @@ function VolumesTable({
                   </TableRow>
                 ))
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    No volumes found
-                  </TableCell>
-                </TableRow>
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<VolumeIcon className="w-5 h-5" />}
+                  title="No volumes found"
+                  description="Create a volume to mount storage in your clusters and jobs"
+                />
               )}
             </TableBody>
           </Table>
