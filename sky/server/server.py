@@ -695,13 +695,20 @@ def _prune_sky_logs(cutoff: float) -> int:
 
     Only sky-* dirs are swept, sparing the job/request log trees that share
     ~/sky_logs (api_server/, jobs_controller/, managed_jobs/, <job_id>-*).
+    Dirs holding the provision log of an existing cluster are kept regardless
+    of age so /provision_logs keeps serving live clusters; once the cluster
+    is terminated its logs fall back to the age-based retention.
     """
     sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
     if not os.path.isdir(sky_logs_dir):
         return 0
+    protected_dirs = {
+        os.path.basename(os.path.dirname(path))
+        for path in global_user_state.get_all_cluster_provision_log_paths()
+    }
     removed = 0
     for entry in os.scandir(sky_logs_dir):
-        if not entry.name.startswith('sky-'):
+        if not entry.name.startswith('sky-') or entry.name in protected_dirs:
             continue
         try:
             if (entry.is_dir(follow_symlinks=False) and

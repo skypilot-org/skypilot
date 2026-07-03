@@ -329,7 +329,7 @@ Example:
 
 Retention period in hours for the per-operation provision log directories under ``~/sky_logs/sky-*`` on the API server (optional). Set to a negative value to disable this GC.
 
-Each launch/exec/provision creates a ``~/sky_logs/sky-<timestamp>`` directory holding server-side copies of ``provision.log``, ``setup-*.log``, ``run.log``, etc. (and each upload a ``~/sky_logs/file_uploads/*.log`` file). The GC daemon removes entries older than this period; the launched resources (clusters/jobs) are unaffected.
+Each launch/exec/provision creates a ``~/sky_logs/sky-<timestamp>`` directory holding server-side copies of ``provision.log``, ``setup-*.log``, ``run.log``, etc. (and each upload a ``~/sky_logs/file_uploads/*.log`` file). The GC daemon removes entries older than this period, except directories holding the provision log of an existing cluster, which are kept for as long as the cluster exists. The launched resources (clusters/jobs) are unaffected.
 
 Default: ``720`` (30 days).
 

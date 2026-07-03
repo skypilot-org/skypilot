@@ -1689,6 +1689,15 @@ def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
 
 
 @metrics_lib.time_me
+def get_all_cluster_provision_log_paths() -> List[str]:
+    """Returns the recorded provision_log_path of every existing cluster."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(cluster_table.c.provision_log_path).all()
+    return [row.provision_log_path for row in rows if row.provision_log_path]
+
+
+@metrics_lib.time_me
 def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from cluster_history for this name.
 
