@@ -749,6 +749,28 @@ async def update_status_msg_async(request_id: str, status_msg: str) -> None:
         request_id, status_msg)
 
 
+def _request_id_prefix_where(prefix: str) -> Tuple[str, Tuple[str, ...]]:
+    """WHERE fragment + params matching request_ids that start with ``prefix``.
+
+    Semantically equivalent to ``request_id LIKE prefix || '%'`` but expressed
+    as a range (``request_id >= ? AND request_id < ?``) so SQLite can use the
+    request_id primary-key index instead of a full table scan. SQLite's default
+    case-insensitive LIKE cannot use the BINARY-collated primary-key index
+    (verified with EXPLAIN QUERY PLAN: ``LIKE`` -> ``SCAN``, range -> ``SEARCH
+    ... USING INDEX``), which made every request lookup O(table size). Request
+    ids are lowercase UUIDs, so a case-sensitive prefix range matches exactly
+    the same rows.
+
+    An empty prefix matches all rows (a full scan), preserving the previous
+    behavior of ``LIKE '%'`` (used for empty-input completion).
+    """
+    if not prefix:
+        return 'request_id LIKE ?', ('%',)
+    # Smallest string strictly greater than every string starting with prefix.
+    upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+    return 'request_id >= ? AND request_id < ?', (prefix, upper)
+
+
 def _get_request_no_lock(
         request_id: str,
         fields: Optional[List[str]] = None) -> Optional[Request]:
@@ -757,10 +779,11 @@ def _get_request_no_lock(
     columns_str = ', '.join(REQUEST_COLUMNS)
     if fields:
         columns_str = ', '.join(fields)
+    where, params = _request_id_prefix_where(request_id)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                        'WHERE request_id LIKE ?'), (request_id + '%',))
+        cursor.execute(
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}', params)
         row = cursor.fetchone()
         if row is None:
             return None
@@ -777,9 +800,10 @@ async def _get_request_no_lock_async(
     columns_str = ', '.join(REQUEST_COLUMNS)
     if fields:
         columns_str = ', '.join(fields)
+    where, params = _request_id_prefix_where(request_id)
     async with _DB.execute_fetchall_async(
-        (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-         'WHERE request_id LIKE ?'), (request_id + '%',)) as rows:
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
+            params) as rows:
         row = rows[0] if rows else None
         if row is None:
             return None
@@ -1514,11 +1538,12 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(fields)
         else:
             columns_str = ', '.join(REQUEST_COLUMNS)
+        where, params = _request_id_prefix_where(request_id_prefix)
         with _DB.conn:
             cursor = _DB.conn.cursor()
-            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                            'WHERE request_id LIKE ?'),
-                           (request_id_prefix + '%',))
+            cursor.execute(
+                f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
+                params)
             rows = cursor.fetchall()
             if not rows:
                 return None
@@ -1537,9 +1562,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(fields)
         else:
             columns_str = ', '.join(REQUEST_COLUMNS)
+        where, params = _request_id_prefix_where(request_id_prefix)
         async with _DB.execute_fetchall_async(
-            (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-             'WHERE request_id LIKE ?'), (request_id_prefix + '%',)) as rows:
+                f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
+                params) as rows:
             if not rows:
                 return None
             if fields:
@@ -1555,9 +1581,9 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         columns = 'status'
         if include_msg:
             columns += ', status_msg'
-        sql = (f'SELECT {columns} FROM {REQUEST_TABLE} '
-               f'WHERE request_id LIKE ?')
-        async with _DB.execute_fetchall_async(sql, (request_id + '%',)) as rows:
+        where, params = _request_id_prefix_where(request_id)
+        sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE {where}'
+        async with _DB.execute_fetchall_async(sql, params) as rows:
             if rows is None or len(rows) == 0:
                 return None
             status = RequestStatus(rows[0][0])
@@ -1568,16 +1594,17 @@ class SqliteRequestBackend(request_storage.RequestBackend):
     async def get_api_request_ids_start_with(self,
                                              incomplete: str) -> List[str]:
         assert _DB is not None
+        where, params = _request_id_prefix_where(incomplete)
         async with _DB.execute_fetchall_async(
                 f"""SELECT request_id FROM {REQUEST_TABLE}
-                    WHERE request_id LIKE ?
+                    WHERE {where}
                     ORDER BY
                         CASE
                             WHEN status IN ('PENDING', 'RUNNING') THEN 0
                             ELSE 1
                         END,
                         created_at DESC
-                    LIMIT 1000""", (f'{incomplete}%',)) as rows:
+                    LIMIT 1000""", params) as rows:
             if not rows:
                 return []
         return [row[0] for row in rows]
