@@ -59,7 +59,6 @@ import threading
 import typing
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-import filelock
 import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
@@ -155,6 +154,27 @@ def get_skypilot_config_lock_path() -> str:
     lock_path = os.path.expanduser(SKYPILOT_CONFIG_LOCK_PATH)
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     return lock_path
+
+
+# Distributed lock id guarding config-file reads/writes.
+# A Postgres advisory lock if PG is available, falling back to a file
+# lock locally). All config-file writers/readers MUST use this same id
+#  so they stay mutually exclusive.
+SKYPILOT_CONFIG_LOCK_ID = 'skypilot-config-file'
+
+
+def get_skypilot_config_lock(timeout: Optional[float] = None):
+    """Return the distributed lock guarding the config file.
+
+    ``timeout=None`` waits indefinitely (matches the historical file-lock
+    behavior); callers that must not block forever pass a timeout and handle
+    ``locks.LockTimeout``.
+    """
+    # Lazy import: sky.utils.locks -> global_user_state -> skypilot_config, so a
+    # top-level import here would be circular. Imported at call time (after all
+    # modules are loaded) it is safe.
+    from sky.utils import locks  # pylint: disable=import-outside-toplevel
+    return locks.get_lock(SKYPILOT_CONFIG_LOCK_ID, timeout)
 
 
 def _get_config_context() -> ConfigContext:
@@ -596,7 +616,8 @@ def overlay_skypilot_config(
 
 def safe_reload_config() -> None:
     """Reloads the config, safe to be called concurrently."""
-    with filelock.FileLock(get_skypilot_config_lock_path()):
+    # timeout=None: wait indefinitely, matching the historical file-lock read.
+    with get_skypilot_config_lock():
         reload_config()
 
 

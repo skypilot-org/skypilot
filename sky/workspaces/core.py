@@ -3,8 +3,6 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-import filelock
-
 from sky import check as sky_check
 from sky import exceptions
 from sky import global_user_state
@@ -122,10 +120,11 @@ def _update_workspaces_config(
     Returns:
         The updated workspaces configuration.
     """
-    lock_path = skypilot_config.get_skypilot_config_lock_path()
+    # Distributed config lock: serializes config read-modify-write across worker
+    # processes.
     try:
-        with filelock.FileLock(lock_path,
-                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
             # Read the current config inside the lock to ensure we have
             # the latest state
             current_config = skypilot_config.to_dict()
@@ -141,13 +140,12 @@ def _update_workspaces_config(
             skypilot_config.update_api_server_config_no_lock(current_config)
 
             return current_workspaces
-    except filelock.Timeout as e:
+    except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to update workspace configuration due to a timeout '
-            f'when trying to acquire the lock at {lock_path}. This may '
+            'Failed to update workspace configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again or manually remove the lock '
-            f'file if you believe it is stale.') from e
+            'configuration. Please try again.') from e
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -704,11 +702,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     resource_checker.check_no_active_resources_for_workspaces(
         workspaces_to_check)
 
-    # Use file locking to prevent race conditions
-    lock_path = skypilot_config.get_skypilot_config_lock_path()
     try:
-        with filelock.FileLock(lock_path,
-                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
@@ -724,13 +720,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     elif operation == 'delete':
                         permission_service.remove_workspace_policy(
                             workspace_name)
-    except filelock.Timeout as e:
+    except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to update configuration due to a timeout '
-            f'when trying to acquire the lock at {lock_path}. This may '
+            'Failed to update configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again or manually remove the lock '
-            f'file if you believe it is stale.') from e
+            'configuration. Please try again.') from e
 
     # Validate the configuration by running sky check
     try:
