@@ -44,13 +44,14 @@ class TestWorkspaceManagement(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir)
 
-    @mock.patch('sky.skypilot_config.get_skypilot_config_lock_path')
+    @mock.patch('sky.skypilot_config.get_skypilot_config_lock')
+    @mock.patch('sky.skypilot_config.reload_config')
     @mock.patch('sky.skypilot_config.to_dict')
     @mock.patch('sky.skypilot_config.update_api_server_config_no_lock')
     def test_internal_update_workspaces_config(self, mock_update_no_lock,
-                                               mock_to_dict, mock_lock_path):
+                                               mock_to_dict, mock_reload,
+                                               mock_lock):
         """Test the internal helper for updating workspaces configuration."""
-        mock_lock_path.return_value = self.config_path + '.lock'
         mock_to_dict.return_value = self.sample_config.copy()
 
         new_workspaces = {
@@ -71,7 +72,10 @@ class TestWorkspaceManagement(unittest.TestCase):
 
         # Verify the function called the right methods
         mock_to_dict.assert_called_once()
-        mock_lock_path.assert_called_once()
+        # Acquires the distributed config lock and reloads from the backing
+        # store inside it (so a cross-replica-stale in-memory read can't clobber).
+        mock_lock.assert_called_once()
+        mock_reload.assert_called_once()
         mock_update_no_lock.assert_called_once()
 
         # Verify the written config has the updated workspaces
