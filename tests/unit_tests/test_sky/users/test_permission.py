@@ -706,7 +706,8 @@ class TestPermissionService:
 
         mock_get_lock.assert_called_once_with(
             permission.POLICY_UPDATE_LOCK_ID,
-            permission.POLICY_UPDATE_LOCK_TIMEOUT_SECONDS)
+            permission.POLICY_UPDATE_LOCK_TIMEOUT_SECONDS,
+            poll_interval=permission.POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS)
         mock_lock.__enter__.assert_called_once()
         mock_lock.__exit__.assert_called_once()
 

@@ -162,6 +162,21 @@ def get_skypilot_config_lock_path() -> str:
 #  so they stay mutually exclusive.
 SKYPILOT_CONFIG_LOCK_ID = 'skypilot-config-file'
 
+# Bounded wait for `safe_reload_config` (a read): long enough to ride out a
+# writer holding the lock, short enough not to hang the caller behind a wedged
+# holder. On timeout the reload is skipped and the current config is kept.
+_CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS = 20
+
+# How often a contended acquirer retries the config lock. The Postgres lock
+# acquires via `pg_try_advisory_lock` polled every `poll_interval` seconds; its
+# default (1s) means a waiter can sleep up to ~1s after the holder releases
+# before noticing. The config lock is held only for a fast reload/RMW (a file
+# read + a single-row DB query, ~ms) but sits on hot paths (every sync-handler
+# config refresh, login-time reconcile, config write), so poll at 100ms to keep
+# contended latency ~10x lower. Still far above a DB-storming rate for the few
+# waiters this lock ever sees.
+_CONFIG_LOCK_POLL_INTERVAL_SECONDS = 0.1
+
 
 def get_skypilot_config_lock(timeout: Optional[float] = None):
     """Return the distributed lock guarding the config file.
@@ -174,7 +189,9 @@ def get_skypilot_config_lock(timeout: Optional[float] = None):
     # top-level import here would be circular. Imported at call time (after all
     # modules are loaded) it is safe.
     from sky.utils import locks  # pylint: disable=import-outside-toplevel
-    return locks.get_lock(SKYPILOT_CONFIG_LOCK_ID, timeout)
+    return locks.get_lock(SKYPILOT_CONFIG_LOCK_ID,
+                          timeout,
+                          poll_interval=_CONFIG_LOCK_POLL_INTERVAL_SECONDS)
 
 
 def _get_config_context() -> ConfigContext:
@@ -615,10 +632,23 @@ def overlay_skypilot_config(
 
 
 def safe_reload_config() -> None:
-    """Reloads the config, safe to be called concurrently."""
-    # timeout=None: wait indefinitely, matching the historical file-lock read.
-    with get_skypilot_config_lock():
-        reload_config()
+    """Reloads the config, safe to be called concurrently.
+
+    Best-effort refresh with a bounded lock wait: a reload is a *read*, so on a
+    lock timeout we log and proceed with the currently loaded config rather than
+    block the caller indefinitely behind a wedged lock holder (the historical
+    ``timeout=None`` could hang every reloader across replicas forever).
+    """
+    # Lazy import to avoid the sky.utils.locks -> global_user_state ->
+    # skypilot_config import cycle (see get_skypilot_config_lock).
+    from sky.utils import locks  # pylint: disable=import-outside-toplevel
+    try:
+        with get_skypilot_config_lock(_CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS):
+            reload_config()
+    except locks.LockTimeout:
+        logger.warning(
+            'Timed out acquiring the config lock to reload; proceeding with '
+            'the currently loaded config.')
 
 
 def reload_config() -> None:

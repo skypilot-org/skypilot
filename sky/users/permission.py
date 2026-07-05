@@ -31,6 +31,11 @@ logger = sky_logging.init_logger(__name__)
 # Distributed lock id guarding casbin policy writes.
 POLICY_UPDATE_LOCK_ID = 'casbin-policy-update'
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
+# Retry the (short-held) policy lock every 100ms instead of the Postgres lock's
+# 1s default, so a contended waiter on the hot path (login seeds a role, each
+# reconcile calls update_role / workspace policy writes) doesn't sleep up to ~1s
+# after the holder releases. See sky/utils/locks.py PostgresLock.acquire.
+POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS = 0.1
 
 _enforcer_instance: Optional['PermissionService'] = None
 
@@ -640,8 +645,10 @@ class PermissionService:
 def _policy_lock() -> Generator[None, None, None]:
     """Context manager for policy update lock."""
     try:
-        with locks.get_lock(POLICY_UPDATE_LOCK_ID,
-                            POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
+        with locks.get_lock(
+                POLICY_UPDATE_LOCK_ID,
+                POLICY_UPDATE_LOCK_TIMEOUT_SECONDS,
+                poll_interval=POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS):
             yield
     except locks.LockTimeout as e:
         raise RuntimeError('Failed to update policy due to a timeout when '
