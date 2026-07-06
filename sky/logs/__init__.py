@@ -39,8 +39,11 @@ def register_logging_agent_provider(
 
 
 def get_logging_agent() -> Optional[LoggingAgent]:
-    if _logging_agent_provider is not None:
-        agent = _logging_agent_provider()
+    # Capture into a local so a concurrent register_logging_agent_provider(None)
+    # cannot clear the global between the check and the call.
+    provider = _logging_agent_provider
+    if provider is not None:
+        agent = provider()
         if agent is not None:
             return agent
     store = skypilot_config.get_nested(('logs', 'store'), None)
