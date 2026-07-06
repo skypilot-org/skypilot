@@ -22,9 +22,12 @@ import { YamlEditor } from '@/components/ui/yaml-editor';
 export function Config() {
   const { userRole, restrictConfigToAdmins } = useSidebar();
   const isAdmin = userRole === 'admin';
-  // Only restrict the config view when the server has opted in
-  // (rbac.restrict_config_to_admins) AND the caller is not an admin.
-  const configRestricted = restrictConfigToAdmins && !isAdmin;
+  // Who can read the config: admins always; a 'user' only when the server
+  // hasn't restricted it (rbac.restrict_config_to_admins). Viewers never can
+  // (config is not on the viewer allowlist), so they get the access-denied
+  // card instead of a 403.
+  const canViewConfig =
+    isAdmin || (userRole === 'user' && !restrictConfigToAdmins);
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,9 +55,9 @@ export function Config() {
   }, []);
 
   useEffect(() => {
-    // When config is restricted to admins, non-admins get a 403, so skip the
-    // request entirely and show the access-denied card instead.
-    if (configRestricted) {
+    // If the caller can't read the config, it would 403, so skip the request
+    // entirely and show the access-denied card instead.
+    if (!canViewConfig) {
       setLoading(false);
       return;
     }
@@ -69,7 +72,7 @@ export function Config() {
     if (typeof window !== 'undefined') {
       checkGrafana();
     }
-  }, [configRestricted, loadConfig]);
+  }, [canViewConfig, loadConfig]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -172,10 +175,10 @@ export function Config() {
     );
   }
 
-  // The API server configuration exposes admin-only secrets. When the server
-  // opts into restricting it (rbac.restrict_config_to_admins), non-admins get
-  // an access-denied card instead of a 403.
-  if (configRestricted) {
+  // The API server configuration exposes admin-only secrets. Anyone who can't
+  // read it (restricted non-admins, or viewers) gets an access-denied card
+  // instead of a 403.
+  if (!canViewConfig) {
     return (
       <Card className="w-full">
         <CardHeader>

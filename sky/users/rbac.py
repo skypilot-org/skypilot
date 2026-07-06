@@ -442,20 +442,26 @@ def get_role_permissions(
         config_permissions[role_name] = permissions
     # Add default roles if not present
     if 'user' not in config_permissions:
-        user_blocklist = _DEFAULT_USER_BLOCKLIST.copy()
-        # Optionally also block config reads for the user role (the payload
-        # exposes admin-only secrets). Off by default; opt in via
-        # rbac.restrict_config_to_admins.
-        if restrict_config_to_admins():
-            user_blocklist.append({
-                'path': '/workspaces/config',
-                'method': 'GET'
-            })
         config_permissions['user'] = {
             'permissions': {
-                'blocklist': user_blocklist
+                'blocklist': _DEFAULT_USER_BLOCKLIST.copy()
             }
         }
+
+    # Optionally block config reads for the user role (the payload exposes
+    # admin-only secrets). Off by default; opt in via
+    # rbac.restrict_config_to_admins. Applied here (rather than only to the
+    # default blocklist) so the restriction still holds when an admin has
+    # customized the user role in the config.
+    if restrict_config_to_admins():
+        user_cfg = config_permissions.get('user')
+        if isinstance(user_cfg, dict):
+            permissions = user_cfg.setdefault('permissions', {})
+            if isinstance(permissions, dict):
+                blocklist = permissions.setdefault('blocklist', [])
+                entry = {'path': '/workspaces/config', 'method': 'GET'}
+                if isinstance(blocklist, list) and entry not in blocklist:
+                    blocklist.append(entry)
 
     # Merge plugin rules into the appropriate roles
     if plugin_rules:

@@ -206,9 +206,11 @@ export function TopBar() {
     isMobileSidebarOpen,
     toggleMobileSidebar,
   } = useSidebar();
-  // Show the config entry point unless the server restricts it to admins and
-  // the current user is not an admin.
-  const showConfigLink = !restrictConfigToAdmins || userRole === 'admin';
+  // Who can actually read the config: admins always; a 'user' only when the
+  // server hasn't restricted it. Viewers never can (config is not on the
+  // viewer allowlist), so the entry point is hidden for them too.
+  const showConfigLink =
+    userRole === 'admin' || (userRole === 'user' && !restrictConfigToAdmins);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [openNavDropdown, setOpenNavDropdown] = useState(null);
   const { ungrouped, groups } = useGroupedNavLinks();

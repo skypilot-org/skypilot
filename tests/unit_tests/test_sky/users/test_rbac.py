@@ -57,6 +57,35 @@ class TestGetRolePermissions:
             'method': 'GET'
         } in self._user_blocklist(True)
 
+    def test_config_get_blocked_even_when_user_role_customized(self):
+        # Security: a custom user role in config must not bypass the
+        # restriction. GET /workspaces/config is still appended, and the
+        # custom entries are preserved.
+        custom_roles = {
+            'user': {
+                'permissions': {
+                    'blocklist': [{
+                        'path': '/foo',
+                        'method': 'POST'
+                    }]
+                }
+            }
+        }
+
+        def fake_get_nested(keys, default_value=None, *args, **kwargs):
+            if keys == ('rbac', 'restrict_config_to_admins'):
+                return True
+            if keys == ('rbac', 'roles'):
+                return custom_roles
+            return {}
+
+        with mock.patch('sky.skypilot_config.get_nested',
+                        side_effect=fake_get_nested):
+            permissions = rbac.get_role_permissions()
+        blocklist = permissions['user']['permissions']['blocklist']
+        assert {'path': '/workspaces/config', 'method': 'GET'} in blocklist
+        assert {'path': '/foo', 'method': 'POST'} in blocklist
+
 
 class TestGetViewerAllowlist:
     """rbac.get_viewer_allowlist composes defaults + config + plugin entries."""
