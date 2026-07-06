@@ -20,19 +20,42 @@ class TestRoleEnum:
 
 
 class TestGetRolePermissions:
-    """rbac.get_role_permissions exposes the default user blocklist."""
+    """GET /workspaces/config is admin-only only when opted in via
+    rbac.restrict_config_to_admins; POST is always admin-only."""
 
-    def test_workspaces_config_get_is_blocked_for_user(self):
-        # The config payload exposes provider tokens, so both reads and
-        # writes are admin-only for the default user role.
-        with mock.patch('sky.skypilot_config.get_nested', return_value={}):
+    @staticmethod
+    def _user_blocklist(restrict):
+        # ('rbac', 'roles') -> {} (use defaults);
+        # ('rbac', 'restrict_config_to_admins') -> the flag under test.
+        def fake_get_nested(keys, default_value=None, *args, **kwargs):
+            if keys == ('rbac', 'restrict_config_to_admins'):
+                return restrict
+            return {}
+
+        with mock.patch('sky.skypilot_config.get_nested',
+                        side_effect=fake_get_nested):
             permissions = rbac.get_role_permissions()
-        user_blocklist = permissions['user']['permissions']['blocklist']
-        assert {'path': '/workspaces/config', 'method': 'GET'} in user_blocklist
+        return permissions['user']['permissions']['blocklist']
+
+    def test_config_post_always_blocked_for_user(self):
         assert {
             'path': '/workspaces/config',
             'method': 'POST'
-        } in user_blocklist
+        } in self._user_blocklist(False)
+
+    def test_config_get_not_blocked_by_default(self):
+        # Default (flag off): reads are allowed for the user role.
+        assert {
+            'path': '/workspaces/config',
+            'method': 'GET'
+        } not in self._user_blocklist(False)
+
+    def test_config_get_blocked_when_restricted(self):
+        # rbac.restrict_config_to_admins=true: reads become admin-only.
+        assert {
+            'path': '/workspaces/config',
+            'method': 'GET'
+        } in self._user_blocklist(True)
 
 
 class TestGetViewerAllowlist:

@@ -11,15 +11,10 @@ from sky.workspaces import utils as workspaces_utils
 logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
-# Cannot access workspace CUD operations. Both GET and POST of
-# /workspaces/config are admin-only: the payload includes the entire admin
-# config (e.g. provider tokens), so reads are blocked too.
+# Cannot access workspace CUD operations.
 _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/config',
     'method': 'POST'
-}, {
-    'path': '/workspaces/config',
-    'method': 'GET'
 }, {
     'path': '/workspaces/update',
     'method': 'POST'
@@ -394,6 +389,19 @@ def get_viewer_allowlist(
     return combined
 
 
+def restrict_config_to_admins() -> bool:
+    """Whether GET /workspaces/config is restricted to admins.
+
+    The config payload includes admin-only secrets (e.g. cloud provider
+    tokens), so admins can opt into blocking non-admin reads by setting
+    ``rbac.restrict_config_to_admins: true``. Defaults to False to preserve
+    backward-compatible behavior (POST is always admin-only regardless).
+    """
+    return bool(
+        skypilot_config.get_nested(('rbac', 'restrict_config_to_admins'),
+                                   default_value=False))
+
+
 def get_role_permissions(
     plugin_rules: Optional[Dict[str, List[Dict[str, str]]]] = None
 ) -> Dict[str, Dict[str, Dict[str, List[Dict[str, str]]]]]:
@@ -434,9 +442,18 @@ def get_role_permissions(
         config_permissions[role_name] = permissions
     # Add default roles if not present
     if 'user' not in config_permissions:
+        user_blocklist = _DEFAULT_USER_BLOCKLIST.copy()
+        # Optionally also block config reads for the user role (the payload
+        # exposes admin-only secrets). Off by default; opt in via
+        # rbac.restrict_config_to_admins.
+        if restrict_config_to_admins():
+            user_blocklist.append({
+                'path': '/workspaces/config',
+                'method': 'GET'
+            })
         config_permissions['user'] = {
             'permissions': {
-                'blocklist': _DEFAULT_USER_BLOCKLIST.copy()
+                'blocklist': user_blocklist
             }
         }
 

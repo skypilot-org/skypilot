@@ -59,6 +59,9 @@ export function SidebarProvider({ children }) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState(null);
   const [userRole, setUserRole] = useState(null);
+  // Server-side opt-in (rbac.restrict_config_to_admins) surfaced via
+  // /api/health, so the config UI can be hidden for non-admins.
+  const [restrictConfigToAdmins, setRestrictConfigToAdmins] = useState(false);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
@@ -75,6 +78,7 @@ export function SidebarProvider({ children }) {
     fetch(`${fullEndpoint}/api/health`)
       .then((res) => res.json())
       .then((data) => {
+        setRestrictConfigToAdmins(!!data.restrict_config_to_admins);
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
 
@@ -121,6 +125,7 @@ export function SidebarProvider({ children }) {
         toggleMobileSidebar,
         userEmail,
         userRole,
+        restrictConfigToAdmins,
       }}
     >
       {children}
@@ -189,8 +194,16 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
-  const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
-    useSidebar();
+  const {
+    userEmail,
+    userRole,
+    restrictConfigToAdmins,
+    isMobileSidebarOpen,
+    toggleMobileSidebar,
+  } = useSidebar();
+  // Show the config entry point unless the server restricts it to admins and
+  // the current user is not an admin.
+  const showConfigLink = !restrictConfigToAdmins || userRole === 'admin';
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [openNavDropdown, setOpenNavDropdown] = useState(null);
   const { ungrouped, groups } = useGroupedNavLinks();
@@ -658,8 +671,9 @@ export function TopBar() {
                 {/* Version Display */}
                 <UpgradeHint />
 
-                {/* Config Button (admin-only: the config exposes secrets) */}
-                {userRole === 'admin' && (
+                {/* Config button: hidden for non-admins when the server
+                    restricts config to admins (it exposes secrets). */}
+                {showConfigLink && (
                   <CustomTooltip
                     content="Configuration"
                     className="text-sm text-muted-foreground"
@@ -924,8 +938,9 @@ export function TopBar() {
                   Slack
                 </a>
 
-                {/* Config link (admin-only: the config exposes secrets) */}
-                {userRole === 'admin' && (
+                {/* Config link: hidden for non-admins when the server
+                    restricts config to admins (it exposes secrets). */}
+                {showConfigLink && (
                   <Link
                     href="/settings"
                     className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${

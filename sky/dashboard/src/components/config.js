@@ -19,8 +19,11 @@ import { PluginSlot } from '@/plugins/PluginSlot';
 import { useSidebar } from '@/components/elements/sidebar';
 
 export function Config() {
-  const { userRole } = useSidebar();
+  const { userRole, restrictConfigToAdmins } = useSidebar();
   const isAdmin = userRole === 'admin';
+  // Only restrict the config view when the server has opted in
+  // (rbac.restrict_config_to_admins) AND the caller is not an admin.
+  const configRestricted = restrictConfigToAdmins && !isAdmin;
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -48,9 +51,9 @@ export function Config() {
   }, []);
 
   useEffect(() => {
-    // The config payload includes admin-only secrets, so only admins may
-    // fetch it. Non-admins receive a 403, so skip the request entirely.
-    if (!isAdmin) {
+    // When config is restricted to admins, non-admins get a 403, so skip the
+    // request entirely and show the access-denied card instead.
+    if (configRestricted) {
       setLoading(false);
       return;
     }
@@ -65,7 +68,7 @@ export function Config() {
     if (typeof window !== 'undefined') {
       checkGrafana();
     }
-  }, [isAdmin, loadConfig]);
+  }, [configRestricted, loadConfig]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -168,9 +171,10 @@ export function Config() {
     );
   }
 
-  // The API server configuration exposes admin-only secrets, so it is
-  // restricted to admins.
-  if (!isAdmin) {
+  // The API server configuration exposes admin-only secrets. When the server
+  // opts into restricting it (rbac.restrict_config_to_admins), non-admins get
+  // an access-denied card instead of a 403.
+  if (configRestricted) {
     return (
       <Card className="w-full">
         <CardHeader>

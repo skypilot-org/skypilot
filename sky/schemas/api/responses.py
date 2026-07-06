@@ -90,6 +90,10 @@ class APIHealthResponse(ResponseBaseModel):
     external_proxy_auth_enabled: bool = False
     # Whether telemetry/usage collection is enabled
     telemetry_enabled: bool = True
+    # Whether GET /workspaces/config is restricted to admins (config payload
+    # includes admin-only secrets). Lets the dashboard hide the config UI for
+    # non-admins when enabled.
+    restrict_config_to_admins: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
