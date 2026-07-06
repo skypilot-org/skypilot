@@ -2034,7 +2034,7 @@ def test_request_id_where_matches_like():
         conn.execute('INSERT OR IGNORE INTO requests VALUES (?)', (r,))
     # '\U0010ffff' exercises the max-code-point upper-bound fallback.
     for prefix in [
-            '', 'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8], '\U0010ffff',
+            'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8], '\U0010ffff',
             'a\U0010ffff'
     ]:
         like = {
@@ -2054,6 +2054,9 @@ def test_request_id_where_matches_like():
     assert requests._request_id_where(rows[0]) == ('request_id = ?', (rows[0],))
     where, _ = requests._request_id_where(rows[0][:8])
     assert where == 'request_id >= ? AND request_id < ?'
+    # An empty id is never a valid lookup key.
+    with pytest.raises(ValueError):
+        requests._request_id_where('')
 
 
 @pytest.mark.asyncio
@@ -2089,6 +2092,9 @@ async def test_request_id_lookup_uses_index(isolated_database):
     both = await requests.get_requests_async_with_prefix('11111111-')
     assert {r.request_id for r in both} == {ids[0], ids[1]}
     assert await requests.get_request_async('no-such-id') is None
+    # Empty-input shell completion lists recent ids (must not raise on '').
+    all_ids = await requests.get_api_request_ids_start_with('')
+    assert set(ids).issubset(set(all_ids))
 
     # The generated query must use the index (SEARCH), not a full SCAN.
     where, params = requests._request_id_where(ids[0])

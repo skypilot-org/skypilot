@@ -766,18 +766,21 @@ def _request_id_where(request_id: str) -> Tuple[str, Tuple[str, ...]]:
     - A full-length id (the common ``/api/get`` status-poll case) uses an exact
       ``request_id = ?`` match -- the most direct index lookup, mirroring the
       Postgres request backend's ``_id_where``.
-    - A shorter string is a request-id prefix (CLI short-id / shell
+    - A shorter (non-empty) string is a request-id prefix (CLI short-id / shell
       completion), expressed as an indexed range ``request_id >= ? AND
       request_id < ?`` rather than ``LIKE prefix || '%'``. Request ids are
       lowercase UUIDs, so this case-sensitive match is equivalent to the old
       ``LIKE`` and also matches the Postgres backend.
-    - An empty string matches all rows (a full scan), preserving the previous
-      ``LIKE '%'`` behavior (used for empty-input completion).
+
+    Raises ``ValueError`` on an empty ``request_id``: it is never a valid
+    lookup key, and matching all rows would silently turn a caller bug into a
+    full table scan. Callers that legitimately want "all requests" (e.g.
+    empty-input shell completion) must not go through this helper.
     """
+    if not request_id:
+        raise ValueError('request_id must not be empty')
     if len(request_id) >= _FULL_REQUEST_ID_LEN:
         return 'request_id = ?', (request_id,)
-    if not request_id:
-        return 'request_id LIKE ?', ('%',)
     last = request_id[-1]
     if ord(last) >= 0x10FFFF:
         # Can't form an upper bound past the maximum code point; fall back to a
@@ -1612,10 +1615,18 @@ class SqliteRequestBackend(request_storage.RequestBackend):
     async def get_api_request_ids_start_with(self,
                                              incomplete: str) -> List[str]:
         assert _DB is not None
-        where, params = _request_id_where(incomplete)
+        # Empty input means "list recent request ids" for completion, so skip
+        # the request_id filter entirely (rather than matching all via the
+        # prefix helper, which rejects an empty id).
+        if incomplete:
+            where, params = _request_id_where(incomplete)
+            where_clause = f'WHERE {where}'
+        else:
+            where_clause = ''
+            params = ()
         async with _DB.execute_fetchall_async(
                 f"""SELECT request_id FROM {REQUEST_TABLE}
-                    WHERE {where}
+                    {where_clause}
                     ORDER BY
                         CASE
                             WHEN status IN ('PENDING', 'RUNNING') THEN 0
