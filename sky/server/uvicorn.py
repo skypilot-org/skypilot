@@ -58,7 +58,7 @@ _RETRIABLE_REQUEST_NAMES = {
 }
 
 
-def _reuse_port_enabled() -> bool:
+def _reuse_port_enabled(config: uvicorn.Config) -> bool:
     """Whether to bind a per-worker SO_REUSEPORT socket.
 
     With uvicorn's default multiprocess model the parent binds a single
@@ -71,8 +71,12 @@ def _reuse_port_enabled() -> bool:
     load evenly.
 
     Opt-in via env var, and only on platforms that support SO_REUSEPORT.
+    SO_REUSEPORT only applies to TCP host/port binding, so it is disabled when
+    the server listens on a Unix domain socket or an inherited file descriptor.
     """
     if not hasattr(socket, 'SO_REUSEPORT'):
+        return False
+    if config.uds is not None or config.fd is not None:
         return False
     return os.environ.get(constants.ENV_VAR_SERVER_REUSE_PORT,
                           '').lower() in ('1', 'true', 'yes')
@@ -85,15 +89,16 @@ def _bind_reuse_port_socket(config: uvicorn.Config) -> socket.socket:
     sets SO_REUSEPORT so that multiple workers can bind the same address and
     the kernel load-balances new connections across them.
     """
+    host = config.host or ''
     family = socket.AF_INET
-    if config.host and ':' in config.host:
+    if host and ':' in host:
         # It's an IPv6 address.
         family = socket.AF_INET6
-    sock = socket.socket(family=family)
+    sock = socket.socket(family=family, type=socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     try:
-        sock.bind((config.host, config.port))
+        sock.bind((host, config.port))
     except OSError as exc:
         logger.error(exc)
         sys.exit(1)
@@ -284,7 +289,7 @@ class Server(uvicorn.Server):
         # socket; each worker binds its own SO_REUSEPORT socket here instead.
         # This also covers workers restarted by the multiprocess supervisor,
         # which re-invoke run() with the same (empty) socket list.
-        if _reuse_port_enabled() and not sockets:
+        if _reuse_port_enabled(self.config) and not sockets:
             sockets = [_bind_reuse_port_socket(self.config)]
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
@@ -327,13 +332,18 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     try:
         if config.workers is not None and config.workers > 1:
             sockets: List[socket.socket]
-            if _reuse_port_enabled():
+            if _reuse_port_enabled(config):
                 # Do not pre-bind a shared socket in the parent: each worker
                 # binds its own SO_REUSEPORT socket in Server.run() so the
                 # kernel spreads connections across workers. An empty socket
                 # list is forwarded to every (re)started worker.
                 logger.info('SO_REUSEPORT enabled: each worker binds its own '
                             'listening socket.')
+                # Test bind in the parent to fail fast on startup errors (e.g.
+                # port already taken by a non-SO_REUSEPORT process, or
+                # permission denied). Otherwise the parent starts fine and only
+                # the workers crash-loop as they each hit the bind error.
+                _bind_reuse_port_socket(config).close()
                 sockets = []
             else:
                 sockets = [config.bind_socket()]
