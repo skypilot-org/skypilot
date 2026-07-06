@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
@@ -29,6 +29,24 @@ export function Config() {
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const successTimeoutRef = useRef(null);
 
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const config = await getConfig();
+      if (Object.keys(config).length === 0) {
+        setEditableConfig('');
+      } else {
+        setEditableConfig(yaml.dump(config, { indent: 2 }));
+      }
+    } catch (error) {
+      console.error('Error loading config:', error);
+      setError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     // The config payload includes admin-only secrets, so only admins may
     // fetch it. Non-admins receive a 403, so skip the request entirely.
@@ -47,7 +65,7 @@ export function Config() {
     if (typeof window !== 'undefined') {
       checkGrafana();
     }
-  }, [isAdmin]);
+  }, [isAdmin, loadConfig]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -57,24 +75,6 @@ export function Config() {
       }
     };
   }, []);
-
-  const loadConfig = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const config = await getConfig();
-      if (Object.keys(config).length === 0) {
-        setEditableConfig('');
-      } else {
-        setEditableConfig(yaml.dump(config, { indent: 2 }));
-      }
-    } catch (error) {
-      console.error('Error loading config:', error);
-      setError(error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSave = async () => {
     trackSettingsAction('save');

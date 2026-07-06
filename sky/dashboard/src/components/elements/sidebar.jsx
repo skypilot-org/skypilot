@@ -86,14 +86,18 @@ export function SidebarProvider({ children }) {
               const response = await fetch(`${fullEndpoint}/users/role`);
               if (response.ok) {
                 const roleData = await response.json();
-                if (roleData.role) {
-                  setUserRole(roleData.role);
-                }
+                // Fall back to the least-privileged role if the payload has no
+                // role, so admin-gated views (e.g. the Config page) never hang
+                // waiting on a null role.
+                setUserRole(roleData.role || 'user');
+              } else {
+                setUserRole('user');
               }
             } catch (error) {
-              // If role data is not available or there's an error,
-              // we just don't show the role - it's not critical
+              // On any failure, resolve to the least-privileged role rather
+              // than leaving it null (which would hang admin-gated views).
               console.log('Could not fetch user role:', error);
+              setUserRole('user');
             }
           };
 
@@ -102,6 +106,9 @@ export function SidebarProvider({ children }) {
       })
       .catch((error) => {
         console.error('Error fetching user data:', error);
+        // User-data fetch failed entirely; resolve the role to the
+        // least-privileged value so admin-gated views don't hang on null.
+        setUserRole('user');
       });
   }, [fullEndpoint]);
 
@@ -917,19 +924,22 @@ export function TopBar() {
                   Slack
                 </a>
 
-                <Link
-                  href="/settings"
-                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
-                    isActivePath('/settings')
-                      ? 'bg-blue-50 text-blue-600'
-                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-                  onClick={toggleMobileSidebar}
-                  prefetch={false}
-                >
-                  <Settings className="w-5 h-5 mr-3" />
-                  Configuration
-                </Link>
+                {/* Config link (admin-only: the config exposes secrets) */}
+                {userRole === 'admin' && (
+                  <Link
+                    href="/settings"
+                    className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                      isActivePath('/settings')
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                    onClick={toggleMobileSidebar}
+                    prefetch={false}
+                  >
+                    <Settings className="w-5 h-5 mr-3" />
+                    Configuration
+                  </Link>
+                )}
               </div>
             </nav>
           </div>
