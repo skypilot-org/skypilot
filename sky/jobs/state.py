@@ -3387,8 +3387,11 @@ def get_task_logs_to_clean(retention_seconds: int,
                 )).
             where(
                 sqlalchemy.and_(
-                    job_info_table.c.schedule_state.is_(
-                        ManagedJobScheduleState.DONE.value),
+                    # Use ==, not .is_(): on PostgreSQL `IS <string>` is a
+                    # syntax error (IS only accepts NULL/TRUE/FALSE), which
+                    # would make the whole GC query raise on every run.
+                    job_info_table.c.schedule_state ==
+                    ManagedJobScheduleState.DONE.value,
                     spot_table.c.end_at.isnot(None),
                     spot_table.c.end_at < (now - retention_seconds),
                     spot_table.c.logs_cleaned_at.is_(None),
@@ -3411,7 +3414,18 @@ def get_controller_logs_to_clean(retention_seconds: int,
 
     The controller logs will only cleaned when:
     - the job schedule state is DONE
-    - AND the end time of the latest task is older than the retention period
+    - AND either the end time of the latest task is older than the retention
+      period, or the job has no end time at all (it was cancelled before it
+      ever ran, so there is no log to retain)
+
+    Unlike task logs, controller logs do not require local_log_file to be set.
+    A controller log file is written for every job the controller processes
+    (during provisioning, recovery, etc.), regardless of whether the task ever
+    produced a downloaded log. Gating on local_log_file would leave controller
+    logs of jobs that terminate without a downloaded task log -- e.g. those that
+    end as FAILED_CONTROLLER on a controller crash, or are cancelled before the
+    task starts -- uncleaned forever. The DONE schedule state plus a finished
+    end_at is sufficient to know the controller has exited and its log is final.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -3423,18 +3437,24 @@ def get_controller_logs_to_clean(retention_seconds: int,
                     job_info_table.c.spot_job_id == spot_table.c.spot_job_id,
                 )).where(
                     sqlalchemy.and_(
-                        job_info_table.c.schedule_state.is_(
-                            ManagedJobScheduleState.DONE.value),
-                        spot_table.c.local_log_file.isnot(None),
+                        job_info_table.c.schedule_state ==
+                        ManagedJobScheduleState.DONE.value,
                         job_info_table.c.controller_logs_cleaned_at.is_(None),
                     )).group_by(
                         job_info_table.c.spot_job_id,
                         job_info_table.c.current_cluster_name,
-                    ).having(
-                        sqlalchemy.func.max(
-                            spot_table.c.end_at).isnot(None),).having(
-                                sqlalchemy.func.max(spot_table.c.end_at) < (
-                                    now - retention_seconds)).limit(batch_size))
+                    ).
+            having(
+                # A job cancelled while still PENDING (via
+                # set_pending_cancelled) reaches DONE with end_at never
+                # set. It never ran, so it has no controller log to
+                # retain -- clean it immediately. Filtering it out here
+                # instead would leave it forever uncleaned and re-scanned
+                # by the group-by on every GC cycle.
+                sqlalchemy.or_(
+                    sqlalchemy.func.max(spot_table.c.end_at).is_(None),
+                    sqlalchemy.func.max(spot_table.c.end_at) <
+                    (now - retention_seconds))).limit(batch_size))
         rows = result.fetchall()
         return [{'job_id': row[0]} for row in rows]
 
@@ -3602,33 +3622,63 @@ def get_job_events(job_id: int,
     } for row in rows]
 
 
-def get_latest_recovery_reasons(job_ids: List[int]) -> Dict[int, str]:
-    """Return {job_id: reason} for the most recent RECOVERING event per job.
+def _get_latest_event_reasons(
+    job_ids_by_status: Dict['ManagedJobStatus', List[int]]
+) -> Dict['ManagedJobStatus', Dict[int, str]]:
+    """Return {status: {job_id: reason}} for the latest event of each status.
 
-    Only jobs with a non-empty RECOVERING reason are included. Used to surface
-    why a job is currently recovering (e.g. an OOMKilled pod) in the
-    `details` column. A single batched query keeps this off the per-job path.
+    Fetches the most recent non-empty event reason per (status, job_id) in a
+    single batched query, to stay off the per-job path and avoid extra DB
+    round trips when several statuses are needed at once. Each job_id is
+    matched only against the status it was requested under, so a job's
+    historical events of other statuses are ignored.
     """
-    if not job_ids:
-        return {}
+    result: Dict['ManagedJobStatus',
+                 Dict[int, str]] = {status: {} for status in job_ids_by_status}
+    conditions = [
+        sqlalchemy.and_(
+            job_events_table.c.new_status == status.value,
+            job_events_table.c.spot_job_id.in_(job_ids),
+        ) for status, job_ids in job_ids_by_status.items() if job_ids
+    ]
+    if not conditions:
+        return result
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(
             sqlalchemy.select(
                 job_events_table.c.spot_job_id,
+                job_events_table.c.new_status,
                 job_events_table.c.reason,
-            ).where(
-                sqlalchemy.and_(
-                    job_events_table.c.spot_job_id.in_(job_ids),
-                    job_events_table.c.new_status ==
-                    ManagedJobStatus.RECOVERING.value,
-                )).order_by(job_events_table.c.timestamp.desc())).fetchall()
-    # rows are newest-first; keep the first (latest) non-empty reason per job.
-    reasons: Dict[int, str] = {}
-    for spot_job_id, reason in rows:
+            ).where(sqlalchemy.or_(*conditions)).order_by(
+                job_events_table.c.timestamp.desc())).fetchall()
+    # rows are newest-first; keep the first (latest) non-empty reason per
+    # (status, job_id).
+    for spot_job_id, new_status, reason in rows:
+        reasons = result[ManagedJobStatus(new_status)]
         if spot_job_id not in reasons and reason:
             reasons[spot_job_id] = reason
-    return reasons
+    return result
+
+
+def get_latest_recovery_and_pending_reasons(
+        recovering_job_ids: List[int],
+        pending_job_ids: List[int]) -> Tuple[Dict[int, str], Dict[int, str]]:
+    """Return (recovery_reasons, pending_reasons) in a single DB query.
+
+    Each dict maps job_id -> the most recent non-empty event reason for that
+    status. Used to surface why a job is currently recovering (e.g. an
+    OOMKilled pod) or still pending (e.g. it was just submitted to the queue
+    or is in launch backoff) in the `details` column; both were previously
+    only visible in the event table. Fetches both in one round trip to stay
+    off the per-job path.
+    """
+    reasons = _get_latest_event_reasons({
+        ManagedJobStatus.RECOVERING: recovering_job_ids,
+        ManagedJobStatus.PENDING: pending_job_ids,
+    })
+    return (reasons[ManagedJobStatus.RECOVERING],
+            reasons[ManagedJobStatus.PENDING])
 
 
 async def cleanup_job_events_with_retention_async(

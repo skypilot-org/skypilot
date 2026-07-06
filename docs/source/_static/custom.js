@@ -30,6 +30,27 @@ document.addEventListener('DOMContentLoaded', function () {
 })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
 !function(t){var k="ko",i=(window.globalKoalaKey=window.globalKoalaKey||k);if(window[i])return;var ko=(window[i]=[]);["identify","track","removeListeners","on","off","qualify","ready"].forEach(function(t){ko[t]=function(){var n=[].slice.call(arguments);return n.unshift(t),ko.push(n),ko}});var n=document.createElement("script");n.async=!0,n.setAttribute("src","https://cdn.getkoala.com/v1/pk_d9bb6290ccb8a01b2d181fc0c8cf0dbb9836/sdk.js"),(document.body || document.head).appendChild(n)}();
 
+// Website analytics
+(function() {
+    if (typeof window === 'undefined') return;
+    if (typeof window.signals !== 'undefined') return;
+    var script = document.createElement('script');
+    script.src = 'https://cdn.cr-relay.com/v1/site/1537a3d1-43b9-4d6c-8efa-8d60f2326b23/signals.js';
+    script.async = true;
+    var signals = window.signals = Object.assign(
+        [],
+        { _opts: { apiHost: 'https://api.cr-relay.com' } },
+        ['page', 'identify', 'form'].reduce(function (acc, method){
+            acc[method] = function () {
+                signals.push([method, arguments]);
+                return signals;
+            };
+            return acc;
+        }, {})
+    );
+    document.head.appendChild(script);
+})();
+
 // New items: add 'new-item' class for for new items.
 document.addEventListener('DOMContentLoaded', () => {
     // New items:

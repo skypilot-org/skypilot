@@ -1259,6 +1259,26 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def _parse_job_ids_snippet(source_var: str, ids_file: str) -> str:
+    """Shell snippet: extract launched job IDs into a comma list at ids_file.
+
+    ``sky jobs launch --num-jobs`` collapses contiguous IDs into ranges in its
+    "Jobs submitted with IDs:" line (e.g. ``2-11``), so widen the capture to
+    include ``-`` and expand any ``N-M`` range back into individual
+    comma-separated IDs (plain comma lists pass through unchanged). Downstream
+    ``awk -F,`` field access then works regardless of format. ``source_var`` is
+    the shell var holding the launch output (e.g. ``s`` for ``$s``).
+    """
+    # awk expands each field: an 'N-M' range becomes N,N+1,...,M; a bare id is
+    # kept as-is. Braces/`$i` are literal awk, not str formatting.
+    expand = (
+        r"""awk -F, '{o=""; for (i=1; i<=NF; i++) {n=split($i, a, "-"); """
+        r"""if (n==2) {for (j=a[1]; j<=a[2]; j++) o=o (o == "" ? "" : ",") j} """
+        r"""else o=o (o == "" ? "" : ",") $i} print o}'""")
+    return (f'echo "${source_var}" | grep "Jobs submitted with IDs:" | '
+            f'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | {expand} > {ids_file}')
+
+
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1281,8 +1301,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             launch_cmd = (
                 f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
                 f'--num-jobs {num_jobs} -d -y); echo "$s"; '
-                f'echo "$s" | grep "Jobs submitted with IDs:" | '
-                f'sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                f'{_parse_job_ids_snippet("s", ids_file)}; '
                 f'cat {ids_file}')
             id_expr = (lambda i: f"$(awk -F, '{{print ${i + 1}}}' {ids_file})")
             test = smoke_tests_utils.Test(
@@ -1364,12 +1383,20 @@ def test_pools_num_jobs_option(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Test parallel job launching with --num-jobs 3
-                    ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
-                     'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Jobs submitted with IDs: 2,3,4,5,6,7,8,9,10,11"; '
-                     'sleep 5').format(pool_name=pool_name,
-                                       job_yaml=job_yaml.name)
+                    # Test parallel job launching with --num-jobs 10. The IDs
+                    # are collapsed into a single N-M range (see
+                    # _parse_job_ids_snippet); assert the range spans exactly 10
+                    # jobs rather than hard-coding the start ID, which is not 2
+                    # on a shared/long-lived server DB.
+                    (
+                        's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                        'echo "$s"; '
+                        'echo; echo; echo "$s" | grep "Jobs submitted with IDs:" | '
+                        'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | '
+                        # Braces doubled: this string goes through str.format().
+                        'awk -F- \'{{c = $2 - $1 + 1}} END {{exit !(c == 10)}}\'; '
+                        'sleep 5').format(pool_name=pool_name,
+                                          job_yaml=job_yaml.name)
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -2434,10 +2461,12 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             launch_cmd = (
                 's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
-                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                '{parse}; '
                 'cat {ids_file}').format(pool_name=pool_name,
                                          job_yaml=job_yaml.name,
                                          NUM_JOBS=NUM_JOBS,
+                                         parse=_parse_job_ids_snippet(
+                                             's', ids_file),
                                          ids_file=ids_file)
             test_commands.append(launch_cmd)
 

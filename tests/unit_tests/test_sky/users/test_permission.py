@@ -13,6 +13,7 @@ from sky.skylet import constants
 from sky.users import permission
 from sky.users import rbac
 from sky.utils import common
+from sky.utils import locks
 
 
 @pytest.fixture
@@ -692,39 +693,39 @@ class TestPermissionService:
             0]
         assert 'test-workspace' in prefix_arg
 
-    @mock.patch('sky.users.permission.filelock.FileLock')
-    def test_policy_lock_context_manager(self, mock_filelock):
+    @mock.patch('sky.users.permission.locks.get_lock')
+    def test_policy_lock_context_manager(self, mock_get_lock):
         """Test the policy lock context manager."""
         mock_lock = mock.Mock()
         mock_lock.__enter__ = mock.Mock(return_value=mock.Mock())
         mock_lock.__exit__ = mock.Mock(return_value=None)
-        mock_filelock.return_value = mock_lock
+        mock_get_lock.return_value = mock_lock
 
         with permission._policy_lock():
             pass
 
-        mock_filelock.assert_called_once_with(
-            permission.POLICY_UPDATE_LOCK_PATH,
-            permission.POLICY_UPDATE_LOCK_TIMEOUT_SECONDS)
+        mock_get_lock.assert_called_once_with(
+            permission.POLICY_UPDATE_LOCK_ID,
+            permission.POLICY_UPDATE_LOCK_TIMEOUT_SECONDS,
+            poll_interval=permission.POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS)
         mock_lock.__enter__.assert_called_once()
         mock_lock.__exit__.assert_called_once()
 
-    @mock.patch('sky.users.permission.filelock.FileLock')
-    def test_policy_lock_timeout_exception(self, mock_filelock):
+    @mock.patch('sky.users.permission.locks.get_lock')
+    def test_policy_lock_timeout_exception(self, mock_get_lock):
         """Test policy lock timeout exception handling."""
-        from filelock import Timeout
-
         mock_lock = mock.Mock()
-        mock_lock.__enter__ = mock.Mock(side_effect=Timeout('test_lock'))
+        mock_lock.__enter__ = mock.Mock(
+            side_effect=locks.LockTimeout('test_lock'))
         mock_lock.__exit__ = mock.Mock(return_value=None)
-        mock_filelock.return_value = mock_lock
+        mock_get_lock.return_value = mock_lock
 
         with pytest.raises(RuntimeError) as exc_info:
             with permission._policy_lock():
                 pass
 
-        assert 'Failed to reload policy due to a timeout' in str(exc_info.value)
-        assert 'policy_update.lock' in str(exc_info.value)
+        assert 'Failed to update policy due to a timeout' in str(exc_info.value)
+        assert 'casbin policy lock' in str(exc_info.value)
 
     @mock.patch('sky.users.permission.kv_cache')
     def test_delete_user_with_role(self, mock_kv_cache):

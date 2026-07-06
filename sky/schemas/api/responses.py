@@ -119,11 +119,16 @@ class StatusResponse(ResponseBaseModel):
     last_creation_command: Optional[str] = None
     is_managed: bool
     last_event: Optional[str] = None
-    # Latest LAUNCH_PROGRESS event reason for clusters in INIT status
-    # (rendered as LAUNCHING on the dashboard). None for all other
-    # statuses and for clusters that have not yet emitted a
-    # launch-progress event.
-    launch_status_reason: Optional[str] = None
+    # Disambiguates the overloaded INIT status for display (dashboard and
+    # CLI): 'launching' (actively provisioning) vs 'unhealthy' (flipped to
+    # INIT by an abnormal-state refresh, e.g. node terminated / OOMKilled /
+    # ray unhealthy). Values are status_lib.INIT_KIND_*. None for all
+    # non-INIT statuses.
+    init_kind: Optional[str] = None
+    # Human-readable reason to show for an INIT cluster: the abnormal-state
+    # explanation when init_kind == 'unhealthy', else the latest launch
+    # progress/status message. None when there is no reason to show.
+    init_status_reason: Optional[str] = None
     resources_str: Optional[str] = None
     resources_str_full: Optional[str] = None
     # credentials is a JSON, so we use Any here.
