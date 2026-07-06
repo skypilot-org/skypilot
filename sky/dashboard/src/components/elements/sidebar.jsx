@@ -106,6 +106,11 @@ export function SidebarProvider({ children }) {
           };
 
           getUserRole();
+        } else {
+          // No user info (e.g. auth disabled or anonymous): resolve the role
+          // to the least-privileged value instead of leaving it null, which
+          // would hang admin-gated views (e.g. the Config page) forever.
+          setUserRole('user');
         }
       })
       .catch((error) => {
