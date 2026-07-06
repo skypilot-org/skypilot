@@ -2017,8 +2017,12 @@ def test_decode_tolerates_unresolvable_entrypoint(monkeypatch):
     assert decoded.status == RequestStatus.SUCCEEDED
 
 
-def test_request_id_prefix_where_matches_like():
-    """The range fragment matches exactly the ids `LIKE prefix || '%'` would."""
+def test_request_id_where_matches_like():
+    """The clause matches exactly the ids `LIKE prefix || '%'` would.
+
+    Also asserts a full-length id uses an exact `=` and a shorter string uses
+    the indexed range.
+    """
     import sqlite3
     import uuid
     conn = sqlite3.connect(':memory:')
@@ -2038,12 +2042,18 @@ def test_request_id_prefix_where_matches_like():
                 'SELECT request_id FROM requests WHERE request_id LIKE ?', (
                     prefix + '%',))
         }
-        where, params = requests._request_id_prefix_where(prefix)
+        where, params = requests._request_id_where(prefix)
         rng = {
             x[0] for x in conn.execute(
                 f'SELECT request_id FROM requests WHERE {where}', params)
         }
         assert like == rng, prefix
+
+    # A full-length (>=36 char) id uses an exact `=`; a shorter string uses the
+    # indexed prefix range.
+    assert requests._request_id_where(rows[0]) == ('request_id = ?', (rows[0],))
+    where, _ = requests._request_id_where(rows[0][:8])
+    assert where == 'request_id >= ? AND request_id < ?'
 
 
 @pytest.mark.asyncio
@@ -2081,7 +2091,7 @@ async def test_request_id_lookup_uses_index(isolated_database):
     assert await requests.get_request_async('no-such-id') is None
 
     # The generated query must use the index (SEARCH), not a full SCAN.
-    where, params = requests._request_id_prefix_where(ids[0])
+    where, params = requests._request_id_where(ids[0])
     plan = requests._DB.conn.execute(
         f'EXPLAIN QUERY PLAN SELECT status FROM {requests.REQUEST_TABLE} '
         f'WHERE {where}', params).fetchall()

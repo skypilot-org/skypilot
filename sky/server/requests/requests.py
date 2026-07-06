@@ -749,33 +749,44 @@ async def update_status_msg_async(request_id: str, status_msg: str) -> None:
         request_id, status_msg)
 
 
-def _request_id_prefix_where(prefix: str) -> Tuple[str, Tuple[str, ...]]:
-    """WHERE fragment + params matching request_ids that start with ``prefix``.
+# UUID request ids are exactly 36 characters (8-4-4-4-12 with dashes). A
+# caller passing a string this long is looking up a full id, not a prefix.
+_FULL_REQUEST_ID_LEN = 36
 
-    Semantically equivalent to ``request_id LIKE prefix || '%'`` but expressed
-    as a range (``request_id >= ? AND request_id < ?``) so SQLite can use the
-    request_id primary-key index instead of a full table scan. SQLite's default
-    case-insensitive LIKE cannot use the BINARY-collated primary-key index
-    (verified with EXPLAIN QUERY PLAN: ``LIKE`` -> ``SCAN``, range -> ``SEARCH
-    ... USING INDEX``), which made every request lookup O(table size). Request
-    ids are lowercase UUIDs, so a case-sensitive prefix range matches exactly
-    the same rows; this also matches the Postgres request backend, which
-    already looks up request ids with a case-sensitive ``=``.
 
-    An empty prefix matches all rows (a full scan), preserving the previous
-    behavior of ``LIKE '%'`` (used for empty-input completion).
+def _request_id_where(request_id: str) -> Tuple[str, Tuple[str, ...]]:
+    """WHERE fragment + params to look up a request by full id or by prefix.
+
+    Both branches use the ``request_id`` primary-key index instead of a full
+    table scan (SQLite's default case-insensitive ``LIKE`` cannot use the
+    BINARY-collated primary-key index -- verified with EXPLAIN QUERY PLAN:
+    ``LIKE`` -> ``SCAN``, ``=``/range -> ``SEARCH ... USING INDEX``), which is
+    what made every request lookup O(table size).
+
+    - A full-length id (the common ``/api/get`` status-poll case) uses an exact
+      ``request_id = ?`` match -- the most direct index lookup, mirroring the
+      Postgres request backend's ``_id_where``.
+    - A shorter string is a request-id prefix (CLI short-id / shell
+      completion), expressed as an indexed range ``request_id >= ? AND
+      request_id < ?`` rather than ``LIKE prefix || '%'``. Request ids are
+      lowercase UUIDs, so this case-sensitive match is equivalent to the old
+      ``LIKE`` and also matches the Postgres backend.
+    - An empty string matches all rows (a full scan), preserving the previous
+      ``LIKE '%'`` behavior (used for empty-input completion).
     """
-    if not prefix:
+    if len(request_id) >= _FULL_REQUEST_ID_LEN:
+        return 'request_id = ?', (request_id,)
+    if not request_id:
         return 'request_id LIKE ?', ('%',)
-    last = prefix[-1]
+    last = request_id[-1]
     if ord(last) >= 0x10FFFF:
         # Can't form an upper bound past the maximum code point; fall back to a
         # scan. Real request ids are ASCII UUIDs, so this only guards against
         # malformed input rather than crashing on chr(0x110000).
-        return 'request_id LIKE ?', (prefix + '%',)
+        return 'request_id LIKE ?', (request_id + '%',)
     # Smallest string strictly greater than every string starting with prefix.
-    upper = prefix[:-1] + chr(ord(last) + 1)
-    return 'request_id >= ? AND request_id < ?', (prefix, upper)
+    upper = request_id[:-1] + chr(ord(last) + 1)
+    return 'request_id >= ? AND request_id < ?', (request_id, upper)
 
 
 def _get_request_no_lock(
@@ -786,7 +797,7 @@ def _get_request_no_lock(
     columns_str = ', '.join(REQUEST_COLUMNS)
     if fields:
         columns_str = ', '.join(fields)
-    where, params = _request_id_prefix_where(request_id)
+    where, params = _request_id_where(request_id)
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(
@@ -807,7 +818,7 @@ async def _get_request_no_lock_async(
     columns_str = ', '.join(REQUEST_COLUMNS)
     if fields:
         columns_str = ', '.join(fields)
-    where, params = _request_id_prefix_where(request_id)
+    where, params = _request_id_where(request_id)
     async with _DB.execute_fetchall_async(
             f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
             params) as rows:
@@ -1545,7 +1556,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(fields)
         else:
             columns_str = ', '.join(REQUEST_COLUMNS)
-        where, params = _request_id_prefix_where(request_id_prefix)
+        where, params = _request_id_where(request_id_prefix)
         with _DB.conn:
             cursor = _DB.conn.cursor()
             cursor.execute(
@@ -1569,7 +1580,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(fields)
         else:
             columns_str = ', '.join(REQUEST_COLUMNS)
-        where, params = _request_id_prefix_where(request_id_prefix)
+        where, params = _request_id_where(request_id_prefix)
         async with _DB.execute_fetchall_async(
                 f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
                 params) as rows:
@@ -1588,7 +1599,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         columns = 'status'
         if include_msg:
             columns += ', status_msg'
-        where, params = _request_id_prefix_where(request_id)
+        where, params = _request_id_where(request_id)
         sql = f'SELECT {columns} FROM {REQUEST_TABLE} WHERE {where}'
         async with _DB.execute_fetchall_async(sql, params) as rows:
             if rows is None or len(rows) == 0:
@@ -1601,7 +1612,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
     async def get_api_request_ids_start_with(self,
                                              incomplete: str) -> List[str]:
         assert _DB is not None
-        where, params = _request_id_prefix_where(incomplete)
+        where, params = _request_id_where(incomplete)
         async with _DB.execute_fetchall_async(
                 f"""SELECT request_id FROM {REQUEST_TABLE}
                     WHERE {where}
