@@ -119,10 +119,11 @@ class StatusResponse(ResponseBaseModel):
     last_creation_command: Optional[str] = None
     is_managed: bool
     last_event: Optional[str] = None
-    # Disambiguates the overloaded INIT status for the dashboard:
-    # 'launching' (actively provisioning) vs 'unhealthy' (flipped to INIT
-    # by an abnormal-state refresh, e.g. node terminated / OOMKilled /
-    # ray unhealthy). None for all non-INIT statuses.
+    # Disambiguates the overloaded INIT status for display (dashboard and
+    # CLI): 'launching' (actively provisioning) vs 'unhealthy' (flipped to
+    # INIT by an abnormal-state refresh, e.g. node terminated / OOMKilled /
+    # ray unhealthy). Values are status_lib.INIT_KIND_*. None for all
+    # non-INIT statuses.
     init_kind: Optional[str] = None
     # Human-readable reason to show for an INIT cluster: the abnormal-state
     # explanation when init_kind == 'unhealthy', else the latest launch

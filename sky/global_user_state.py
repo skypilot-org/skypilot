@@ -2325,9 +2325,9 @@ def get_clusters(
         if record['status'] is status_lib.ClusterStatus.INIT:
             latest_reason = latest_init_event_dict.get(row.cluster_hash)
             record['init_kind'] = (
-                'unhealthy' if latest_reason is not None and
+                status_lib.INIT_KIND_UNHEALTHY if latest_reason is not None and
                 latest_reason.startswith(ABNORMAL_STATUS_REASON_PREFIX) else
-                'launching')
+                status_lib.INIT_KIND_LAUNCHING)
             record['init_status_reason'] = latest_reason
         else:
             record['init_kind'] = None
