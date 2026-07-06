@@ -611,3 +611,25 @@ class TestCloudVmRayBackendTeardownNoLock:
 
         mock_run_on_head.assert_not_called()
         mock_get_yaml.assert_called_once_with(refreshed_handle.cluster_yaml)
+
+
+class TestNewHandleRuntimeMetadata:
+    """Runtime metadata a freshly constructed handle starts with."""
+
+    def test_new_handle_has_no_runtime_established(self):
+        """A new handle is created before provisioning, so it claims no Ray.
+
+        Otherwise teardown of a cluster that crashed or recovered during
+        provisioning attempts ``ray stop`` on a runtime that was never set
+        up.
+        """
+        handle = CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster-abc',
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=MagicMock(),
+        )
+        metadata = handle.provision_runtime_metadata
+        assert (metadata.has_ray, metadata.has_skylet, metadata.has_job_queue,
+                metadata.ssh_available) == (False, False, False, False)

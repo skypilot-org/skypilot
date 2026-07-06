@@ -25,6 +25,7 @@ each other.
 """
 import collections
 import concurrent.futures
+import datetime
 import fnmatch
 import io
 import json
@@ -68,6 +69,8 @@ from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -132,12 +135,8 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
-_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
-    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group', 'batch_total_batches',
-    'batch_completed_batches'
-]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = list(
+    managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
     'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',
@@ -5810,8 +5809,6 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
-    if pool is None and num_jobs is not None:
-        raise click.UsageError('Cannot specify --num-jobs without --pool.')
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
@@ -5890,6 +5887,11 @@ def jobs_launch(
                 f'pool, please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
         print_setup_fm_warning = False
+    elif num_jobs is not None and num_jobs > 1:
+        click.secho(
+            f'Submitting {colorama.Fore.CYAN}{num_jobs}'
+            f'{colorama.Style.RESET_ALL} managed jobs. Each job will be '
+            'launched on its own cluster.')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -5933,19 +5935,34 @@ def jobs_launch(
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
         # Sort job ids to ensure consistent ordering.
-        job_ids_str = ','.join(map(str, sorted(job_ids)))
+        job_ids_str = managed_job_utils.format_job_ids_as_ranges(job_ids)
         dashboard_hint = ''
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'pool',
-                'operator': ':',
-                'value': pool,
-            })
+            if pool is not None:
+                query = urllib.parse.urlencode({
+                    'property': 'pool',
+                    'operator': ':',
+                    'value': pool,
+                })
+                starting_page = f'jobs?{query}'
+                show_jobs_label = 'Show all jobs in the pool:'
+            else:
+                starting_page = 'jobs'
+                show_jobs_label = 'Show all jobs:'
             dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=f'jobs?{query}')
-            dashboard_hint = (
-                f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
-                f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                server_common.get_server_url(), starting_page=starting_page)
+            dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
+                              f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                              f'{ux_utils.RESET_BOLD}')
+        if pool is not None:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'{ux_utils.RESET_BOLD}')
+        else:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all these jobs:'
+                f'\t{ux_utils.BOLD}sky jobs cancel <job-ids>'
                 f'{ux_utils.RESET_BOLD}')
         click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                     f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -5957,9 +5974,66 @@ def jobs_launch(
                     f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
                     f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
                     f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
-                    f'{ux_utils.RESET_BOLD}')
+                    f'{cancel_hint}')
+
+
+# Value the ``-s``/``--status`` option takes when given with no argument. It is
+# a deprecated alias for ``--skip-finished`` (see jobs_queue).
+# TODO(kevin): remove in 0.15.0, after which a bare ``-s`` is invalid and ``-s``
+# is solely the short flag for ``--status``.
+_SKIP_FINISHED_SENTINEL = '__skip_finished__'
+
+
+class StatusList(click.Choice):
+    """Comma-separated, case-insensitive choices.
+
+    Returns a list so a single ``--status FAILED,FAILED_SETUP`` and a repeated
+    ``--status FAILED --status FAILED_SETUP`` are both accepted; with
+    ``multiple=True`` the option then yields a tuple of lists to flatten.
+    """
+
+    def convert(self, value, param, ctx):
+        # A bare ``-s`` yields the sentinel; pass it through unvalidated so the
+        # handler can treat it as --skip-finished.
+        if value == _SKIP_FINISHED_SENTINEL:
+            return [value]
+        return [
+            super(StatusList, self).convert(v.strip(), param, ctx)
+            for v in value.split(',')
+            if v.strip()
+        ]
+
+
+# Accepted absolute date/time formats for --after / --before. ISO date and
+# date-time (space or 'T' separator) first; US m-d-Y for familiarity. Naive
+# values are interpreted in the local timezone.
+_SUBMITTED_AT_DATETIME_FORMATS = (
+    '%Y-%m-%d',
+    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%d %H:%M',
+    '%Y-%m-%dT%H:%M:%S',
+    '%Y-%m-%dT%H:%M',
+    '%m-%d-%Y',
+    '%m-%d-%Y %H:%M:%S',
+)
+
+
+def _parse_datetime_to_epoch(value: str) -> float:
+    """Parses an absolute date/time string into an epoch timestamp (seconds).
+
+    Naive datetimes are interpreted in the local timezone.
+
+    Raises:
+        ValueError: if the value matches none of the accepted formats.
+    """
+    for fmt in _SUBMITTED_AT_DATETIME_FORMATS:
+        try:
+            return datetime.datetime.strptime(value,
+                                              fmt).astimezone().timestamp()
+        except ValueError:
+            continue
+    raise ValueError(f'Invalid date/time {value!r}. Use e.g. "2026-01-13", '
+                     '"2026-01-13 15:30:00", or "2026-01-13T15:30:00".')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -5982,11 +6056,45 @@ def jobs_launch(
     help='Query the latest statuses, restarting the jobs controller if stopped.'
 )
 @click.option('--skip-finished',
-              '-s',
               default=False,
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
+@click.option('-s',
+              '--status',
+              'statuses',
+              is_flag=False,
+              flag_value=_SKIP_FINISHED_SENTINEL,
+              multiple=True,
+              type=StatusList([s.value for s in ManagedJobStatus],
+                              case_sensitive=False),
+              required=False,
+              help='Filter by status, comma-separated '
+              '(e.g. -s FAILED,FAILED_SETUP). A bare -s (no value) is a '
+              'deprecated alias for --skip-finished.')
+@click.option(
+    '--since',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted within this time window, relative to now '
+          '(e.g. "30m", "48h", "7d", "2w"). A bare number is seconds. '
+          'Mutually exclusive with --after.'))
+@click.option(
+    '--after',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted at or after this absolute local time '
+          '(e.g. "2026-01-13" or "2026-01-13 15:30:00"). Mutually exclusive '
+          'with --since.'))
+@click.option(
+    '--before',
+    default=None,
+    type=str,
+    required=False,
+    help=('Show only jobs submitted at or before this absolute local time '
+          '(e.g. "2026-01-13" or "2026-01-13 15:30:00").'))
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @flags.output_format_option()
@@ -5995,6 +6103,10 @@ def jobs_launch(
 def jobs_queue(verbose: bool,
                refresh: bool,
                skip_finished: bool,
+               statuses: Tuple[List[str], ...],
+               since: Optional[str],
+               after: Optional[str],
+               before: Optional[str],
                all_users: bool,
                all: bool,
                limit: int,
@@ -6055,7 +6167,69 @@ def jobs_queue(verbose: bool,
 
       sky jobs queue -l 10
 
+    (Tip) To filter by status, use ``-s``/``--status`` (comma-separated):
+
+    .. code-block:: bash
+
+      sky jobs queue -s FAILED,FAILED_SETUP
+
+    (Tip) To show only active (pending/running) jobs, use ``--skip-finished``:
+
+    .. code-block:: bash
+
+      sky jobs queue --skip-finished
+
+    (Tip) To show only jobs submitted in the last 7 days, use ``--since``:
+
+    .. code-block:: bash
+
+      sky jobs queue --since 7d
+
+    (Tip) To filter by an absolute submission window, use ``--after`` and/or
+    ``--before``:
+
+    .. code-block:: bash
+
+      sky jobs queue --after 2026-01-01 --before 2026-01-31
+
     """
+    status_filter = [status for group in statuses for status in group]
+    # TODO(kevin): remove in 0.15.0, along with _SKIP_FINISHED_SENTINEL and the
+    # flag_value on -s/--status.
+    if _SKIP_FINISHED_SENTINEL in status_filter:
+        click.secho(
+            'Warning: `-s` without a value is a deprecated alias for '
+            '`--skip-finished` and will be removed in 0.15.0. Use '
+            '`--skip-finished`, or pass a status (e.g. `-s RUNNING`).',
+            fg='yellow',
+            err=True)
+        skip_finished = True
+        status_filter = [
+            s for s in status_filter if s != _SKIP_FINISHED_SENTINEL
+        ]
+    status_filter = status_filter or None
+    if since is not None and after is not None:
+        raise click.UsageError(
+            '--since and --after are mutually exclusive: --since is a relative '
+            'window from now, --after is an absolute lower bound.')
+    submitted_after = None
+    if since is not None:
+        try:
+            since_seconds = resources_utils.parse_time_seconds(since)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--since') from e
+        submitted_after = time.time() - since_seconds
+    elif after is not None:
+        try:
+            submitted_after = _parse_datetime_to_epoch(after)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--after') from e
+    submitted_before = None
+    if before is not None:
+        try:
+            submitted_before = _parse_datetime_to_epoch(before)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint='--before') from e
     if output_format != flags.OUTPUT_FORMAT_JSON:
         click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
@@ -6070,11 +6244,15 @@ def jobs_queue(verbose: bool,
         # Call both cli_utils.get_managed_job_queue and managed_jobs.pool_status
         # in parallel
         def get_managed_jobs_queue():
-            return cli_utils.get_managed_job_queue(refresh=refresh,
-                                                   skip_finished=skip_finished,
-                                                   all_users=all_users,
-                                                   limit=max_num_jobs_to_show,
-                                                   fields=fields)
+            return cli_utils.get_managed_job_queue(
+                refresh=refresh,
+                skip_finished=skip_finished,
+                all_users=all_users,
+                limit=max_num_jobs_to_show,
+                fields=fields,
+                statuses=status_filter,
+                submitted_after=submitted_after,
+                submitted_before=submitted_before)
 
         def get_pool_status():
             try:

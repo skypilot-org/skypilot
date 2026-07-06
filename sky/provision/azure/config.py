@@ -44,7 +44,7 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
 
 def get_cluster_id_and_nsg_name(resource_group: str,
                                 cluster_name_on_cloud: str) -> Tuple[str, str]:
-    hasher = hashlib.md5(resource_group.encode('utf-8'))
+    hasher = hashlib.md5(resource_group.encode('utf-8'), usedforsecurity=False)
     unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     # We use the cluster name + resource group hash as the
     # unique ID for the cluster, as we need to make sure that

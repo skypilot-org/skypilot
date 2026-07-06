@@ -5,7 +5,7 @@ Serving Models
 
 .. note::
 
-    We're building the next generation of SkyServe focused on production-readiness:
+    `SkyPilot Endpoints <https://blog.skypilot.co/skypilot-endpoints/>`_ is the next generation of SkyServe focused on production-readiness:
 
     - **High-performance:** prefill–decode disaggregation, cache-aware routing, TP/DP/PP/Wide-EP, vLLM and SGlang supported
     - **Multi-cluster by design:** run replicas across all your clusters
@@ -20,7 +20,7 @@ framework and deploys it across one or more regions or clouds.
 
 .. warning::
    
-   SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not yet recommended for external/production serving. Expect rough edges.
+   SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not recommended for external/production serving. Expect rough edges.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 
@@ -639,3 +639,13 @@ If you encounter the "Max number of services reached" error, you can increase th
   see :ref:`Customizing SkyServe controller resources <customizing-sky-serve-controller-resources>`.
 - **Consolidation mode**: Increasing the API server pod memory;
   see :ref:`Tuning API server resources <sky-api-server-resources-tuning>`.
+
+.. toctree::
+   :hidden:
+
+   autoscaling
+   update
+   auth
+   spot-policy
+   https
+   serve-high-availability

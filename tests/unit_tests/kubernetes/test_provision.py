@@ -8,14 +8,123 @@ import pytest
 from sky import clouds
 from sky import exceptions as sky_exceptions
 from sky import resources
+from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
+from sky.provision import common as provision_common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.instance import logger
+from sky.utils import subprocess_utils
 
 
 def _remove_colorama_escape_codes(error_output):
     return [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in error_output]
+
+
+def _make_provision_config(count):
+    """A minimal ProvisionConfig sufficient to drive _create_pods."""
+    return provision_common.ProvisionConfig(
+        provider_config={'timeout': 10},
+        authentication_config={},
+        docker_config={},
+        node_config={
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{}]
+            },
+        },
+        count=count,
+        tags={},
+        resume_stopped_nodes=False,
+        ports_to_open_on_launch=None,
+    )
+
+
+def _fake_pod(name):
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod.status.phase = 'Pending'
+    return pod
+
+
+def _patch_create_pods_k8s_boundary(monkeypatch, existing_pods, head_name):
+    """Stub the Kubernetes-touching calls _create_pods makes.
+
+    Leaves the to_start_count arithmetic and per-pod skip logic to run for
+    real, so the idempotency contract is what's actually exercised.
+    """
+
+    def fake_filter_pods(namespace, context, tags, phases):
+        # Only the Pending/Running query returns existing pods; the
+        # Terminating and Failed/Succeeded cleanup queries return nothing.
+        if 'Pending' in phases:
+            return dict(existing_pods)
+        return {}
+
+    monkeypatch.setattr(kubernetes_utils, 'get_namespace_from_config',
+                        lambda *a, **k: 'ns')
+    monkeypatch.setattr(kubernetes_utils, 'get_context_from_config',
+                        lambda *a, **k: 'ctx')
+    monkeypatch.setattr(kubernetes_utils, 'filter_pods', fake_filter_pods)
+    monkeypatch.setattr(instance, '_get_head_pod_name', lambda pods: head_name)
+    monkeypatch.setattr(kubernetes_utils, 'check_nvidia_runtime_class',
+                        lambda *a, **k: False)
+    monkeypatch.setattr(instance, '_wait_for_pods_to_schedule',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(instance, '_wait_for_pods_to_run', lambda *a, **k: None)
+    monkeypatch.setattr(instance, 'is_high_availability_cluster_by_kubectl',
+                        lambda *a, **k: False)
+
+
+def test_create_pods_is_idempotent_when_all_pods_exist(monkeypatch):
+    """Relaunching with all pods already present must create nothing.
+
+    This pins the reattach-safety contract that lets a paused launch resume
+    onto the pods it already created: _create_pods computes to_start_count == 0
+    and issues no create_namespaced_pod calls, returning the existing head.
+    """
+    cluster_on_cloud = 'test-cluster-abc'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {
+        head_name: _fake_pod(head_name),
+        f'{cluster_on_cloud}-worker1': _fake_pod(f'{cluster_on_cloud}-worker1'),
+    }
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+
+    core_api = mock.MagicMock()
+    monkeypatch.setattr(kubernetes, 'core_api', lambda *a, **k: core_api)
+
+    # run_in_parallel drives the per-index create thread; run it inline so the
+    # head/worker skip logic actually executes.
+    monkeypatch.setattr(subprocess_utils, 'run_in_parallel',
+                        lambda fn, items, *a, **k: [fn(i) for i in items])
+
+    config = _make_provision_config(count=2)
+    record = instance._create_pods('us', cluster_on_cloud, cluster_on_cloud,
+                                   config)
+
+    core_api.create_namespaced_pod.assert_not_called()
+    assert record.created_instance_ids == []
+    assert record.head_instance_id == head_name
+
+
+def test_create_pods_raises_on_more_pods_than_requested(monkeypatch):
+    """More running+pending pods than requested trips the leak guard."""
+    cluster_on_cloud = 'test-cluster-xyz'
+    head_name = f'{cluster_on_cloud}-head'
+    existing = {
+        head_name: _fake_pod(head_name),
+        f'{cluster_on_cloud}-worker1': _fake_pod(f'{cluster_on_cloud}-worker1'),
+        f'{cluster_on_cloud}-worker2': _fake_pod(f'{cluster_on_cloud}-worker2'),
+    }
+    _patch_create_pods_k8s_boundary(monkeypatch, existing, head_name)
+
+    config = _make_provision_config(count=2)
+    with pytest.raises(RuntimeError, match='resource leak'):
+        instance._create_pods('us', cluster_on_cloud, cluster_on_cloud, config)
 
 
 def test_out_of_cpus(monkeypatch):
@@ -3262,3 +3371,165 @@ class TestConfigureRuntimeClass:
                                           nvidia_runtime_exists=True,
                                           needs_gpus_nvidia=False)
         assert pod_spec['spec']['runtimeClassName'] == 'sysbox-runc'
+
+
+# ---------- Pod creation 409 "object is being deleted" handling ----------
+
+
+class TestCreatePodFinalizerHandling:
+    """Recovery path for the 409 ``object is being deleted`` error:
+
+    ``_create_namespaced_pod_with_retries`` force-removes the terminating pod
+    (strip Kueue finalizer + force-delete grace=0), then recreates it.
+    """
+
+    _DELETING_MSG = ('object is being deleted: pods "t-reco-head" already '
+                     'exists')
+
+    def _conflict_exc(self):
+        import json
+        return _make_api_exception(409,
+                                   'Conflict',
+                                   body=json.dumps(
+                                       {'message': self._DELETING_MSG}))
+
+    def test_strips_kueue_finalizer_then_recreates(self, monkeypatch):
+        """Kueue case: strip the finalizer, force-delete (grace 0), recreate."""
+        conflict = self._conflict_exc()
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        stuck_pod = mock.MagicMock()
+        stuck_pod.metadata.finalizers = [
+            'kueue.x-k8s.io/managed', 'example.com/other'
+        ]
+
+        core_api_mock = mock.MagicMock()
+        # 1: initial create 409s; 2: create after force-removing the old pod
+        # succeeds.
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = stuck_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # JSON patch (list body), not strategic-merge (which no-ops on the
+        # finalizers list); keeps the unrelated finalizer, drops only Kueue's.
+        patch_call = core_api_mock.patch_namespaced_pod.call_args
+        assert patch_call.args[2] == [{
+            'op': 'replace',
+            'path': '/metadata/finalizers',
+            'value': ['example.com/other']
+        }]
+        # Removing the finalizer alone leaves the pod lingering for its grace
+        # period, so it must also be force-deleted (grace 0) before recreating.
+        assert any(
+            c.kwargs.get('grace_period_seconds') == 0
+            for c in core_api_mock.delete_namespaced_pod.call_args_list)
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_force_delete_without_finalizer_then_recreates(self, monkeypatch):
+        """Non-Kueue case: no finalizer to strip; force-delete (grace 0) then
+
+        recreate. The pod is read (to check finalizers) but never patched.
+        """
+        conflict = self._conflict_exc()
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        plain_pod = mock.MagicMock()
+        plain_pod.metadata.finalizers = None
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = plain_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # No Kueue finalizer, so no patch; still force-deleted (grace 0).
+        core_api_mock.patch_namespaced_pod.assert_not_called()
+        assert any(
+            c.kwargs.get('grace_period_seconds') == 0
+            for c in core_api_mock.delete_namespaced_pod.call_args_list)
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_pod_gc_d_between_read_and_patch(self, monkeypatch):
+        """If the pod is GC'd between read and finalizer-patch, the 404 on the
+
+        patch is the success state (pod gone) — return (skipping the redundant
+        force-delete) and let the caller recreate, rather than raising.
+        """
+        conflict = self._conflict_exc()
+        not_found = _make_api_exception(404, 'Not Found')
+        created_pod = mock.MagicMock()
+        created_pod.metadata.name = 't-reco-head'
+
+        stuck_pod = mock.MagicMock()
+        stuck_pod.metadata.finalizers = ['kueue.x-k8s.io/managed']
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = [
+            conflict, created_pod
+        ]
+        core_api_mock.read_namespaced_pod.return_value = stuck_pod
+        core_api_mock.patch_namespaced_pod.side_effect = not_found
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        result = instance._create_namespaced_pod_with_retries(
+            'default', pod_spec, None)
+
+        assert result is created_pod
+        # 404 on patch => pod already gone => skip force-delete, just recreate.
+        core_api_mock.delete_namespaced_pod.assert_not_called()
+        assert core_api_mock.create_namespaced_pod.call_count == 2
+
+    def test_asserts_pod_is_terminating(self, monkeypatch):
+        """The helper is only valid for a terminating pod; if the read returns a
+
+        live pod (no deletionTimestamp), the precondition assert fires rather
+        than force-deleting a healthy pod.
+        """
+        conflict = self._conflict_exc()
+        live_pod = mock.MagicMock()
+        live_pod.metadata.deletion_timestamp = None  # not terminating
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.create_namespaced_pod.side_effect = conflict
+        core_api_mock.read_namespaced_pod.return_value = live_pod
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **k: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *a, **k: FakeApiException)
+
+        pod_spec = {'metadata': {'name': 't-reco-head'}, 'spec': {}}
+        with pytest.raises(AssertionError):
+            instance._create_namespaced_pod_with_retries(
+                'default', pod_spec, None)
+        # Must not have touched the live pod.
+        core_api_mock.patch_namespaced_pod.assert_not_called()
+        core_api_mock.delete_namespaced_pod.assert_not_called()

@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { ServerIcon } from '@/components/elements/icons';
 import {
   AlertTriangleIcon,
   RotateCwIcon,
@@ -789,6 +791,16 @@ export function ContextDetails({
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {nodesInContext.length === 0 && (
+            <div className="rounded-md border border-gray-200 shadow-sm">
+              <EmptyState
+                icon={<ServerIcon className="w-5 h-5" />}
+                title="No nodes found"
+                description="No nodes are available in this context"
+              />
             </div>
           )}
 
@@ -2017,7 +2029,6 @@ export function GPUs() {
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
-  const [enabledClouds, setEnabledClouds] = useState(0);
   // Separate cluster/job counts for Cloud panel (for progressive loading)
   const [cloudClusterCounts, setCloudClusterCounts] = useState({});
   const [cloudJobCounts, setCloudJobCounts] = useState({});
@@ -2126,7 +2137,6 @@ export function GPUs() {
         setClusterDataLoading(false);
         setCloudInfraData([]);
         setTotalClouds(0);
-        setEnabledClouds(0);
         setCloudClusterCounts({});
         setCloudJobCounts({});
         setCloudDataLoaded(true);
@@ -2398,13 +2408,11 @@ export function GPUs() {
       if (cloudData) {
         setCloudInfraData(cloudData.clouds || []);
         setTotalClouds(cloudData.totalClouds || 0);
-        setEnabledClouds(cloudData.enabledClouds || 0);
         setCloudDataLoaded(true);
       } else if (cloudData === null) {
         // Data was explicitly null (not just missing)
         setCloudInfraData([]);
         setTotalClouds(0);
-        setEnabledClouds(0);
         setCloudDataLoaded(true);
       }
       // Clear loading state as soon as Cloud list is ready
@@ -2413,7 +2421,6 @@ export function GPUs() {
       console.error('Error in fetchCloudData:', error);
       setCloudInfraData([]);
       setTotalClouds(0);
-      setEnabledClouds(0);
       setCloudDataLoaded(true);
       setCloudLoading(false);
     }
@@ -2851,12 +2858,20 @@ export function GPUs() {
   // Check if all infrastructure is disabled
   const allInfrastructureDisabled = (() => {
     // Ensure all data has been loaded
-    if (!cloudDataLoaded || !kubeDataLoaded || kubeLoading || cloudLoading) {
+    if (
+      !cloudDataLoaded ||
+      !kubeDataLoaded ||
+      !slurmDataLoaded ||
+      kubeLoading ||
+      cloudLoading ||
+      slurmLoading ||
+      pluginInfraLoading
+    ) {
       return false; // Still loading, don't show hint
     }
 
     // Check all infrastructure types
-    const noCloud = enabledClouds === 0;
+    const noCloud = filteredEnabledCloudsCount === 0;
     const noSSH = sshContexts.length === 0;
     const noKubernetes = kubeContexts.length === 0;
     const noSlurm = slurmClusters.length === 0;
@@ -3276,8 +3291,9 @@ export function GPUs() {
       });
 
       // Add Cloud section (always show)
-      // Cloud section is active if there are any enabled clouds
-      const cloudHasActivity = enabledClouds > 0;
+      // Cloud section is active if there are any enabled clouds or
+      // storage-only cloud rows.
+      const cloudHasActivity = filteredEnabledCloudsCount > 0;
       sections.push({
         name: 'Cloud',
         render: renderCloudInfrastructure,

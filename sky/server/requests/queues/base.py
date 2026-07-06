@@ -3,9 +3,11 @@
 import abc
 import multiprocessing
 import queue as queue_lib
+import time
 from typing import List, Optional, Tuple
 
 from sky import sky_logging
+from sky.metrics import utils as metrics_utils
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
@@ -13,9 +15,39 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# The element stored inside the in-memory queues: the public request tuple
+# plus the wall-clock time it was enqueued, so get() can report how long the
+# entry actually waited for a worker. The enqueue timestamp is set
+# afresh on every put(), including re-enqueues (requeue, retry/backoff,
+# broken-pool), so the recorded wait excludes time spent paused or running.
+_InternalItem = Tuple[Tuple[str, bool, bool], float]
+
+
+def _observe_queue_wait(schedule_type: str, enqueued_at: float) -> None:
+    """Record time the just-dequeued entry spent waiting in the queue.
+
+    Metric emission must never disrupt the dequeue path, so any failure
+    (label mismatch, client error) is logged and swallowed.
+    """
+    if not metrics_utils.METRICS_ENABLED:
+        return
+    try:
+        metrics_utils.SKY_APISERVER_QUEUE_WAIT_SECONDS.labels(
+            schedule_type=schedule_type).observe(
+                max(0,
+                    time.time() - enqueued_at))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to observe queue wait metric: {e}')
+
 
 class QueueBackend(abc.ABC):
-    """Abstract queue backend."""
+    """Abstract queue backend.
+
+    Each backend is responsible for emitting
+    ``SKY_APISERVER_QUEUE_WAIT_SECONDS`` from ``get()`` (measuring the time
+    between enqueue and dequeue of the returned entry), so the metric reflects
+    true queue residency regardless of the backend's storage.
+    """
 
     @abc.abstractmethod
     def put(self, item: Tuple[str, bool, bool]) -> None:
@@ -30,7 +62,11 @@ class QueueBackend(abc.ABC):
 
     @abc.abstractmethod
     def get(self) -> Optional[Tuple[str, bool, bool]]:
-        """Non-blocking get. Returns None if queue is empty."""
+        """Non-blocking get. Returns None if queue is empty.
+
+        Implementations must emit ``SKY_APISERVER_QUEUE_WAIT_SECONDS`` for the
+        dequeued entry (see ``_observe_queue_wait``).
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -71,16 +107,22 @@ class LocalQueueBackend(QueueBackend):
 
     def __init__(self, queue_name: str):
         super().__init__()
+        # queue_name is the schedule type ('long' / 'short'); used as the
+        # metric label when reporting queue wait.
+        self._schedule_type = queue_name
         self._queue = local_queue.get_queue(queue_name)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
-        self._queue.put(item)
+        internal: _InternalItem = (item, time.time())
+        self._queue.put(internal)
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         try:
-            return self._queue.get(block=False)
+            item, enqueued_at = self._queue.get(block=False)
         except queue_lib.Empty:
             return None
+        _observe_queue_wait(self._schedule_type, enqueued_at)
+        return item
 
     def qsize(self) -> int:
         return self._queue.qsize()
@@ -93,16 +135,22 @@ class MultiprocessingQueueBackend(QueueBackend):
                  queue_name: str,
                  port: int = mp_queue.DEFAULT_QUEUE_MANAGER_PORT):
         super().__init__()
+        # queue_name is the schedule type ('long' / 'short'); used as the
+        # metric label when reporting queue wait.
+        self._schedule_type = queue_name
         self._queue = mp_queue.get_queue(queue_name, port)
 
     def put(self, item: Tuple[str, bool, bool]) -> None:
-        self._queue.put(item)
+        internal: _InternalItem = (item, time.time())
+        self._queue.put(internal)
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         try:
-            return self._queue.get(block=False)
+            item, enqueued_at = self._queue.get(block=False)
         except queue_lib.Empty:
             return None
+        _observe_queue_wait(self._schedule_type, enqueued_at)
+        return item
 
     def qsize(self) -> int:
         return self._queue.qsize()
