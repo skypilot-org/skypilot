@@ -4194,5 +4194,103 @@ class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
         self.assertEqual(result, 'numeric-sa')
 
 
+class TestKubernetesSpotLabelContext(unittest.TestCase):
+    """Regression test for TICKET-034.
+
+    make_deploy_resources_variables must pass the provisioning context to
+    get_spot_label(). get_spot_label resolves the autoscaler type per-context
+    (get_effective_region_config keyed on the context name), so without the
+    context argument only a *global* kubernetes.autoscaler is honored and a
+    per-context setting (context_configs.<ctx>.autoscaler: karpenter) never
+    injects the spot node label. This test fails if the call site drops the
+    context (the original bug: get_spot_label() with no args).
+    """
+
+    def setUp(self):
+        self.resources = mock.MagicMock()
+        self.resources.instance_type = "2CPU--4GB"
+        self.resources.accelerators = None
+        self.resources.use_spot = True
+        self.resources.region = "test-context"
+        self.resources.zone = None
+        self.resources.cluster_config_overrides = {}
+        self.resources.image_id = None
+        setattr(self.resources, 'assert_launchable', lambda: self.resources)
+        self.resources.network_tier = resources_utils.NetworkTier.BEST
+        self.cluster_name = "test-cluster"
+        self.region = mock.MagicMock()
+        self.region.name = "test-context"
+
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_spot_label_uses_provisioning_context(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_spot_label):
+        mock_cluster_type = mock.MagicMock()
+        mock_cluster_type.supports_high_performance_networking.return_value = (
+            False)
+        mock_cluster_type.requires_ipc_lock_capability.return_value = False
+        mock_detect_network_type.return_value = (mock_cluster_type, None)
+
+        mock_get_current_context.return_value = "test-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-image:latest"
+        # Simulate a Karpenter context: get_spot_label returns the label only
+        # when it can resolve the (per-context) autoscaler.
+        mock_get_spot_label.return_value = ('karpenter.sh/capacity-type',
+                                            'spot')
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # The heart of the regression: NO call to get_spot_label may drop the
+        # provisioning context. get_spot_label runs at more than one site during
+        # deploy-var construction; every one must forward the context, or the
+        # per-context autoscaler config is silently ignored. A bare call()
+        # (the original bug) must never appear.
+        self.assertGreaterEqual(mock_get_spot_label.call_count, 1)
+        self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
+        for call_args in mock_get_spot_label.call_args_list:
+            self.assertEqual(call_args, mock.call('test-context'))
+        # ...and the resolved label must flow into the pod template vars.
+        self.assertEqual(deploy_vars['k8s_spot_label_key'],
+                         'karpenter.sh/capacity-type')
+        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+
+
 if __name__ == '__main__':
     unittest.main()
