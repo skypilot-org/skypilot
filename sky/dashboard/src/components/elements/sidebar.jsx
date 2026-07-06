@@ -73,8 +73,7 @@ export function SidebarProvider({ children }) {
 
   // Guard window access so the component doesn't throw during Next.js SSR/SSG
   // (window is undefined on the server).
-  const baseUrl =
-    typeof window !== 'undefined' ? window.location.origin : '';
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const fullEndpoint = `${baseUrl}${ENDPOINT}`;
   useEffect(() => {
     // Fetch user info from health endpoint
