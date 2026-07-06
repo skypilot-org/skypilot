@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 // Mock the shared dashboard cache so we can observe which cache key the hook
 // fetches under (all-users vs. current-user scope) without hitting the network.
@@ -138,5 +138,61 @@ describe('useClusterData ownership scoping (client path)', () => {
     const names = result.current.allData.map((c) => c.cluster).sort();
     expect(names).toEqual(['mine-active', 'mine-terminated']);
     expect(names).not.toContain('other-terminated');
+  });
+
+  it('drops a stale all-users response that resolves after a newer scoped fetch', async () => {
+    // Deep-linking ?owner=mine starts an all-users fetch (initial scope)
+    // followed by a scoped fetch once the URL is synced. If the all-users
+    // response lands last it must not overwrite the scoped data.
+    let resolveAllUsers;
+    dashboardCache.get.mockImplementation((fn, args) => {
+      if (args && args[0] && args[0].allUsers === false) {
+        return Promise.resolve([
+          {
+            cluster: 'mine-active',
+            user_hash: 'u-1',
+            user: 'alice',
+            status: 'RUNNING',
+          },
+        ]);
+      }
+      return new Promise((resolve) => {
+        resolveAllUsers = () =>
+          resolve([
+            {
+              cluster: 'other-active',
+              user_hash: 'u-2',
+              user: 'bob',
+              status: 'RUNNING',
+            },
+          ]);
+      });
+    });
+
+    // Stable identities: fresh objects every render would recreate the hook's
+    // fetch callbacks and trigger spurious refetches.
+    const currentUser = { id: 'u-1', name: 'alice' };
+    const filters = [];
+    const { result, rerender } = renderHook(
+      ({ allUsers }) => useClusterData({ allUsers, currentUser, filters }),
+      { initialProps: { allUsers: true } }
+    );
+
+    // Flip to the scoped fetch while the all-users request is still pending.
+    rerender({ allUsers: false });
+    await waitFor(() =>
+      expect(result.current.allData.map((c) => c.cluster)).toEqual([
+        'mine-active',
+      ])
+    );
+
+    // The stale all-users response resolves last; it must be discarded.
+    await act(async () => {
+      resolveAllUsers();
+    });
+    expect(result.current.allData.map((c) => c.cluster)).toEqual([
+      'mine-active',
+    ]);
+    expect(result.current.loading).toBe(false);
   });
 });

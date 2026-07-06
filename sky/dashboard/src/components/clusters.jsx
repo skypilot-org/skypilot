@@ -294,14 +294,14 @@ export function Clusters() {
 
       const isAnonymous = authResolved && !currentUser;
       const owner = router.query.owner;
-      let expectedScope = null;
       if (isAnonymous) {
-        expectedScope = OWNER_SCOPE_ALL;
-      } else if (isOwnerScope(owner)) {
-        expectedScope = owner;
-      }
-      if (expectedScope !== null && userScope !== expectedScope) {
-        setUserScope(expectedScope);
+        if (userScope !== OWNER_SCOPE_ALL) {
+          setUserScope(OWNER_SCOPE_ALL);
+        }
+      } else if (isOwnerScope(owner) && userScope !== owner) {
+        // Go through selectScope so a deep-linked ?owner=... choice is also
+        // persisted to localStorage like a manual toggle.
+        selectScope(owner);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -530,12 +530,14 @@ export function Clusters() {
   const isEveryone = !explicitUserFilter && userScope === OWNER_SCOPE_ALL;
 
   const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getClusters);
+    // Invalidate cache to ensure fresh data is fetched. Use invalidateFunction
+    // so every cache key is dropped regardless of arguments (e.g. the
+    // current-user-scoped [{allUsers: false}] entry used by "My Clusters").
+    dashboardCache.invalidateFunction(getClusters);
     dashboardCache.invalidate(getWorkspaces);
     // Only invalidate cluster history if we're currently showing history
     if (showHistory) {
-      dashboardCache.invalidate(getClusterHistory);
+      dashboardCache.invalidateFunction(getClusterHistory);
     }
 
     // Reset preloading state so ClusterTable can fetch fresh data immediately
@@ -1410,43 +1412,41 @@ export function ClusterTable({
                     </TableRow>
                   );
                 })
-              ) : (
-                userScope === OWNER_SCOPE_MINE &&
+              ) : userScope === OWNER_SCOPE_MINE &&
                 currentUser &&
                 !hasExplicitUserFilter &&
                 othersTotal > 0 ? (
-                  <EmptyTableState
-                    colSpan={totalColSpan}
-                    icon={<ServerIcon className="w-5 h-5" />}
-                    title={`You don't have any${showHistory ? '' : ' active'} clusters${showHistory ? ' yet' : ''}`}
-                    description={`${othersTotal.toLocaleString()} cluster${
-                      othersTotal === 1 ? '' : 's'
-                    } owned by other users — switch to All Clusters to see them.`}
-                    action={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={onViewAllClusters}
-                        className="text-sky-blue hover:text-sky-blue-bright"
-                      >
-                        View all clusters
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <EmptyTableState
-                    colSpan={totalColSpan}
-                    icon={<ServerIcon className="w-5 h-5" />}
-                    title={
-                      showHistory ? 'No clusters found' : 'No active clusters'
-                    }
-                    description={
-                      showHistory
-                        ? 'No clusters in the selected time range'
-                        : 'Launch a cluster to run your workloads'
-                    }
-                  />
-                )
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<ServerIcon className="w-5 h-5" />}
+                  title={`You don't have any${showHistory ? '' : ' active'} clusters${showHistory ? ' yet' : ''}`}
+                  description={`${othersTotal.toLocaleString()} cluster${
+                    othersTotal === 1 ? '' : 's'
+                  } owned by other users — switch to All Clusters to see them.`}
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onViewAllClusters}
+                      className="text-sky-blue hover:text-sky-blue-bright"
+                    >
+                      View all clusters
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<ServerIcon className="w-5 h-5" />}
+                  title={
+                    showHistory ? 'No clusters found' : 'No active clusters'
+                  }
+                  description={
+                    showHistory
+                      ? 'No clusters in the selected time range'
+                      : 'Launch a cluster to run your workloads'
+                  }
+                />
               )}
             </TableBody>
           </Table>

@@ -592,6 +592,10 @@ export function useClusterData(options = {}) {
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
   const isInitialMount = useRef(true);
+  // Monotonic id used to drop stale responses: if the fetch options change
+  // (e.g. the ownership scope flips from all-users to current-user) while a
+  // request is in flight, the older response must not overwrite the newer one.
+  const fetchIdRef = useRef(0);
 
   // Reset to page 1 when filters or ownership scope change, but skip on
   // initial mount so the page number read from the URL isn't overwritten.
@@ -629,14 +633,6 @@ export function useClusterData(options = {}) {
     const resultHasPrev = result.hasPrev || result.has_prev || false;
     const resultData = result.items || result.data || [];
 
-    setData(resultData);
-    setFullData(resultData);
-    setTotal(resultTotal);
-    setTotalPages(resultTotalPages);
-    setHasNext(resultHasNext);
-    setHasPrev(resultHasPrev);
-    setIsServerPagination(true);
-
     // Prefetch next page in background if there is one
     if (resultHasNext) {
       const nextPageOptions = {
@@ -654,6 +650,16 @@ export function useClusterData(options = {}) {
         .then(() => console.log('[useClusterData] Prefetched page', page + 1))
         .catch((err) => console.warn('[useClusterData] Prefetch failed:', err));
     }
+
+    return {
+      data: resultData,
+      fullData: resultData,
+      total: resultTotal,
+      totalPages: resultTotalPages,
+      hasNext: resultHasNext,
+      hasPrev: resultHasPrev,
+      isServerPagination: true,
+    };
   }, [
     page,
     limit,
@@ -723,29 +729,44 @@ export function useClusterData(options = {}) {
     const startIndex = (page - 1) * limit;
     const paginatedData = allClusters.slice(startIndex, startIndex + limit);
 
-    setData(paginatedData);
-    setFullData(allClusters);
-    setTotal(clientTotal);
-    setTotalPages(clientTotalPages);
-    setHasNext(page < clientTotalPages);
-    setHasPrev(page > 1);
-    setIsServerPagination(false);
+    return {
+      data: paginatedData,
+      fullData: allClusters,
+      total: clientTotal,
+      totalPages: clientTotalPages,
+      hasNext: page < clientTotalPages,
+      hasPrev: page > 1,
+      isServerPagination: false,
+    };
   }, [showHistory, historyDays, page, limit, allUsers, currentUser]);
 
   /**
    * Main fetch function - chooses server or client path
    */
   const fetchData = useCallback(async () => {
+    const fetchId = ++fetchIdRef.current;
     setLoading(true);
     setError(null);
 
     try {
-      if (isPaginationPluginAvailable()) {
-        await fetchServerSide();
-      } else {
-        await fetchClientSide();
+      const result = isPaginationPluginAvailable()
+        ? await fetchServerSide()
+        : await fetchClientSide();
+      // A newer fetch started while this one was in flight; drop the result.
+      if (fetchId !== fetchIdRef.current) {
+        return;
       }
+      setData(result.data);
+      setFullData(result.fullData);
+      setTotal(result.total);
+      setTotalPages(result.totalPages);
+      setHasNext(result.hasNext);
+      setHasPrev(result.hasPrev);
+      setIsServerPagination(result.isServerPagination);
     } catch (fetchError) {
+      if (fetchId !== fetchIdRef.current) {
+        return;
+      }
       console.error('[useClusterData] Error fetching clusters:', fetchError);
       setError(fetchError);
       setData([]);
