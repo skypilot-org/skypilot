@@ -792,6 +792,21 @@ def _request_id_where(request_id: str) -> Tuple[str, Tuple[str, ...]]:
     return 'request_id >= ? AND request_id < ?', (request_id, upper)
 
 
+def _request_id_prefix_clause(prefix: str) -> Tuple[str, Tuple[str, ...]]:
+    """A ``WHERE`` clause (or '') + params for a request-id prefix listing.
+
+    Unlike :func:`_request_id_where` (an exact/prefix match that rejects an
+    empty id), the ``*_with_prefix`` listings and empty-input shell completion
+    treat an empty prefix as "all requests", so this returns an empty clause
+    (no filter) for an empty prefix and an index-friendly ``WHERE`` clause
+    otherwise.
+    """
+    if not prefix:
+        return '', ()
+    where, params = _request_id_where(prefix)
+    return f'WHERE {where}', params
+
+
 def _get_request_no_lock(
         request_id: str,
         fields: Optional[List[str]] = None) -> Optional[Request]:
@@ -1559,12 +1574,11 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(fields)
         else:
             columns_str = ', '.join(REQUEST_COLUMNS)
-        where, params = _request_id_where(request_id_prefix)
+        clause, params = _request_id_prefix_clause(request_id_prefix)
         with _DB.conn:
             cursor = _DB.conn.cursor()
             cursor.execute(
-                f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
-                params)
+                f'SELECT {columns_str} FROM {REQUEST_TABLE} {clause}', params)
             rows = cursor.fetchall()
             if not rows:
                 return None
@@ -1583,9 +1597,9 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             columns_str = ', '.join(fields)
         else:
             columns_str = ', '.join(REQUEST_COLUMNS)
-        where, params = _request_id_where(request_id_prefix)
+        clause, params = _request_id_prefix_clause(request_id_prefix)
         async with _DB.execute_fetchall_async(
-                f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
+                f'SELECT {columns_str} FROM {REQUEST_TABLE} {clause}',
                 params) as rows:
             if not rows:
                 return None
@@ -1615,18 +1629,11 @@ class SqliteRequestBackend(request_storage.RequestBackend):
     async def get_api_request_ids_start_with(self,
                                              incomplete: str) -> List[str]:
         assert _DB is not None
-        # Empty input means "list recent request ids" for completion, so skip
-        # the request_id filter entirely (rather than matching all via the
-        # prefix helper, which rejects an empty id).
-        if incomplete:
-            where, params = _request_id_where(incomplete)
-            where_clause = f'WHERE {where}'
-        else:
-            where_clause = ''
-            params = ()
+        # Empty input lists recent request ids for completion (match all).
+        clause, params = _request_id_prefix_clause(incomplete)
         async with _DB.execute_fetchall_async(
                 f"""SELECT request_id FROM {REQUEST_TABLE}
-                    {where_clause}
+                    {clause}
                     ORDER BY
                         CASE
                             WHEN status IN ('PENDING', 'RUNNING') THEN 0
