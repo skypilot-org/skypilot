@@ -71,7 +71,10 @@ export function SidebarProvider({ children }) {
     setIsMobileSidebarOpen((prev) => !prev);
   };
 
-  const baseUrl = window.location.origin;
+  // Guard window access so the component doesn't throw during Next.js SSR/SSG
+  // (window is undefined on the server).
+  const baseUrl =
+    typeof window !== 'undefined' ? window.location.origin : '';
   const fullEndpoint = `${baseUrl}${ENDPOINT}`;
   useEffect(() => {
     // Fetch user info from health endpoint
