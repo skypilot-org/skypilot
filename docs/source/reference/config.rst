@@ -256,6 +256,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`restrict_config_to_admins <config-yaml-rbac-restrict-config-to-admins>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -2749,6 +2750,26 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-restrict-config-to-admins:
+
+``rbac.restrict_config_to_admins``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restrict reading the API server config to admins (optional, default ``false``).
+
+The API server config (returned by ``GET /workspaces/config``) includes
+admin-only secrets such as cloud provider tokens. When this is set to ``true``,
+the ``user`` role is blocked from reading it (returns ``403``) and the dashboard
+hides the configuration page for non-admin users. Writing the config
+(``POST /workspaces/config``) is admin-only regardless of this setting.
+
+Defaults to ``false`` to preserve backward-compatible behavior.
+
+.. code-block:: yaml
+
+  rbac:
+    restrict_config_to_admins: true
 
 .. _config-yaml-db:
 

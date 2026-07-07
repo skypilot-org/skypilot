@@ -2346,6 +2346,11 @@ def get_config_schema():
                 'type': 'string',
                 'case_insensitive_enum': ['admin', 'user', 'viewer']
             },
+            # When true, GET /workspaces/config is restricted to admins (the
+            # config payload includes admin-only secrets). Defaults to false.
+            'restrict_config_to_admins': {
+                'type': 'boolean',
+            },
             # Per-role permission overrides. Schema is intentionally
             # permissive (additionalProperties: True on
             # `permissions`) because admin/user use `blocklist`

@@ -90,6 +90,7 @@ from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
+from sky.users import rbac
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
@@ -2792,6 +2793,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         latest_version=latest_version,
         # Whether telemetry/usage collection is enabled
         telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
+        # Whether GET /workspaces/config is restricted to admins (so the
+        # dashboard can hide the config UI for non-admins when enabled)
+        restrict_config_to_admins=rbac.restrict_config_to_admins(),
     )
 
 

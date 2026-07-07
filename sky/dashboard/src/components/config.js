@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
@@ -16,9 +16,18 @@ import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { trackSettingsAction } from '@/lib/analytics';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useSidebar } from '@/components/elements/sidebar';
 import { YamlEditor } from '@/components/ui/yaml-editor';
 
 export function Config() {
+  const { userRole, restrictConfigToAdmins } = useSidebar();
+  const isAdmin = userRole === 'admin';
+  // Who can read the config: admins always; a 'user' only when the server
+  // hasn't restricted it (rbac.restrict_config_to_admins). Viewers never can
+  // (config is not on the viewer allowlist), so they get the access-denied
+  // card instead of a 403.
+  const canViewConfig =
+    isAdmin || (userRole === 'user' && !restrictConfigToAdmins);
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,30 +36,7 @@ export function Config() {
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const successTimeoutRef = useRef(null);
 
-  useEffect(() => {
-    loadConfig();
-
-    // Check Grafana availability
-    const checkGrafana = async () => {
-      const available = await checkGrafanaAvailability();
-      setIsGrafanaAvailable(available);
-    };
-
-    if (typeof window !== 'undefined') {
-      checkGrafana();
-    }
-  }, []);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (successTimeoutRef.current) {
-        clearTimeout(successTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -66,7 +52,36 @@ export function Config() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // If the caller can't read the config, it would 403, so skip the request
+    // entirely and show the access-denied card instead.
+    if (!canViewConfig) {
+      setLoading(false);
+      return;
+    }
+    loadConfig();
+
+    // Check Grafana availability
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
+  }, [canViewConfig, loadConfig]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSave = async () => {
     trackSettingsAction('save');
@@ -149,6 +164,36 @@ export function Config() {
       successTimeoutRef.current = null;
     }
   };
+
+  // User role is still resolving.
+  if (userRole === null) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <CircularProgress size={20} />
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
+
+  // The API server configuration exposes admin-only secrets. Anyone who can't
+  // read it (restricted non-admins, or viewers) gets an access-denied card
+  // instead of a 403.
+  if (!canViewConfig) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="text-base font-normal">
+            API Server Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-600">
+            You must be an admin to view the API server configuration.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <>
