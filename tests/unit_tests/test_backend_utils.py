@@ -647,3 +647,107 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+def _fake_ssh_handle():
+    handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+    handle.cluster_name = 'jump-abcd'
+    handle.cluster_name_on_cloud = 'jump-abcd-01'
+    handle.cached_external_ips = ['1.2.3.4']
+    handle.cached_external_ssh_ports = [22]
+    handle.cluster_yaml = '/fake/yaml'
+    handle.ssh_user = 'ubuntu'
+    handle.docker_user = None
+    return handle
+
+
+@mock.patch.object(backend_utils.cluster_utils.SSHConfigHelper, 'add_cluster')
+@mock.patch.object(backend_utils.auth_utils, 'create_ssh_key_files_from_db')
+@mock.patch.object(backend_utils,
+                   'ssh_credential_from_yaml',
+                   return_value={
+                       'ssh_user': 'ubuntu',
+                       'ssh_private_key': '/fake/key'
+                   })
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_handle_from_cluster_name')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_cluster_names',
+                   return_value=['jump-abcd'])
+def test_expand_proxy_rewrites_alias(mock_names, mock_get_handle, mock_cred,
+                                     mock_restore_key, mock_add):
+    mock_get_handle.return_value = _fake_ssh_handle()
+    proxy = "ssh -W '[%h]:%p' -o StrictHostKeyChecking=no jump-abcd"
+    command, jump = backend_utils.expand_proxy_cluster_aliases(proxy, None)
+    # Alias is replaced by an explicit, config-independent target.
+    assert 'jump-abcd' not in command
+    assert 'ubuntu@1.2.3.4' in command
+    assert '-i /fake/key' in command
+    assert '-F /dev/null' in command
+    assert 'Port=22' in command
+    # The user's own flags are preserved.
+    assert "-W '[%h]:%p'" in command
+    assert jump is None
+    # Restore side effects ran.
+    mock_restore_key.assert_called_once_with('/fake/key')
+    mock_add.assert_called_once()
+
+
+@mock.patch.object(backend_utils.cluster_utils.SSHConfigHelper, 'add_cluster')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_cluster_names',
+                   return_value=['other-cluster'])
+def test_expand_proxy_noop_when_not_a_cluster(mock_names, mock_add):
+    proxy = "ssh -W '[%h]:%p' jump-abcd"
+    command, jump = backend_utils.expand_proxy_cluster_aliases(proxy, None)
+    assert command == proxy
+    assert jump is None
+    mock_add.assert_not_called()
+
+
+@mock.patch.object(backend_utils.global_user_state, 'get_cluster_names')
+def test_expand_proxy_noop_without_proxy(mock_names):
+    command, jump = backend_utils.expand_proxy_cluster_aliases(None, None)
+    assert command is None and jump is None
+    mock_names.assert_not_called()
+
+
+@mock.patch.object(backend_utils.cluster_utils.SSHConfigHelper, 'add_cluster')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_handle_from_cluster_name')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_cluster_names',
+                   return_value=['jump-abcd'])
+def test_expand_proxy_best_effort_missing_ips(mock_names, mock_get_handle,
+                                              mock_add):
+    handle = _fake_ssh_handle()
+    handle.cached_external_ips = None  # not ssh-reachable yet
+    mock_get_handle.return_value = handle
+    proxy = "ssh -W '[%h]:%p' jump-abcd"
+    command, _ = backend_utils.expand_proxy_cluster_aliases(proxy, None)
+    assert command == proxy  # unchanged, no raise
+    mock_add.assert_not_called()
+
+
+@mock.patch.object(backend_utils.cluster_utils.SSHConfigHelper, 'add_cluster')
+@mock.patch.object(backend_utils.auth_utils, 'create_ssh_key_files_from_db')
+@mock.patch.object(backend_utils,
+                   'ssh_credential_from_yaml',
+                   return_value={
+                       'ssh_user': 'ubuntu',
+                       'ssh_private_key': '/fake/key'
+                   })
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_handle_from_cluster_name')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_cluster_names',
+                   return_value=['jump-abcd'])
+def test_expand_proxy_matches_user_at_host(mock_names, mock_get_handle,
+                                           mock_cred, mock_restore_key,
+                                           mock_add):
+    mock_get_handle.return_value = _fake_ssh_handle()
+    # user@alias form: the cluster's own user is used, alias dropped.
+    command, _ = backend_utils.expand_proxy_cluster_aliases(
+        'ssh -W [%h]:%p me@jump-abcd', None)
+    assert 'jump-abcd' not in command
+    assert 'ubuntu@1.2.3.4' in command
