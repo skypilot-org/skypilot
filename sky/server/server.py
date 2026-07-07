@@ -576,6 +576,12 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
+                # This middleware runs in the main API-server process, which —
+                # unlike executor-queued requests — does not reload config per
+                # request. Refresh it so a runtime change to `rbac.default_role`
+                # (or any other config) is honored when seeding this new user's
+                # role, instead of only taking effect after a server restart.
+                skypilot_config.safe_reload_config()
                 permission.permission_service.add_user_if_not_exists(
                     auth_user.id)
 

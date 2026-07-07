@@ -717,10 +717,9 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
 
 
 def _reload_config_from_internal_file(internal_config_path: str) -> None:
-    # Reset the global variables, to avoid using stale values.
-    _set_loaded_config(config_utils.Config())
-    _set_loaded_config_path(None)
-
+    # Build the new config fully, then swap it in at the end (see
+    # `_reload_config_as_server` for why we don't blank up front). A missing
+    # file raises with the previously-loaded config left intact.
     config_path = os.path.expanduser(internal_config_path)
     if not os.path.exists(config_path):
         with ux_utils.print_exception_no_traceback():
@@ -748,10 +747,12 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
 
 
 def _reload_config_as_server() -> None:
-    # Reset the global variables, to avoid using stale values.
-    _set_loaded_config(config_utils.Config())
-    _set_loaded_config_path(None)
-
+    # Build the new config fully, then swap it in with a single
+    # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
+    # `get_nested` reads without the config lock (hot path), so a transient
+    # empty config would be observable by a concurrent reader and e.g. make
+    # `rbac.get_default_role()` fall back to admin. On any exception below the
+    # previously-loaded config is left in place (stale is safer than empty).
     server_config_path = _resolve_server_config_path()
     server_config = _get_config_from_path(server_config_path)
     # Get the db url from the env var. _get_config_from_path should have moved
@@ -785,10 +786,8 @@ def _reload_config_as_server() -> None:
 
 
 def _reload_config_as_client() -> None:
-    # Reset the global variables, to avoid using stale values.
-    _set_loaded_config(config_utils.Config())
-    _set_loaded_config_path(None)
-
+    # Build the new config fully, then swap it in at the end (see
+    # `_reload_config_as_server` for why we don't blank up front).
     overrides: List[config_utils.Config] = []
     user_config_path = resolve_user_config_path()
     user_config = _get_config_from_path(user_config_path)
