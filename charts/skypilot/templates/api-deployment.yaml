@@ -358,7 +358,7 @@ spec:
           subPath: .sky
         {{- end }}
         {{- if .Values.storage.enabled }}
-        {{- if .Values.apiService.persistSSHConfig }}
+        {{- if ne .Values.apiService.persistSSHConfig false }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
