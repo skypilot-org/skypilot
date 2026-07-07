@@ -208,6 +208,56 @@ def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
         f'config was empty mid-reload (would fall back to admin): {observed}')
 
 
+class _DummyLock:
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_safe_reload_config_uses_shared_lock(monkeypatch) -> None:
+    """`safe_reload_config` (a pure read) must take the lock in SHARED mode so
+    concurrent reloads don't serialize. Reverting `shared_lock=True` fails this.
+    """
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+
+    skypilot_config.safe_reload_config()
+
+    assert captured.get('shared_lock') is True
+
+
+def test_get_skypilot_config_lock_defaults_to_exclusive(monkeypatch) -> None:
+    """Writers (the default) must take the lock EXCLUSIVELY."""
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+
+    skypilot_config.get_skypilot_config_lock()
+
+    assert captured.get('shared_lock') is False
+
+
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:
