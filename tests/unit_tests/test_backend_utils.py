@@ -647,3 +647,74 @@ def test_make_safe_symlink_command_leaves_target_unquoted():
         source='/etc/config', target='~/.sky/file_mounts/etc/config')
     assert 'ln -s ~/.sky/file_mounts/etc/config /etc/config' in cmd
     assert "'~/.sky/file_mounts/etc/config'" not in cmd
+
+
+def test_cluster_names_referenced_in_proxy():
+    names = ['jump-abcd', 'sky-1234-me', 'target']
+    f = backend_utils._cluster_names_referenced_in_proxy
+    # ProxyCommand referencing a bastion by its SSH alias (the shape used by
+    # the aws ssh_proxy_command smoke test).
+    p = ("ssh -W '[%h]:%p' -o StrictHostKeyChecking=no "
+         "-o UserKnownHostsFile=/dev/null jump-abcd")
+    assert f([p], names) == ['jump-abcd']
+    # ProxyJump user@host:port form.
+    assert f(['me@jump-abcd:22'], names) == ['jump-abcd']
+    # Comma-separated jump chain.
+    assert f(['jump-abcd,sky-1234-me'], names) == ['jump-abcd', 'sky-1234-me']
+    # A non-SkyPilot host is not matched.
+    assert not f(['ssh bastion.corp.example'], names)
+    # Malformed quoting falls back to a whitespace split.
+    assert f(["ssh 'unterminated jump-abcd"], names) == ['jump-abcd']
+    # No duplicates even if referenced more than once.
+    assert f(['jump-abcd jump-abcd'], names) == ['jump-abcd']
+
+
+def _fake_handle():
+    handle = mock.MagicMock(spec=backends.CloudVmRayResourceHandle)
+    handle.cluster_name = 'jump-abcd'
+    handle.cluster_name_on_cloud = 'jump-abcd-01'
+    handle.cached_external_ips = ['1.2.3.4']
+    handle.cached_external_ssh_ports = [22]
+    handle.cluster_yaml = '/fake/yaml'
+    handle.ssh_user = 'ubuntu'
+    handle.docker_user = None
+    return handle
+
+
+@mock.patch.object(backend_utils.cluster_utils.SSHConfigHelper, 'add_cluster')
+@mock.patch.object(backend_utils,
+                   'ssh_credential_from_yaml',
+                   return_value={'ssh_user': 'ubuntu'})
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_handle_from_cluster_name')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_cluster_names',
+                   return_value=['jump-abcd'])
+def test_restore_ssh_config_rebuilds_missing_stanza(mock_names, mock_get_handle,
+                                                    mock_cred, mock_add):
+    mock_get_handle.return_value = _fake_handle()
+    proxy = "ssh -W '[%h]:%p' jump-abcd"
+    with mock.patch.object(backend_utils.os.path, 'exists', return_value=False):
+        backend_utils.restore_ssh_config_from_db_for_proxy(proxy, None)
+    mock_add.assert_called_once()
+    args = mock_add.call_args[0]
+    assert args[0] == 'jump-abcd'  # cluster_name
+    assert args[2] == ['1.2.3.4']  # ips
+    assert args[4] == [22]  # ports
+
+
+@mock.patch.object(backend_utils.cluster_utils.SSHConfigHelper, 'add_cluster')
+@mock.patch.object(backend_utils.global_user_state,
+                   'get_cluster_names',
+                   return_value=['jump-abcd'])
+def test_restore_ssh_config_skips_when_stanza_present(mock_names, mock_add):
+    proxy = "ssh -W '[%h]:%p' jump-abcd"
+    with mock.patch.object(backend_utils.os.path, 'exists', return_value=True):
+        backend_utils.restore_ssh_config_from_db_for_proxy(proxy, None)
+    mock_add.assert_not_called()
+
+
+@mock.patch.object(backend_utils.global_user_state, 'get_cluster_names')
+def test_restore_ssh_config_noop_without_proxy(mock_names):
+    backend_utils.restore_ssh_config_from_db_for_proxy(None, None)
+    mock_names.assert_not_called()

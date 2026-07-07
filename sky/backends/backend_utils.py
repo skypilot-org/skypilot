@@ -1774,6 +1774,96 @@ def ssh_credential_from_yaml(
     return credentials
 
 
+def _cluster_names_referenced_in_proxy(proxy_strs: List[str],
+                                       cluster_names: List[str]) -> List[str]:
+    """Returns cluster names that appear as SSH host tokens in proxy strings.
+
+    A proxy command / jump may reach the destination through a SkyPilot
+    cluster referenced by its SSH host alias (which equals the cluster name),
+    e.g. ``ssh -W '[%h]:%p' jump-host`` or a ``user@jump-host:port`` jump spec.
+    This tokenizes the proxy strings and returns the subset of tokens (or their
+    host component) that match a known cluster name.
+    """
+    names = set(cluster_names)
+    matched: List[str] = []
+    for proxy in proxy_strs:
+        try:
+            tokens = shlex.split(proxy)
+        except ValueError:
+            tokens = proxy.split()
+        for token in tokens:
+            # A jump host may be given as user@host:port or a comma-separated
+            # chain; expand the token into its host components before matching.
+            candidates = [token]
+            for sep in ('@', ':', ','):
+                candidates = [
+                    part for cand in candidates for part in cand.split(sep)
+                ]
+            for cand in candidates:
+                if cand in names and cand not in matched:
+                    matched.append(cand)
+    return matched
+
+
+def restore_ssh_config_from_db_for_proxy(ssh_proxy_command: Optional[str],
+                                         ssh_proxy_jump: Optional[str]) -> None:
+    """Restores local SSH config stanzas for clusters referenced by a proxy.
+
+    When a cluster is launched, SkyPilot writes a per-cluster SSH config stanza
+    under ``~/.sky/generated/ssh/<name>`` (Included from ``~/.ssh/config``).
+    This stanza is local state, present only on the machine that ran the
+    launch. A user-provided ``ssh_proxy_command`` / ``ssh_proxy_jump`` may reach
+    its destination *through another SkyPilot cluster* by that cluster's SSH
+    host alias (e.g. a bastion started with ``sky launch``); the inner
+    ``ssh <alias>`` then needs the alias' stanza to be present locally to
+    resolve it.
+
+    On a machine that did not launch the referenced cluster (e.g. a remote API
+    server that provisioned it in a different session, or was restarted), the
+    stanza is absent and the proxy cannot resolve the alias. This rebuilds the
+    stanza on demand from the authoritative cluster state in the global user
+    state.
+
+    Best-effort: failures are logged at debug level and ignored (the proxy may
+    legitimately reference a non-SkyPilot host that is not in the database).
+    """
+    proxy_strs = [s for s in (ssh_proxy_command, ssh_proxy_jump) if s]
+    if not proxy_strs:
+        return
+    try:
+        cluster_names = global_user_state.get_cluster_names()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Skip SSH config restore; cannot list clusters: {e}')
+        return
+    for name in _cluster_names_referenced_in_proxy(proxy_strs, cluster_names):
+        try:
+            stanza_path = os.path.expanduser(
+                cluster_utils.SSHConfigHelper.ssh_cluster_path.format(name))
+            if os.path.exists(stanza_path):
+                continue
+            handle = global_user_state.get_handle_from_cluster_name(name)
+            if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                continue
+            if (not handle.cached_external_ips or
+                    not handle.cached_external_ssh_ports):
+                continue
+            auth_config = ssh_credential_from_yaml(
+                handle.cluster_yaml,
+                ssh_user=handle.ssh_user,
+                docker_user=handle.docker_user)
+            cluster_utils.SSHConfigHelper.add_cluster(
+                handle.cluster_name, handle.cluster_name_on_cloud,
+                handle.cached_external_ips, auth_config,
+                handle.cached_external_ssh_ports, handle.docker_user,
+                handle.ssh_user)
+            logger.debug(
+                f'Restored local SSH config stanza for cluster {name!r} '
+                'referenced by an SSH proxy.')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Failed to restore SSH config for cluster {name!r}: {e}')
+
+
 def ssh_credentials_from_handles(
     handles: List['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
 ) -> List[Dict[str, Any]]:

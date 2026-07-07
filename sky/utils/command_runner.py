@@ -1011,6 +1011,20 @@ class SSHCommandRunner(CommandRunner):
             if not os.path.exists(expanded_key_path):
                 raise FileNotFoundError(
                     f'SSH private key not found: {expanded_key_path}')
+        # A user-provided proxy command/jump may reach the destination through
+        # another SkyPilot cluster referenced by its SSH host alias (e.g. a
+        # bastion started with `sky launch`). That alias is resolved from a
+        # per-cluster SSH config stanza which is local state, present only on
+        # the machine that launched the cluster. Restore it from the global
+        # user state if this machine (e.g. a different API server) lacks it.
+        if ssh_proxy_command is not None or ssh_proxy_jump is not None:
+            # Lazy import: sky.backends.backend_utils imports this module, so a
+            # top-level import would be circular. This branch is only reached
+            # for proxied connections, which are uncommon.
+            # pylint: disable-next=import-outside-toplevel
+            from sky.backends import backend_utils
+            backend_utils.restore_ssh_config_from_db_for_proxy(
+                ssh_proxy_command, ssh_proxy_jump)
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
