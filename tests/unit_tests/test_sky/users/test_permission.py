@@ -1564,3 +1564,22 @@ class TestPermissionServiceMultiProcess:
         mock_add_tables.assert_called()
         mock_init_policies.assert_called()
         mock_init_basic_auth.assert_called()
+
+
+class TestSeedNewUserRole:
+    """`seed_new_user_role` reloads config before seeding the default role."""
+
+    def test_reloads_config_before_add(self, monkeypatch):
+        # Order matters: the reload must happen before `add_user_if_not_exists`
+        # resolves `rbac.default_role`, so a runtime default-role change is
+        # honored. Reordering or dropping the reload makes this fail.
+        calls = []
+        monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
+                            lambda: calls.append('reload'))
+        monkeypatch.setattr(permission.permission_service,
+                            'add_user_if_not_exists',
+                            lambda user_id: calls.append(f'add:{user_id}'))
+
+        permission.seed_new_user_role('u1')
+
+        assert calls == ['reload', 'add:u1']

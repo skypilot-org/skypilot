@@ -15,7 +15,6 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky import skypilot_config
 from sky.server import constants as server_constants
 from sky.server import middleware_utils
 from sky.server.auth import loopback
@@ -162,13 +161,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         })
                 newly_added = global_user_state.add_or_update_user(auth_user)
                 if newly_added:
-                    # This middleware runs in the main API-server process,
-                    # which does not reload config per request; refresh so a
-                    # runtime `rbac.default_role` change is honored when
-                    # seeding this new user's role without a server restart.
-                    skypilot_config.safe_reload_config()
-                    permission.permission_service.add_user_if_not_exists(
-                        auth_user.id)
+                    # Offload the blocking config reload + role seed to a
+                    # worker thread so this async middleware doesn't block the
+                    # event loop. The reload lets a runtime `rbac.default_role`
+                    # change take effect for this new user without a restart.
+                    await asyncio.to_thread(permission.seed_new_user_role,
+                                            auth_user.id)
                 request.state.auth_user = auth_user
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:

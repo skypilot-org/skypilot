@@ -832,16 +832,12 @@ def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add service account to permission system with default role
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.permission import permission_service
-
-        # This handler runs in the main API-server process and does not reload
-        # config per request; refresh so a runtime `rbac.default_role` change is
-        # honored for the SA's seeded role without a server restart.
-        skypilot_config.safe_reload_config()
-        permission_service.add_user_if_not_exists(service_account_user_id)
+        # Add the service account to the permission system with the default
+        # role. This handler runs in the main API-server process (no per-request
+        # config reload), so seed via the helper that refreshes config first —
+        # an admin's runtime `rbac.default_role` change then applies without a
+        # server restart.
+        permission.seed_new_user_role(service_account_user_id)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
