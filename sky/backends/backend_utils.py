@@ -3080,7 +3080,7 @@ def _update_cluster_status(
                        f'{init_reason}')
         if status_reason:
             log_message += f' ({status_reason})'
-        log_message += '. Transitioned to INIT.'
+        log_message += '. Transitioned to INIT (details: cluster is unhealthy).'
         # Do not add event if the cluster is already in INIT status.
         if status != status_lib.ClusterStatus.INIT:
             global_user_state.add_cluster_event(
