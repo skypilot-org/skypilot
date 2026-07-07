@@ -226,6 +226,7 @@ def test_safe_reload_config_uses_shared_lock(monkeypatch) -> None:
 
     def fake_get_lock(lock_id,
                       timeout=None,
+                      lock_type=None,
                       poll_interval=None,
                       shared_lock=False):
         captured['shared_lock'] = shared_lock
@@ -246,6 +247,7 @@ def test_get_skypilot_config_lock_defaults_to_exclusive(monkeypatch) -> None:
 
     def fake_get_lock(lock_id,
                       timeout=None,
+                      lock_type=None,
                       poll_interval=None,
                       shared_lock=False):
         captured['shared_lock'] = shared_lock
