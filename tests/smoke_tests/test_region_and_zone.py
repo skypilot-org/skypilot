@@ -22,7 +22,6 @@
 import pathlib
 import shlex
 import tempfile
-import textwrap
 import time
 
 import jinja2
@@ -35,6 +34,7 @@ from sky import clouds
 from sky import skypilot_config
 from sky.data import storage as storage_lib
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import controller_utils
 
 
@@ -64,17 +64,37 @@ def test_aws_region():
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile(mode='w') as f:
-        f.write(
-            textwrap.dedent(f"""\
-        aws:
-            ssh_proxy_command: ssh -W '[%h]:%p' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
-        """))
-        f.write(
-            textwrap.dedent(f"""\
-            api_server:
-                endpoint: {smoke_tests_utils.get_api_server_url()}
-            """))
-        f.flush()
+        # We used to point ssh_proxy_command at the SSH alias `jump-{name}`,
+        # which relies on the machine executing the proxy command (the API
+        # server, and for managed jobs the jobs controller) having the local
+        # ~/.ssh/config that includes SkyPilot's generated per-cluster
+        # configs. That does not hold for a remote API server, so instead we
+        # expand the proxy command into the jump cluster's actual SSH command.
+        # The jump cluster's IP/user/port become available locally in
+        # ~/.sky/generated/ssh/jump-{name} after `sky launch jump-{name}`, and
+        # the private key is the user's shared SkyPilot key, which lives at the
+        # same path (~/.sky/clients/<user_hash>/ssh/sky-key) on the client, the
+        # API server and the jobs controller. The generated config's own
+        # IdentityFile points to a client-only key copy, so we cannot use it.
+        jump_ssh_config = f'~/.sky/generated/ssh/jump-{name}'
+        jump_key_path = (
+            f'~/.sky/clients/{common_utils.get_user_hash()}/ssh/sky-key')
+        # Built at runtime (after the jump cluster is launched) since the jump
+        # cluster's IP is not known when the test is defined.
+        build_jump_config_cmd = (
+            f'JUMP_CFG=$(eval echo {jump_ssh_config}); '
+            'JUMP_IP=$(awk \'$1=="HostName"{print $2; exit}\' "$JUMP_CFG"); '
+            'JUMP_USER=$(awk \'$1=="User"{print $2; exit}\' "$JUMP_CFG"); '
+            'JUMP_PORT=$(awk \'$1=="Port"{print $2; exit}\' "$JUMP_CFG"); '
+            f'cat > {f.name} <<EOF\n'
+            'aws:\n'
+            '    ssh_proxy_command: ssh -W \'[%h]:%p\' '
+            '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '
+            f'-o IdentitiesOnly=yes -i {jump_key_path} '
+            '-p $JUMP_PORT $JUMP_USER@$JUMP_IP\n'
+            'api_server:\n'
+            f'    endpoint: {smoke_tests_utils.get_api_server_url()}\n'
+            'EOF')
 
         jobs_controller_proxy_test_cmds = []
         jobs_controller_proxy_test_cmds_down = ''
@@ -108,6 +128,9 @@ def test_aws_with_ssh_proxy_command():
             'aws_with_ssh_proxy_command',
             [
                 f'sky launch -y -c jump-{name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG}',
+                # Expand the proxy command into the jump cluster's actual SSH
+                # command now that the jump cluster's SSH config is available.
+                build_jump_config_cmd,
                 # Use jump config
                 f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={f.name}; '
                 f'sky launch -y -c {name} --infra aws/us-east-1 {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
