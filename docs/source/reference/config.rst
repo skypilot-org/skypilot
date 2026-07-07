@@ -29,6 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
+    :ref:`logs_retention_hours <config-yaml-api-server-logs-retention-hours>`: 720
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 720
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
     :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
@@ -320,6 +321,24 @@ Example:
 
   api_server:
     requests_retention_hours: -1 # Disable requests GC
+
+.. _config-yaml-api-server-logs-retention-hours:
+
+``api_server.logs_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period in hours for the per-operation provision log directories under ``~/sky_logs/sky-*`` on the API server (optional). Set to a negative value to disable this GC.
+
+Each launch/exec/provision creates a ``~/sky_logs/sky-<timestamp>`` directory holding server-side copies of ``provision.log``, ``setup-*.log``, ``run.log``, etc. (and each upload a ``~/sky_logs/file_uploads/*.log`` file). The GC daemon removes entries older than this period, except directories holding the provision log of an existing cluster, which are kept for as long as the cluster exists. The launched resources (clusters/jobs) are unaffected.
+
+Default: ``720`` (30 days).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    logs_retention_hours: -1 # Disable sky_logs provision dir GC
 
 .. _config-yaml-api-server-cluster-event-retention-hours:
 

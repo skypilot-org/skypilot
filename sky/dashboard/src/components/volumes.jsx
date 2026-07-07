@@ -188,7 +188,7 @@ export function Volumes() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-4 min-h-[20px]">
         <div className="text-base flex items-center">
           {hasPluginTabs ? (
             <>

@@ -2015,3 +2015,91 @@ def test_decode_tolerates_unresolvable_entrypoint(monkeypatch):
     assert decoded.request_id == 'down-req'
     assert decoded.name == 'down'
     assert decoded.status == RequestStatus.SUCCEEDED
+
+
+def test_request_id_where_matches_like():
+    """The clause matches exactly the ids `LIKE prefix || '%'` would.
+
+    Also asserts a full-length id uses an exact `=` and a shorter string uses
+    the indexed range.
+    """
+    import sqlite3
+    import uuid
+    conn = sqlite3.connect(':memory:')
+    conn.execute('CREATE TABLE requests (request_id TEXT PRIMARY KEY)')
+    rows = [str(uuid.uuid4()) for _ in range(500)]
+    # Craft ids that stress the prefix upper-bound (chars near '9'/'f'/'-').
+    rows += ['ab9', 'ab9a', 'abaa', 'de-', 'de-x', 'deadbeef']
+    for r in rows:
+        conn.execute('INSERT OR IGNORE INTO requests VALUES (?)', (r,))
+    # '\U0010ffff' exercises the max-code-point upper-bound fallback.
+    for prefix in [
+            'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8], '\U0010ffff',
+            'a\U0010ffff'
+    ]:
+        like = {
+            x[0] for x in conn.execute(
+                'SELECT request_id FROM requests WHERE request_id LIKE ?', (
+                    prefix + '%',))
+        }
+        where, params = requests._request_id_where(prefix)
+        rng = {
+            x[0] for x in conn.execute(
+                f'SELECT request_id FROM requests WHERE {where}', params)
+        }
+        assert like == rng, prefix
+
+    # A full-length (>=36 char) id uses an exact `=`; a shorter string uses the
+    # indexed prefix range.
+    assert requests._request_id_where(rows[0]) == ('request_id = ?', (rows[0],))
+    where, _ = requests._request_id_where(rows[0][:8])
+    assert where == 'request_id >= ? AND request_id < ?'
+    # An empty id is never a valid lookup key.
+    with pytest.raises(ValueError):
+        requests._request_id_where('')
+
+
+@pytest.mark.asyncio
+async def test_request_id_lookup_uses_index(isolated_database):
+    """Request-id lookups must use the PK index, not a full table scan.
+
+    Regression test for the requests-DB full-table-scan: `get_request` /
+    `get_request_status_async` ran `WHERE request_id LIKE ?`, which SQLite
+    could not satisfy with the primary-key index (default case-insensitive
+    LIKE on a BINARY-collated key) and so scanned the whole table.
+    """
+    ids = [
+        '11111111-1111-1111-1111-111111111111',
+        '11111111-2222-2222-2222-222222222222',
+        'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    ]
+    for rid in ids:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=rid,
+                             name='n',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             finished_at=0.0,
+                             user_id='u'))
+
+    # Full id -> exactly one; shared prefix -> both; miss -> None.
+    got = await requests.get_request_async(ids[0])
+    assert got is not None and got.request_id == ids[0]
+    status = await requests.get_request_status_async(ids[0])
+    assert status is not None and status.status == RequestStatus.RUNNING
+    both = await requests.get_requests_async_with_prefix('11111111-')
+    assert {r.request_id for r in both} == {ids[0], ids[1]}
+    assert await requests.get_request_async('no-such-id') is None
+    # Empty-input shell completion lists recent ids (must not raise on '').
+    all_ids = await requests.get_api_request_ids_start_with('')
+    assert set(ids).issubset(set(all_ids))
+
+    # The generated query must use the index (SEARCH), not a full SCAN.
+    where, params = requests._request_id_where(ids[0])
+    plan = requests._DB.conn.execute(
+        f'EXPLAIN QUERY PLAN SELECT status FROM {requests.REQUEST_TABLE} '
+        f'WHERE {where}', params).fetchall()
+    plan_text = ' '.join(str(row) for row in plan)
+    assert 'SEARCH' in plan_text and 'SCAN' not in plan_text, plan_text
