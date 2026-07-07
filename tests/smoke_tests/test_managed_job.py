@@ -120,6 +120,206 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+# Defining workspaces requires loading a server config, which means restarting
+# the API server -- not possible against a remote server or in the dependency
+# test (see test_workspaces.py for the same constraints).
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_managed_jobs_queue_workspace_column(generic_cloud: str):
+    """Regression test for the `sky jobs queue` WORKSPACE column.
+
+    `sky jobs queue` renders a WORKSPACE column whenever the listed jobs span
+    more than one workspace (see `format_job_table` in sky/jobs/utils.py). That
+    extra column shifts the position of the NAME column, which used to break the
+    status-wait helper's awk parsing (it matched the name in a fixed column).
+
+    Launch two managed jobs in two different workspaces to force the WORKSPACE
+    column to appear, assert it is actually present, and confirm the helper can
+    still find each job's status despite the shifted NAME column.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    ws1 = f'{name}-wsa'
+    ws2 = f'{name}-wsb'
+    # Define the two workspaces (and the low controller resources) via
+    # config_dict. This matters: config_dict is *overlaid* onto the existing
+    # server config by override_sky_config (which writes the merged result to
+    # SKYPILOT_GLOBAL_CONFIG), whereas pointing SKYPILOT_GLOBAL_CONFIG at a
+    # hand-written workspaces-only file would *replace* the server config on
+    # restart and drop settings the test env relies on (e.g. jobs controller
+    # consolidation). The SKY_API_RESTART below then loads the merged config.
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            ws1: {},
+            ws2: {},
+        },
+    }
+
+    # Broad status set: the job may already be RUNNING/SUCCEEDED by the time we
+    # poll. We only care that the helper *finds* the status, not which one.
+    job_statuses = [
+        sky.ManagedJobStatus.PENDING,
+        sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
+        sky.ManagedJobStatus.STARTING,
+        sky.ManagedJobStatus.RUNNING,
+        sky.ManagedJobStatus.SUCCEEDED,
+    ]
+    wait_timeout = 360 if generic_cloud in [
+        'azure', 'gcp', 'kubernetes', 'nebius'
+    ] else 120
+
+    def _launch(job_name: str, workspace: str) -> str:
+        return (f'sky jobs launch -n {job_name} --workspace {workspace} '
+                f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'examples/managed_job.yaml -y -d')
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-queue-workspace-column',
+        [
+            # Restart so the server picks up the merged config (existing server
+            # config + the two workspaces + low controller resources) that
+            # override_sky_config wrote to SKYPILOT_GLOBAL_CONFIG.
+            smoke_tests_utils.SKY_API_RESTART,
+            _launch(f'{name}-1', ws1),
+            _launch(f'{name}-2', ws2),
+            # With jobs in two workspaces, `sky jobs queue` must render the
+            # WORKSPACE column -- otherwise this test would not exercise the
+            # column-shift scenario, so fail loudly if it is missing.
+            's=$(sky jobs queue); echo "$s"; echo "$s" | grep -q WORKSPACE',
+            # The actual regression guard: the helper must find each job's
+            # status even though the WORKSPACE column shifted the NAME column.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-1',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+        ],
+        # Cancel each job in its own workspace (cancel is workspace-scoped),
+        # then restart onto the original server config to drop our workspaces.
+        teardown=
+        (f'sky jobs cancel -y -n {name}-1 --config active_workspace={ws1} || true; '
+         f'sky jobs cancel -y -n {name}-2 --config active_workspace={ws2} || true; '
+         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+         f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
+    """`sky jobs launch --num-jobs N` works without a pool.
+
+    Regression test for the lifted pool-only restriction on --num-jobs: with no
+    --pool, N independent managed jobs must be submitted, each on its own
+    cluster, with SKYPILOT_NUM_JOBS=N and a distinct SKYPILOT_JOB_RANK in
+    [0, N). It also checks the CLI output uses the non-pool variants (no
+    `--pool None` / `value=None` hints).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    num_jobs = 2
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    # The API server DB is shared across tests, so we can't assume the job IDs
+    # are 1..num_jobs. All num_jobs jobs share the same name (a known
+    # limitation), so we resolve their IDs by name from `sky jobs queue`.
+    ids_file = f'/tmp/num_jobs_no_pool_ids_{name}.txt'
+    job_config = textwrap.dedent("""\
+        run: |
+          echo "SKYPILOT_NUM_JOBS_VALUE=${SKYPILOT_NUM_JOBS}"
+          echo "SKYPILOT_JOB_RANK_VALUE=${SKYPILOT_JOB_RANK}"
+        """)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as job_yaml:
+        job_yaml.write(job_config)
+        job_yaml.flush()
+        # Launch num_jobs jobs without a pool and assert the output is the
+        # non-pool variant: no pool-only hints, and the multi-job notice.
+        launch_cmd = (
+            f's=$(sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {job_yaml.name} '
+            f'--num-jobs {num_jobs} -y -d); echo "$s"; '
+            # Non-pool multi-job notice is printed.
+            'echo "$s" | grep "Each job will be launched on its own cluster"; '
+            # No pool-specific hints leaked when there is no pool.
+            '! echo "$s" | grep -- "--pool None"; '
+            '! echo "$s" | grep "value=None"; '
+            '! echo "$s" | grep "in the pool"')
+        # Resolve the num_jobs job IDs by name. `sky jobs queue` renders a
+        # variable number of leading columns before NAME: the TASK column can be
+        # empty and a WORKSPACE column is added whenever the listed jobs span
+        # more than one workspace (always the case with --all), so NAME is not at
+        # a fixed column index. Match the name in any column and print the ID
+        # (always the first column).
+        # Use --all: on a shared server the default queue is truncated to the
+        # latest 50 jobs, so the just-launched jobs can fall outside the window
+        # and the name lookup finds 0.
+        capture_ids_cmd = (
+            's=$(sky jobs queue --all); echo "$s"; echo "$s" | '
+            'awk -v n=' + name +
+            ' \'{for (i=1; i<=NF; i++) if ($i==n) {print $1; break}}\' | '
+            f'sort -un > {ids_file}; cat {ids_file}; '
+            f'cnt=$(wc -l < {ids_file}); '
+            f'if [ "$cnt" -ne {num_jobs} ]; then '
+            f'  echo "Expected {num_jobs} jobs named {name}, found $cnt"; '
+            '  exit 1; fi')
+        # Wait for every job (by ID) to reach SUCCEEDED, failing fast on a bad
+        # status. Uses the controller log, like wait_until_job_status_by_id.
+        wait_all_cmd = (
+            f'start_time=$SECONDS; while read jid; do while true; do '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            '    echo "Timeout waiting for job $jid"; sky jobs queue; exit 1; fi; '
+            '  s=$(sky jobs logs --controller "$jid" --no-follow 2>&1); '
+            '  echo "$s"; '
+            '  if echo "$s" | grep -q "Job status: JobStatus.SUCCEEDED"; then '
+            '    break; fi; '
+            '  if echo "$s" | grep -qE "Job status: JobStatus.(FAILED|CANCELLED'
+            '|FAILED_SETUP|FAILED_CONTROLLER)"; then '
+            '    echo "Job $jid hit a bad status"; sky jobs queue; exit 1; fi; '
+            '  sleep 10; '
+            f'done; done < {ids_file}')
+        # Check each job logged SKYPILOT_NUM_JOBS=num_jobs, and that the set of
+        # SKYPILOT_JOB_RANK values is exactly {0, ..., num_jobs-1} (distinct).
+        check_envs_cmd = (
+            'ranks=""; while read jid; do '
+            '  s=$(sky jobs logs "$jid" --no-follow 2>&1); echo "$s"; '
+            f'  echo "$s" | grep "SKYPILOT_NUM_JOBS_VALUE={num_jobs}"; '
+            '  r=$(echo "$s" | sed -n '
+            '"s/.*SKYPILOT_JOB_RANK_VALUE=\\([0-9]*\\).*/\\1/p" | head -n1); '
+            '  ranks="$ranks $r"; '
+            f'done < {ids_file}; '
+            'sorted=$(echo $ranks | tr " " "\\n" | sort -un | tr "\\n" " " | '
+            'sed "s/ *$//"); echo "ranks: [$sorted]"; '
+            f'expected=$(seq 0 {num_jobs - 1} | tr "\\n" " " | sed "s/ *$//"); '
+            'if [ "$sorted" != "$expected" ]; then '
+            '  echo "Expected distinct ranks [$expected], got [$sorted]"; '
+            '  exit 1; fi; echo "Ranks are distinct and correct."')
+        test = smoke_tests_utils.Test(
+            'managed-jobs-num-jobs-without-pool',
+            [
+                launch_cmd,
+                capture_ids_cmd,
+                wait_all_cmd,
+                # Give the job logs a moment to be fully flushed.
+                'sleep 20',
+                check_envs_cmd,
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
     """Test that logs are accessible after a managed job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
@@ -301,11 +501,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a non-numeric value is rejected by Click's
-            # built-in int parser. Negative ints (and 0) are valid
-            # synonyms for "all lines".
+            # --tail with a non-numeric value is rejected by the integer
+            # parser. Negative ints (and 0) are valid synonyms for "all
+            # lines".
             f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
-            f'grep "is not a valid integer"',
+            f'grep -iE "invalid.*(int|num|tail)|not a valid"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -2258,7 +2458,9 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
     def check_labels_in_queue():
         """Check that labels are present in the job queue."""
         # Get the job queue using SDK
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'labels'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         # Parse the queue response
@@ -2350,7 +2552,9 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
 
     def check_git_commit_in_queue():
         """Check that git_commit is present in the job queue metadata."""
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'metadata'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         if isinstance(queue_records, tuple):

@@ -9,16 +9,17 @@ from typing import Generator, List, Optional, Set
 
 import casbin
 from casbin import util as casbin_util
-import filelock
 import sqlalchemy_adapter
 
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import locks
 from sky.utils.db import db_utils
 from sky.utils.db import kv_cache
 
@@ -28,9 +29,14 @@ logging.getLogger('casbin.model').setLevel(sky_logging.ERROR)
 logging.getLogger('casbin.rbac').setLevel(sky_logging.ERROR)
 logger = sky_logging.init_logger(__name__)
 
-# Filelocks for the policy update.
-POLICY_UPDATE_LOCK_PATH = os.path.expanduser('~/.sky/.policy_update.lock')
+# Distributed lock id guarding casbin policy writes.
+POLICY_UPDATE_LOCK_ID = 'casbin-policy-update'
 POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
+# Retry the (short-held) policy lock every 100ms instead of the Postgres lock's
+# 1s default, so a contended waiter on the hot path (login seeds a role, each
+# reconcile calls update_role / workspace policy writes) doesn't sleep up to ~1s
+# after the holder releases. See sky/utils/locks.py PostgresLock.acquire.
+POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS = 0.1
 
 _enforcer_instance: Optional['PermissionService'] = None
 
@@ -640,16 +646,33 @@ class PermissionService:
 def _policy_lock() -> Generator[None, None, None]:
     """Context manager for policy update lock."""
     try:
-        with filelock.FileLock(POLICY_UPDATE_LOCK_PATH,
-                               POLICY_UPDATE_LOCK_TIMEOUT_SECONDS):
+        with locks.get_lock(
+                POLICY_UPDATE_LOCK_ID,
+                POLICY_UPDATE_LOCK_TIMEOUT_SECONDS,
+                poll_interval=POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS):
             yield
-    except filelock.Timeout as e:
-        raise RuntimeError(f'Failed to reload policy due to a timeout '
-                           f'when trying to acquire the lock at '
-                           f'{POLICY_UPDATE_LOCK_PATH}. '
-                           'Please try again or manually remove the lock '
-                           f'file if you believe it is stale.') from e
+    except locks.LockTimeout as e:
+        raise RuntimeError('Failed to update policy due to a timeout when '
+                           'trying to acquire the casbin policy lock. This '
+                           'may indicate another SkyPilot process is currently '
+                           'updating the policy. Please try again.') from e
 
 
 # Singleton instance of PermissionService for other modules to use.
 permission_service = PermissionService()
+
+
+def seed_new_user_role(user_id: str) -> None:
+    """Reload config, then assign the default role to a new user.
+
+    Refreshes the in-memory config first so a runtime change to
+    `rbac.default_role` is honored without a server restart: the main API-server
+    process (auth middlewares, sync handlers) bypasses the executor's
+    per-request config reload. `add_user_if_not_exists` is a no-op if the user
+    already has a role.
+
+    Blocking (config file/DB read + policy lock). Async callers MUST offload it
+    via `asyncio.to_thread` so it does not block the event loop.
+    """
+    skypilot_config.safe_reload_config()
+    permission_service.add_user_if_not_exists(user_id)

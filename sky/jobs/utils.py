@@ -960,17 +960,18 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     # Merge results and collect cluster info for unique clusters
     seen_cluster_names: Set[str] = set()
     seen_controller_uuids: Set[str] = set()
-    for job_id, (job_inline, job_files, job_errors, cluster_name,
+    for job_id, (job_inline, job_files, job_errors, cluster_names,
                  controller_uuids) in zip(job_ids, results):
         inline_data.extend(job_inline)
         file_paths.extend(job_files)
         errors.extend(job_errors)
         seen_controller_uuids.update(controller_uuids)
-        if cluster_name and cluster_name not in seen_cluster_names:
-            seen_cluster_names.add(cluster_name)
-            job_prefix = f'managed_jobs/{job_id}'
-            _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                            inline_data, errors)
+        for cluster_name in cluster_names:
+            if cluster_name not in seen_cluster_names:
+                seen_cluster_names.add(cluster_name)
+                job_prefix = f'managed_jobs/{job_id}'
+                _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                                inline_data, file_paths, errors)
 
     # Collect controller system log paths (shared, not per-job). Scope to
     # the controllers that actually ran the requested jobs — globbing the
@@ -995,12 +996,14 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 def _collect_job_debug_manifest(
     job_id: int,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
-           Optional[str], Set[str]]:
+           List[str], Set[str]]:
     """Collect debug manifest entries for a single managed job.
 
     Returns:
-        (inline_data, file_paths, errors, cluster_name, controller_uuids)
-        for this job. ``controller_uuids`` is the set of parent controller
+        (inline_data, file_paths, errors, cluster_names, controller_uuids)
+        for this job. ``cluster_names`` are the underlying cluster name(s)
+        of the job's tasks (a multi-task pipeline launches one cluster per
+        task). ``controller_uuids`` is the set of parent controller
         UUIDs that ran this job (empty if no <jobid>.log exists yet or the
         log doesn't contain the marker — e.g., the job never started).
     """
@@ -1086,52 +1089,64 @@ def _collect_job_debug_manifest(
                     'relative_path': f'{job_prefix}/run{suffix}.log',
                 })
 
-    # 5. Resolve cluster name (cluster info collected in caller for dedup)
-    cluster_name = None
+    # 5. Resolve cluster name(s) (cluster info collected in caller for
+    # dedup). A pool job records its assigned worker; a non-pool job uses
+    # a deterministic per-task cluster name (a multi-task pipeline
+    # launches one cluster per task, so there can be several).
+    cluster_names: List[str] = []
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/cluster_info'):
-        cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
-        if cluster_name is None:
-            # Fall back to generated name
+        pool_cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
+        if pool_cluster_name is not None:
+            cluster_names.append(pool_cluster_name)
+        else:
+            # Fall back to the generated per-task names
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
-            if task_info:
-                _, task_name, _, _, _ = task_info[0]
-                cluster_name = generate_managed_job_cluster_name(
-                    task_name, job_id)
+            for _, task_name, _, _, _ in task_info:
+                cluster_names.append(
+                    generate_managed_job_cluster_name(task_name, job_id))
+            # De-duplicate while preserving order.
+            cluster_names = list(dict.fromkeys(cluster_names))
 
-    return inline_data, file_paths, errors, cluster_name, controller_uuids
+    return inline_data, file_paths, errors, cluster_names, controller_uuids
 
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
                                     inline_data: List[Dict[str, str]],
+                                    file_paths: List[Dict[str, str]],
                                     errors: List[Dict[str, str]]) -> None:
-    """Collect cluster info and events for a managed job's cluster."""
+    """Collect cluster info, history, events, and the provision log for a
+    managed job's cluster.
+
+    Cluster history and events outlive the cluster row, so this still
+    produces data for terminated clusters (the normal state for a finished
+    managed job's cluster).
+    """
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
 
     with _catch_to_errors(errors, 'managed_jobs',
                           f'{cluster_name}/cluster_info'):
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return
-        cluster_info = debug_dump_helpers.serialize_cluster_record(
-            cluster_record)
-        inline_data.append({
-            'relative_path': f'{cluster_prefix}/cluster_info.json',
-            'content': json.dumps(cluster_info, indent=2, default=str),
-        })
-
-        cluster_hash = cluster_record.get('cluster_hash')
-        if not cluster_hash:
-            return
-        for event_data in debug_dump_helpers.get_cluster_events_data(
-                cluster_hash):
+        for filename, content in debug_dump_helpers.get_cluster_dump_data(
+                cluster_name):
             inline_data.append({
-                'relative_path': f'{cluster_prefix}/'
-                                 f'events_{event_data["event_type"]}.json',
-                'content': json.dumps(event_data['events'],
-                                      indent=2,
-                                      default=str),
+                'relative_path': f'{cluster_prefix}/{filename}',
+                'content': json.dumps(content, indent=2, default=str),
             })
+
+    # Provision log (FILE — needs rsync). The path is recorded in cluster
+    # history, so this also works for terminated clusters.
+    with _catch_to_errors(errors, 'managed_jobs',
+                          f'{cluster_name}/provision_log'):
+        provision_log_path = (
+            global_user_state.get_cluster_history_provision_log_path(
+                cluster_name))
+        if provision_log_path:
+            provision_log = pathlib.Path(provision_log_path).expanduser()
+            if provision_log.is_file():
+                file_paths.append({
+                    'remote_path': str(provision_log),
+                    'relative_path': f'{cluster_prefix}/provision.log',
+                })
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
@@ -2409,8 +2424,9 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
 def _format_job_details(*,
                         job: Dict[str, Any],
                         highest_blocking_priority: int,
-                        recovery_reason: Optional[str] = None) -> None:
-    """Add details about schedule state / backoff / recovery."""
+                        recovery_reason: Optional[str] = None,
+                        pending_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery / pending."""
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2447,6 +2463,13 @@ def _format_job_details(*,
             if hint is not None:
                 detail += f' ({hint})'
         job['details'] = detail
+    elif pending_reason:
+        # Surface why a job is still PENDING (e.g. it was submitted to the
+        # controller queue or is in launch backoff) so the reason is visible
+        # in the job details view, not just the event table. Collapse
+        # whitespace so a multi-line reason renders on a single line in the
+        # details column.
+        job['details'] = ' '.join(pending_reason.split())
     else:
         job['details'] = None
 
@@ -2671,25 +2694,35 @@ def get_managed_job_queue(
 
     _populate_job_records_from_handles(jobs_with_handle)
 
-    # Batch-fetch the reason a recovering job is recovering (e.g. an OOMKilled
-    # pod), so it can be surfaced in `details`. Scoped to RECOVERING jobs (a
-    # small, transient subset) and done in one query to stay off the per-job
-    # path. `job['status']` is already stringified above.
+    # Batch-fetch the reason a job is recovering (e.g. an OOMKilled pod) or
+    # still pending (e.g. submitted to the queue or in launch backoff), so it
+    # can be surfaced in `details`. Both were previously only visible in the
+    # event table. Scoped to the (small, transient) RECOVERING/PENDING subsets
+    # and fetched together in one query to stay off the per-job path and avoid
+    # an extra DB round trip. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
+    pending_reasons: Dict[int, str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
             managed_job_state.ManagedJobStatus.RECOVERING.value
         ]
-        recovery_reasons = managed_job_state.get_latest_recovery_reasons(
-            recovering_job_ids)
+        pending_job_ids = [
+            job['job_id']
+            for job in jobs
+            if job['status'] == managed_job_state.ManagedJobStatus.PENDING.value
+        ]
+        recovery_reasons, pending_reasons = (
+            managed_job_state.get_latest_recovery_and_pending_reasons(
+                recovering_job_ids, pending_job_ids))
 
     for job in jobs:
         if not fields or 'details' in fields:
             _format_job_details(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
-                recovery_reason=recovery_reasons.get(job['job_id']))
+                recovery_reason=recovery_reasons.get(job['job_id']),
+                pending_reason=pending_reasons.get(job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
@@ -2857,6 +2890,36 @@ def _get_job_status_from_tasks(
             # confusing.
             break
     return managed_task_status, current_task_id
+
+
+def format_job_ids_as_ranges(job_ids: Optional[List[int]]) -> str:
+    """Formats job IDs as a compact comma-separated list of ranges.
+
+    Contiguous IDs are collapsed into ``start-end`` ranges, e.g.
+    ``[1, 2, 3, 5, 6]`` becomes ``'1-3,5-6'``. This keeps the output readable
+    when many jobs are submitted at once (e.g. ``sky jobs launch --num-jobs``).
+    Returns an empty string for empty input.
+    """
+    if not job_ids:
+        return ''
+
+    if len(job_ids) == 1:
+        return str(job_ids[0])
+
+    job_ids = sorted(job_ids)
+    ranges = []
+    start = prev = job_ids[0]
+
+    for n in job_ids[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append(f'{start}-{prev}' if start != prev else str(start))
+        start = prev = n
+
+    # append last range
+    ranges.append(f'{start}-{prev}' if start != prev else str(start))
+    return ','.join(ranges)
 
 
 @typing.overload

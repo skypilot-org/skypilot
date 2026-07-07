@@ -3326,7 +3326,15 @@ def test_launching_with_pending_pods():
             # Check Pod pending
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, f'kubectl get pod {head} | grep "Pending"'),
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra kubernetes --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
+            # The pending head pod above was created via the cloud-cmd helper,
+            # i.e. on the helper's kubectl context. On a multi-context API
+            # server the launch below could otherwise land on a *different*
+            # context and never contend with that pod (it would then succeed
+            # instead of timing out, failing this test). Pin the launch to the
+            # helper's context so the two are co-located; on a local
+            # single-context server this is a no-op (`--infra kubernetes`).
+            smoke_tests_utils.resolve_cloud_cmd_k8s_context_cmd(name),
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
             # Check Pods have been deleted
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
@@ -3456,11 +3464,14 @@ def test_kubernetes_pod_config_sidecar():
         test = smoke_tests_utils.Test(
             'kubernetes_pod_config_sidecar',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
-                # Launch SkyPilot cluster with sidecar
+                # Launch SkyPilot cluster with sidecar first; it may land on
+                # any context on a multi-context API server.
                 f'sky launch -y -c {name} --infra kubernetes '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify pod has 2 containers (ray-node and sidecar)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,

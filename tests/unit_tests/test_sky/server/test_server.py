@@ -873,3 +873,87 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
             'regex': 'https://grafana.example.com/.*'
         }]
     }
+
+
+# --- Tests for _prune_sky_logs (~/sky_logs GC) ---
+
+
+def _touch_dir(path: pathlib.Path, mtime: float) -> pathlib.Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / 'provision.log').write_text('log')
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def _touch_file(path: pathlib.Path, mtime: float) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('log')
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+@pytest.fixture
+def _no_provision_log_paths(monkeypatch):
+    monkeypatch.setattr(server.global_user_state,
+                        'get_all_cluster_provision_log_paths', lambda: [])
+
+
+def test_prune_sky_logs_removes_only_expired_provision_dirs(
+        tmp_path, monkeypatch, _no_provision_log_paths):
+    """Old sky-* dirs are pruned; fresh ones and non sky-* dirs are kept."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    old = _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    fresh = _touch_dir(tmp_path / 'sky-2020-01-02-00-00-00-000000', now - 100)
+    job_dir = _touch_dir(tmp_path / '1-my-job', now - 10_000)
+    api_dir = _touch_dir(tmp_path / 'api_server', now - 10_000)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old.exists()
+    assert fresh.exists()
+    assert job_dir.exists()
+    assert api_dir.exists()
+
+
+def test_prune_sky_logs_keeps_live_cluster_provision_dirs(
+        tmp_path, monkeypatch):
+    """Expired dirs referenced by an existing cluster survive the sweep."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    live = _touch_dir(tmp_path / 'sky-2020-01-01-00-00-00-000000', now - 10_000)
+    orphan = _touch_dir(tmp_path / 'sky-2020-01-01-11-11-11-111111',
+                        now - 10_000)
+    monkeypatch.setattr(server.global_user_state,
+                        'get_all_cluster_provision_log_paths',
+                        lambda: [str(live / 'provision.log')])
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert live.exists()
+    assert not orphan.exists()
+
+
+def test_prune_sky_logs_removes_expired_file_upload_logs(
+        tmp_path, monkeypatch, _no_provision_log_paths):
+    """Old ~/sky_logs/file_uploads/*.log files are pruned by mtime."""
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY', str(tmp_path))
+    now = 1_000_000.0
+    old_log = _touch_file(tmp_path / 'file_uploads' / 'sky-old.log',
+                          now - 10_000)
+    fresh_log = _touch_file(tmp_path / 'file_uploads' / 'sky-fresh.log',
+                            now - 100)
+
+    removed = server._prune_sky_logs(cutoff=now - 5_000)
+
+    assert removed == 1
+    assert not old_log.exists()
+    assert fresh_log.exists()
+
+
+def test_prune_sky_logs_missing_dir_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
+                        str(tmp_path / 'does-not-exist'))
+    assert server._prune_sky_logs(cutoff=1_000_000.0) == 0

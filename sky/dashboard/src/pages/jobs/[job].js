@@ -604,6 +604,23 @@ function JobDetails() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {/* Slot for plugins to add extra log filters beside the
+                        node picker. jobId/taskId mirror the jobs.detail.logs
+                        context exactly (the per-task object's id for
+                        multi-task jobs) so a plugin can key shared state on
+                        the same identity as the log pane below. */}
+                    <PluginSlot
+                      name="jobs.detail.logfilters"
+                      context={{
+                        jobId: (isMultiTask
+                          ? allTasks[selectedTaskIndex]
+                          : detailJobData
+                        )?.id,
+                        taskId: isMultiTask ? selectedTaskIndex : null,
+                        isController: false,
+                        refreshTrigger: refreshLogsFlag,
+                      }}
+                    />
                     {!logsSlotHasPlugin && (
                       <span className="text-xs text-gray-500">
                         (Logs are not streaming; click refresh to fetch the
@@ -1562,7 +1579,11 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Queue Details section - right column */}
+      {/* Details section - surfaces the reason behind the current status
+          (e.g. why a job is still PENDING). A plugin may take over this slot
+          to render richer queue-specific details (e.g. Kueue); otherwise the
+          OSS fallback shows the plain details string so the reason is visible
+          here in the job details view, not just in the event table. */}
       {jobData.details && (
         <PluginSlot
           name="jobs.detail.queue_details"
@@ -1573,6 +1594,14 @@ function JobDetailsContent({
             jobData: jobData,
             title: 'Queue Details',
           }}
+          fallback={
+            <div>
+              <div className="text-gray-600 font-medium text-base">Details</div>
+              <div className="text-base mt-1 whitespace-pre-wrap break-words">
+                {jobData.details}
+              </div>
+            </div>
+          }
         />
       )}
 

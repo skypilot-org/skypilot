@@ -69,6 +69,8 @@ from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -133,12 +135,8 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
-_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
-    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group', 'batch_total_batches',
-    'batch_completed_batches'
-]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = list(
+    managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
     'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',
@@ -5811,8 +5809,6 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
-    if pool is None and num_jobs is not None:
-        raise click.UsageError('Cannot specify --num-jobs without --pool.')
     if num_jobs is not None and num_jobs < 1:
         raise click.UsageError(
             f'--num-jobs must be a positive integer. Got: {num_jobs}.')
@@ -5891,6 +5887,11 @@ def jobs_launch(
                 f'pool, please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
         print_setup_fm_warning = False
+    elif num_jobs is not None and num_jobs > 1:
+        click.secho(
+            f'Submitting {colorama.Fore.CYAN}{num_jobs}'
+            f'{colorama.Style.RESET_ALL} managed jobs. Each job will be '
+            'launched on its own cluster.')
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -5934,19 +5935,34 @@ def jobs_launch(
         # TODO(tian): This can be very long. Considering have a "group id"
         # and query all job ids with the same group id.
         # Sort job ids to ensure consistent ordering.
-        job_ids_str = ','.join(map(str, sorted(job_ids)))
+        job_ids_str = managed_job_utils.format_job_ids_as_ranges(job_ids)
         dashboard_hint = ''
         if not server_common.is_api_server_local():
-            query = urllib.parse.urlencode({
-                'property': 'pool',
-                'operator': ':',
-                'value': pool,
-            })
+            if pool is not None:
+                query = urllib.parse.urlencode({
+                    'property': 'pool',
+                    'operator': ':',
+                    'value': pool,
+                })
+                starting_page = f'jobs?{query}'
+                show_jobs_label = 'Show all jobs in the pool:'
+            else:
+                starting_page = 'jobs'
+                show_jobs_label = 'Show all jobs:'
             dashboard_url = server_common.get_dashboard_url(
-                server_common.get_server_url(), starting_page=f'jobs?{query}')
-            dashboard_hint = (
-                f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
-                f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                server_common.get_server_url(), starting_page=starting_page)
+            dashboard_hint = (f'\n{ux_utils.INDENT_SYMBOL}{show_jobs_label}'
+                              f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                              f'{ux_utils.RESET_BOLD}')
+        if pool is not None:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                f'{ux_utils.RESET_BOLD}')
+        else:
+            cancel_hint = (
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all these jobs:'
+                f'\t{ux_utils.BOLD}sky jobs cancel <job-ids>'
                 f'{ux_utils.RESET_BOLD}')
         click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                     f'{job_ids_str}{colorama.Style.RESET_ALL}.'
@@ -5958,9 +5974,7 @@ def jobs_launch(
                     f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
                     f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
                     f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
-                    f'{ux_utils.RESET_BOLD}')
+                    f'{cancel_hint}')
 
 
 # Value the ``-s``/``--status`` option takes when given with no argument. It is

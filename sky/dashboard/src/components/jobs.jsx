@@ -17,7 +17,15 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
+import { BriefcaseIcon } from '@/components/elements/icons';
 import {
   formatDuration,
   REFRESH_INTERVAL,
@@ -48,6 +56,7 @@ import {
   ChevronRightIcon,
   CheckIcon,
   InfoIcon,
+  Layers,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -77,6 +86,11 @@ import {
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
 import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
+
+// Page-size ("rows per page") options for the managed jobs queue, and the
+// localStorage key used to remember the user's last choice across reloads.
+const JOBS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-jobs-page-size';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -522,9 +536,19 @@ export function ManagedJobsTable({
   });
   const [pageSize, setPageSize] = useState(() => {
     if (typeof window !== 'undefined') {
+      // An explicit URL query param wins (e.g. a shared/bookmarked link);
+      // otherwise fall back to the last choice persisted in localStorage,
+      // and finally to the default of 10.
       const params = new URLSearchParams(window.location.search);
       const ps = parseInt(params.get('pageSize'), 10);
-      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+      if (JOBS_PAGE_SIZE_OPTIONS.includes(ps)) {
+        return ps;
+      }
+      return getPersistedPageSize(
+        JOBS_PAGE_SIZE_STORAGE_KEY,
+        JOBS_PAGE_SIZE_OPTIONS,
+        10
+      );
     }
     return 10;
   });
@@ -1388,6 +1412,8 @@ export function ManagedJobsTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(JOBS_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
@@ -2376,7 +2402,7 @@ export function ManagedJobsTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 <>
                   {Array.from(groupedJobs.entries()).map(([jobId, tasks]) => {
                     const isMultiTask = tasks.length > 1;
@@ -2476,12 +2502,12 @@ export function ManagedJobsTable({
                   })}
                 </>
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6"
-                  >
-                    <div className="flex flex-col items-center space-y-4">
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={totalColSpan} className="p-0">
+                    <div
+                      className="flex flex-col items-center justify-center space-y-4 px-6"
+                      style={{ minHeight: 280 }}
+                    >
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
                           <p className="text-gray-700">
@@ -2527,7 +2553,12 @@ export function ManagedJobsTable({
                             </Button>
                           </div>
                         ) : (
-                          <p className="text-gray-500">No active jobs</p>
+                          <EmptyState
+                            icon={<BriefcaseIcon className="w-5 h-5" />}
+                            title="No active jobs"
+                            description="Launch a managed job to run it with automatic recovery"
+                            minHeight={0}
+                          />
                         ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
@@ -2587,6 +2618,7 @@ export function ManagedJobsTable({
         }
         pageSize={pageSize}
         onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={JOBS_PAGE_SIZE_OPTIONS}
         itemLabel="Jobs"
       />
 
@@ -2874,7 +2906,7 @@ export function ClusterJobs({
                   </div>
                 </TableCell>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
+            ) : paginatedData.length > 0 && !isForceEmpty() ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -2934,14 +2966,12 @@ export function ClusterJobs({
                 </React.Fragment>
               ))
             ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No jobs found
-                </TableCell>
-              </TableRow>
+              <EmptyTableState
+                colSpan={8}
+                icon={<BriefcaseIcon className="w-5 h-5" />}
+                title="No jobs found"
+                description="Submit a job to run it on this cluster"
+              />
             )}
           </TableBody>
         </Table>
@@ -3154,6 +3184,10 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
+  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Worker Details, Worker Resources) — used for the empty-state colSpan.
+  const poolColumnCount = 5;
+
   return (
     <Card>
       <div className="overflow-x-auto rounded-lg">
@@ -3200,7 +3234,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   </div>
                 </TableCell>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
+            ) : paginatedData.length > 0 && !isForceEmpty() ? (
               paginatedData.map((pool) => (
                 <TableRow key={pool.name}>
                   <TableCell>
@@ -3230,14 +3264,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 </TableRow>
               ))
             ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={5}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No pools found
-                </TableCell>
-              </TableRow>
+              <EmptyTableState
+                colSpan={poolColumnCount}
+                icon={<Layers size={20} strokeWidth={1.75} />}
+                title="No pools found"
+                description="Create a pool to share workers across jobs"
+              />
             )}
           </TableBody>
         </Table>

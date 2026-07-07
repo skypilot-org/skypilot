@@ -1,14 +1,37 @@
 """Unit tests for the jobs server queue."""
 import time
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 import pytest
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
 from sky.skylet import constants as skylet_constants
+
+
+def _unwrap(fn):
+    while hasattr(fn, '__wrapped__'):
+        fn = fn.__wrapped__
+    return fn
+
+
+def test_v1_queue_handler_defaults_to_lightweight_fields():
+    """The deprecated v1 queue path (core.queue) must narrow fields so old
+    clients hitting /jobs/queue don't trigger a full-payload pull."""
+    raw_queue = _unwrap(jobs_core.queue)
+    with mock.patch.object(jobs_core, 'queue_v2',
+                           return_value=([], 0, {}, 0)) as mock_queue_v2:
+        raw_queue(refresh=False,
+                  skip_finished=False,
+                  all_users=False,
+                  job_ids=None)
+    _, kwargs = mock_queue_v2.call_args
+    assert kwargs['fields'] == list(
+        managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 
 
 def _make_job(job_id: int,
