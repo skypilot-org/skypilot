@@ -1805,6 +1805,14 @@ def _cluster_names_referenced_in_proxy(proxy_strs: List[str],
     return matched
 
 
+# Proxy (command, jump) pairs whose referenced SkyPilot clusters already have
+# their local SSH config stanzas present, so the DB-querying restore below can
+# be skipped. restore_ssh_config_from_db_for_proxy() runs on every
+# SSHCommandRunner instantiation with a proxy configured; this memoizes the
+# pairs already satisfied on this machine.
+_checked_proxies: Set[Tuple[Optional[str], Optional[str]]] = set()
+
+
 def restore_ssh_config_from_db_for_proxy(ssh_proxy_command: Optional[str],
                                          ssh_proxy_jump: Optional[str]) -> None:
     """Restores local SSH config stanzas for clusters referenced by a proxy.
@@ -1830,19 +1838,28 @@ def restore_ssh_config_from_db_for_proxy(ssh_proxy_command: Optional[str],
     proxy_strs = [s for s in (ssh_proxy_command, ssh_proxy_jump) if s]
     if not proxy_strs:
         return
+    cache_key = (ssh_proxy_command, ssh_proxy_jump)
+    if cache_key in _checked_proxies:
+        return
     try:
         cluster_names = global_user_state.get_cluster_names()
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Skip SSH config restore; cannot list clusters: {e}')
         return
-    for name in _cluster_names_referenced_in_proxy(proxy_strs, cluster_names):
+    referenced = _cluster_names_referenced_in_proxy(proxy_strs, cluster_names)
+
+    def _stanza_path(name: str) -> str:
+        return os.path.expanduser(
+            cluster_utils.SSHConfigHelper.ssh_cluster_path.format(name))
+
+    for name in referenced:
+        if os.path.exists(_stanza_path(name)):
+            continue
         try:
-            stanza_path = os.path.expanduser(
-                cluster_utils.SSHConfigHelper.ssh_cluster_path.format(name))
-            if os.path.exists(stanza_path):
-                continue
             handle = global_user_state.get_handle_from_cluster_name(name)
             if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                continue
+            if handle.cluster_yaml is None:
                 continue
             if (not handle.cached_external_ips or
                     not handle.cached_external_ssh_ports):
@@ -1862,6 +1879,11 @@ def restore_ssh_config_from_db_for_proxy(ssh_proxy_command: Optional[str],
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(
                 f'Failed to restore SSH config for cluster {name!r}: {e}')
+    # Memoize only when every referenced cluster's stanza is present, so a
+    # not-yet-ready cluster (e.g. one without cached IPs yet) is retried on a
+    # later call rather than being permanently skipped.
+    if all(os.path.exists(_stanza_path(name)) for name in referenced):
+        _checked_proxies.add(cache_key)
 
 
 def ssh_credentials_from_handles(

@@ -692,6 +692,7 @@ def _fake_handle():
                    return_value=['jump-abcd'])
 def test_restore_ssh_config_rebuilds_missing_stanza(mock_names, mock_get_handle,
                                                     mock_cred, mock_add):
+    backend_utils._checked_proxies.clear()
     mock_get_handle.return_value = _fake_handle()
     proxy = "ssh -W '[%h]:%p' jump-abcd"
     with mock.patch.object(backend_utils.os.path, 'exists', return_value=False):
@@ -708,6 +709,7 @@ def test_restore_ssh_config_rebuilds_missing_stanza(mock_names, mock_get_handle,
                    'get_cluster_names',
                    return_value=['jump-abcd'])
 def test_restore_ssh_config_skips_when_stanza_present(mock_names, mock_add):
+    backend_utils._checked_proxies.clear()
     proxy = "ssh -W '[%h]:%p' jump-abcd"
     with mock.patch.object(backend_utils.os.path, 'exists', return_value=True):
         backend_utils.restore_ssh_config_from_db_for_proxy(proxy, None)

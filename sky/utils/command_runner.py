@@ -1017,7 +1017,7 @@ class SSHCommandRunner(CommandRunner):
         # per-cluster SSH config stanza which is local state, present only on
         # the machine that launched the cluster. Restore it from the global
         # user state if this machine (e.g. a different API server) lacks it.
-        if ssh_proxy_command is not None or ssh_proxy_jump is not None:
+        if ssh_proxy_command or ssh_proxy_jump:
             # Lazy import: sky.backends.backend_utils imports this module, so a
             # top-level import would be circular. This branch is only reached
             # for proxied connections, which are uncommon.
