@@ -3641,3 +3641,85 @@ class TestDumpKubeContextsInfo:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'allowed_contexts'
         assert 'boom' in errors[0]['error']
+
+
+class TestDumpServerPodInfo:
+    """Tests for _dump_server_pod_info (the API server's own k8s pod).
+
+    The pod's coordinates come from the pod itself (SA namespace file +
+    hostname), so these patch that discovery; the k8s collection itself is
+    covered by tests/unit_tests/kubernetes/test_debug.py.
+    """
+
+    @staticmethod
+    def _patch_in_cluster(available):
+        return mock.patch.object(debug_utils.kubernetes_utils,
+                                 'is_incluster_config_available',
+                                 return_value=available)
+
+    def test_noop_when_not_running_in_kubernetes(self, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with self._patch_in_cluster(False), \
+             mock.patch('sky.provision.kubernetes.debug.dump_api_server_pod'
+                        ) as dump:
+            debug_utils._dump_server_pod_info(str(tmp_path), errors)
+
+        dump.assert_not_called()
+        assert not errors
+
+    def test_dumps_own_pod_coordinates(self, tmp_path, monkeypatch):
+        """Namespace comes from the mounted SA file (not the in-cluster
+        provisioning namespace override) and the pod name from the hostname."""
+        ns_file = tmp_path / 'namespace'
+        ns_file.write_text('server-ns\n')
+        monkeypatch.setattr(debug_utils, '_SA_NAMESPACE_PATH', str(ns_file))
+        errors: List[Dict[str, str]] = []
+        with self._patch_in_cluster(True), \
+             mock.patch.object(debug_utils.platform, 'node',
+                               return_value='api-0'), \
+             mock.patch('sky.provision.kubernetes.debug.dump_api_server_pod',
+                        return_value=[]) as dump:
+            debug_utils._dump_server_pod_info(str(tmp_path), errors)
+
+        dump.assert_called_once_with(namespace='server-ns',
+                                     pod_name='api-0',
+                                     output_dir=os.path.join(
+                                         str(tmp_path), 'server_pod'))
+        assert not errors
+
+    def test_provider_errors_are_prefixed(self, tmp_path, monkeypatch):
+        ns_file = tmp_path / 'namespace'
+        ns_file.write_text('server-ns')
+        monkeypatch.setattr(debug_utils, '_SA_NAMESPACE_PATH', str(ns_file))
+        provider_errors = [{
+            'resource': 'logs/sidecar.log',
+            'error': 'forbidden',
+            'traceback': 'tb',
+        }]
+        errors: List[Dict[str, str]] = []
+        with self._patch_in_cluster(True), \
+             mock.patch.object(debug_utils.platform, 'node',
+                               return_value='api-0'), \
+             mock.patch('sky.provision.kubernetes.debug.dump_api_server_pod',
+                        return_value=provider_errors):
+            debug_utils._dump_server_pod_info(str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'server_pod'
+        assert errors[0]['resource'] == 'server_pod/logs/sidecar.log'
+        assert errors[0]['error'] == 'forbidden'
+
+    def test_discovery_failure_recorded_not_raised(self, tmp_path, monkeypatch):
+        """A missing SA namespace file (or any discovery failure) is recorded
+        best-effort and never aborts the surrounding dump."""
+        monkeypatch.setattr(debug_utils, '_SA_NAMESPACE_PATH',
+                            str(tmp_path / 'does-not-exist'))
+        errors: List[Dict[str, str]] = []
+        with self._patch_in_cluster(True), \
+             mock.patch('sky.provision.kubernetes.debug.dump_api_server_pod'
+                        ) as dump:
+            debug_utils._dump_server_pod_info(str(tmp_path), errors)
+
+        dump.assert_not_called()
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'server_pod'

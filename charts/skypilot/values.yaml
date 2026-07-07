@@ -504,6 +504,11 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "pods", "pods/status", "pods/exec", "pods/portforward" ]
       verbs: [ "*" ]
+    # Required for reading container logs (e.g. collecting the API server's
+    # own pod logs, sidecars included, in debug dumps)
+    - apiGroups: [ "" ]
+      resources: [ "pods/log" ]
+      verbs: [ "get" ]
     # Required for managing services for SkyPilot Pods
     - apiGroups: [ "" ]
       resources: [ "services" ]

@@ -3,7 +3,7 @@
 When the API server dumps a cluster that runs on Kubernetes, we also snapshot
 the related k8s objects so an operator can inspect them like
 ``kubectl get -o yaml`` without needing kubectl access to the user's cluster.
-There are two entry points, split by scope:
+There are three entry points, split by scope:
 
 - ``dump_cluster_resources`` -- a single SkyPilot cluster's own resources (pods,
   events, the Services/Deployments/etc. it created, and its 1:1 Kueue Workload).
@@ -12,6 +12,9 @@ There are two entry points, split by scope:
   one SkyPilot cluster (GPU-metrics pods, the non-Workload Kueue objects). The
   caller fetches this once per unique kube context, not once per cluster. These
   are cluster-wide API calls, so they need broader RBAC and are best-effort.
+- ``dump_api_server_pod`` -- the API server's OWN pod, when the server itself
+  runs inside Kubernetes (helm deployments): spec/status, events, and every
+  container's logs, sidecars included. Namespace-scoped, in-cluster auth only.
 
 This module is intentionally provider-specific and self-contained: the generic
 dump path (``sky.utils.debug_utils``) discovers the k8s coordinates and
@@ -74,6 +77,12 @@ _PROMETHEUS_SERVER_CONTAINER = 'prometheus-server'
 _PROMETHEUS_LOG_TAIL_LINES = 2000
 _KUBE_STATE_METRICS_NAME_SUBSTR = 'kube-state-metrics'
 _DCGM_EXPORTER_NAME_SUBSTR = 'dcgm-exporter'
+
+# Tail bound for the API server pod's own container logs. More generous than
+# the Prometheus bound: on a busy deployment a sidecar's interesting lines
+# (crash output, startup config, sync errors) can sit well behind its steady
+# per-request chatter, and a few thousand extra lines cost little in the zip.
+_SERVER_POD_LOG_TAIL_LINES = 5000
 
 # Keys in a serialized Secret whose values must never leave the cluster.
 _SECRET_REDACTED_KEYS = ('data', 'stringData')
@@ -219,6 +228,169 @@ def dump_context_resources(context: Optional[str],
     except OSError as e:
         _record_error(errors, 'context.json', e)
     return errors
+
+
+def dump_api_server_pod(namespace: str, pod_name: str,
+                        output_dir: str) -> List[Dict[str, str]]:
+    """Snapshot the API server's own pod into output_dir.
+
+    When the API server itself runs inside Kubernetes (e.g. deployed via the
+    helm chart), its own pod is debugging surface the dump otherwise misses:
+    restarts/OOM kills, probe failures, and the logs of every container in the
+    pod. Sidecar containers matter here -- their stdout never lands on the API
+    server container's filesystem, so the kube API is the only way the dump
+    can reach it. Writes (best-effort)::
+
+        <output_dir>/
+          pod.yaml                       # spec/status; env values redacted
+          events.yaml                    # the pod's events (restarts, probes)
+          logs/<container>.log           # each container's log tail, and
+          logs/<container>.previous.log  # its pre-restart instance, if any
+
+    Container env ``value`` literals are redacted wholesale (names kept):
+    operators can put anything in the pod env, and the SkyPilot-relevant
+    values are already in ``server_info.json``'s environment section. Uses
+    in-cluster auth (the server's own service account). Reading logs needs the
+    ``pods/log`` RBAC verb (granted by the helm chart); a deployment without
+    it still gets pod.yaml + events, with the log failures recorded.
+
+    Returns error records with ``resource`` relative to ``output_dir`` for the
+    caller to prefix.
+    """
+    errors: List[Dict[str, str]] = []
+    os.makedirs(output_dir, exist_ok=True)
+
+    context = kubernetes.in_cluster_context_name()
+    api_client = kubernetes.api_client(context)
+    core = _fail_fast(kubernetes.core_api(context))
+
+    try:
+        pod = core.read_namespaced_pod(name=pod_name,
+                                       namespace=namespace,
+                                       _request_timeout=kubernetes.API_TIMEOUT)
+    except Exception as e:  # pylint: disable=broad-except
+        # Without the pod object we can't even enumerate containers -- record
+        # and bail out of this (still best-effort) section.
+        _record_error(errors, 'pod', e)
+        return errors
+
+    try:
+        pod_dict = _strip_managed_fields(
+            api_client.sanitize_for_serialization(pod))
+        _redact_container_env(pod_dict)
+        annotations = pod_dict.get('metadata', {}).get('annotations')
+        if annotations and _LAST_APPLIED_ANNOTATION in annotations:
+            # The last-applied manifest embeds the full pod spec -- including
+            # the env values redacted above -- verbatim.
+            annotations[_LAST_APPLIED_ANNOTATION] = _REDACTED
+        _write_yaml(os.path.join(output_dir, 'pod.yaml'), pod_dict)
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'pod', e)
+
+    # The pod's events: restarts, OOM kills, probe failures, scheduling and
+    # image-pull problems -- the "why" behind a bad pod status.
+    try:
+        events = core.list_namespaced_event(
+            namespace,
+            field_selector=(f'involvedObject.kind=Pod,'
+                            f'involvedObject.name={pod_name}'),
+            _request_timeout=kubernetes.API_TIMEOUT).items
+        if events:
+            _write_yaml(os.path.join(output_dir, 'events.yaml'), [
+                _with_type_meta(
+                    _strip_managed_fields(
+                        api_client.sanitize_for_serialization(ev)), 'v1',
+                    'Event') for ev in events
+            ])
+    except Exception as e:  # pylint: disable=broad-except
+        _record_error(errors, 'events', e)
+
+    # Every container's log tail: init containers included, since k8s-native
+    # sidecars are restartable init containers.
+    containers = list(pod.spec.init_containers or []) + list(
+        pod.spec.containers or [])
+    logs_dir = os.path.join(output_dir, 'logs')
+    for container in containers:
+        _dump_container_log_tail(core,
+                                 namespace=namespace,
+                                 pod_name=pod_name,
+                                 container=container.name,
+                                 out_dir=logs_dir,
+                                 file_prefix=container.name,
+                                 resource_prefix='logs',
+                                 tail_lines=_SERVER_POD_LOG_TAIL_LINES,
+                                 errors=errors)
+    return errors
+
+
+def _redact_container_env(pod_dict: Dict[str, Any]) -> None:
+    """Redact literal env values in a serialized pod's containers, in place.
+
+    Keeps the env var *names* (often the useful debugging signal: "is this
+    var set at all?") and any ``valueFrom`` refs (they only point at a
+    Secret/ConfigMap key, no value embedded), but replaces every literal
+    ``value`` -- operators can and do pass credentials as plain env values,
+    and no name-based blocklist can enumerate theirs.
+    """
+    spec = pod_dict.get('spec', {})
+    for section in ('initContainers', 'containers', 'ephemeralContainers'):
+        for container in spec.get(section) or []:
+            for env_var in container.get('env') or []:
+                if 'value' in env_var:
+                    env_var['value'] = _REDACTED
+
+
+def _dump_container_log_tail(core: Any, namespace: str, pod_name: str,
+                             container: str, out_dir: str, file_prefix: str,
+                             resource_prefix: str, tail_lines: int,
+                             errors: List[Dict[str, str]]) -> None:
+    """Write a container's log tail to ``<out_dir>/<file_prefix>.log``.
+
+    Grabs the current container instance's tail and, when it has restarted,
+    the previous (terminated) instance's logs too (``.previous.log``) -- the
+    latter holds the boot-to-crash output of the instance that actually
+    failed; the pod object shows *that* it restarted, not *why*. Best-effort
+    and tail-bounded.
+    """
+    current_log = None
+    for previous in (False, True):
+        suffix = '.previous' if previous else ''
+        resource = f'{resource_prefix}/{file_prefix}{suffix}.log'
+        try:
+            pod_log = core.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                container=container,
+                previous=previous,
+                tail_lines=tail_lines,
+                _request_timeout=kubernetes.API_TIMEOUT)
+            if not pod_log:
+                continue
+            if not previous:
+                current_log = pod_log
+            elif pod_log == current_log:
+                # In a fast crash-loop the two reads can land on the same
+                # container instance: mid-CrashLoopBackOff (no running
+                # container) kubelet resolves both previous=False and
+                # previous=True to the last-terminated instance, and a
+                # restart can also fall between the reads. Drop a previous
+                # log that's a byte-for-byte duplicate of the current one --
+                # it adds nothing.
+                continue
+            # Keep the write inside the try so a local OSError (full disk,
+            # permissions) is recorded best-effort, not propagated.
+            os.makedirs(out_dir, exist_ok=True)
+            _write_text(os.path.join(out_dir, f'{file_prefix}{suffix}.log'),
+                        pod_log)
+        except kubernetes.api_exception() as e:
+            # A 400 on previous=True just means the container has never
+            # restarted (no previous instance) -- expected, not an error.
+            if not (previous and e.status == 400):
+                _record_error(errors, resource, e)
+            continue
+        except Exception as e:  # pylint: disable=broad-except
+            _record_error(errors, resource, e)
+            continue
 
 
 def _record_error(errors: List[Dict[str, str]], resource: str,
@@ -536,51 +708,18 @@ def _dump_gpu_metrics_pods(context: Optional[str], output_dir: str,
     # The prometheus-server container's own logs -- the only place the WAL
     # replay progress ("Replaying WAL...", per-segment loads) and any
     # panic/abort message surface; the pod object shows *that* it restarted,
-    # not *why* it died mid-startup. Grab the current container's tail and, when
-    # it has restarted, the previous (terminated) container's logs too -- the
-    # latter holds the boot-to-crash output of the instance that actually
-    # failed. Best-effort and tail-bounded.
+    # not *why* it died mid-startup. Best-effort and tail-bounded.
     for pod in prom_pods:
         pod_name = pod.metadata.name
-        current_log = None
-        for previous in (False, True):
-            suffix = '.previous' if previous else ''
-            resource = f'gpu_metrics/{pod_name}{suffix}.log'
-            try:
-                pod_log = core.read_namespaced_pod_log(
-                    name=pod_name,
-                    namespace=_GPU_METRICS_NAMESPACE,
-                    container=_PROMETHEUS_SERVER_CONTAINER,
-                    previous=previous,
-                    tail_lines=_PROMETHEUS_LOG_TAIL_LINES,
-                    _request_timeout=kubernetes.API_TIMEOUT)
-                if not pod_log:
-                    continue
-                if not previous:
-                    current_log = pod_log
-                elif pod_log == current_log:
-                    # In a fast crash-loop the two reads can land on the same
-                    # container instance: mid-CrashLoopBackOff (no running
-                    # container) kubelet resolves both previous=False and
-                    # previous=True to the last-terminated instance, and a
-                    # restart can also fall between the reads. Drop a previous
-                    # log that's a byte-for-byte duplicate of the current one --
-                    # it adds nothing.
-                    continue
-                # Keep the write inside the try so a local OSError (full disk,
-                # permissions) is recorded best-effort, not propagated.
-                os.makedirs(out_dir, exist_ok=True)
-                _write_text(os.path.join(out_dir, f'{pod_name}{suffix}.log'),
-                            pod_log)
-            except kubernetes.api_exception() as e:
-                # A 400 on previous=True just means the container has never
-                # restarted (no previous instance) -- expected, not an error.
-                if not (previous and e.status == 400):
-                    _record_error(errors, resource, e)
-                continue
-            except Exception as e:  # pylint: disable=broad-except
-                _record_error(errors, resource, e)
-                continue
+        _dump_container_log_tail(core,
+                                 namespace=_GPU_METRICS_NAMESPACE,
+                                 pod_name=pod_name,
+                                 container=_PROMETHEUS_SERVER_CONTAINER,
+                                 out_dir=out_dir,
+                                 file_prefix=pod_name,
+                                 resource_prefix='gpu_metrics',
+                                 tail_lines=_PROMETHEUS_LOG_TAIL_LINES,
+                                 errors=errors)
 
     # The config + topology behind the pods. The prometheus.yml ConfigMap and
     # the Prometheus PVC(s) are namespace-scoped (minimal RBAC); the

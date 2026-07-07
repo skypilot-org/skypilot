@@ -721,3 +721,149 @@ def test_defunct_context_fast_fails_per_cluster(tmp_path, k8s_apis):
     k8s_apis.custom.list_namespaced_custom_object.assert_not_called()
     assert not (tmp_path / 'services.yaml').exists()
     assert not (tmp_path / 'kueue').exists()
+
+
+# ---------------------------------------------------------------------------
+# dump_api_server_pod (the API server's own pod)
+# ---------------------------------------------------------------------------
+
+
+def _server_pod(*, init_names=(), container_names=('skypilot-api',)):
+    """A fake pod model for read_namespaced_pod, with named containers."""
+    return SimpleNamespace(
+        _marker='server-pod',
+        spec=SimpleNamespace(
+            init_containers=[SimpleNamespace(name=n) for n in init_names],
+            containers=[SimpleNamespace(name=n) for n in container_names]))
+
+
+def _run_server_pod(tmp_path):
+    return debug.dump_api_server_pod(namespace='sky-ns',
+                                     pod_name='api-0',
+                                     output_dir=str(tmp_path))
+
+
+def test_server_pod_dumps_pod_events_and_all_container_logs(tmp_path, k8s_apis):
+    """Every container in the pod -- init/sidecar containers included -- gets
+    its log tail collected, alongside the pod object and its events."""
+    k8s_apis.core.read_namespaced_pod.return_value = _server_pod(
+        init_names=('sidecar',), container_names=('skypilot-api',))
+    k8s_apis.core.list_namespaced_event.return_value = _events('api-0')
+
+    def _log(*args, **kwargs):
+        del args
+        if kwargs['previous']:
+            raise _FakeApiException(400)  # never restarted
+        return f'log of {kwargs["container"]}\n'
+
+    k8s_apis.core.read_namespaced_pod_log.side_effect = _log
+
+    errors = _run_server_pod(tmp_path)
+
+    assert not errors
+    pod = yaml_utils.read_yaml(str(tmp_path / 'pod.yaml'))
+    assert pod['marker'] == 'server-pod'
+    # Lists are dumped as multi-document YAML (one document per event).
+    events = yaml_utils.read_yaml_all(str(tmp_path / 'events.yaml'))
+    assert [e['marker'] for e in events] == ['evt']
+    assert [(e['apiVersion'], e['kind']) for e in events] == [('v1', 'Event')]
+    for container in ('sidecar', 'skypilot-api'):
+        assert (tmp_path / 'logs' /
+                f'{container}.log').read_text() == f'log of {container}\n'
+        assert not (tmp_path / 'logs' / f'{container}.previous.log').exists()
+    # The pod is read by its own coordinates, not a label selector.
+    _, kwargs = k8s_apis.core.read_namespaced_pod.call_args
+    assert (kwargs['name'], kwargs['namespace']) == ('api-0', 'sky-ns')
+    # The event query is server-side scoped to this pod.
+    _, kwargs = k8s_apis.core.list_namespaced_event.call_args
+    assert kwargs['field_selector'] == ('involvedObject.kind=Pod,'
+                                        'involvedObject.name=api-0')
+
+
+def test_server_pod_env_values_are_redacted(tmp_path, k8s_apis):
+    """Literal env values are redacted wholesale (operators can put anything
+    in them); names and valueFrom refs are kept, and the kubectl last-applied
+    annotation (which embeds the full spec verbatim) is redacted too."""
+    k8s_apis.core.read_namespaced_pod.return_value = _server_pod()
+    k8s_apis.api_client.sanitize_for_serialization.side_effect = None
+    k8s_apis.api_client.sanitize_for_serialization.return_value = {
+        'metadata': {
+            'annotations': {
+                'kubectl.kubernetes.io/last-applied-configuration': '{"spec": "full manifest incl. env"}',
+                'other': 'kept',
+            },
+        },
+        'spec': {
+            'initContainers': [{
+                'name': 'sidecar',
+                'env': [{
+                    'name': 'SOME_TOKEN',
+                    'value': 'hunter2'
+                }],
+            }],
+            'containers': [{
+                'name': 'skypilot-api',
+                'env': [{
+                    'name': 'PLAIN_VALUE',
+                    'value': 'also-redacted'
+                }, {
+                    'name': 'FROM_SECRET',
+                    'valueFrom': {
+                        'secretKeyRef': {
+                            'name': 'db',
+                            'key': 'uri'
+                        }
+                    }
+                }],
+            }],
+        },
+    }
+
+    errors = _run_server_pod(tmp_path)
+
+    assert not errors
+    pod = yaml_utils.read_yaml(str(tmp_path / 'pod.yaml'))
+    init_env, = pod['spec']['initContainers'][0]['env']
+    assert (init_env['name'], init_env['value']) == ('SOME_TOKEN', '<redacted>')
+    api_env = pod['spec']['containers'][0]['env']
+    assert api_env[0] == {'name': 'PLAIN_VALUE', 'value': '<redacted>'}
+    # valueFrom refs carry no value; kept as-is.
+    assert api_env[1]['valueFrom']['secretKeyRef'] == {
+        'name': 'db',
+        'key': 'uri'
+    }
+    annotations = pod['metadata']['annotations']
+    assert annotations[
+        'kubectl.kubernetes.io/last-applied-configuration'] == '<redacted>'
+    assert annotations['other'] == 'kept'
+
+
+def test_server_pod_read_failure_records_and_bails(tmp_path, k8s_apis):
+    """Without the pod object we can't enumerate containers -- the section
+    records one error and stops, never raising into the surrounding dump."""
+    k8s_apis.core.read_namespaced_pod.side_effect = RuntimeError('forbidden')
+
+    errors = _run_server_pod(tmp_path)
+
+    assert [e['resource'] for e in errors] == ['pod']
+    assert errors[0]['error'] == 'forbidden'
+    k8s_apis.core.read_namespaced_pod_log.assert_not_called()
+    assert not (tmp_path / 'pod.yaml').exists()
+
+
+def test_server_pod_log_rbac_denial_keeps_pod_and_events(tmp_path, k8s_apis):
+    """A deployment without the pods/log RBAC verb still gets pod.yaml and
+    events.yaml; the per-container log failures are recorded, not raised."""
+    k8s_apis.core.read_namespaced_pod.return_value = _server_pod(
+        container_names=('skypilot-api', 'sidecar'))
+    k8s_apis.core.read_namespaced_pod_log.side_effect = _FakeApiException(403)
+
+    errors = _run_server_pod(tmp_path)
+
+    assert (tmp_path / 'pod.yaml').exists()
+    resources = [e['resource'] for e in errors]
+    # Recorded once per read (current + previous) per container.
+    assert resources.count('logs/skypilot-api.log') == 1
+    assert resources.count('logs/skypilot-api.previous.log') == 1
+    assert resources.count('logs/sidecar.log') == 1
+    assert not (tmp_path / 'logs').exists()

@@ -1173,6 +1173,69 @@ def _collect_cluster_kubernetes_resources(
             })
 
 
+# The pod's namespace, mounted into every pod by the service-account
+# admission controller. Read directly (rather than via
+# get_kube_config_context_namespace) because the SKYPILOT_IN_CLUSTER_NAMESPACE
+# env var overrides that helper -- it names the namespace SkyPilot *launches
+# pods into*, which need not be the namespace the API server itself runs in.
+_SA_NAMESPACE_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
+
+
+def _dump_server_pod_info(dump_dir: str,
+                          errors: Optional[List[Dict[str,
+                                                     str]]] = None) -> None:
+    """Snapshot the API server's own k8s pod into ``server_pod/``.
+
+    Only applies when the API server runs inside a Kubernetes pod (helm
+    deployments); a bare-metal/local server has no pod and this is a no-op.
+    Captures the pod spec/status, its events, and every container's log tail
+    -- including sidecar containers, whose stdout is reachable only through
+    the kube API (see kubernetes_debug.dump_api_server_pod).
+
+    The pod's coordinates come from the pod itself: the namespace from the
+    mounted service-account file, and the pod name from the hostname (which
+    Kubernetes sets to the pod name unless a deployment explicitly overrides
+    ``spec.hostname`` -- the helm chart doesn't). Best-effort: every failure
+    is recorded in ``errors`` and never aborts the dump.
+    """
+    try:
+        if not kubernetes_utils.is_incluster_config_available():
+            logger.debug('Not running inside Kubernetes; skipping server pod '
+                         'dump')
+            return
+        with open(_SA_NAMESPACE_PATH, encoding='utf-8') as f:
+            namespace = f.read().strip()
+        pod_name = platform.node()
+        if not namespace or not pod_name:
+            logger.debug(f'Could not resolve own pod coordinates (namespace='
+                         f'{namespace!r}, pod={pod_name!r}); skipping server '
+                         f'pod dump')
+            return
+        pod_errors = kubernetes_debug.dump_api_server_pod(
+            namespace=namespace,
+            pod_name=pod_name,
+            output_dir=os.path.join(dump_dir, 'server_pod'))
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to dump API server pod: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'server_pod',
+                'resource': 'server_pod',
+                'error': str(e),
+                'traceback': _full_traceback(),
+            })
+        return
+
+    if errors is not None:
+        for err in pod_errors:
+            errors.append({
+                'component': 'server_pod',
+                'resource': f'server_pod/{err["resource"]}',
+                'error': err['error'],
+                'traceback': err['traceback'],
+            })
+
+
 def _dump_kube_contexts_info(dump_dir: str,
                              errors: Optional[List[Dict[str,
                                                         str]]] = None) -> None:
@@ -1689,6 +1752,9 @@ def _build_debug_dump(
     # Dump all sections
     errors = debug_dump_context['errors']
     _dump_server_info(dump_dir, errors=errors)
+    # The API server's own k8s pod (spec/status, events, container logs incl.
+    # sidecars) -- no-op unless the server runs inside Kubernetes.
+    _dump_server_pod_info(dump_dir, errors=errors)
     # Cluster-wide k8s objects (GPU-metrics pods, Kueue quota config), fetched
     # once per allowed kube context (source of truth: existing_allowed_contexts,
     # so a context with no SkyPilot clusters is still captured).
