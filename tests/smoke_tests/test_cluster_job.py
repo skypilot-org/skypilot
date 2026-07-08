@@ -3625,8 +3625,10 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
 
 # ---------- Cluster Resize ----------
 def test_resize(generic_cloud: str):
-    """Test cluster resize: scale up, scale down, busy-worker rejection, and
-    (on stop-capable clouds) resizing a STOPPED cluster.
+    """Test cluster resize end to end: CLI validation (``--resize`` requires
+    ``-c``, and ``--resize`` on a missing cluster warns and falls back to a
+    normal launch), scale up, scale down, busy-worker rejection, and (on
+    stop-capable clouds) resizing a STOPPED cluster.
 
     Not marked ``@pytest.mark.kubernetes`` so it runs on the selected
     ``generic_cloud``. The stopped-cluster scenario is skipped on Kubernetes,
@@ -3657,8 +3659,14 @@ def test_resize(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'resize',
         [
-            # Launch a single-node cluster.
-            f'sky launch -y -c {name} --infra {generic_cloud} --cpus 2 --num-nodes 1',
+            # --- CLI validation (fail case): --resize requires -c ---
+            'sky launch --resize --num-nodes 4 2>&1 && '
+            'exit 1 || echo "Correctly rejected"',
+            # --- Create via --resize on a non-existent cluster: the backend
+            #     warns and falls back to a normal launch, creating the initial
+            #     single-node cluster (success / fallback case). ---
+            f'sky launch -y -c {name} --resize --infra {generic_cloud} '
+            f'--cpus 2 --num-nodes 1',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
             # --- Scale up ---
             f'sky launch -y -c {name} --resize --num-nodes 3',
@@ -3684,26 +3692,5 @@ def test_resize(generic_cloud: str):
         # Stop/start cycles on a real cloud (AWS/GCP) are much slower than the
         # Kubernetes-only path.
         timeout=(35 * 60 if generic_cloud != 'kubernetes' else 10 * 60),
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.kubernetes
-def test_resize_cli_validation(generic_cloud: str):
-    """Test resize CLI validation: --resize without -c should error."""
-    name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test(
-        'resize_cli_validation',
-        [
-            # --resize without -c should error.
-            'sky launch --resize --num-nodes 4 2>&1 && '
-            'exit 1 || echo "Correctly rejected"',
-            # --resize on a non-existent cluster should warn and create.
-            f'sky launch -y -c {name} --resize --infra kubernetes '
-            f'--cpus 2 --num-nodes 1',
-            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=5 * 60,
     )
     smoke_tests_utils.run_one_test(test)
