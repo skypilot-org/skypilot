@@ -2680,11 +2680,10 @@ async def api_status(
 def _get_local_contexts() -> List[str]:
     """Kubeconfig contexts that point at the API server's own cluster.
 
-    The dashboard uses this to query the local cluster's GPU series with
-    cluster="" (they are scraped raw by the central Prometheus, never
-    stamped) instead of hardcoding the 'in-cluster' context name. Shares
-    metrics_utils.is_local_context() with the federation routes so both
-    sides always agree on which contexts are local.
+    Uses the same detection as the metrics federation routes, so the
+    dashboard and the federation always agree on which contexts are
+    local (their series are queried with cluster="" instead of a
+    context name).
     """
     local_contexts, _ = metrics_utils.split_local_remote_contexts(
         core.get_all_contexts())
@@ -2695,15 +2694,11 @@ def _get_local_contexts() -> List[str]:
 async def dashboard_config() -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
-    Currently exposes:
-    - `external_links`: the optional allowlist that the dashboard matches
-      against streamed logs to render labeled external links on cluster
-      and job detail pages.
-    - `local_contexts`: Kubernetes contexts that point at the cluster the
-      API server runs in (see _get_local_contexts). Omitted when
-      detection raises, so the dashboard falls back to its default
-      (['in-cluster']) instead of treating an error as "no local
-      contexts".
+    Exposes `external_links` (allowlist for labeled external links on
+    cluster/job detail pages) and `local_contexts` (contexts pointing at
+    the API server's own cluster). `local_contexts` is omitted when
+    detection raises, so the dashboard falls back to its ['in-cluster']
+    default instead of treating an error as "no local contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])

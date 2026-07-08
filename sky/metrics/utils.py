@@ -504,64 +504,17 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
     return _in_cluster_identity_uid
 
 
-def _detect_local_context(context: str) -> bool:
-    """Probes whether `context` points at the API server's own cluster.
-
-    Reads the kube-system namespace through the context's credentials
-    and compares its UID with the API server's own cluster identity
-    (_get_in_cluster_identity_uid). Decision table:
-      - UID matches -> local.
-      - UID differs -> remote.
-      - No identity anchor (not in a pod / RBAC missing) -> remote,
-        without probing.
-      - 403 / timeout / other probe errors -> assume remote and log a
-        warning.
-    "Remote" is always the safe answer: the context then uses the
-    port-forward path, which is the previous upstream behavior for every
-    context, and idempotent stamping (see add_cluster_name_label) keeps
-    that path bounded even for a misclassified local context. The API
-    server's own cluster also stays reachable through the `in-cluster`
-    context, which is treated as local unconditionally (see
-    is_local_context) and never goes through this probe.
-    """
-    own_uid = _get_in_cluster_identity_uid()
-    if own_uid is None:
-        return False
-    # Import lazily to avoid circular import (metrics -> provision ->
-    # clouds -> metrics).
-    # pylint: disable=import-outside-toplevel
-    from sky.adaptors import kubernetes as kubernetes_adaptors
-    try:
-        core = kubernetes_adaptors.core_api(context)
-        probed_uid = _read_cluster_identity_uid(core)
-    except kubernetes_adaptors.api_exception() as e:
-        status = getattr(e, 'status', None)
-        logger.warning(
-            f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
-            f'through context {context!r} (status={status}); assuming the '
-            f'context is remote: {common_utils.format_exception(e)}')
-        return False
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(
-            f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
-            f'through context {context!r}; assuming the context is remote: '
-            f'{common_utils.format_exception(e)}')
-        return False
-    return bool(probed_uid) and probed_uid == own_uid
-
-
 def is_local_context(context: str) -> bool:
     """Whether a kubeconfig context points at the API server's own cluster.
 
     The in-cluster context is local by construction (its credentials are
-    the pod's own service account), so it is treated as local without any
-    probing. For named contexts, UID detection is used and its result is
-    cached at process level per context name (see
-    _LOCAL_CONTEXT_CACHE_TTL_SECONDS). When detection is unavailable or
-    fails, named contexts degrade to remote and only the in-cluster
-    context keeps being treated as local — i.e. the fallback for a broken
-    self-detection is to reference the local cluster via the in-cluster
-    context.
+    the pod's own service account). Named contexts are probed: local iff
+    the kube-system UID read through the context's credentials matches
+    the API server's own cluster identity. Any failure (no identity
+    anchor, 403, timeout) degrades to remote — the safe answer, since
+    the local cluster stays reachable via the in-cluster context.
+    Results are cached at process level for
+    _LOCAL_CONTEXT_CACHE_TTL_SECONDS.
     """
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
@@ -576,7 +529,21 @@ def is_local_context(context: str) -> bool:
             is_local, detected_at = cached
             if now - detected_at < _LOCAL_CONTEXT_CACHE_TTL_SECONDS:
                 return is_local
-    is_local = _detect_local_context(context)
+    is_local = False
+    own_uid = _get_in_cluster_identity_uid()
+    if own_uid is not None:
+        try:
+            core = kubernetes_adaptors.core_api(context)
+            probed_uid = _read_cluster_identity_uid(core)
+            is_local = bool(probed_uid) and probed_uid == own_uid
+        except Exception as e:  # pylint: disable=broad-except
+            status = getattr(e, 'status', None)
+            status_str = f' (status={status})' if status is not None else ''
+            logger.warning(
+                f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} '
+                f'namespace through context {context!r}{status_str}; '
+                f'assuming the context is remote: '
+                f'{common_utils.format_exception(e)}')
     with _local_context_cache_lock:
         _local_context_cache[context] = (is_local, time.time())
     return is_local
@@ -593,19 +560,11 @@ def split_local_remote_contexts(
         contexts: List[str]) -> Tuple[List[str], List[str]]:
     """Partitions contexts into (local, remote) via is_local_context().
 
-    The single source of truth for "which contexts point at the API
-    server's own cluster", shared by the federation routes (which skip
-    local contexts — the central Prometheus already scrapes the local
-    cluster's exporters directly, so federating them again would only
-    duplicate the raw series under a stamped copy) and by the dashboard
-    (which matches the local cluster's series with cluster="" instead of
-    a context name).
-
-    Uncached contexts are probed in parallel (bounded by
-    _DETECTION_MAX_PARALLEL_PROBES) so the first call costs roughly one
-    probe timeout rather than one per context; later calls hit the
-    process-level cache. Still blocking — call from a thread in async
-    code.
+    Shared by the federation routes and /dashboard_config so both agree
+    on which contexts point at the API server's own cluster. Uncached
+    contexts are probed in parallel (bounded) so the first call costs
+    roughly one probe timeout rather than one per context. Blocking —
+    call from a thread in async code.
     """
     if not contexts:
         return [], []
@@ -1016,14 +975,11 @@ async def _federate_metrics_for_context(
         stats: Optional[FederationStats] = None) -> str:
     """Federates and stamps the given series from one context's Prometheus.
 
-    Shared by /gpu-metrics and /endpoints-metrics. Contexts that point at
-    the API server's own cluster never reach this function — the routes
-    filter them out with split_local_remote_contexts() because the central
-    Prometheus already scrapes the local cluster's exporters directly
-    (federating them again would only produce stamped duplicates of the
-    raw series). Every selector is still restricted to never-stamped
-    series (cluster="") so that even a misclassified local context cannot
-    re-federate its own stamped output (no self-federation loop).
+    Shared by /gpu-metrics and /endpoints-metrics; the routes only pass
+    remote contexts (see split_local_remote_contexts). Every selector is
+    restricted to never-stamped series (cluster="") so that even a
+    misclassified local context cannot re-federate its own stamped
+    output (no self-federation loop).
     """
     prometheus_namespace, prometheus_service, prometheus_port = (
         _get_prometheus_target())
