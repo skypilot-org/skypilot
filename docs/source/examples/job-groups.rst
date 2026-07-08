@@ -193,6 +193,14 @@ clusters. SkyPilot supports this by letting each task pin its own Kubernetes con
 Tasks reach each other using the same ``{task_name}-{node_index}.{job_group_name}``
 hostnames described above, regardless of which cluster they land on.
 
+.. note::
+
+    Explicitly pinning each task's cluster is the current mechanism for
+    spanning clusters. Automatic placement — a plain ``infra: k8s`` Job Group
+    spreading across clusters only when no single cluster can satisfy all
+    tasks — is planned; the networking described here already supports tasks
+    landing on different clusters however they got there.
+
 How it works
 ~~~~~~~~~~~~
 
