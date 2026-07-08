@@ -52,6 +52,8 @@ class ManagedJobRunner(Protocol):
         fields: Optional[List[str]],
         sort_by: Optional[str],
         sort_order: Optional[str],
+        submitted_after: Optional[float],
+        submitted_before: Optional[float],
     ) -> Tuple[List[Dict[str, Any]], int,
                'managed_job_utils.ManagedJobQueueResultType', int, Dict[str,
                                                                         int]]:

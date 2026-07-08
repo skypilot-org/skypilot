@@ -4116,7 +4116,12 @@ def get_custom_config_k8s_contexts() -> List[str]:
 # corresponding spot label key and value.
 SPOT_LABEL_MAP = {
     kubernetes_enums.KubernetesAutoscalerType.GKE.value:
-        ('cloud.google.com/gke-spot', 'true')
+        ('cloud.google.com/gke-spot', 'true'),
+    # Karpenter satisfies a pod's capacity-type node requirement by choosing the
+    # capacity type, so a `karpenter.sh/capacity-type: spot` node selector routes
+    # the pod to a spot NodePool.
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER.value:
+        ('karpenter.sh/capacity-type', 'spot'),
 }
 
 
@@ -4157,10 +4162,11 @@ def get_spot_label(
                     key] == value:
                 return key, value
 
-    # Check if autoscaler is configured. Allow spot instances if autoscaler type
-    # is known to support spot instances.
+    # Check if autoscaler is configured. Allow spot instances if the autoscaler
+    # type is known to support them (i.e. has an entry in SPOT_LABEL_MAP).
     autoscaler_type = get_autoscaler_type(context=context)
-    if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
+    if (autoscaler_type is not None and
+            autoscaler_type.value in SPOT_LABEL_MAP):
         return SPOT_LABEL_MAP[autoscaler_type.value]
 
     return None, None
@@ -5085,7 +5091,8 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
         config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
-    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    hashed = hashlib.sha1(normalized.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()
     path = os.path.expanduser(
         f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
     )

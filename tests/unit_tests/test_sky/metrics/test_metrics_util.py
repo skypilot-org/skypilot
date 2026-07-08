@@ -275,6 +275,24 @@ def test_add_cluster_name_label_brace_in_label_value():
     assert result == 'foo{cluster="ctx-a",bar="}",qux="v"} 1.0'
 
 
+def test_add_cluster_name_label_cluster_inside_other_label_value():
+    """A ',cluster=' substring inside another label's value is not a label.
+
+    Regression test for matching on raw text instead of label tokens: the
+    replacement must never start inside another label's (quoted) value.
+    """
+    # No real cluster label: prepend, leave the value untouched.
+    text = 'foo{note="a,cluster=\\"x\\"",bar="b"} 1.0'
+    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
+    assert result == ('foo{cluster="ctx-a",note="a,cluster=\\"x\\"",bar="b"}'
+                      ' 1.0')
+
+    # Real cluster label present: replace only the actual label.
+    text = 'foo{note="a,cluster=\\"x\\"",cluster="old"} 1.0'
+    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
+    assert result == ('foo{note="a,cluster=\\"x\\"",cluster="ctx-a"} 1.0')
+
+
 class _FakeAsyncHttpClient:
     """Minimal async context-manager stand-in for httpx.AsyncClient."""
 
@@ -293,6 +311,9 @@ class _FakeAsyncHttpClient:
         _FakeAsyncHttpClient.calls.append((url, params))
         response = mock.MagicMock()
         response.text = 'fake_metrics'
+        response.content = b'fake_metrics'
+        response.num_bytes_downloaded = len(b'fake_metrics')
+        response.headers = {}
         response.raise_for_status = mock.MagicMock()
         return response
 
@@ -401,6 +422,29 @@ def test_get_metrics_for_context_remote_path_unchanged():
     for pattern in kwargs['match_patterns']:
         assert 'cluster=""' not in pattern, pattern
     assert result == 'foo{cluster="ctx-remote",bar="baz"} 1.0'
+
+
+def test_get_endpoint_metrics_for_context_local_path():
+    """/endpoints-metrics shares the local-path logic with /gpu-metrics."""
+    send_local = mock.AsyncMock(return_value='vllm:foo{bar="baz"} 1.0')
+    send_port_forward = mock.AsyncMock()
+    with mock.patch.object(utils, 'is_local_context', return_value=True), \
+         mock.patch.object(utils, '_get_prometheus_target',
+                           return_value=('skypilot',
+                                         'skypilot-prometheus-server', 80)), \
+         mock.patch.object(utils, 'send_local_metrics_request', send_local), \
+         mock.patch.object(utils, 'send_metrics_request_with_port_forward',
+                           send_port_forward):
+        result = asyncio.run(
+            utils.get_endpoint_metrics_for_context('ctx-local'))
+
+    send_port_forward.assert_not_called()
+    send_local.assert_awaited_once()
+    kwargs = send_local.await_args.kwargs
+    assert kwargs['route'] == 'endpoints-metrics'
+    for pattern in kwargs['match_patterns']:
+        assert 'cluster=""' in pattern, pattern
+    assert result == 'vllm:foo{cluster="ctx-local",bar="baz"} 1.0'
 
 
 def test_start_svc_port_forward_terminates_on_timeout():

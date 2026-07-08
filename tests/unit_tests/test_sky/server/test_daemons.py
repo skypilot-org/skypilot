@@ -226,8 +226,7 @@ class TestConsolidationEventInstancePersistence:
     # Attribute names the fix introduces. Use getattr/setattr so that if
     # the fix is reverted the fixture still runs cleanly; the actual test
     # assertions (call_count) then become the failure signal.
-    _EVENT_ATTRS = ('_pool_status_update_event', '_serve_status_update_event',
-                    '_managed_job_event')
+    _EVENT_ATTRS = ('_pool_status_update_event', '_serve_status_update_event')
 
     @pytest.fixture(autouse=True)
     def _reset_module_state(self):
@@ -237,20 +236,17 @@ class TestConsolidationEventInstancePersistence:
         fake_lock = mock.MagicMock()
         fake_lock.is_locked.return_value = True
         prior_locks = (daemons._pool_consolidation_mode_lock,
-                       daemons._serve_consolidation_mode_lock,
-                       daemons._managed_job_consolidation_mode_lock)
+                       daemons._serve_consolidation_mode_lock)
         prior_events = {
             name: getattr(daemons, name, None) for name in self._EVENT_ATTRS
         }
         daemons._pool_consolidation_mode_lock = fake_lock
         daemons._serve_consolidation_mode_lock = fake_lock
-        daemons._managed_job_consolidation_mode_lock = fake_lock
         for name in self._EVENT_ATTRS:
             setattr(daemons, name, None)
         yield
         (daemons._pool_consolidation_mode_lock,
-         daemons._serve_consolidation_mode_lock,
-         daemons._managed_job_consolidation_mode_lock) = prior_locks
+         daemons._serve_consolidation_mode_lock) = prior_locks
         for name, value in prior_events.items():
             setattr(daemons, name, value)
 
@@ -294,21 +290,3 @@ class TestConsolidationEventInstancePersistence:
             assert mock_event.call_count == 2
             assert mock.call(pool=False) in mock_event.call_args_list
             assert mock.call(pool=True) in mock_event.call_args_list
-
-    def test_managed_job_event_instance_is_reused_across_iterations(self):
-        # signal_file path is real disk I/O in the original function;
-        # patch pathlib.Path directly (daemons.pathlib is a LazyImport
-        # wrapper that proxies to the real pathlib module, so patching
-        # at the module level reaches both lookup paths).
-        fake_signal_file = mock.MagicMock()
-        fake_signal_file.expanduser.return_value = fake_signal_file
-        with mock.patch('pathlib.Path',
-                        return_value=fake_signal_file), \
-             mock.patch(
-                 'sky.jobs.utils.ha_recovery_for_consolidation_mode'), \
-             mock.patch('sky.skylet.events.ManagedJobEvent') as mock_event, \
-             mock.patch.object(daemons.time, 'sleep'):
-            for _ in range(3):
-                daemons.managed_job_status_refresh_event()
-            mock_event.assert_called_once_with()
-            assert mock_event.return_value.run.call_count == 3

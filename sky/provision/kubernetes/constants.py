@@ -24,5 +24,9 @@ TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 # Default name of the primary workload container in SkyPilot Ray pods.
 RAY_NODE_CONTAINER_NAME = 'ray-node'
 
+# Finalizer Kueue puts on pod-group pods; retained on a terminating pod until a
+# replacement is observed, so it blocks garbage-collection of a deleted pod.
+KUEUE_MANAGED_FINALIZER = 'kueue.x-k8s.io/managed'
+
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']

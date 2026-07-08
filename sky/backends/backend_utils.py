@@ -707,7 +707,8 @@ def get_expirable_clouds(
 
 
 def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
-    path_hash = hashlib.md5(path.encode()).hexdigest()[:6]
+    path_hash = hashlib.md5(path.encode(),
+                            usedforsecurity=False).hexdigest()[:6]
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
@@ -3072,12 +3073,14 @@ def _update_cluster_status(
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = (f'^Cluster is abnormal because '
-                                 f'{re.escape(init_reason)}.*')
-        log_message = f'Cluster is abnormal because {init_reason}'
+            init_reason_regex = (
+                f'^{re.escape(global_user_state.ABNORMAL_STATUS_REASON_PREFIX)}'
+                f' {re.escape(init_reason)}.*')
+        log_message = (f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} '
+                       f'{init_reason}')
         if status_reason:
             log_message += f' ({status_reason})'
-        log_message += '. Transitioned to INIT.'
+        log_message += '. Transitioned to INIT (details: cluster is unhealthy).'
         # Do not add event if the cluster is already in INIT status.
         if status != status_lib.ClusterStatus.INIT:
             global_user_state.add_cluster_event(

@@ -57,7 +57,7 @@ import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
@@ -604,6 +604,23 @@ function JobDetails() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {/* Slot for plugins to add extra log filters beside the
+                        node picker. jobId/taskId mirror the jobs.detail.logs
+                        context exactly (the per-task object's id for
+                        multi-task jobs) so a plugin can key shared state on
+                        the same identity as the log pane below. */}
+                    <PluginSlot
+                      name="jobs.detail.logfilters"
+                      context={{
+                        jobId: (isMultiTask
+                          ? allTasks[selectedTaskIndex]
+                          : detailJobData
+                        )?.id,
+                        taskId: isMultiTask ? selectedTaskIndex : null,
+                        isController: false,
+                        refreshTrigger: refreshLogsFlag,
+                      }}
+                    />
                     {!logsSlotHasPlugin && (
                       <span className="text-xs text-gray-500">
                         (Logs are not streaming; click refresh to fetch the
@@ -1375,6 +1392,12 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
+        <div className="text-gray-600 font-medium text-base">Duration</div>
+        <div className="text-base mt-1">
+          {formatDuration(jobData.job_duration)}
+        </div>
+      </div>
+      <div>
         <div className="text-gray-600 font-medium text-base">
           Requested Resources
         </div>
@@ -1552,7 +1575,11 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Queue Details section - right column */}
+      {/* Details section - surfaces the reason behind the current status
+          (e.g. why a job is still PENDING). A plugin may take over this slot
+          to render richer queue-specific details (e.g. Kueue); otherwise the
+          OSS fallback shows the plain details string so the reason is visible
+          here in the job details view, not just in the event table. */}
       {jobData.details && (
         <PluginSlot
           name="jobs.detail.queue_details"
@@ -1563,6 +1590,14 @@ function JobDetailsContent({
             jobData: jobData,
             title: 'Queue Details',
           }}
+          fallback={
+            <div>
+              <div className="text-gray-600 font-medium text-base">Details</div>
+              <div className="text-base mt-1 whitespace-pre-wrap break-words">
+                {jobData.details}
+              </div>
+            </div>
+          }
         />
       )}
 
@@ -1638,7 +1673,7 @@ function JobDetailsContent({
                 </div>
 
                 {isYamlExpanded && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                  <div>
                     {(() => {
                       const yamlDocs = formatJobYaml(jobData.dag_yaml);
                       // Build JobGroup header with name and execution
@@ -1662,9 +1697,10 @@ function JobDetailsContent({
                       } else if (yamlDocs.length === 1) {
                         // Single document - show directly
                         return (
-                          <YamlHighlighter className="whitespace-pre-wrap">
-                            {jobGroupHeader + yamlDocs[0].content}
-                          </YamlHighlighter>
+                          <YamlCodeBlock
+                            value={jobGroupHeader + yamlDocs[0].content}
+                            readOnly
+                          />
                         );
                       } else {
                         // Multiple documents - show toggle and content
@@ -1688,12 +1724,15 @@ function JobDetailsContent({
 
                             {showFullYaml ? (
                               // Show full YAML with JobGroup header
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {jobGroupHeader +
+                              <YamlCodeBlock
+                                value={
+                                  jobGroupHeader +
                                   yamlDocs
                                     .map((doc) => doc.content)
-                                    .join('\n---\n')}
-                              </YamlHighlighter>
+                                    .join('\n---\n')
+                                }
+                                readOnly
+                              />
                             ) : (
                               // Show per-job YAMLs
                               yamlDocs.map((doc, index) => (
@@ -1718,9 +1757,10 @@ function JobDetailsContent({
                                   </button>
                                   {expandedYamlDocs[index] && (
                                     <div className="mt-3 ml-6">
-                                      <YamlHighlighter className="whitespace-pre-wrap">
-                                        {doc.content}
-                                      </YamlHighlighter>
+                                      <YamlCodeBlock
+                                        value={doc.content}
+                                        readOnly
+                                      />
                                     </div>
                                   )}
                                 </div>
