@@ -557,6 +557,17 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
     try:
         process = psutil.Process(record.pid)
 
+        if process.status() == psutil.STATUS_ZOMBIE:
+            # A dead-but-unreaped controller (e.g. SIGKILLed or OOM-killed
+            # before its parent waited on it) will never run again, but
+            # psutil.Process.is_running() returns True for zombies - so
+            # without this check a zombified controller's jobs would look
+            # healthy forever and never be recovered. The pid cannot be
+            # reused while the zombie exists, so acting on it is safe.
+            if not quiet:
+                logger.debug(f'Controller process {record.pid} is a zombie.')
+            return False
+
         if record.started_at is not None:
             if process.create_time() != record.started_at:
                 if not quiet:

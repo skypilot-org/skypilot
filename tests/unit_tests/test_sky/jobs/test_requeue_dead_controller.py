@@ -16,6 +16,7 @@ import time
 from unittest import mock
 
 import filelock
+import psutil
 import pytest
 import sqlalchemy
 from sqlalchemy import create_engine
@@ -257,6 +258,28 @@ class TestIsLegacyControllerProcess:
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, pid=-_PID, pid_started_at=None)
         assert not state.is_legacy_controller_process(1)
+
+
+class TestControllerProcessAlive:
+    """A zombie (dead-but-unreaped) controller must count as dead."""
+
+    def test_zombie_controller_is_dead(self):
+        proc = mock.MagicMock()
+        proc.status.return_value = psutil.STATUS_ZOMBIE
+        proc.is_running.return_value = True
+        proc.create_time.return_value = _PID_STARTED_AT
+        with mock.patch('psutil.Process', return_value=proc):
+            assert not managed_job_utils.controller_process_alive(
+                state.ControllerPidRecord(pid=_PID, started_at=_PID_STARTED_AT))
+
+    def test_running_controller_is_alive(self):
+        proc = mock.MagicMock()
+        proc.status.return_value = psutil.STATUS_RUNNING
+        proc.is_running.return_value = True
+        proc.create_time.return_value = _PID_STARTED_AT
+        with mock.patch('psutil.Process', return_value=proc):
+            assert managed_job_utils.controller_process_alive(
+                state.ControllerPidRecord(pid=_PID, started_at=_PID_STARTED_AT))
 
 
 @pytest.fixture
