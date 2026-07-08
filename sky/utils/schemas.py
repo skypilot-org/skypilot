@@ -2344,7 +2344,7 @@ def get_config_schema():
                 'case_insensitive_enum': ['admin', 'user', 'viewer']
             },
             # When true, GET /workspaces/config is restricted to admins (the
-            # config payload includes admin-only secrets). Defaults to false.
+            # config payload includes admin-only secrets). Defaults to true.
             'restrict_config_to_admins': {
                 'type': 'boolean',
             },

@@ -93,7 +93,7 @@ class APIHealthResponse(ResponseBaseModel):
     # Whether GET /workspaces/config is restricted to admins (config payload
     # includes admin-only secrets). Lets the dashboard hide the config UI for
     # non-admins when enabled.
-    restrict_config_to_admins: bool = False
+    restrict_config_to_admins: bool = True
 
 
 class StatusResponse(ResponseBaseModel):

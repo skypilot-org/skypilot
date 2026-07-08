@@ -59,9 +59,10 @@ export function SidebarProvider({ children }) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState(null);
   const [userRole, setUserRole] = useState(null);
-  // Server-side opt-in (rbac.restrict_config_to_admins) surfaced via
-  // /api/health, so the config UI can be hidden for non-admins.
-  const [restrictConfigToAdmins, setRestrictConfigToAdmins] = useState(false);
+  // Server-side flag (rbac.restrict_config_to_admins, default true) surfaced
+  // via /api/health, so the config UI can be hidden for non-admins. Default to
+  // restricted before /api/health resolves.
+  const [restrictConfigToAdmins, setRestrictConfigToAdmins] = useState(true);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
