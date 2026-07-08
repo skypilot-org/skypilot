@@ -2827,3 +2827,40 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+
+.. _config-yaml-metrics:
+
+``metrics``
+~~~~~~~~~~~
+
+GPU metrics federation configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-metrics-prometheus:
+
+``metrics.prometheus``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Prometheus deployment that ``/gpu-metrics`` federates from in each Kubernetes context (optional).
+
+By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm chart: service ``skypilot-prometheus-server`` in namespace ``skypilot``, port ``80``. Set these fields if your Prometheus lives in a different namespace or under a different service name.
+
+``namespace``
+    Namespace the Prometheus service is deployed in. Default: ``skypilot``.
+
+``service``
+    Name of the Prometheus service. Default: ``skypilot-prometheus-server``.
+
+``port``
+    Port of the Prometheus service. Default: ``80``.
+
+.. code-block:: yaml
+
+  metrics:
+    prometheus:
+      namespace: monitoring
+      service: prometheus-server
+      port: 80
+
+.. note::
+
+    When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the API server's own namespace as seen through the context's credentials) and fetches metrics from the Prometheus service directly over in-cluster DNS, restricted to never-stamped series to avoid a self-federation loop. If detection fails (e.g. the context's credentials cannot ``get`` the API server's namespace), the context is treated as remote; the local cluster can always be referenced via the ``in-cluster`` context, which is treated as local unconditionally.
