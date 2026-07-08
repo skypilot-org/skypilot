@@ -571,9 +571,10 @@ def is_local_context(context: str) -> bool:
     now = time.time()
     with _local_context_cache_lock:
         cached = _local_context_cache.get(context)
-        if (cached is not None and
-                now - cached[1] < _LOCAL_CONTEXT_CACHE_TTL_SECONDS):
-            return cached[0]
+        if cached is not None:
+            is_local, detected_at = cached
+            if now - detected_at < _LOCAL_CONTEXT_CACHE_TTL_SECONDS:
+                return is_local
     is_local = _detect_local_context(context)
     with _local_context_cache_lock:
         _local_context_cache[context] = (is_local, time.time())
