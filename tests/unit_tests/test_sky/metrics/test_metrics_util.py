@@ -27,10 +27,10 @@ def _fake_namespace(uid):
 def _reset_local_context_detection_state():
     """Reset the process-level detection caches between tests."""
     utils._local_context_cache.clear()  # pylint: disable=protected-access
-    utils._own_cluster_uid = None  # pylint: disable=protected-access
+    utils._in_cluster_identity_uid = None  # pylint: disable=protected-access
     yield
     utils._local_context_cache.clear()  # pylint: disable=protected-access
-    utils._own_cluster_uid = None  # pylint: disable=protected-access
+    utils._in_cluster_identity_uid = None  # pylint: disable=protected-access
 
 
 def test_start_svc_port_forward_terminates_on_exception():
@@ -83,7 +83,7 @@ class _DetectionHarness:
         core.read_namespace.side_effect = _read_namespace
         self._patches = [
             mock.patch.object(utils,
-                              '_get_own_cluster_uid',
+                              '_get_in_cluster_identity_uid',
                               return_value=self._own_uid),
             mock.patch('sky.adaptors.kubernetes.core_api', return_value=core),
             mock.patch('sky.adaptors.kubernetes.api_exception',
@@ -189,7 +189,7 @@ def test_is_local_context_renamed_in_cluster_context():
         assert not h.probe_calls
 
 
-def test_get_own_cluster_uid_caches_success_only():
+def test_get_in_cluster_identity_uid_caches_success_only():
     core = mock.MagicMock()
     core.read_namespace.side_effect = [
         TimeoutError('api server not ready'),
@@ -200,19 +200,19 @@ def test_get_own_cluster_uid_caches_success_only():
          mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
                     return_value='in-cluster'):
         # Failure is not cached; the next call retries and succeeds.
-        assert utils._get_own_cluster_uid() is None  # pylint: disable=protected-access
-        assert utils._get_own_cluster_uid() == 'uid-1'  # pylint: disable=protected-access
+        assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
+        assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
         # Success is cached: no further API calls.
-        assert utils._get_own_cluster_uid() == 'uid-1'  # pylint: disable=protected-access
+        assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
         assert core.read_namespace.call_count == 2
         # The identity anchor is the kube-system namespace.
         assert core.read_namespace.call_args[0][0] == 'kube-system'
 
 
-def test_get_own_cluster_uid_not_in_pod():
+def test_get_in_cluster_identity_uid_not_in_pod():
     """Outside a pod there is no cluster identity: detection disabled."""
     with mock.patch.object(utils.os.path, 'exists', return_value=False):
-        assert utils._get_own_cluster_uid() is None  # pylint: disable=protected-access
+        assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 
 def test_add_empty_cluster_matcher():

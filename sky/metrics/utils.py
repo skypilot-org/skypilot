@@ -80,11 +80,12 @@ _LOCAL_CONTEXT_CACHE_TTL_SECONDS = 60 * 60
 _local_context_cache: Dict[str, Tuple[bool, float]] = {}
 _local_context_cache_lock = threading.Lock()
 
-# UID of the kube-system namespace in the cluster this API server runs
-# in. Only successful reads are cached; failures are retried on the next
+# UID of the kube-system namespace as seen through the in-cluster
+# credentials, i.e. the identity of the cluster this API server runs in.
+# Only successful reads are cached; failures are retried on the next
 # detection attempt.
-_own_cluster_uid: Optional[str] = None
-_own_cluster_uid_lock = threading.Lock()
+_in_cluster_identity_uid: Optional[str] = None
+_in_cluster_identity_uid_lock = threading.Lock()
 
 # Latency buckets shared by histograms that observe seconds. Kept compact to
 # bound time-series cardinality (each labeled series multiplies by len(buckets))
@@ -414,8 +415,8 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
     """(namespace, service, port) of the Prometheus to federate from.
 
     Reads the `metrics.prometheus` server config section, falling back to
-    the defaults that match the SkyPilot Helm chart. gpu_metrics() reloads
-    the config on every scrape, so changes are picked up at runtime.
+    the defaults that match the SkyPilot Helm chart. The metrics routes
+    reload the config on every scrape, so changes are picked up at runtime.
     """
     namespace = skypilot_config.get_nested(
         ('metrics', 'prometheus', 'namespace'), _DEFAULT_PROMETHEUS_NAMESPACE)
@@ -426,7 +427,17 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
     return namespace, service, port
 
 
-def _get_own_cluster_uid() -> Optional[str]:
+def _read_cluster_identity_uid(core) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(
+        _CLUSTER_IDENTITY_NAMESPACE,
+        _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def _get_in_cluster_identity_uid() -> Optional[str]:
     """UID of kube-system in the cluster the API server runs in.
 
     Read through the in-cluster credentials, it acts as the identity
@@ -438,10 +449,10 @@ def _get_own_cluster_uid() -> Optional[str]:
     read (e.g. missing RBAC); in that case detection is disabled and
     every named context is treated as remote.
     """
-    global _own_cluster_uid
-    with _own_cluster_uid_lock:
-        if _own_cluster_uid is not None:
-            return _own_cluster_uid
+    global _in_cluster_identity_uid
+    with _in_cluster_identity_uid_lock:
+        if _in_cluster_identity_uid is not None:
+            return _in_cluster_identity_uid
     if not os.path.exists(_SERVICEACCOUNT_NAMESPACE_PATH):
         # Not running inside a Kubernetes pod.
         return None
@@ -452,11 +463,7 @@ def _get_own_cluster_uid() -> Optional[str]:
     try:
         core = kubernetes_adaptors.core_api(
             kubernetes_adaptors.in_cluster_context_name())
-        namespace = core.read_namespace(
-            _CLUSTER_IDENTITY_NAMESPACE,
-            _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
-        uid = (namespace.metadata.uid if namespace is not None and
-               namespace.metadata is not None else None)
+        uid = _read_cluster_identity_uid(core)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             f'Failed to read the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
@@ -467,9 +474,9 @@ def _get_own_cluster_uid() -> Optional[str]:
         return None
     if not uid:
         return None
-    with _own_cluster_uid_lock:
-        _own_cluster_uid = uid
-    return _own_cluster_uid
+    with _in_cluster_identity_uid_lock:
+        _in_cluster_identity_uid = uid
+    return _in_cluster_identity_uid
 
 
 def _detect_local_context(context: str) -> bool:
@@ -487,7 +494,7 @@ def _detect_local_context(context: str) -> bool:
         still be referenced through the in-cluster context, which is
         always treated as local (see is_local_context).
     """
-    own_uid = _get_own_cluster_uid()
+    own_uid = _get_in_cluster_identity_uid()
     if own_uid is None:
         return False
     # Import lazily to avoid circular import (metrics -> provision ->
@@ -496,9 +503,7 @@ def _detect_local_context(context: str) -> bool:
     from sky.adaptors import kubernetes as kubernetes_adaptors
     try:
         core = kubernetes_adaptors.core_api(context)
-        probed_namespace = core.read_namespace(
-            _CLUSTER_IDENTITY_NAMESPACE,
-            _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
+        probed_uid = _read_cluster_identity_uid(core)
     except kubernetes_adaptors.api_exception() as e:
         status = getattr(e, 'status', None)
         logger.warning(
@@ -512,9 +517,6 @@ def _detect_local_context(context: str) -> bool:
             f'through context {context!r}; assuming the context is remote: '
             f'{common_utils.format_exception(e)}')
         return False
-    probed_uid = (probed_namespace.metadata.uid
-                  if probed_namespace is not None and
-                  probed_namespace.metadata is not None else None)
     return bool(probed_uid) and probed_uid == own_uid
 
 
@@ -712,7 +714,6 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     # monotonic() so durations are immune to wall-clock adjustments.
     try:
-        # Start port forward.
         pf_start = time.monotonic()
         port_forward_process, local_port = await asyncio.to_thread(
             start_svc_port_forward, context, namespace, service, service_port)
@@ -720,42 +721,9 @@ async def send_metrics_request_with_port_forward(
         record_federation_phase(context, route, 'port_forward',
                                 stats.port_forward_seconds)
 
-        # Build endpoint URL
         endpoint = f'http://localhost:{local_port}{endpoint_path}'
-
-        # Make HTTP request. httpx sends `Accept-Encoding: gzip, deflate` by
-        # default and transparently decompresses, so a Prometheus that
-        # compresses /federate (any version >= 2.0) is already gzipped on the
-        # wire; stats captures content-encoding + wire vs. decompressed size so
-        # this is observable rather than assumed.
-        federate_start = time.monotonic()
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            if match_patterns:
-                # For federate endpoint, add match[] parameters
-                params = [('match[]', pattern) for pattern in match_patterns]
-                response = await client.get(endpoint, params=params)
-            else:
-                response = await client.get(endpoint)
-
-            response.raise_for_status()
-            text = response.text
-            # response.content is the decompressed body (already materialized
-            # for a non-streamed request, no await); num_bytes_downloaded is
-            # the raw on-wire (compressed) count.
-            stats.body_bytes = len(response.content)
-            stats.wire_bytes = response.num_bytes_downloaded
-            stats.content_encoding = response.headers.get(
-                'content-encoding', 'identity')
-            # Assign federate_seconds LAST so that (federate_seconds is not
-            # None) structurally implies the byte fields are set — summary()
-            # relies on this. The body is already materialized above, so
-            # measuring the duration here does not lose any transfer time.
-            stats.federate_seconds = time.monotonic() - federate_start
-            record_federation_phase(context, route, 'federate',
-                                    stats.federate_seconds)
-            record_federation_payload(context, route, stats.body_bytes)
-            return text
-
+        return await _send_federate_request(endpoint, match_patterns, timeout,
+                                            context, route, stats)
     finally:
         # Clean up port forward synchronously to guarantee cleanup
         # even if the task is cancelled by asyncio.wait_for().
@@ -763,6 +731,47 @@ async def send_metrics_request_with_port_forward(
         # cleanup.
         if port_forward_process:
             stop_svc_port_forward(port_forward_process)
+
+
+async def _send_federate_request(endpoint: str,
+                                 match_patterns: Optional[List[str]],
+                                 timeout: float, context: str, route: str,
+                                 stats: FederationStats) -> str:
+    """GETs a Prometheus endpoint and records the federate timing/size.
+
+    Shared by the port-forward and local (in-cluster DNS) senders. httpx
+    sends `Accept-Encoding: gzip, deflate` by default and transparently
+    decompresses, so a Prometheus that compresses /federate (any version
+    >= 2.0) is already gzipped on the wire; stats captures
+    content-encoding + wire vs. decompressed size so this is observable
+    rather than assumed.
+    """
+    federate_start = time.monotonic()
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        if match_patterns:
+            params = [('match[]', pattern) for pattern in match_patterns]
+            response = await client.get(endpoint, params=params)
+        else:
+            response = await client.get(endpoint)
+
+        response.raise_for_status()
+        text = response.text
+        # response.content is the decompressed body (already materialized
+        # for a non-streamed request, no await); num_bytes_downloaded is
+        # the raw on-wire (compressed) count.
+        stats.body_bytes = len(response.content)
+        stats.wire_bytes = response.num_bytes_downloaded
+        stats.content_encoding = response.headers.get('content-encoding',
+                                                      'identity')
+        # Assign federate_seconds LAST so that (federate_seconds is not
+        # None) structurally implies the byte fields are set — summary()
+        # relies on this. The body is already materialized above, so
+        # measuring the duration here does not lose any transfer time.
+        stats.federate_seconds = time.monotonic() - federate_start
+        record_federation_phase(context, route, 'federate',
+                                stats.federate_seconds)
+        record_federation_payload(context, route, stats.body_bytes)
+        return text
 
 
 async def send_local_metrics_request(
@@ -801,35 +810,16 @@ async def send_local_metrics_request(
             local path, so port_forward_seconds stays None.
     Returns:
         Response text containing the metrics
+    Raises:
+        httpx.HTTPError: If the direct in-cluster request fails.
     """
     if stats is None:
         stats = FederationStats()
     endpoint = (f'http://{service}.{namespace}.svc:{service_port}'
                 f'{endpoint_path}')
     try:
-        federate_start = time.monotonic()
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            if match_patterns:
-                params = [('match[]', pattern) for pattern in match_patterns]
-                response = await client.get(endpoint, params=params)
-            else:
-                response = await client.get(endpoint)
-            response.raise_for_status()
-            text = response.text
-            stats.body_bytes = len(response.content)
-            stats.wire_bytes = response.num_bytes_downloaded
-            stats.content_encoding = response.headers.get(
-                'content-encoding', 'identity')
-            # Assign federate_seconds LAST so that (federate_seconds is not
-            # None) structurally implies the byte fields are set — summary()
-            # relies on this.
-            stats.federate_seconds = time.monotonic() - federate_start
-            record_federation_phase(context,
-                                    route,
-                                    phase='federate',
-                                    seconds=stats.federate_seconds)
-            record_federation_payload(context, route, stats.body_bytes)
-            return text
+        return await _send_federate_request(endpoint, match_patterns, timeout,
+                                            context, route, stats)
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error(f'Failed to send local metrics request to {endpoint}: '
                      f'{common_utils.format_exception(e)}')
@@ -846,10 +836,10 @@ def _add_empty_cluster_matcher(pattern: str) -> str:
     """
     stripped = pattern.strip()
     if stripped.endswith('}'):
-        head = stripped[:-1].rstrip()
-        if head.endswith('{'):
-            return head + 'cluster=""}'
-        return head + ',cluster=""}'
+        selector_body = stripped[:-1].rstrip()
+        if selector_body.endswith('{'):
+            return selector_body + 'cluster=""}'
+        return selector_body + ',cluster=""}'
     # Bare metric name without a selector.
     return stripped + '{cluster=""}'
 
@@ -874,8 +864,44 @@ def _escape_label_value(value: str) -> str:
     return (value.replace('\\', r'\\').replace('"', r'\"').replace('\n', r'\n'))
 
 
+def _stamp_cluster_label_on_line(line: str, cluster_value: str) -> str:
+    """Ensures one metric line carries exactly one cluster label.
+
+    Non-metric lines (comments, blanks, lines without a label section)
+    are returned unchanged. `cluster_value` must already be escaped for
+    the exposition format (see _escape_label_value).
+    """
+    if line.startswith('#') or not line.strip():
+        return line
+    # Use rfind for the closing brace: label values may legitimately
+    # contain '}' (the sample value/timestamp after the label section
+    # cannot).
+    brace_start = line.find('{')
+    brace_end = line.rfind('}')
+    if brace_start == -1 or brace_end <= brace_start:
+        return line
+    metric_name = line[:brace_start]
+    existing_labels = line[brace_start + 1:brace_end]
+    rest_of_line = line[brace_end + 1:]
+
+    if not existing_labels:
+        new_labels = f'cluster="{cluster_value}"'
+    else:
+        has_cluster = any(
+            m.group(1) == 'cluster'
+            for m in _LABEL_TOKEN_RE.finditer(existing_labels))
+        if has_cluster:
+            new_labels = _LABEL_TOKEN_RE.sub(
+                lambda m: (f'cluster="{cluster_value}"'
+                           if m.group(1) == 'cluster' else m.group(0)),
+                existing_labels)
+        else:
+            new_labels = f'cluster="{cluster_value}",{existing_labels}'
+    return f'{metric_name}{{{new_labels}}}{rest_of_line}'
+
+
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
-    """Adds a cluster label to each metric line.
+    """Ensures each metric line carries exactly one cluster label.
 
     Idempotent: if a series already carries a `cluster` label (e.g. a
     stamped copy that got re-federated), the label is replaced instead of
@@ -888,46 +914,9 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
         context: The cluster name
     """
     cluster_value = _escape_label_value(context)
-    lines = metrics_text.strip().split('\n')
-    modified_lines = []
-
-    for line in lines:
-        # keep comment lines and empty lines as-is
-        if line.startswith('#') or not line.strip():
-            modified_lines.append(line)
-            continue
-        # if line is a metric line with labels, add cluster label.
-        # Use rfind for the closing brace: label values may legitimately
-        # contain '}' (the sample value/timestamp after the label section
-        # cannot).
-        brace_start = line.find('{')
-        brace_end = line.rfind('}')
-        if brace_start != -1 and brace_end > brace_start:
-            metric_name = line[:brace_start]
-            existing_labels = line[brace_start + 1:brace_end]
-            rest_of_line = line[brace_end + 1:]
-
-            if existing_labels:
-                has_cluster = any(
-                    m.group(1) == 'cluster'
-                    for m in _LABEL_TOKEN_RE.finditer(existing_labels))
-                if has_cluster:
-                    new_labels = _LABEL_TOKEN_RE.sub(
-                        lambda m: (f'cluster="{cluster_value}"'
-                                   if m.group(1) == 'cluster' else m.group(0)),
-                        existing_labels)
-                else:
-                    new_labels = f'cluster="{cluster_value}",{existing_labels}'
-            else:
-                new_labels = f'cluster="{cluster_value}"'
-
-            modified_line = f'{metric_name}{{{new_labels}}}{rest_of_line}'
-            modified_lines.append(modified_line)
-        else:
-            # keep other lines as-is
-            modified_lines.append(line)
-
-    return '\n'.join(modified_lines)
+    return '\n'.join(
+        _stamp_cluster_label_on_line(line, cluster_value)
+        for line in metrics_text.strip().split('\n'))
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
@@ -966,10 +955,8 @@ async def get_metrics_for_context(context: str,
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    match_patterns = GPU_METRICS_MATCH_PATTERNS
-
     return await _federate_metrics_for_context(context,
-                                               match_patterns,
+                                               GPU_METRICS_MATCH_PATTERNS,
                                                route='gpu-metrics',
                                                stats=stats)
 
@@ -1004,10 +991,8 @@ async def get_endpoint_metrics_for_context(
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    match_patterns = ENDPOINT_METRICS_MATCH_PATTERNS
-
     return await _federate_metrics_for_context(context,
-                                               match_patterns,
+                                               ENDPOINT_METRICS_MATCH_PATTERNS,
                                                route='endpoints-metrics',
                                                stats=stats)
 
@@ -1057,7 +1042,4 @@ async def _federate_metrics_for_context(
             route=route,
             stats=stats)
 
-    # add cluster name as a label to each metric line
-    metrics_text = await add_cluster_name_label(metrics_text, context)
-
-    return metrics_text
+    return await add_cluster_name_label(metrics_text, context)
