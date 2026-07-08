@@ -142,7 +142,7 @@ Permissions for ``sky gpus list``
 Permissions for GPU metrics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` from this cluster, the credentials used in the kubeconfig context should also be able to ``get`` namespaces:
+If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` from this cluster, the credentials used in the kubeconfig context should also be able to ``get`` namespaces. Service accounts created with ``generate_kubeconfig.sh`` and API servers deployed with the Helm chart already include this permission; if you manage permissions manually, add:
 
 .. code-block:: yaml
 
