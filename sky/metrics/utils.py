@@ -504,19 +504,24 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
 
 
 def _detect_local_context(context: str) -> bool:
-    """Probes whether `context` points at the cluster we are running in.
+    """Probes whether `context` points at the API server's own cluster.
 
     Reads the kube-system namespace through the context's credentials
-    and compares its UID with the one read through the in-cluster
-    credentials. Decision table:
+    and compares its UID with the API server's own cluster identity
+    (_get_in_cluster_identity_uid). Decision table:
       - UID matches -> local.
       - UID differs -> remote.
-      - 403 / timeout / other errors -> assume remote and log a warning.
-        Misclassifying local-as-remote degrades to the previous upstream
-        behavior for that context; it never corrupts data (stamping is
-        idempotent, see add_cluster_name_label). The local cluster can
-        still be referenced through the in-cluster context, which is
-        always treated as local (see is_local_context).
+      - No identity anchor (not in a pod / RBAC missing) -> remote,
+        without probing.
+      - 403 / timeout / other probe errors -> assume remote and log a
+        warning.
+    "Remote" is always the safe answer: the context then uses the
+    port-forward path, which is the previous upstream behavior for every
+    context, and idempotent stamping (see add_cluster_name_label) keeps
+    that path bounded even for a misclassified local context. The API
+    server's own cluster also stays reachable through the `in-cluster`
+    context, which is treated as local unconditionally (see
+    is_local_context) and never goes through this probe.
     """
     own_uid = _get_in_cluster_identity_uid()
     if own_uid is None:
@@ -545,7 +550,7 @@ def _detect_local_context(context: str) -> bool:
 
 
 def is_local_context(context: str) -> bool:
-    """Whether a kubeconfig context points at the cluster we run in.
+    """Whether a kubeconfig context points at the API server's own cluster.
 
     The in-cluster context is local by construction (its credentials are
     the pod's own service account), so it is treated as local without any
