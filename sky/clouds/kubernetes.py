@@ -1093,6 +1093,11 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
 
+        # RDMA/InfiniBand device-plugin resources for this fabric, keyed by
+        # resource name. Rendered into both requests and limits.
+        deploy_vars['k8s_rdma_resource_requests'] = (
+            network_type.get_rdma_resource_requests(acc_count))
+
         # OCI OKE RoCE: requires hostNetwork, privileged containers, and a
         # hostPath mount of /dev/infiniband (no device plugin on OCI). The
         # hostNetwork part also feeds k8s_host_network above (see comment

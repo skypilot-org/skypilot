@@ -1486,12 +1486,9 @@ available_node_types:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
-              {% if k8s_network_type == 'coreweave' %}
-              rdma/ib: 1
-              {% endif %}
-              {% if k8s_network_type == 'together' and k8s_resource_key is not none %}
-              nvidia.com/rdma_ib: {{accelerator_count}}
-              {% endif %}
+              {% for rdma_key, rdma_val in (k8s_rdma_resource_requests | default({})).items() %}
+              {{rdma_key}}: {{rdma_val}}
+              {% endfor %}
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
@@ -1509,12 +1506,9 @@ available_node_types:
               # Limits need to be defined for GPU/TPU/EFA requests
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
-              {% if k8s_network_type == 'coreweave' %}
-              rdma/ib: 1
-              {% endif %}
-              {% if k8s_network_type == 'together' %}
-              nvidia.com/rdma_ib: {{accelerator_count}}
-              {% endif %}
+              {% for rdma_key, rdma_val in (k8s_rdma_resource_requests | default({})).items() %}
+              {{rdma_key}}: {{rdma_val}}
+              {% endfor %}
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}

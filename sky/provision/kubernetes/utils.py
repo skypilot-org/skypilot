@@ -187,6 +187,25 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         """Check if this cluster type requires TCPXO daemon."""
         return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
 
+    def get_rdma_resource_requests(
+        self,
+        accelerator_count: Optional[int] = None,
+    ) -> Dict[str, int]:
+        """Device-plugin resources a pod requests to attach this fabric.
+
+        The InfiniBand/RDMA device-plugin resources that must appear in both
+        the pod's resource requests and limits. Empty for cluster types whose
+        fabric needs no explicit device-plugin resource (e.g. Nebius, whose
+        InfiniBand is exposed without one). Single source of truth for the
+        pod's RDMA resources, shared across the pod-spec renderers.
+        """
+        if self == KubernetesHighPerformanceNetworkType.COREWEAVE:
+            return {'rdma/ib': 1}
+        if (self == KubernetesHighPerformanceNetworkType.TOGETHER and
+                accelerator_count):
+            return {'nvidia.com/rdma_ib': accelerator_count}
+        return {}
+
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
