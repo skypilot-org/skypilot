@@ -1,0 +1,194 @@
+apiVersion: v1
+
+kind: Pod
+
+metadata:
+  labels:
+    parent: skypilot
+    skypilot-cluster: c
+    skypilot-user: null
+    skypilot-binpack: gpu
+  annotations:
+    skypilot-user: ''
+    skypilot-workspace: null
+    skypilot-priority-class: null
+    devices.gke.io/container.tcpxo-daemon: '- path: /dev/nvidia0
+
+      - path: /dev/nvidia1
+
+      - path: /dev/nvidia2
+
+      - path: /dev/nvidia3
+
+      - path: /dev/nvidia4
+
+      - path: /dev/nvidia5
+
+      - path: /dev/nvidia6
+
+      - path: /dev/nvidia7
+
+      - path: /dev/nvidiactl
+
+      - path: /dev/nvidia-uvm
+
+      - path: /dev/dmabuf_import_helper
+
+      '
+    networking.gke.io/default-interface: eth0
+    networking.gke.io/interfaces: "[\n  {\"interfaceName\":\"eth0\",\"network\":\"\
+      default\"},\n  {\"interfaceName\":\"eth1\",\"network\":\"vpc1\"},\n  {\"interfaceName\"\
+      :\"eth2\",\"network\":\"vpc2\"},\n  {\"interfaceName\":\"eth3\",\"network\"\
+      :\"vpc3\"},\n  {\"interfaceName\":\"eth4\",\"network\":\"vpc4\"},\n  {\"interfaceName\"\
+      :\"eth5\",\"network\":\"vpc5\"},\n  {\"interfaceName\":\"eth6\",\"network\"\
+      :\"vpc6\"},\n  {\"interfaceName\":\"eth7\",\"network\":\"vpc7\"},\n  {\"interfaceName\"\
+      :\"eth8\",\"network\":\"vpc8\"}\n]\n"
+
+spec:
+  serviceAccountName: skypilot-service-account
+  automountServiceAccountToken: true
+  restartPolicy: Never
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: skypilot.co/accelerator
+            operator: In
+            values:
+            - h100
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: skypilot-binpack
+              operator: In
+              values:
+              - gpu
+          topologyKey: kubernetes.io/hostname
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+  - name: fusermount-shared-dir
+    hostPath:
+      path: /var/run/fusermount
+      type: DirectoryOrCreate
+  - name: libraries
+    hostPath:
+      path: /home/kubernetes/bin/nvidia
+  - name: sys
+    hostPath:
+      path: /sys
+  - name: proc-sys
+    hostPath:
+      path: /proc/sys
+  - name: aperture-devices
+    hostPath:
+      path: /dev/aperture_devices
+  containers:
+  - name: ray-node
+    imagePullPolicy: Always
+    image: test-image:latest
+    env:
+    - name: SKYPILOT_POD_NODE_TYPE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['ray-node-type']
+    - name: SKYPILOT_POD_CPU_CORE_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: ray-node
+          resource: requests.cpu
+    - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: ray-node
+          resource: requests.memory
+    - name: RAY_memory_monitor_refresh_ms
+      value: '0'
+    - name: SKYPILOT_IN_CLUSTER_CONTEXT_NAME
+      value: test-context
+    - name: LD_LIBRARY_PATH
+      value: /usr/local/nvidia/lib64
+    - name: NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY
+      value: /dev/aperture_devices
+    - name: NCCL_FASTRAK_CTRL_DEV
+      value: eth0
+    - name: NCCL_FASTRAK_IFNAME
+      value: eth1,eth2,eth3,eth4,eth5,eth6,eth7,eth8
+    - name: NCCL_SOCKET_IFNAME
+      value: eth0
+    - name: NCCL_CROSS_NIC
+      value: '0'
+    - name: NCCL_ALGO
+      value: Ring,Tree
+    - name: NCCL_PROTO
+      value: Simple,LL128
+    - name: NCCL_MIN_NCHANNELS
+      value: '4'
+    - name: NCCL_TUNER_PLUGIN
+      value: libnccl-tuner.so
+    - name: NCCL_TUNER_CONFIG_PATH
+      value: /usr/local/nvidia/lib64/a3plus_tuner_config.textproto
+    - name: CUDA_VISIBLE_DEVICES
+      value: 0,1,2,3,4,5,6,7
+    - name: FUSERMOUNT_SHARED_DIR
+      value: /var/run/fusermount
+    ports:
+    - containerPort: 22
+    - containerPort: null
+    - containerPort: 10001
+    - containerPort: null
+    - containerPort: 46590
+    volumeMounts:
+    - mountPath: /dev/shm
+      name: dshm
+    - name: libraries
+      mountPath: /usr/local/nvidia
+    - name: aperture-devices
+      mountPath: /dev/aperture_devices
+    - name: fusermount-shared-dir
+      mountPath: /var/run/fusermount
+    resources:
+      requests:
+        cpu: 8.0
+        memory: 64.0G
+        nvidia.com/gpu: 8
+      limits:
+        nvidia.com/gpu: 8
+    securityContext:
+      capabilities:
+        add:
+        - IPC_LOCK
+  - name: tcpxo-daemon
+    image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.17
+    imagePullPolicy: Always
+    command:
+    - /bin/sh
+    - -c
+    args:
+    - 'set -ex
+
+      chmod 755 /fts/entrypoint_rxdm_container.sh
+
+      /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics=8 --uid= --alsologtostderr
+
+      '
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_BIND_SERVICE
+    volumeMounts:
+    - name: libraries
+      mountPath: /usr/local/nvidia
+    - name: sys
+      mountPath: /hostsysfs
+    - name: proc-sys
+      mountPath: /hostprocsysfs
+    env:
+    - name: LD_LIBRARY_PATH
+      value: /usr/local/nvidia/lib64

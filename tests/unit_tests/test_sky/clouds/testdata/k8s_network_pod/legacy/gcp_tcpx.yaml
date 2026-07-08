@@ -1,0 +1,217 @@
+apiVersion: v1
+
+kind: Pod
+
+metadata:
+  labels:
+    parent: skypilot
+    skypilot-cluster: c
+    skypilot-user: null
+    skypilot-binpack: gpu
+  annotations:
+    skypilot-user: ''
+    skypilot-workspace: null
+    skypilot-priority-class: null
+    devices.gke.io/container.tcpx-daemon: '- path: /dev/nvidia0
+
+      - path: /dev/nvidia1
+
+      - path: /dev/nvidia2
+
+      - path: /dev/nvidia3
+
+      - path: /dev/nvidia4
+
+      - path: /dev/nvidia5
+
+      - path: /dev/nvidia6
+
+      - path: /dev/nvidia7
+
+      - path: /dev/nvidiactl
+
+      - path: /dev/nvidia-uvm
+
+      '
+    networking.gke.io/default-interface: eth0
+    networking.gke.io/interfaces: "[\n  {\"interfaceName\":\"eth0\",\"network\":\"\
+      default\"},\n  {\"interfaceName\":\"eth1\",\"network\":\"vpc1\"},\n  {\"interfaceName\"\
+      :\"eth2\",\"network\":\"vpc2\"},\n  {\"interfaceName\":\"eth3\",\"network\"\
+      :\"vpc3\"},\n  {\"interfaceName\":\"eth4\",\"network\":\"vpc4\"}\n]\n"
+
+spec:
+  serviceAccountName: skypilot-service-account
+  automountServiceAccountToken: true
+  restartPolicy: Never
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: skypilot.co/accelerator
+            operator: In
+            values:
+            - h100
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: skypilot-binpack
+              operator: In
+              values:
+              - gpu
+          topologyKey: kubernetes.io/hostname
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+  - name: fusermount-shared-dir
+    hostPath:
+      path: /var/run/fusermount
+      type: DirectoryOrCreate
+  - name: libraries
+    hostPath:
+      path: /home/kubernetes/bin/nvidia/lib64
+  - name: tcpx-socket
+    emptyDir: {}
+  - name: sys
+    hostPath:
+      path: /sys
+  - name: proc-sys
+    hostPath:
+      path: /proc/sys
+  containers:
+  - name: ray-node
+    imagePullPolicy: Always
+    image: test-image:latest
+    env:
+    - name: SKYPILOT_POD_NODE_TYPE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['ray-node-type']
+    - name: SKYPILOT_POD_CPU_CORE_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: ray-node
+          resource: requests.cpu
+    - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: ray-node
+          resource: requests.memory
+    - name: RAY_memory_monitor_refresh_ms
+      value: '0'
+    - name: SKYPILOT_IN_CLUSTER_CONTEXT_NAME
+      value: test-context
+    - name: LD_LIBRARY_PATH
+      value: /usr/local/nvidia/lib64:/usr/local/tcpx/lib64
+    - name: NCCL_GPUDIRECTTCPX_SOCKET_IFNAME
+      value: eth1,eth2,eth3,eth4
+    - name: NCCL_GPUDIRECTTCPX_CTRL_DEV
+      value: eth0
+    - name: NCCL_GPUDIRECTTCPX_TX_BINDINGS
+      value: eth1:8-21,112-125;eth2:8-21,112-125;eth3:60-73,164-177;eth4:60-73,164-177
+    - name: NCCL_GPUDIRECTTCPX_RX_BINDINGS
+      value: eth1:22-35,126-139;eth2:22-35,126-139;eth3:74-87,178-191;eth4:74-87,178-191
+    - name: NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS
+      value: '500000'
+    - name: NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX
+      value: /tmp
+    - name: NCCL_GPUDIRECTTCPX_FORCE_ACK
+      value: '0'
+    - name: NCCL_SOCKET_IFNAME
+      value: eth0
+    - name: NCCL_CROSS_NIC
+      value: '0'
+    - name: NCCL_ALGO
+      value: Ring
+    - name: NCCL_PROTO
+      value: Simple
+    - name: NCCL_NSOCKS_PERTHREAD
+      value: '4'
+    - name: NCCL_SOCKET_NTHREADS
+      value: '1'
+    - name: NCCL_NET_GDR_LEVEL
+      value: PIX
+    - name: NCCL_DYNAMIC_CHUNK_SIZE
+      value: '524288'
+    - name: NCCL_P2P_PXN_LEVEL
+      value: '0'
+    - name: NCCL_P2P_NET_CHUNKSIZE
+      value: '524288'
+    - name: NCCL_P2P_PCI_CHUNKSIZE
+      value: '524288'
+    - name: NCCL_P2P_NVL_CHUNKSIZE
+      value: '1048576'
+    - name: NCCL_BUFFSIZE
+      value: '4194304'
+    - name: NCCL_MAX_NCHANNELS
+      value: '8'
+    - name: NCCL_MIN_NCHANNELS
+      value: '8'
+    - name: CUDA_VISIBLE_DEVICES
+      value: 0,1,2,3,4,5,6,7
+    - name: FUSERMOUNT_SHARED_DIR
+      value: /var/run/fusermount
+    ports:
+    - containerPort: 22
+    - containerPort: null
+    - containerPort: 10001
+    - containerPort: null
+    - containerPort: 46590
+    volumeMounts:
+    - mountPath: /dev/shm
+      name: dshm
+    - name: tcpx-socket
+      mountPath: /tmp
+    - name: libraries
+      mountPath: /usr/local/nvidia/lib64
+      readOnly: true
+    - name: fusermount-shared-dir
+      mountPath: /var/run/fusermount
+    resources:
+      requests:
+        cpu: 8.0
+        memory: 64.0G
+        nvidia.com/gpu: 8
+      limits:
+        nvidia.com/gpu: 8
+    securityContext:
+      capabilities:
+        add:
+        - IPC_LOCK
+  - name: tcpx-daemon
+    image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpx/tcpgpudmarxd-dev:v2.0.11
+    imagePullPolicy: Always
+    command:
+    - /tcpgpudmarxd/build/app/tcpgpudmarxd
+    - --gpu_nic_preset
+    - a3vm
+    - --gpu_shmem_type
+    - fd
+    - --uds_path
+    - /run/tcpx
+    - --setup_param
+    - --verbose
+    - '128'
+    - '2'
+    - '0'
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+    volumeMounts:
+    - name: libraries
+      mountPath: /usr/local/nvidia/lib64
+      readOnly: true
+    - name: tcpx-socket
+      mountPath: /run/tcpx
+    - name: sys
+      mountPath: /hostsysfs
+    - name: proc-sys
+      mountPath: /hostprocsysfs
+    env:
+    - name: LD_LIBRARY_PATH
+      value: /usr/local/nvidia/lib64
