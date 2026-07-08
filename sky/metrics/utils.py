@@ -51,9 +51,17 @@ _DEFAULT_PROMETHEUS_NAMESPACE = 'skypilot'
 _DEFAULT_PROMETHEUS_SERVICE = 'skypilot-prometheus-server'
 _DEFAULT_PROMETHEUS_SERVICE_PORT = 80
 
-# Path where the pod's service account namespace is mounted.
+# Path where the pod's service account namespace is mounted. Used only to
+# detect whether the API server runs inside a Kubernetes pod.
 _SERVICEACCOUNT_NAMESPACE_PATH = (
     '/var/run/secrets/kubernetes.io/serviceaccount/namespace')
+
+# Namespace whose UID is used as the cluster identity for local-context
+# detection. kube-system exists in every cluster, cannot be deleted, and
+# its UID is stable for the lifetime of the cluster, making it the
+# de-facto cluster identifier. Using a fixed, well-known name also lets
+# RBAC be pinned with `resourceNames: ["kube-system"]`.
+_CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
 
 # Timeout for the namespace UID probes used by local-context detection.
 # Must fit within the per-context timeout budget in sky/server/metrics.py
@@ -72,11 +80,11 @@ _LOCAL_CONTEXT_CACHE_TTL_SECONDS = 60 * 60
 _local_context_cache: Dict[str, Tuple[bool, float]] = {}
 _local_context_cache_lock = threading.Lock()
 
-# (namespace name, namespace UID) of the namespace this API server runs
+# UID of the kube-system namespace in the cluster this API server runs
 # in. Only successful reads are cached; failures are retried on the next
 # detection attempt.
-_own_namespace_identity: Optional[Tuple[str, str]] = None
-_own_namespace_identity_lock = threading.Lock()
+_own_cluster_uid: Optional[str] = None
+_own_cluster_uid_lock = threading.Lock()
 
 # Latency buckets shared by histograms that observe seconds. Kept compact to
 # bound time-series cardinality (each labeled series multiplies by len(buckets))
@@ -309,47 +317,24 @@ def _get_prometheus_target() -> Tuple[str, str, int]:
     return namespace, service, port
 
 
-def _get_own_namespace_name() -> Optional[str]:
-    """Name of the namespace the API server pod runs in, if any.
+def _get_own_cluster_uid() -> Optional[str]:
+    """UID of kube-system in the cluster the API server runs in.
 
-    Prefers the POD_NAMESPACE downward-API env var, then falls back to the
-    service account namespace file. Returns None when not running in a
-    Kubernetes pod.
+    Read through the in-cluster credentials, it acts as the identity
+    anchor for local-context detection: a kubeconfig context that
+    resolves kube-system to the same UID points at the cluster this API
+    server runs in.
+
+    Returns None when not running in a pod or when kube-system cannot be
+    read (e.g. missing RBAC); in that case detection is disabled and
+    every named context is treated as remote.
     """
-    namespace = os.environ.get('POD_NAMESPACE')
-    if namespace:
-        return namespace
-    try:
-        with open(_SERVICEACCOUNT_NAMESPACE_PATH, encoding='utf-8') as f:
-            namespace = f.read().strip()
-    except OSError:
-        return None
-    return namespace or None
-
-
-def _get_own_namespace_identity() -> Optional[Tuple[str, str]]:
-    """(name, UID) of the namespace the API server runs in.
-
-    The UID is read through the in-cluster credentials and acts as the
-    identity anchor for local-context detection: a kubeconfig context
-    that resolves the same namespace name to the same UID points at the
-    cluster this API server runs in.
-
-    Reading the pod's own namespace (rather than e.g. kube-system) is
-    deliberate: it only needs a namespaced Role granting `get` on
-    `namespaces` inside the release namespace, which works on
-    multi-tenant clusters where users cannot get ClusterRoles.
-
-    Returns None when not running in a pod or when the namespace cannot
-    be read (e.g. missing RBAC); in that case detection is disabled and
-    every context is treated as remote.
-    """
-    global _own_namespace_identity
-    with _own_namespace_identity_lock:
-        if _own_namespace_identity is not None:
-            return _own_namespace_identity
-    namespace = _get_own_namespace_name()
-    if namespace is None:
+    global _own_cluster_uid
+    with _own_cluster_uid_lock:
+        if _own_cluster_uid is not None:
+            return _own_cluster_uid
+    if not os.path.exists(_SERVICEACCOUNT_NAMESPACE_PATH):
+        # Not running inside a Kubernetes pod.
         return None
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
@@ -358,31 +343,33 @@ def _get_own_namespace_identity() -> Optional[Tuple[str, str]]:
     try:
         core = kubernetes_adaptors.core_api(
             kubernetes_adaptors.in_cluster_context_name())
-        own_namespace = core.read_namespace(
-            namespace, _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
-        uid = own_namespace.metadata.uid
+        namespace = core.read_namespace(
+            _CLUSTER_IDENTITY_NAMESPACE,
+            _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
+        uid = namespace.metadata.uid
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
-            f'Failed to read own namespace {namespace!r} through in-cluster '
-            f'credentials; local-context detection is disabled until the '
-            f'next attempt and only the in-cluster context will be treated '
-            f'as local: {common_utils.format_exception(e)}')
+            f'Failed to read the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
+            f'through in-cluster credentials; local-context detection is '
+            f'disabled until the next attempt and only the in-cluster '
+            f'context will be treated as local: '
+            f'{common_utils.format_exception(e)}')
         return None
     if not uid:
         return None
-    with _own_namespace_identity_lock:
-        _own_namespace_identity = (namespace, uid)
-    return _own_namespace_identity
+    with _own_cluster_uid_lock:
+        _own_cluster_uid = uid
+    return _own_cluster_uid
 
 
 def _detect_local_context(context: str) -> bool:
     """Probes whether `context` points at the cluster we are running in.
 
-    Reads the API server's own namespace through the context's credentials
-    and compares UIDs. Decision table:
+    Reads the kube-system namespace through the context's credentials
+    and compares its UID with the one read through the in-cluster
+    credentials. Decision table:
       - UID matches -> local.
       - UID differs -> remote.
-      - 404 -> remote (namespace does not exist there; clean negative).
       - 403 / timeout / other errors -> assume remote and log a warning.
         Misclassifying local-as-remote degrades to the previous upstream
         behavior for that context; it never corrupts data (stamping is
@@ -390,10 +377,9 @@ def _detect_local_context(context: str) -> bool:
         still be referenced through the in-cluster context, which is
         always treated as local (see is_local_context).
     """
-    identity = _get_own_namespace_identity()
-    if identity is None:
+    own_uid = _get_own_cluster_uid()
+    if own_uid is None:
         return False
-    namespace, own_uid = identity
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
     # pylint: disable=import-outside-toplevel
@@ -401,20 +387,19 @@ def _detect_local_context(context: str) -> bool:
     try:
         core = kubernetes_adaptors.core_api(context)
         probed_namespace = core.read_namespace(
-            namespace, _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
+            _CLUSTER_IDENTITY_NAMESPACE,
+            _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
     except kubernetes_adaptors.api_exception() as e:
         status = getattr(e, 'status', None)
-        if status == 404:
-            return False
         logger.warning(
-            f'Failed to probe namespace {namespace!r} through context '
-            f'{context!r} (status={status}); assuming the context is remote: '
-            f'{common_utils.format_exception(e)}')
+            f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
+            f'through context {context!r} (status={status}); assuming the '
+            f'context is remote: {common_utils.format_exception(e)}')
         return False
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
-            f'Failed to probe namespace {namespace!r} through context '
-            f'{context!r}; assuming the context is remote: '
+            f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
+            f'through context {context!r}; assuming the context is remote: '
             f'{common_utils.format_exception(e)}')
         return False
     return bool(

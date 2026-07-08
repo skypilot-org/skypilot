@@ -27,10 +27,10 @@ def _fake_namespace(uid):
 def _reset_local_context_detection_state():
     """Reset the process-level detection caches between tests."""
     utils._local_context_cache.clear()  # pylint: disable=protected-access
-    utils._own_namespace_identity = None  # pylint: disable=protected-access
+    utils._own_cluster_uid = None  # pylint: disable=protected-access
     yield
     utils._local_context_cache.clear()  # pylint: disable=protected-access
-    utils._own_namespace_identity = None  # pylint: disable=protected-access
+    utils._own_cluster_uid = None  # pylint: disable=protected-access
 
 
 def test_start_svc_port_forward_terminates_on_exception():
@@ -64,8 +64,8 @@ def test_start_svc_port_forward_terminates_on_exception():
 class _DetectionHarness:
     """Patches the pieces is_local_context() depends on."""
 
-    def __init__(self, own_identity, probe_result=None, probe_exc=None):
-        self._own_identity = own_identity
+    def __init__(self, own_uid, probe_result=None, probe_exc=None):
+        self._own_uid = own_uid
         self._probe_result = probe_result
         self._probe_exc = probe_exc
         self.probe_calls = []
@@ -83,8 +83,8 @@ class _DetectionHarness:
         core.read_namespace.side_effect = _read_namespace
         self._patches = [
             mock.patch.object(utils,
-                              '_get_own_namespace_identity',
-                              return_value=self._own_identity),
+                              '_get_own_cluster_uid',
+                              return_value=self._own_uid),
             mock.patch('sky.adaptors.kubernetes.core_api', return_value=core),
             mock.patch('sky.adaptors.kubernetes.api_exception',
                        return_value=_FakeApiException),
@@ -102,39 +102,37 @@ class _DetectionHarness:
 
 
 def test_is_local_context_uid_match():
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
+    with _DetectionHarness(own_uid='uid-1',
                            probe_result=_fake_namespace('uid-1')) as h:
         assert utils.is_local_context('ctx-a') is True
-        assert h.probe_calls == ['sky-ns']
+        assert h.probe_calls == ['kube-system']
 
 
 def test_is_local_context_uid_mismatch():
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
+    with _DetectionHarness(own_uid='uid-1',
                            probe_result=_fake_namespace('uid-2')):
         assert utils.is_local_context('ctx-a') is False
 
 
 def test_is_local_context_404_is_remote():
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
-                           probe_exc=_FakeApiException(404)):
+    with _DetectionHarness(own_uid='uid-1', probe_exc=_FakeApiException(404)):
         assert utils.is_local_context('ctx-a') is False
 
 
 def test_is_local_context_403_assumed_remote():
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
-                           probe_exc=_FakeApiException(403)):
+    with _DetectionHarness(own_uid='uid-1', probe_exc=_FakeApiException(403)):
         assert utils.is_local_context('ctx-a') is False
 
 
 def test_is_local_context_error_assumed_remote():
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
+    with _DetectionHarness(own_uid='uid-1',
                            probe_exc=TimeoutError('probe timed out')):
         assert utils.is_local_context('ctx-a') is False
 
 
 def test_is_local_context_no_own_identity():
-    """Not in a pod / cannot read own namespace: everything is remote."""
-    with _DetectionHarness(own_identity=None) as h:
+    """Not in a pod / cannot read kube-system: everything is remote."""
+    with _DetectionHarness(own_uid=None) as h:
         assert utils.is_local_context('ctx-a') is False
         # No probe should be attempted without an identity anchor.
         assert not h.probe_calls
@@ -142,7 +140,7 @@ def test_is_local_context_no_own_identity():
 
 def test_is_local_context_cache_is_process_level():
     """Detection runs once per context and survives request-cache clears."""
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
+    with _DetectionHarness(own_uid='uid-1',
                            probe_result=_fake_namespace('uid-1')) as h:
         assert utils.is_local_context('ctx-a') is True
         # gpu_metrics() clears the request-level cache on every scrape;
@@ -155,7 +153,7 @@ def test_is_local_context_cache_is_process_level():
 def test_is_local_context_cache_ttl_expiry():
     ttl = utils._LOCAL_CONTEXT_CACHE_TTL_SECONDS  # pylint: disable=protected-access
     fake_now = [0.0]
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
+    with _DetectionHarness(own_uid='uid-1',
                            probe_result=_fake_namespace('uid-1')) as h:
         with mock.patch.object(utils.time,
                                'time',
@@ -168,7 +166,7 @@ def test_is_local_context_cache_ttl_expiry():
 
 def test_is_local_context_in_cluster_is_always_local():
     """The in-cluster context is local by construction: no probe needed."""
-    with _DetectionHarness(own_identity=('sky-ns', 'uid-1'),
+    with _DetectionHarness(own_uid='uid-1',
                            probe_result=_fake_namespace('uid-2')) as h:
         assert utils.is_local_context('in-cluster') is True
         assert not h.probe_calls
@@ -176,7 +174,7 @@ def test_is_local_context_in_cluster_is_always_local():
 
 def test_is_local_context_falls_back_to_in_cluster_on_broken_detection():
     """With detection unavailable, only the in-cluster context is local."""
-    with _DetectionHarness(own_identity=None) as h:
+    with _DetectionHarness(own_uid=None) as h:
         assert utils.is_local_context('ctx-a') is False
         assert utils.is_local_context('in-cluster') is True
         assert not h.probe_calls
@@ -184,31 +182,37 @@ def test_is_local_context_falls_back_to_in_cluster_on_broken_detection():
 
 def test_is_local_context_renamed_in_cluster_context():
     """A renamed in-cluster context is also local without probing."""
-    with _DetectionHarness(own_identity=None) as h, \
+    with _DetectionHarness(own_uid=None) as h, \
          mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
                     return_value='my-renamed-context'):
         assert utils.is_local_context('my-renamed-context') is True
         assert not h.probe_calls
 
 
-def test_get_own_namespace_identity_caches_success_only():
+def test_get_own_cluster_uid_caches_success_only():
     core = mock.MagicMock()
     core.read_namespace.side_effect = [
         TimeoutError('api server not ready'),
         _fake_namespace('uid-1'),
     ]
-    with mock.patch.object(utils,
-                           '_get_own_namespace_name',
-                           return_value='sky-ns'), \
+    with mock.patch.object(utils.os.path, 'exists', return_value=True), \
          mock.patch('sky.adaptors.kubernetes.core_api', return_value=core), \
          mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
                     return_value='in-cluster'):
         # Failure is not cached; the next call retries and succeeds.
-        assert utils._get_own_namespace_identity() is None  # pylint: disable=protected-access
-        assert utils._get_own_namespace_identity() == ('sky-ns', 'uid-1')  # pylint: disable=protected-access
+        assert utils._get_own_cluster_uid() is None  # pylint: disable=protected-access
+        assert utils._get_own_cluster_uid() == 'uid-1'  # pylint: disable=protected-access
         # Success is cached: no further API calls.
-        assert utils._get_own_namespace_identity() == ('sky-ns', 'uid-1')  # pylint: disable=protected-access
+        assert utils._get_own_cluster_uid() == 'uid-1'  # pylint: disable=protected-access
         assert core.read_namespace.call_count == 2
+        # The identity anchor is the kube-system namespace.
+        assert core.read_namespace.call_args[0][0] == 'kube-system'
+
+
+def test_get_own_cluster_uid_not_in_pod():
+    """Outside a pod there is no cluster identity: detection disabled."""
+    with mock.patch.object(utils.os.path, 'exists', return_value=False):
+        assert utils._get_own_cluster_uid() is None  # pylint: disable=protected-access
 
 
 def test_add_empty_cluster_matcher():

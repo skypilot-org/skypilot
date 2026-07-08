@@ -142,7 +142,7 @@ Permissions for ``sky gpus list``
 Permissions for GPU metrics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` from this cluster, the credentials used in the kubeconfig context should also be able to ``get`` namespaces. Service accounts created with ``generate_kubeconfig.sh`` and API servers deployed with the Helm chart already include this permission; if you manage permissions manually, add:
+If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` from this cluster, the credentials used in the kubeconfig context should also be able to ``get`` the ``kube-system`` namespace. Service accounts created with ``generate_kubeconfig.sh`` and API servers deployed with the Helm chart already include this permission; if you manage permissions manually, add:
 
 .. code-block:: yaml
 
@@ -154,9 +154,10 @@ If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` fr
     rules:
       - apiGroups: [""]
         resources: ["namespaces"]
+        resourceNames: ["kube-system"]
         verbs: ["get"]
 
-SkyPilot uses this to detect whether a kubeconfig context points back at the cluster the API server itself runs in (by reading the namespace the API server is deployed in and comparing UIDs), which is required to avoid a metrics self-federation loop. The permission can be scoped down to a namespaced ``Role`` (in the namespace the API server is deployed in) or a ``resourceNames`` restriction.
+SkyPilot uses this to detect whether a kubeconfig context points back at the cluster the API server itself runs in (by reading the UID of the ``kube-system`` namespace, the de-facto cluster identity, and comparing it with the UID seen through the in-cluster credentials), which is required to avoid a metrics self-federation loop.
 
 .. tip::
 

@@ -1907,8 +1907,10 @@ Default: see the yaml below.
         verbs: ["list", "get"]
       # Required for detecting whether a kubeconfig context points back at
       # the cluster the API server runs in when federating GPU metrics.
+      # Only the kube-system namespace UID is read as the cluster identity.
       - apiGroups: [ "" ]
         resources: [ "namespaces" ]
+        resourceNames: [ "kube-system" ]
         verbs: [ "get" ]
 
 .. _helm-values-rbac-manageRbacPolicies:
