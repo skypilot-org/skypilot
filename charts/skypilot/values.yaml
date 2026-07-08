@@ -529,6 +529,13 @@ rbac:
     - apiGroups: [""]
       resources: ["services"]
       verbs: ["list", "get"]
+    # Required for detecting whether a kubeconfig context points back at the
+    # cluster the API server runs in when federating GPU metrics (reads the
+    # UID of the API server's own namespace, see is_local_context in
+    # sky/metrics/utils.py).
+    - apiGroups: [ "" ]
+      resources: [ "namespaces" ]
+      verbs: [ "get" ]
   # This allows the API server to grant permissions to SkyPilot Pods and system components.
   # `kubernetes.remote_identity` must be specified in the sky config if this is disabled.
   manageRbacPolicies: true

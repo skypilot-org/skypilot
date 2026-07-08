@@ -73,34 +73,4 @@ roleRef:
   kind: Role
   name: {{ $fullName }}-api-role
   apiGroup: rbac.authorization.k8s.io
----
-# Allows the API server to read the UID of the namespace it runs in.
-# Used to auto-detect whether a kubeconfig context points back at this
-# same cluster when federating GPU metrics (see is_local_context in
-# sky/metrics/utils.py). A namespaced Role is sufficient to `get` the
-# namespace object it lives in, so this works on multi-tenant clusters
-# without any cluster-scoped permissions.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ $fullName }}-own-namespace-role
-  namespace: {{ .Release.Namespace }}
-rules:
-  - apiGroups: [ "" ]
-    resources: [ "namespaces" ]
-    verbs: [ "get" ]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ $fullName }}-own-namespace-role-binding
-  namespace: {{ .Release.Namespace }}
-subjects:
-- kind: ServiceAccount
-  name: {{ include "skypilot.serviceAccountName" . }}
-  namespace: {{ .Release.Namespace }}
-roleRef:
-  kind: Role
-  name: {{ $fullName }}-own-namespace-role
-  apiGroup: rbac.authorization.k8s.io
 {{- end }}

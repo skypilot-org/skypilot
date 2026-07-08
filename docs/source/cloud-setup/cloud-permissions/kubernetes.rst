@@ -139,6 +139,30 @@ Permissions for ``sky gpus list``
     If this role is not granted to the service account, ``sky gpus list`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
 
 
+Permissions for GPU metrics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If the API server federates :ref:`GPU metrics <api-server-gpu-metrics-setup>` from this cluster, the credentials used in the kubeconfig context should also be able to ``get`` namespaces:
+
+.. code-block:: yaml
+
+    # Required only if the API server federates GPU metrics from this cluster.
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+        name: sky-sa-cluster-role-namespace-reader
+    rules:
+      - apiGroups: [""]
+        resources: ["namespaces"]
+        verbs: ["get"]
+
+SkyPilot uses this to detect whether a kubeconfig context points back at the cluster the API server itself runs in (by reading the namespace the API server is deployed in and comparing UIDs), which is required to avoid a metrics self-federation loop. The permission can be scoped down to a namespaced ``Role`` (in the namespace the API server is deployed in) or a ``resourceNames`` restriction.
+
+.. tip::
+
+    If this permission is not granted, GPU metrics for remote clusters still work; only a context that points back at the API server's own cluster would be misdetected as remote. The local cluster can always be referenced via the ``in-cluster`` context instead, which does not need this permission.
+
+
 Permissions for object store mounting
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
