@@ -3513,6 +3513,9 @@ def test_managed_jobs_api_access(generic_cloud: str):
 
 # ---------- Testing emergency recovery from unexpected controller errors ----------
 @pytest.mark.managed_jobs
+# Mutates the managed-jobs DB directly on the API server host, so it cannot
+# run against a remote API server (skip at collection, not just runtime).
+@pytest.mark.no_remote_server
 def test_managed_jobs_emergency_recovery(generic_cloud: str):
     """An externally mutated schedule state triggers emergency recovery.
 
