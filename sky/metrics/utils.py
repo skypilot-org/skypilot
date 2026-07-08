@@ -1,5 +1,6 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
 import asyncio
+import concurrent.futures
 import contextlib
 import functools
 import os
@@ -581,6 +582,13 @@ def is_local_context(context: str) -> bool:
     return is_local
 
 
+# Bounds the probe threads spawned by split_local_remote_contexts for
+# uncached contexts. Keeps the worst-case first-call latency near one
+# probe timeout (instead of timeout * num_contexts) without letting a
+# pathological kubeconfig fan out unbounded threads.
+_DETECTION_MAX_PARALLEL_PROBES = 8
+
+
 def split_local_remote_contexts(
         contexts: List[str]) -> Tuple[List[str], List[str]]:
     """Partitions contexts into (local, remote) via is_local_context().
@@ -591,13 +599,23 @@ def split_local_remote_contexts(
     cluster's exporters directly, so federating them again would only
     duplicate the raw series under a stamped copy) and by the dashboard
     (which matches the local cluster's series with cluster="" instead of
-    a context name). May issue one blocking Kubernetes API probe per
-    uncached context; call from a thread in async code.
+    a context name).
+
+    Uncached contexts are probed in parallel (bounded by
+    _DETECTION_MAX_PARALLEL_PROBES) so the first call costs roughly one
+    probe timeout rather than one per context; later calls hit the
+    process-level cache. Still blocking — call from a thread in async
+    code.
     """
+    if not contexts:
+        return [], []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(
+            len(contexts), _DETECTION_MAX_PARALLEL_PROBES)) as executor:
+        is_local_flags = list(executor.map(is_local_context, contexts))
     local: List[str] = []
     remote: List[str] = []
-    for context in contexts:
-        (local if is_local_context(context) else remote).append(context)
+    for context, is_local in zip(contexts, is_local_flags):
+        (local if is_local else remote).append(context)
     return local, remote
 
 
@@ -1000,7 +1018,7 @@ async def _federate_metrics_for_context(
 
     Shared by /gpu-metrics and /endpoints-metrics. Contexts that point at
     the API server's own cluster never reach this function — the routes
-    filter them out with filter_remote_contexts() because the central
+    filter them out with split_local_remote_contexts() because the central
     Prometheus already scrapes the local cluster's exporters directly
     (federating them again would only produce stamped duplicates of the
     raw series). Every selector is still restricted to never-stamped

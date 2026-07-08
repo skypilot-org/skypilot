@@ -2700,7 +2700,10 @@ async def dashboard_config() -> Dict[str, Any]:
       against streamed logs to render labeled external links on cluster
       and job detail pages.
     - `local_contexts`: Kubernetes contexts that point at the cluster the
-      API server runs in (see _get_local_contexts).
+      API server runs in (see _get_local_contexts). Omitted when
+      detection raises, so the dashboard falls back to its default
+      (['in-cluster']) instead of treating an error as "no local
+      contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
@@ -2713,16 +2716,16 @@ async def dashboard_config() -> Dict[str, Any]:
             regex = entry.get('regex')
             if isinstance(label, str) and isinstance(regex, str):
                 sanitized.append({'label': label, 'regex': regex})
-    local_contexts: List[str] = []
+    config: Dict[str, Any] = {'external_links': sanitized}
     try:
         # May probe each uncached context once (blocking k8s API calls);
         # keep it off the event loop. Failures must not break the rest of
         # the dashboard config.
-        local_contexts = await asyncio.to_thread(_get_local_contexts)
+        config['local_contexts'] = await asyncio.to_thread(_get_local_contexts)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning('Failed to determine local Kubernetes contexts for '
                        f'the dashboard: {common_utils.format_exception(e)}')
-    return {'external_links': sanitized, 'local_contexts': local_contexts}
+    return config
 
 
 @app.get('/api/plugins')
