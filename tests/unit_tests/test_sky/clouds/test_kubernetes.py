@@ -4194,5 +4194,117 @@ class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
         self.assertEqual(result, 'numeric-sa')
 
 
+class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
+    """Regression tests for scale-from-zero EFA count derivation.
+
+    On an AWS/Karpenter cluster with GPU pools at min=0, only non-GPU system
+    nodes are running at schedule time. Scanning nodes for
+    vpc.amazonaws.com/efa therefore finds nothing, so network_tier: best would
+    omit the EFA request and NCCL silently falls back to TCP. The fix derives
+    the EFA count from the requested accelerator instead. These tests drive
+    Kubernetes._detect_network_type directly against a cold node set; the cold
+    cases fail without the fix (the function returns NONE / no count).
+    """
+
+    # An AWS EKS system node carries the cloud-provider label even with no GPU.
+    _AWS_SYSTEM_NODE_LABELS = {
+        'k8s.io/cloud-provider-aws': 'abc123',
+        'topology.kubernetes.io/zone': 'us-east-2a',
+        'node.kubernetes.io/instance-type': 'm6i.large',
+    }
+
+    def _node(self, labels, allocatable):
+        node = mock.MagicMock()
+        node.metadata.labels = dict(labels)
+        node.status.allocatable = dict(allocatable)
+        return node
+
+    def _cold_aws_nodes(self):
+        # Scale-from-zero: only a non-GPU AWS system node is up.
+        return [self._node(self._AWS_SYSTEM_NODE_LABELS, {'cpu': '2'})]
+
+    def _detect(self, nodes, acc_count, acc_type, cfg_return=None):
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=nodes), \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=cfg_return):
+            return kubernetes.Kubernetes._detect_network_type(
+                'ctx',
+                resources_utils.NetworkTier.BEST,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=acc_count,
+                acc_type=acc_type)
+
+    def test_cold_derives_full_node_efa_from_accelerator(self):
+        net, meta = self._detect(self._cold_aws_nodes(), 8, 'H100')
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta['efa_count'], 32)  # p5.48xlarge -> 32 EFA
+
+    def test_cold_derives_proportional_efa_for_partial_request(self):
+        _net, meta = self._detect(self._cold_aws_nodes(), 4, 'H100')
+        self.assertEqual(meta['efa_count'], 16)  # floor(4/8 * 32)
+
+    def test_cold_derives_per_accelerator_not_hardcoded(self):
+        _net, meta = self._detect(self._cold_aws_nodes(), 8, 'A100')
+        self.assertEqual(meta['efa_count'], 4)  # p4d.24xlarge -> 4 EFA
+
+    def test_cold_accelerator_lookup_is_case_insensitive(self):
+        # Accelerator casing can vary by source; the catalog lookup upper-cases.
+        _net, meta = self._detect(self._cold_aws_nodes(), 8, 'h100')
+        self.assertEqual(meta['efa_count'], 32)
+        _net, meta = self._detect(self._cold_aws_nodes(), 8, 'a100-80gb')
+        self.assertEqual(meta['efa_count'], 4)
+
+    def test_cold_unknown_accelerator_falls_through_no_efa(self):
+        # Unknown SKU on a cold cluster: we can't size the fabric, so fall
+        # through to today's behavior (no EFA) rather than reporting EFA we
+        # can't request. Safe no-op, no regression.
+        net, meta = self._detect(self._cold_aws_nodes(), 8, 'L4')
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_warm_node_scan_wins_over_catalog(self):
+        # A running GPU+EFA node that advertises a DIFFERENT count than the
+        # catalog: the live scan must win (catalog is only a cold fallback).
+        warm = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            },
+            {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '16',  # != catalog's 32
+            })
+        _net, meta = self._detect([warm], 8, 'H100')
+        self.assertEqual(meta['efa_count'], 16)  # from the node, not 32
+
+    def test_non_aws_cold_cluster_gets_no_efa(self):
+        # A cold non-AWS node (no cloud-provider-aws label) must not trigger the
+        # AWS fallback.
+        node = self._node({'kubernetes.io/hostname': 'n1'}, {'cpu': '2'})
+        net, meta = self._detect([node], 8, 'H100')
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_not_best_tier_returns_none(self):
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=self._cold_aws_nodes()):
+            net, meta = kubernetes.Kubernetes._detect_network_type(
+                'ctx',
+                resources_utils.NetworkTier.STANDARD,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=8,
+                acc_type='H100')
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+
 if __name__ == '__main__':
     unittest.main()
