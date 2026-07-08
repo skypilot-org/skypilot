@@ -1530,22 +1530,22 @@ class Kubernetes(clouds.Cloud):
                                        acc_count: int) -> Optional[int]:
         """EFA interfaces to request for ``acc_type:acc_count``, or None.
 
-        Resolves the requested accelerator to its cheapest AWS instance type,
-        reads that instance's EFA interface count from the catalog, and scales
-        it to the requested GPU count with the same proportional rule the
-        live-node scan uses. Returns None -- so the caller leaves EFA unset,
-        i.e. today's behavior -- whenever the catalog can't answer (no
-        MaximumEfaInterfaces column yet, or the accelerator/instance can't be
-        resolved). Generic and autoscaler-agnostic.
+        Resolves the requested accelerator to its full-node EFA instance type
+        (e.g. H100 -> p5.48xlarge), reads that instance's GPU and EFA counts
+        from the catalog, and scales EFA to the requested GPU count with the
+        same proportional rule the live-node scan uses -- so a partial request
+        (e.g. H100:4 on an 8-GPU node) still gets proportional EFA. Returns
+        None -- so the caller leaves EFA unset, i.e. today's behavior --
+        whenever the catalog can't answer (no MaximumEfaInterfaces column yet,
+        or the accelerator can't be resolved). Generic and autoscaler-agnostic.
         """
         # Local import: keeps the AWS-specific catalog off non-AWS import paths.
         from sky.catalog import aws_catalog
         try:
-            instance_types, _ = catalog.get_instance_type_for_accelerator(
-                acc_type, acc_count, clouds='aws')
-            if not instance_types:
+            instance_type = aws_catalog.get_efa_instance_type_for_accelerator(
+                acc_type)
+            if instance_type is None:
                 return None
-            instance_type = instance_types[0]  # cheapest exact match
             node_efa_count = aws_catalog.get_efa_interface_count(instance_type)
             if not node_efa_count:  # None or 0 -> can't size an EFA fabric
                 return None

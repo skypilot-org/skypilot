@@ -695,6 +695,32 @@ def get_efa_interface_count_impl(
     return int(value)
 
 
+def get_efa_instance_type_for_accelerator_impl(
+    df: 'pd.DataFrame',
+    acc_name: str,
+) -> Optional[str]:
+    """The EFA-capable instance type for an accelerator (its full GPU node).
+
+    Picks the instance with the most EFA interfaces among those exposing the
+    accelerator -- i.e. the full node (e.g. H100 -> p5.48xlarge, not p5.4xlarge).
+    Returns its full GPU count and EFA count via the per-instance accessors.
+    Returns None when the catalog has no ``MaximumEfaInterfaces`` column
+    (older/hosted catalog) or no EFA-capable instance exposes the accelerator.
+    This lets callers size a partial request (e.g. H100:4 on a p5.48xlarge)
+    proportionally, matching the live-node scan, since AWS has no instance with
+    a fractional-node GPU count to resolve directly.
+    """
+    if 'MaximumEfaInterfaces' not in df.columns:
+        return None
+    acc = df['AcceleratorName'].astype(str)
+    matches = df[acc.str.fullmatch(acc_name, case=False, na=False) &
+                 df['MaximumEfaInterfaces'].notna()]
+    if matches.empty:
+        return None
+    row = matches.loc[matches['MaximumEfaInterfaces'].idxmax()]
+    return row['InstanceType']
+
+
 def get_instance_type_for_accelerator_impl(
     df: 'pd.DataFrame',
     acc_name: str,

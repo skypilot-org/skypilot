@@ -4300,9 +4300,10 @@ class TestDeriveEfaCountFromCatalog(unittest.TestCase):
     count from the catalog and scales it to the request, degrading to None
     (unchanged behavior) whenever the catalog can't answer."""
 
-    def _derive(self, acc_type, acc_count, instance_types, efa_count, gpus):
-        with patch('sky.catalog.get_instance_type_for_accelerator',
-                   return_value=(instance_types, [])), \
+    def _derive(self, acc_type, acc_count, instance_type, efa_count, gpus):
+        with patch('sky.catalog.aws_catalog.'
+                   'get_efa_instance_type_for_accelerator',
+                   return_value=instance_type), \
              patch('sky.catalog.aws_catalog.get_efa_interface_count',
                    return_value=efa_count), \
              patch('sky.catalog.get_accelerators_from_instance_type',
@@ -4312,26 +4313,29 @@ class TestDeriveEfaCountFromCatalog(unittest.TestCase):
 
     def test_full_node(self):
         self.assertEqual(
-            self._derive('H100', 8, ['p5.48xlarge'], 32, {'H100': 8}), 32)
+            self._derive('H100', 8, 'p5.48xlarge', 32, {'H100': 8}), 32)
 
     def test_proportional_partial_request(self):
+        # H100:4 has no dedicated 4-GPU instance; resolve the full node
+        # (p5.48xlarge: 8 GPU / 32 EFA) and scale: floor(4/8 * 32) = 16.
         self.assertEqual(
-            self._derive('H100', 4, ['p5.48xlarge'], 32, {'H100': 8}), 16)
+            self._derive('H100', 4, 'p5.48xlarge', 32, {'H100': 8}), 16)
 
     def test_per_accelerator(self):
         self.assertEqual(
-            self._derive('A100', 8, ['p4d.24xlarge'], 4, {'A100': 8}), 4)
+            self._derive('A100', 8, 'p4d.24xlarge', 4, {'A100': 8}), 4)
 
     def test_none_when_catalog_lacks_efa_column(self):
         # get_efa_interface_count returns None (column absent / older catalog).
         self.assertIsNone(
-            self._derive('H100', 8, ['p5.48xlarge'], None, {'H100': 8}))
+            self._derive('H100', 8, 'p5.48xlarge', None, {'H100': 8}))
 
     def test_none_when_accelerator_unresolvable(self):
-        self.assertIsNone(self._derive('H100', 8, [], 32, {'H100': 8}))
+        # No EFA-capable instance for the accelerator.
+        self.assertIsNone(self._derive('H100', 8, None, 32, {'H100': 8}))
 
     def test_none_when_instance_gpu_count_unknown(self):
-        self.assertIsNone(self._derive('H100', 8, ['p5.48xlarge'], 32, None))
+        self.assertIsNone(self._derive('H100', 8, 'p5.48xlarge', 32, None))
 
 
 class TestKubernetesSpotLabelContext(unittest.TestCase):

@@ -305,6 +305,17 @@ def get_efa_interface_count(instance_type: str) -> Optional[int]:
     return common.get_efa_interface_count_impl(_get_df(), instance_type)
 
 
+def get_efa_instance_type_for_accelerator(acc_name: str) -> Optional[str]:
+    """EFA-capable full-node instance type for an accelerator, or None.
+
+    The instance exposing the accelerator with the most EFA interfaces (e.g.
+    'H100' -> 'p5.48xlarge'). None when the catalog lacks the
+    ``MaximumEfaInterfaces`` column or no EFA-capable instance matches.
+    """
+    return common.get_efa_instance_type_for_accelerator_impl(
+        _get_df(), acc_name)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
