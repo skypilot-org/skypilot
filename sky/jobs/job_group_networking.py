@@ -20,15 +20,18 @@ Design Goals:
 """
 import asyncio
 import base64
+import dataclasses
 import os
+import re
 import tempfile
 import textwrap
 import traceback
 import typing
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.adaptors import kubernetes
 from sky.utils import command_runner
 
 if typing.TYPE_CHECKING:
@@ -134,6 +137,35 @@ def _get_job_address(job_name: str,
     return f'{job_name}-{node_idx}.{job_group_name}'
 
 
+# Labels stamped on mirror Services/Endpoints created for cross-context
+# JobGroups (see the "Cross-context DNS mirrors" section below). The job-id
+# label is the cleanup key; the group label is used to garbage-collect stale
+# mirrors from a previous run of a group with the same name (a relaunch gets
+# a new job id, so names never collide).
+_MIRROR_LABEL_GROUP = 'skypilot-jobgroup-mirror'
+_MIRROR_LABEL_JOB_ID = 'skypilot-managed-job-id'
+# Exported (no leading underscore) so the jobs controller can reference it
+# without triggering a protected-access lint across modules.
+MIRROR_RECONCILE_INTERVAL_SECONDS = 15
+
+
+def _get_context_from_handle(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+) -> Optional[str]:
+    """Return the kubeconfig context name for a Kubernetes handle.
+
+    For Kubernetes, ``Resources.region`` holds the kubeconfig context name.
+    """
+    if not _is_kubernetes(handle):
+        return None
+    return handle.launched_resources.region
+
+
+def _label_value(value: str) -> str:
+    """Truncate to the Kubernetes label value length limit (63 chars)."""
+    return value[:63]
+
+
 # ============================================================================
 # Layer 3: NetworkConfigurator - Platform-specific network configuration
 # ============================================================================
@@ -142,13 +174,27 @@ def _get_job_address(job_name: str,
 def _generate_k8s_dns_mappings(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
-                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']]
+                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
+    consumer_context: Optional[str] = None,
+    consumer_namespace: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
     """Generate K8s DNS to hostname mappings for background updater.
 
     Args:
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples.
+        consumer_context: Kubeconfig context of the consumer these mappings
+            are being generated for (i.e. the cluster whose /etc/hosts will
+            be updated). When set and a peer's own context differs from
+            this one, the peer's constructed-name entry is pointed at the
+            consumer's own namespace instead of the peer's — that is where
+            the cross-context DNS mirror Service for this peer lives.
+            Same-context callers (or callers that don't care, e.g.
+            single-context groups) should leave this unset, which preserves
+            today's behavior exactly.
+        consumer_namespace: Namespace to use for cross-context peers when
+            ``consumer_context`` is set. Required (and only meaningful) in
+            that case.
 
     Returns:
         List of (k8s_dns, simple_hostname) tuples.
@@ -165,7 +211,14 @@ def _generate_k8s_dns_mappings(
             addresses = managed_job_runtime.k8s_dns_addresses_for_handle(handle)
         if addresses is None:
             cluster_name_on_cloud = handle.cluster_name_on_cloud
+            peer_context = _get_context_from_handle(handle)
             namespace = _get_k8s_namespace_from_handle(handle)
+            if (consumer_context is not None and
+                    peer_context != consumer_context):
+                assert consumer_namespace is not None, (
+                    'consumer_namespace is required when consumer_context '
+                    'is set')
+                namespace = consumer_namespace
             num_nodes = (len(handle.stable_internal_external_ips)
                          if handle.stable_internal_external_ips else 1)
             addresses = [
@@ -365,8 +418,13 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
           for mapping in $MAPPINGS; do
             k8s_dns="${{mapping%%:*}}"
             simple_name="${{mapping##*:}}"
-            # Resolve K8s DNS to IP
-            ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
+            # Resolve K8s DNS to IP. Query the absolute name (trailing dot)
+            # so resolv.conf search-path expansion (ndots:5) can't append a
+            # search domain and let a wildcard DNS record silently answer
+            # this lookup instead of NXDOMAIN. $simple_name below must NOT
+            # get a trailing dot: it needs to keep resolving via the
+            # 'files' backend against /etc/hosts itself.
+            ip=$(getent hosts "$k8s_dns." 2>/dev/null | awk '{{print $1}}')
             if [ -n "$ip" ]; then
               new_entries="${{new_entries}}$ip $simple_name  $MARKER
         "
@@ -536,8 +594,24 @@ class NetworkConfigurator:
 
         ssh_hosts_content = _generate_hosts_entries(job_group_name,
                                                     tasks_handles)
-        k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
-                                                      tasks_handles)
+
+        # Cross-context classic mappings must embed the CONSUMING cluster's
+        # namespace (where the controller creates that peer's DNS mirror
+        # Service), not the peer's own namespace — see
+        # `_generate_k8s_dns_mappings`. Only pay for per-consumer mapping
+        # generation when the group actually spans multiple K8s contexts;
+        # single-context groups keep today's single global mapping list
+        # (byte-identical behavior, no per-task recomputation).
+        k8s_contexts = {
+            _get_context_from_handle(handle)
+            for _, handle in tasks_handles
+            if handle is not None and _is_kubernetes(handle)
+        }
+        spans_multiple_contexts = len(k8s_contexts) > 1
+        global_k8s_dns_mappings: List[Tuple[str, str]] = []
+        if not spans_multiple_contexts:
+            global_k8s_dns_mappings = _generate_k8s_dns_mappings(
+                job_group_name, tasks_handles)
 
         # Each entry: (coroutine, task_name, node_idx, is_k8s)
         setup_tasks: List[Tuple] = []
@@ -552,6 +626,19 @@ class NetworkConfigurator:
                 logger.warning(
                     f'Failed to get command runners for {task.name}: {e}')
                 continue
+
+            if is_k8s:
+                # Computed once per task, not per node.
+                if spans_multiple_contexts:
+                    consumer_context = _get_context_from_handle(handle)
+                    consumer_namespace = _get_k8s_namespace_from_handle(handle)
+                    k8s_dns_mappings = _generate_k8s_dns_mappings(
+                        job_group_name,
+                        tasks_handles,
+                        consumer_context=consumer_context,
+                        consumer_namespace=consumer_namespace)
+                else:
+                    k8s_dns_mappings = global_k8s_dns_mappings
 
             for node_idx, runner in enumerate(runners):
                 if is_k8s:
@@ -604,6 +691,493 @@ class NetworkConfigurator:
         logger.info(
             f'Hosts injection: {success_count}/{len(results)} succeeded')
         return success_count == len(results)
+
+
+# ============================================================================
+# Cross-context DNS mirrors
+#
+# When a JobGroup's Kubernetes tasks span more than one kubeconfig context,
+# each task's real headless Service only resolves inside its own cluster.
+# The functions below let the controller create selectorless "mirror"
+# Services + manually-managed core/v1 Endpoints for each peer task in every
+# OTHER member (context, namespace), so the on-pod DNS updater's mapping
+# strings resolve verbatim regardless of which cluster the consumer is in.
+#
+# Single-context groups never call any Kubernetes API here: everything below
+# gates on there being more than one distinct context among the group's
+# tasks.
+# ============================================================================
+
+# (task, handle) pairs as the controller tracks them: a handle may be None
+# for tasks that are terminal, never launched, or already torn down.
+_TasksHandles = List[Tuple[
+    'task_lib.Task', Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']]]
+
+
+@dataclasses.dataclass
+class _TaskNetworkInfo:
+    """Per-task Kubernetes network info used for cross-context mirroring."""
+    task_name: str
+    cluster_name_on_cloud: str
+    context: Optional[str]
+    namespace: str
+    num_nodes: int
+    # Whether the task's DNS addresses are runtime-supplied (single headless
+    # Service, per-pod hostname records) rather than the classic per-node
+    # Services SkyPilot creates itself.
+    is_v1: bool
+
+
+def _fallback_task_network_info(
+        task: 'task_lib.Task') -> Optional[_TaskNetworkInfo]:
+    """Best-effort network info for a task whose handle is already gone.
+
+    Used only by `cleanup_cross_context_mirrors`: derives (context,
+    namespace) from the task's pinned resources so stale mirrors can still
+    be found and deleted after the cluster itself has been torn down (and
+    thus has no handle in `global_user_state` any more). `cluster_name_on_
+    cloud`/`num_nodes`/`is_v1` are irrelevant for cleanup (which only keys
+    off (context, namespace) and the job-id label) and are filled in
+    best-effort.
+    """
+    if task.name is None:
+        return None
+    context = None
+    for resource in task.resources:
+        if (isinstance(resource.cloud, sky_clouds.Kubernetes) and
+                resource.region is not None):
+            context = resource.region
+            break
+    if context is None:
+        return None
+    # pylint: disable-next=import-outside-toplevel
+    from sky.provision.kubernetes import utils as k8s_utils
+    try:
+        namespace = k8s_utils.get_kube_config_context_namespace(context)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to resolve namespace for context {context} '
+                     f'during JobGroup mirror cleanup, falling back to '
+                     f'default: {e}')
+        namespace = 'default'
+    return _TaskNetworkInfo(task_name=task.name,
+                            cluster_name_on_cloud=task.name,
+                            context=context,
+                            namespace=namespace,
+                            num_nodes=1,
+                            is_v1=False)
+
+
+def _task_network_infos(
+    tasks_handles: _TasksHandles,
+    job_id: int,
+    include_fallback: bool = False,
+) -> List[_TaskNetworkInfo]:
+    """Collect per-task Kubernetes network info for cross-context mirroring.
+
+    Args:
+        tasks_handles: (Task, ResourceHandle) tuples for each task.
+        job_id: Managed job ID (used to detect runtime-supplied addresses).
+        include_fallback: If True, also emit a best-effort info entry (see
+            `_fallback_task_network_info`) for tasks whose handle is None.
+            Only meaningful for cleanup — `setup_cross_context_mirrors`
+            needs live handles and leaves this False.
+
+    Returns:
+        List of `_TaskNetworkInfo`, one per Kubernetes task with usable
+        info. Non-Kubernetes tasks and (unless `include_fallback`) tasks
+        with no handle are omitted.
+    """
+    infos: List[_TaskNetworkInfo] = []
+    for task, handle in tasks_handles:
+        if handle is not None and _is_kubernetes(handle):
+            assert task.name is not None, task
+            infos.append(
+                _TaskNetworkInfo(
+                    task_name=task.name,
+                    cluster_name_on_cloud=handle.cluster_name_on_cloud,
+                    context=_get_context_from_handle(handle),
+                    namespace=_get_k8s_namespace_from_handle(handle),
+                    num_nodes=(len(handle.stable_internal_external_ips)
+                               if handle.stable_internal_external_ips else 1),
+                    is_v1=dns_addresses_for_task(task, job_id) is not None))
+        elif include_fallback and handle is None:
+            fallback = _fallback_task_network_info(task)
+            if fallback is not None:
+                infos.append(fallback)
+    return infos
+
+
+def group_spans_multiple_contexts(
+    tasks_handles: _TasksHandles,
+    job_id: int,
+) -> bool:
+    """True iff the group's Kubernetes tasks span more than one context."""
+    infos = _task_network_infos(tasks_handles, job_id)
+    return len({info.context for info in infos}) > 1
+
+
+def _list_peer_pod_ips(context: Optional[str], namespace: str,
+                       cluster_name_on_cloud: str) -> Dict[int, str]:
+    """List a peer task's pod IPs, keyed by node index.
+
+    Synchronous (intended to be run via `asyncio.to_thread`). Exceptions
+    propagate to the caller.
+    """
+    core_api = kubernetes.core_api(context)
+    # Classic clusters label pods with the SkyPilot cluster name; fall back
+    # to the (runtime-managed) job name label if that selector comes up
+    # empty.
+    selectors = [
+        f'skypilot-cluster-name={cluster_name_on_cloud}',
+        f'skypilot-managed-job-name={cluster_name_on_cloud}',
+    ]
+    pods: List[Any] = []
+    for selector in selectors:
+        pods = core_api.list_namespaced_pod(namespace,
+                                            label_selector=selector,
+                                            _request_timeout=10).items
+        if pods:
+            break
+
+    worker_prefix = f'{cluster_name_on_cloud}-worker'
+    pod_ips: Dict[int, str] = {}
+    for pod in pods:
+        if pod.metadata.deletion_timestamp is not None:
+            continue
+        if not pod.status.pod_ip:
+            continue
+        name = pod.metadata.name
+        node_idx: Optional[int] = None
+        if name == f'{cluster_name_on_cloud}-head':
+            node_idx = 0
+        elif name.startswith(worker_prefix):
+            suffix = name[len(worker_prefix):]
+            if suffix.isdigit():
+                node_idx = int(suffix)
+        elif pod.spec.hostname is not None:
+            match = re.match(r'node-(\d+)', pod.spec.hostname)
+            if match is not None:
+                node_idx = int(match.group(1))
+        if node_idx is None:
+            logger.debug(f'Could not determine node index for pod {name} '
+                         f'(peer cluster {cluster_name_on_cloud}); '
+                         'skipping.')
+            continue
+        pod_ips[node_idx] = pod.status.pod_ip
+    return pod_ips
+
+
+def _mirror_specs(
+        peer: _TaskNetworkInfo,
+        pod_ips: Dict[int, str]) -> List[Tuple[str, List[Dict[str, str]]]]:
+    """Build (service_name, endpoint_addresses) pairs to mirror a peer task.
+
+    `endpoint_addresses` is the `addresses` list for a single Endpoints
+    subset (empty when the corresponding pod IP is not yet known).
+    """
+    if peer.is_v1:
+        # V1-runtime mirrors expose node 0 only — this matches the
+        # in-cluster contract, where the runtime's own headless Service +
+        # pod hostname/subdomain only ever resolves node 0 for inter-task
+        # discovery; intra-task workers use their own discovery mechanism.
+        addresses = []
+        if 0 in pod_ips:
+            addresses = [{'ip': pod_ips[0], 'hostname': 'node-0'}]
+        return [(peer.cluster_name_on_cloud, addresses)]
+
+    # Classic peer: one headless Service per node, name-identical to the
+    # real per-node Services the peer's own cluster creates. No 'hostname'
+    # field needed — the lookup name is the mirror Service's own A record.
+    specs: List[Tuple[str, List[Dict[str, str]]]] = []
+    for node_idx in range(peer.num_nodes):
+        name = (f'{peer.cluster_name_on_cloud}-head' if node_idx == 0 else
+                f'{peer.cluster_name_on_cloud}-worker{node_idx}')
+        addresses = [{'ip': pod_ips[node_idx]}] if node_idx in pod_ips else []
+        specs.append((name, addresses))
+    return specs
+
+
+def _mirror_service_manifest(name: str, job_group_name: str,
+                             job_id: int) -> Dict[str, Any]:
+    """Selectorless headless Service manifest for a JobGroup DNS mirror.
+
+    Deliberately no selector and no ports: DNS A records come from the
+    manually-managed Endpoints (`_mirror_endpoints_manifest`) below, and
+    ports are irrelevant for A-record resolution (the real Services being
+    mirrored are portless too).
+    """
+    return {
+        'apiVersion': 'v1',
+        'kind': 'Service',
+        'metadata': {
+            'name': name,
+            'labels': {
+                'parent': 'skypilot',
+                _MIRROR_LABEL_GROUP: _label_value(job_group_name),
+                _MIRROR_LABEL_JOB_ID: str(job_id),
+            },
+        },
+        'spec': {
+            'clusterIP': 'None',
+        },
+    }
+
+
+def _mirror_endpoints_manifest(name: str, addresses: List[Dict[str, str]],
+                               job_group_name: str,
+                               job_id: int) -> Dict[str, Any]:
+    """Endpoints manifest for a JobGroup DNS mirror Service.
+
+    Uses legacy core/v1 Endpoints rather than discovery.k8s.io EndpointSlice
+    deliberately: kube-dns (GKE Standard's default) only reads Endpoints,
+    while the endpointslice-mirroring controller (GA, default-on since k8s
+    1.19) mirrors selectorless-Service Endpoints into EndpointSlices for
+    clusters running CoreDNS / Cloud DNS. Writing legacy Endpoints therefore
+    serves both without needing to know which the member cluster runs.
+    """
+    return {
+        'apiVersion': 'v1',
+        'kind': 'Endpoints',
+        'metadata': {
+            'name': name,
+            'labels': {
+                'parent': 'skypilot',
+                _MIRROR_LABEL_GROUP: _label_value(job_group_name),
+                _MIRROR_LABEL_JOB_ID: str(job_id),
+            },
+        },
+        'subsets': [{
+            'addresses': addresses
+        }] if addresses else [],
+    }
+
+
+def _apply_mirrors_in_cluster(context: Optional[str], namespace: str,
+                              job_group_name: str, job_id: int,
+                              desired: Dict[str, List[Dict[str, str]]],
+                              quiet: bool) -> None:
+    """Create/update JobGroup DNS mirrors in one member cluster.
+
+    Synchronous (intended to be run via `asyncio.to_thread`). Raises on
+    hard API errors so the caller can aggregate per-member failures; does
+    not catch anything itself.
+    """
+    core_api = kubernetes.core_api(context)
+
+    # GC mirrors left behind by a previous run of a group with the same
+    # name. A relaunch gets a new job id, so the current run's mirror names
+    # never collide with stale ones — safe to delete unconditionally.
+    group_label = _label_value(job_group_name)
+    stale = core_api.list_namespaced_service(
+        namespace,
+        label_selector=f'{_MIRROR_LABEL_GROUP}={group_label}',
+        _request_timeout=10)
+    for svc in stale.items:
+        if svc.metadata.labels.get(_MIRROR_LABEL_JOB_ID) == str(job_id):
+            continue
+        name = svc.metadata.name
+        for delete_fn in (core_api.delete_namespaced_service,
+                          core_api.delete_namespaced_endpoints):
+            try:
+                delete_fn(name, namespace, _request_timeout=10)
+            except kubernetes.api_exception() as e:
+                if e.status != 404:
+                    raise
+
+    for name, addresses in desired.items():
+        service_manifest = _mirror_service_manifest(name, job_group_name,
+                                                    job_id)
+        try:
+            core_api.create_namespaced_service(namespace,
+                                               service_manifest,
+                                               _request_timeout=10)
+        except kubernetes.api_exception() as e:
+            # The mirror Service spec is static (no selector/ports), so an
+            # already-existing Service needs no update.
+            if e.status != 409:
+                raise
+
+        try:
+            existing = core_api.read_namespaced_endpoints(name,
+                                                          namespace,
+                                                          _request_timeout=10)
+        except kubernetes.api_exception() as e:
+            if e.status != 404:
+                raise
+            existing = None
+
+        desired_key = sorted((address.get('ip'), address.get('hostname'))
+                             for address in addresses)
+        if existing is None:
+            endpoints_manifest = _mirror_endpoints_manifest(
+                name, addresses, job_group_name, job_id)
+            core_api.create_namespaced_endpoints(namespace,
+                                                 endpoints_manifest,
+                                                 _request_timeout=10)
+            continue
+
+        existing_key = sorted((address.ip, address.hostname)
+                              for subset in (existing.subsets or [])
+                              for address in (subset.addresses or []))
+        if desired_key != existing_key:
+            endpoints_manifest = _mirror_endpoints_manifest(
+                name, addresses, job_group_name, job_id)
+            core_api.replace_namespaced_endpoints(name,
+                                                  namespace,
+                                                  endpoints_manifest,
+                                                  _request_timeout=10)
+
+    level = logger.debug if quiet else logger.info
+    level(f'Mirrored {len(desired)} JobGroup peer service(s) into '
+          f'{context}/{namespace}')
+
+
+def _delete_mirrors_in_cluster(context: Optional[str], namespace: str,
+                               job_id: int) -> None:
+    """Delete this job's DNS mirrors from one member cluster.
+
+    Synchronous (intended to be run via `asyncio.to_thread`). Best-effort:
+    404s are tolerated and other errors are logged, never raised.
+    """
+    core_api = kubernetes.core_api(context)
+    try:
+        services = core_api.list_namespaced_service(
+            namespace,
+            label_selector=f'{_MIRROR_LABEL_JOB_ID}={job_id}',
+            _request_timeout=10)
+    except kubernetes.api_exception() as e:
+        logger.warning(f'Failed to list JobGroup mirrors in '
+                       f'{context}/{namespace}: {e}')
+        return
+
+    for svc in services.items:
+        name = svc.metadata.name
+        for delete_fn in (core_api.delete_namespaced_service,
+                          core_api.delete_namespaced_endpoints):
+            try:
+                delete_fn(name, namespace, _request_timeout=10)
+            except kubernetes.api_exception() as e:
+                if e.status != 404:
+                    logger.warning(
+                        f'Failed to delete JobGroup mirror {name} in '
+                        f'{context}/{namespace}: {e}')
+
+
+# Per-group lock so Phase 3 setup, on-recovery re-setup, and the periodic
+# reconcile loop (see controller.py) never interleave mirror writes for the
+# same job. Created lazily; entries are small and outlive their job for the
+# life of the controller process, which is acceptable.
+_mirror_locks: Dict[int, asyncio.Lock] = {}
+
+
+def _get_mirror_lock(job_id: int) -> asyncio.Lock:
+    return _mirror_locks.setdefault(job_id, asyncio.Lock())
+
+
+async def setup_cross_context_mirrors(
+    job_group_name: str,
+    job_id: int,
+    tasks_handles: _TasksHandles,
+    quiet: bool = False,
+) -> bool:
+    """Mirror each K8s task's peer DNS into every other member cluster.
+
+    No-op (returns True immediately, no Kubernetes API calls) unless the
+    group's tasks span more than one Kubernetes context — single-context
+    groups are completely unaffected.
+
+    Never raises: per-member failures are logged and reflected in the
+    return value so the caller can proceed (mirrors are best-effort, same
+    as the rest of JobGroup networking setup).
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        job_id: Managed job ID.
+        tasks_handles: (Task, ResourceHandle) tuples for tasks with a live
+            handle (a None handle is simply skipped by `_task_network_infos`
+            since there is nothing to mirror for it yet).
+        quiet: If True, log at debug instead of info/warning (used by the
+            periodic reconcile loop to avoid spamming the log every
+            interval).
+
+    Returns:
+        True if every member cluster was reconciled successfully.
+    """
+    infos = _task_network_infos(tasks_handles, job_id)
+    contexts = {info.context for info in infos}
+    if len(contexts) <= 1:
+        return True
+
+    members = sorted({(info.context, info.namespace) for info in infos})
+    if not quiet:
+        logger.info(f'Setting up cross-cluster DNS mirrors for JobGroup '
+                    f'{job_group_name!r} across contexts: '
+                    f'{sorted(str(c) for c in contexts)}')
+
+    async with _get_mirror_lock(job_id):
+        ok = True
+        for ctx, ns in members:
+            desired: Dict[str, List[Dict[str, str]]] = {}
+            for peer in infos:
+                if peer.context == ctx:
+                    continue
+                try:
+                    pod_ips = await asyncio.to_thread(
+                        _list_peer_pod_ips, peer.context, peer.namespace,
+                        peer.cluster_name_on_cloud)
+                except Exception as e:  # pylint: disable=broad-except
+                    if not quiet:
+                        logger.warning(f'Failed to list pods for JobGroup peer '
+                                       f'{peer.task_name!r} in {peer.context}/'
+                                       f'{peer.namespace}: {e}')
+                    pod_ips = {}
+                desired.update(dict(_mirror_specs(peer, pod_ips)))
+
+            try:
+                await asyncio.to_thread(_apply_mirrors_in_cluster, ctx, ns,
+                                        job_group_name, job_id, desired, quiet)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(
+                    f'Failed to set up JobGroup DNS mirrors in {ctx}/{ns}: '
+                    f'{e}. The SkyPilot service account needs get/list/'
+                    'create/patch/update/delete on services and endpoints '
+                    f'in that namespace.')
+                ok = False
+        return ok
+
+
+async def cleanup_cross_context_mirrors(
+    job_group_name: str,
+    job_id: int,
+    tasks_handles: _TasksHandles,
+) -> None:
+    """Delete this job's DNS mirrors from every member cluster.
+
+    No-op (no Kubernetes API calls) unless the group's tasks span more than
+    one Kubernetes context. Best-effort and never raises: handles in
+    `tasks_handles` may be None (cluster already gone), in which case a
+    fallback (context, namespace) is derived from the task's pinned
+    resources so mirrors can still be found and swept.
+
+    Args:
+        job_group_name: Name of the JobGroup (used only for logging — the
+            job-id label alone identifies this run's mirrors).
+        job_id: Managed job ID.
+        tasks_handles: (Task, ResourceHandle) tuples for all tasks.
+    """
+    infos = _task_network_infos(tasks_handles, job_id, include_fallback=True)
+    contexts = {info.context for info in infos}
+    if len(contexts) <= 1:
+        return
+
+    members = sorted({(info.context, info.namespace) for info in infos})
+    for ctx, ns in members:
+        try:
+            await asyncio.to_thread(_delete_mirrors_in_cluster, ctx, ns, job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to clean up JobGroup {job_group_name!r} DNS '
+                f'mirrors in {ctx}/{ns}: {e}')
 
 
 # ============================================================================

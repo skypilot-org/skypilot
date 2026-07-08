@@ -1068,6 +1068,32 @@ class Optimizer:
             logger.info(
                 f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
 
+        # When every job pins an explicit infra, respect the pins. If they
+        # differ, skip the common-infra search entirely: heterogeneous
+        # groups (e.g. tasks on different Kubernetes clusters) are
+        # intentional, not a failed optimization.
+        pinned_infras = set()
+        all_pinned = True
+        for task in tasks:
+            task_resources = getattr(task, 'resources', None)
+            if not task_resources:
+                all_pinned = False
+                break
+            for resource in task_resources:
+                if resource.cloud is None or resource.region is None:
+                    all_pinned = False
+                    break
+                pinned_infras.add((str(resource.cloud), resource.region))
+            if not all_pinned:
+                break
+        if all_pinned and len(pinned_infras) > 1:
+            if not quiet:
+                logger.info(f'Jobs in JobGroup "{dag.name}" pin different '
+                            'infrastructures; optimizing each job '
+                            'independently.')
+            return Optimizer._optimize_independent(dag, minimize,
+                                                   blocked_resources, quiet)
+
         # Find common infrastructure for all tasks in the JobGroup
         return Optimizer._optimize_same_infra(dag, minimize, blocked_resources,
                                               quiet)

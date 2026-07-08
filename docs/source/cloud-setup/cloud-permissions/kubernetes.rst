@@ -77,6 +77,13 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       - apiGroups: [ "" ]
         resources: [ "services" ]
         verbs: [ "*" ]
+      # Required for cross-cluster Job Group service discovery: SkyPilot
+      # manages selectorless mirror Services with manually-managed Endpoints
+      # so tasks in one Kubernetes cluster can resolve tasks running in
+      # another.
+      - apiGroups: [ "" ]
+        resources: [ "endpoints" ]
+        verbs: [ "get", "list", "create", "patch", "update", "delete" ]
       # Required for managing SSH keys
       - apiGroups: [ "" ]
         resources: [ "secrets" ]
@@ -305,6 +312,13 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       - apiGroups: [ "" ]
         resources: [ "services" ]
         verbs: [ "*" ]
+      # Required for cross-cluster Job Group service discovery: SkyPilot
+      # manages selectorless mirror Services with manually-managed Endpoints
+      # so tasks in one Kubernetes cluster can resolve tasks running in
+      # another.
+      - apiGroups: [ "" ]
+        resources: [ "endpoints" ]
+        verbs: [ "get", "list", "create", "patch", "update", "delete" ]
       # Required for managing SSH keys
       - apiGroups: [ "" ]
         resources: [ "secrets" ]

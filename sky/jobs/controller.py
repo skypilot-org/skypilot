@@ -1,6 +1,7 @@
 """Controller: handles scheduling and the life cycle of a managed job.
 """
 import asyncio
+import contextlib
 import io
 import json
 import os
@@ -1314,6 +1315,8 @@ class JobController:
                     global_user_state.get_handle_from_cluster_name, t_cluster)
                 updated_handles.append((t, t_handle))
 
+            await job_group_networking.setup_cross_context_mirrors(
+                job_group_name, self._job_id, updated_handles)
             await job_group_networking.setup_job_group_networking(
                 job_group_name, updated_handles)
 
@@ -1342,6 +1345,28 @@ class JobController:
             force_transit_to_recovering=force_transit_to_recovering,
             on_recovery=on_recovery,
         )
+
+    async def _reconcile_job_group_mirrors(
+            self, job_group_name: str,
+            all_tasks_handles: List[Tuple['sky.Task', typing.Any]]) -> None:
+        """Keep cross-context DNS mirrors pointed at live pod IPs.
+
+        Covers pod IP churn that never surfaces as a SkyPilot-level recovery
+        (e.g. a runtime replacing an individual pod in place): the peer's
+        own cluster DNS follows automatically, but mirrors in other member
+        clusters must be re-pointed by the controller.
+        """
+        while True:
+            await asyncio.sleep(
+                job_group_networking.MIRROR_RECONCILE_INTERVAL_SECONDS)
+            try:
+                await job_group_networking.setup_cross_context_mirrors(
+                    job_group_name, self._job_id, all_tasks_handles, quiet=True)
+            except asyncio.CancelledError:  # pylint: disable=try-except-raise
+                raise
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(
+                    f'JobGroup mirror reconcile failed (will retry): {e}')
 
     async def _run_job_group(self) -> bool:
         """Run a JobGroup with parallel execution.
@@ -1554,6 +1579,16 @@ class JobController:
 
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
+        # Set up cross-context DNS mirrors first (no-op unless the group's
+        # Kubernetes tasks span more than one context) so the per-node
+        # updater scripts started below have somewhere to resolve their
+        # peers' hostnames as soon as they come up.
+        all_tasks_handles = [(task, handles[tid])
+                             for tid, task in enumerate(tasks)
+                             if handles[tid] is not None]
+        await job_group_networking.setup_cross_context_mirrors(
+            job_group_name, self._job_id, all_tasks_handles)
+
         # Build list of (task, handle) for non-terminal tasks with valid
         # handles. Skip tasks that inline the DNS mapping — they already
         # start the DNS updater from task.run.
@@ -1578,157 +1613,180 @@ class JobController:
 
         logger.info('JobGroup setup complete, all jobs are running')
 
-        # Phase 4: Monitor all jobs in parallel with primary/auxiliary support
-        logger.info('Phase 4: Monitoring all jobs...')
-
-        # Determine primary vs auxiliary jobs
-        primary_job_names = self._dag.primary_tasks
-        if not primary_job_names:
-            # All jobs are primary (traditional behavior)
-            primary_task_ids: Set[int] = set(range(len(tasks)))
-            auxiliary_task_ids: Set[int] = set()
-        else:
-            primary_task_ids = {
-                tid for tid, t in enumerate(tasks)
-                if t.name in primary_job_names
-            }
-            auxiliary_task_ids = set(range(len(tasks))) - primary_task_ids
-
-        if auxiliary_task_ids:
-            logger.info(
-                f'Primary jobs: {[tasks[tid].name for tid in primary_task_ids]}'
-            )
-            logger.info(f'Auxiliary jobs: '
-                        f'{[tasks[tid].name for tid in auxiliary_task_ids]}')
-
-        # Create asyncio.Task objects for all non-terminal tasks
-        # Maps task_id -> asyncio.Task
-        monitor_async_tasks: Dict[int, asyncio.Task] = {}
-        for task_id, task in enumerate(tasks):
-            if is_terminal(task_id):
-                continue
-
-            _, force_recovery = task_resume_info[task_id]
-            task_handle = handles[task_id]
-            executor = strategy_executors[task_id]
-            cluster_name = cluster_names[task_id]
-            assert cluster_name is not None
-            assert executor is not None
-            coro = self._monitor_job_group_task(task_id, task, cluster_name,
-                                                executor, job_group_name,
-                                                tasks_handles, force_recovery)
-            monitor_async_tasks[task_id] = asyncio.create_task(
-                coro, name=f'monitor_{task.name}')
-
-        # Track results: task_id -> success (True/False/Exception)
-        task_results: Dict[int, typing.Union[bool, Exception]] = {}
-        # Track remaining primary task IDs (non-terminal ones)
-        remaining_primary = primary_task_ids - {
-            tid for tid in range(len(tasks)) if is_terminal(tid)
-        }
-        # Reverse mapping: asyncio.Task -> task_id for efficient lookup
-        async_task_to_id: Dict[asyncio.Task, int] = {
-            at: tid for tid, at in monitor_async_tasks.items()
-        }
+        # Periodically re-point cross-context DNS mirrors at live pod IPs
+        # (no-op unless the group's Kubernetes tasks span more than one
+        # context). Started here so it covers the whole monitoring phase;
+        # cancelled in the `finally` below on every exit path.
+        mirror_reconcile_task: Optional[asyncio.Task] = None
+        if job_group_networking.group_spans_multiple_contexts(
+                all_tasks_handles, self._job_id):
+            mirror_reconcile_task = asyncio.create_task(
+                self._reconcile_job_group_mirrors(job_group_name,
+                                                  all_tasks_handles),
+                name=f'mirror_reconcile_{job_group_name}')
 
         try:
-            # Monitor with primary/auxiliary termination logic
-            while monitor_async_tasks:
-                # Wait for any task to complete
-                done, _ = await asyncio.wait(
-                    monitor_async_tasks.values(),
-                    return_when=asyncio.FIRST_COMPLETED)
+            # Phase 4: Monitor all jobs in parallel with primary/auxiliary
+            # support
+            logger.info('Phase 4: Monitoring all jobs...')
 
-                for completed_task in done:
-                    completed_task_id = async_task_to_id[completed_task]
+            # Determine primary vs auxiliary jobs
+            primary_job_names = self._dag.primary_tasks
+            if not primary_job_names:
+                # All jobs are primary (traditional behavior)
+                primary_task_ids: Set[int] = set(range(len(tasks)))
+                auxiliary_task_ids: Set[int] = set()
+            else:
+                primary_task_ids = {
+                    tid for tid, t in enumerate(tasks)
+                    if t.name in primary_job_names
+                }
+                auxiliary_task_ids = set(range(len(tasks))) - primary_task_ids
 
-                    # Remove from monitoring
-                    del monitor_async_tasks[completed_task_id]
-                    del async_task_to_id[completed_task]
+            if auxiliary_task_ids:
+                logger.info(f'Primary jobs: '
+                            f'{[tasks[tid].name for tid in primary_task_ids]}')
+                logger.info(
+                    f'Auxiliary jobs: '
+                    f'{[tasks[tid].name for tid in auxiliary_task_ids]}')
 
-                    # Get result
-                    try:
-                        task_result: typing.Union[bool, Exception] = (
-                            completed_task.result())
-                        task_results[completed_task_id] = task_result
-                        if task_result:
-                            logger.info(
-                                f'Job {tasks[completed_task_id].name} succeeded'
-                            )
-                        else:
-                            logger.info(
-                                f'Job {tasks[completed_task_id].name} failed')
-                    except asyncio.CancelledError:
-                        # Task was cancelled (auxiliary job termination)
-                        task_results[completed_task_id] = False
-                        task_name = tasks[completed_task_id].name
-                        logger.info(f'Job {task_name} was terminated')
-                    except Exception as e:  # pylint: disable=broad-except
-                        # TODO: avoid broad except
-                        task_results[completed_task_id] = e
-                        logger.error(
-                            f'Job {tasks[completed_task_id].name} failed with '
-                            f'exception: {e}')
+            # Create asyncio.Task objects for all non-terminal tasks
+            # Maps task_id -> asyncio.Task
+            monitor_async_tasks: Dict[int, asyncio.Task] = {}
+            for task_id, task in enumerate(tasks):
+                if is_terminal(task_id):
+                    continue
 
-                    # If this was a primary task, check if all primary done
-                    if completed_task_id in remaining_primary:
-                        remaining_primary.discard(completed_task_id)
+                _, force_recovery = task_resume_info[task_id]
+                task_handle = handles[task_id]
+                executor = strategy_executors[task_id]
+                cluster_name = cluster_names[task_id]
+                assert cluster_name is not None
+                assert executor is not None
+                coro = self._monitor_job_group_task(task_id, task, cluster_name,
+                                                    executor, job_group_name,
+                                                    tasks_handles,
+                                                    force_recovery)
+                monitor_async_tasks[task_id] = asyncio.create_task(
+                    coro, name=f'monitor_{task.name}')
 
-                        if not remaining_primary:
-                            # All primary jobs are done
-                            logger.info('All primary jobs completed')
+            # Track results: task_id -> success (True/False/Exception)
+            task_results: Dict[int, typing.Union[bool, Exception]] = {}
+            # Track remaining primary task IDs (non-terminal ones)
+            remaining_primary = primary_task_ids - {
+                tid for tid in range(len(tasks)) if is_terminal(tid)
+            }
+            # Reverse mapping: asyncio.Task -> task_id for efficient lookup
+            async_task_to_id: Dict[asyncio.Task, int] = {
+                at: tid for tid, at in monitor_async_tasks.items()
+            }
 
-                            # Check if all primary jobs succeeded. For terminal
-                            # tasks, check their status; for others, check
-                            # result.
-                            def primary_task_succeeded(tid: int) -> bool:
-                                if is_terminal(tid):
-                                    return (task_resume_info[tid][0] ==
-                                            managed_job_state.ManagedJobStatus.
-                                            SUCCEEDED)
-                                return task_results.get(tid, True) is True
+            try:
+                # Monitor with primary/auxiliary termination logic
+                while monitor_async_tasks:
+                    # Wait for any task to complete
+                    done, _ = await asyncio.wait(
+                        monitor_async_tasks.values(),
+                        return_when=asyncio.FIRST_COMPLETED)
 
-                            all_primary_succeeded = all(
-                                primary_task_succeeded(tid)
-                                for tid in primary_task_ids)
+                    for completed_task in done:
+                        completed_task_id = async_task_to_id[completed_task]
 
-                            # Terminate remaining auxiliary jobs
-                            if monitor_async_tasks:
-                                await self._terminate_auxiliary_jobs(
-                                    tasks, monitor_async_tasks, cluster_names,
-                                    all_primary_succeeded)
-                                # All auxiliary jobs terminated, exit loop
-                                break
+                        # Remove from monitoring
+                        del monitor_async_tasks[completed_task_id]
+                        del async_task_to_id[completed_task]
 
-        except Exception as e:
-            logger.error(f'Monitoring failed: {e}')
-            # Cancel all remaining tasks
-            for task_id, async_task in monitor_async_tasks.items():
-                async_task.cancel()
-            await self._cleanup_job_group_clusters(cluster_names)
-            raise
+                        # Get result
+                        try:
+                            task_result: typing.Union[bool, Exception] = (
+                                completed_task.result())
+                            task_results[completed_task_id] = task_result
+                            if task_result:
+                                logger.info(f'Job '
+                                            f'{tasks[completed_task_id].name} '
+                                            'succeeded')
+                            else:
+                                logger.info(
+                                    f'Job {tasks[completed_task_id].name} '
+                                    'failed')
+                        except asyncio.CancelledError:
+                            # Task was cancelled (auxiliary job termination)
+                            task_results[completed_task_id] = False
+                            task_name = tasks[completed_task_id].name
+                            logger.info(f'Job {task_name} was terminated')
+                        except Exception as e:  # pylint: disable=broad-except
+                            # TODO: avoid broad except
+                            task_results[completed_task_id] = e
+                            logger.error(
+                                f'Job {tasks[completed_task_id].name} failed '
+                                f'with exception: {e}')
 
-        # Check results (include terminal tasks)
-        all_succeeded = True
-        for task_id, task in enumerate(tasks):
-            if is_terminal(task_id):
-                # Terminal task - check if it succeeded
-                task_status = task_resume_info[task_id][0]
-                if task_status != managed_job_state.ManagedJobStatus.SUCCEEDED:
+                        # If this was a primary task, check if all primary
+                        # done
+                        if completed_task_id in remaining_primary:
+                            remaining_primary.discard(completed_task_id)
+
+                            if not remaining_primary:
+                                # All primary jobs are done
+                                logger.info('All primary jobs completed')
+
+                                # Check if all primary jobs succeeded. For
+                                # terminal tasks, check their status; for
+                                # others, check result.
+                                def primary_task_succeeded(tid: int) -> bool:
+                                    if is_terminal(tid):
+                                        return (task_resume_info[tid][0] ==
+                                                managed_job_state.
+                                                ManagedJobStatus.SUCCEEDED)
+                                    return task_results.get(tid, True) is True
+
+                                all_primary_succeeded = all(
+                                    primary_task_succeeded(tid)
+                                    for tid in primary_task_ids)
+
+                                # Terminate remaining auxiliary jobs
+                                if monitor_async_tasks:
+                                    await self._terminate_auxiliary_jobs(
+                                        tasks, monitor_async_tasks,
+                                        cluster_names, all_primary_succeeded)
+                                    # All auxiliary jobs terminated, exit loop
+                                    break
+
+            except Exception as e:
+                logger.error(f'Monitoring failed: {e}')
+                # Cancel all remaining tasks
+                for task_id, async_task in monitor_async_tasks.items():
+                    async_task.cancel()
+                await self._cleanup_job_group_clusters(cluster_names)
+                raise
+
+            # Check results (include terminal tasks)
+            all_succeeded = True
+            for task_id, task in enumerate(tasks):
+                if is_terminal(task_id):
+                    # Terminal task - check if it succeeded
+                    task_status = task_resume_info[task_id][0]
+                    if (task_status !=
+                            managed_job_state.ManagedJobStatus.SUCCEEDED):
+                        all_succeeded = False
+                    continue
+
+                # Check the result for this task
+                check_result = task_results.get(task_id)
+                if isinstance(check_result, Exception):
+                    logger.error(
+                        f'Job {task.name} monitoring failed: {check_result}')
                     all_succeeded = False
-                continue
+                elif check_result is not True:
+                    all_succeeded = False
 
-            # Check the result for this task
-            check_result = task_results.get(task_id)
-            if isinstance(check_result, Exception):
-                logger.error(
-                    f'Job {task.name} monitoring failed: {check_result}')
-                all_succeeded = False
-            elif check_result is not True:
-                all_succeeded = False
-
-        await self._cleanup_job_group_clusters(cluster_names)
-        return all_succeeded
+            await self._cleanup_job_group_clusters(cluster_names)
+            return all_succeeded
+        finally:
+            if mirror_reconcile_task is not None:
+                mirror_reconcile_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await mirror_reconcile_task
 
     async def _terminate_auxiliary_jobs(self, tasks: List['task_lib.Task'],
                                         monitor_async_tasks: Dict[int,
@@ -1972,6 +2030,28 @@ class ControllerManager:
         # sky.exceptions.ResourcesUnavailableError).
         await managed_job_state.remove_ha_recovery_script_async(job_id)
 
+        dag = _get_dag(job_id)
+
+        # Clean up cross-context DNS mirrors before tearing down clusters
+        # below, while handles are still readable from global_user_state
+        # (this is a no-op, no-API-call for single-context/non-JobGroup
+        # jobs — see `cleanup_cross_context_mirrors`).
+        if dag.is_job_group():
+            mirror_tasks_handles: List[Tuple['sky.Task', typing.Any]] = []
+            for task in dag.tasks:
+                assert task.name is not None
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task.name, job_id))
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                mirror_tasks_handles.append((task, handle))
+            try:
+                await job_group_networking.cleanup_cross_context_mirrors(
+                    dag.name or '', job_id, mirror_tasks_handles)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to clean up JobGroup DNS mirrors: {e}')
+
         def task_cleanup(task: 'sky.Task', job_id: int):
             assert task.name is not None, task
             error = None
@@ -2057,7 +2137,6 @@ class ControllerManager:
             if error is not None:
                 raise error
 
-        dag = _get_dag(job_id)
         error = None
         for task in dag.tasks:
             # most things in this function are blocking
