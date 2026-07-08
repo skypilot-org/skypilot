@@ -233,8 +233,10 @@ def _mock_k8s_env(monkeypatch,
         lambda: False)
 
     # Mock per-context credential checks as enabled
-    def mock_check_credentials(context, run_optional_checks=True):
-        del run_optional_checks
+    def mock_check_credentials(context,
+                               run_optional_checks=True,
+                               cloud='kubernetes'):
+        del run_optional_checks, cloud
         return True, check_note
 
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_credentials',

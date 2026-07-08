@@ -892,7 +892,8 @@ class TestProvisionTimeoutPassthrough:
         mock_get_partition_info.return_value = SlurmPartition(name='gpu',
                                                               is_default=False,
                                                               maxtime=7 * 24 *
-                                                              60 * 60)
+                                                              60 * 60,
+                                                              default_time=None)
         mock_get_proctrack_type.return_value = 'cgroup'
 
         mock_client = mock.MagicMock()
@@ -960,7 +961,8 @@ class TestProvisionTimeoutPassthrough:
         mock_get_partition_info.return_value = SlurmPartition(name='gpu',
                                                               is_default=False,
                                                               maxtime=7 * 24 *
-                                                              60 * 60)
+                                                              60 * 60,
+                                                              default_time=None)
         mock_get_proctrack_type.return_value = 'cgroup'
 
         mock_client = mock.MagicMock()
@@ -1022,7 +1024,10 @@ class TestCreateVirtualInstance:
         from sky.adaptors.slurm import SlurmPartition
 
         mock_get_partition_info.return_value = SlurmPartition(
-            name=partition_name, is_default=False, maxtime=7 * 24 * 60 * 60)
+            name=partition_name,
+            is_default=False,
+            maxtime=7 * 24 * 60 * 60,
+            default_time=None)
 
         mock_client = mock.MagicMock()
         mock_client.query_jobs.return_value = []

@@ -181,6 +181,7 @@ You can specify per-context configurations for any Kubernetes config field, incl
 * ``remote_identity``: Service account to use for the context
 * ``provision_timeout``: Timeout for provisioning pods if autoscaler is used
 * ``pricing``: Per-vCPU, per-GB, and per-accelerator hourly rates for cost estimation (see :ref:`config-yaml-kubernetes-pricing`)
+* ``namespace``: Kubernetes namespace pods are launched into (see :ref:`config-yaml-kubernetes-namespace`)
 
 See :ref:`Kubernetes config<config-yaml-kubernetes>` for the list of all fields supported.
 

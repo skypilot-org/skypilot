@@ -1,8 +1,7 @@
 name: nightly-build
 on:
   schedule:
-    - cron: '35 8 * * *' # 08:35 UTC (01:35 PST / 04:35 EST) — original nightly
-    - cron: '0 0 * * *'  # 00:00 UTC (~5:00 PM PT during DST) — tests-only preflight
+    - cron: '0 0 * * *' # 00:00 UTC
   workflow_dispatch:
     inputs:
       skip_buildkite:
@@ -21,7 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.compute_should_run.outputs.should_run }}
-      is_preflight: ${{ steps.compute_should_run.outputs.is_preflight }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
       - name: print latest_commit
@@ -36,16 +34,9 @@ jobs:
             else
               echo "should_run=false" >> "$GITHUB_OUTPUT"
             fi
-            # The 0 0 * * * schedule is the tests-only preflight; it should not publish or release
-            if [[ "${{ github.event.schedule }}" == "0 0 * * *" ]]; then
-              echo "is_preflight=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "is_preflight=false" >> "$GITHUB_OUTPUT"
-            fi
           else
-            # For manual dispatches, always run and never treat as preflight
+            # For manual dispatches, always run
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "is_preflight=false" >> "$GITHUB_OUTPUT"
           fi
 
   gate-tests:
@@ -149,7 +140,7 @@ jobs:
       message: "nightly-build-pypi --aws"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--aws"}'
-      timeout_minutes: 90  # Increased from 60 (actual: ~70min)
+      timeout_minutes: 180  # p50 69m / p95 128m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -163,7 +154,7 @@ jobs:
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot-nightly"
       pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--kubernetes --base-branch pypi/skypilot-nightly"}'
-      timeout_minutes: 60
+      timeout_minutes: 240  # p50 104m / p95 ~227m; old 60m timed out 18/28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -177,7 +168,7 @@ jobs:
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot"
       pipeline: "quicktest-core"
       build_env_vars: '{"ARGS": "--base-branch pypi/skypilot"}'
-      timeout_minutes: 60
+      timeout_minutes: 90  # p50 48m / p95 67m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -191,7 +182,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --resource-heavy"}'
-      timeout_minutes: 100
+      timeout_minutes: 150  # p50 70m / p95 115m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -205,7 +196,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
-      timeout_minutes: 180  # Increased from 80 (actual: ~163min with queue delays)
+      timeout_minutes: 270  # p50 107m / p95 222m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -219,7 +210,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency"}'
-      timeout_minutes: 120  # Increased from 80 (actual: ~99min)
+      timeout_minutes: 270  # p50 97m / p95 185m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -233,8 +224,7 @@ jobs:
       message: "nightly-build-pypi --remote-server --kubernetes"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
-      timeout_minutes: 120  # Increased from 80 (actual: ~97min)
-      sleep_seconds: 600  # 10 minute delay to reduce buildkite resource usage
+      timeout_minutes: 300  # p50 134m / p95 264m; old 120m timed out 23/28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -248,7 +238,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --jobs-consolidation --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --no-resource-heavy"}'
-      timeout_minutes: 90  # Increased from 60 (actual: ~79min)
+      timeout_minutes: 210  # p50 94m / p95 168m; old 90m timed out 17/28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -261,7 +251,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi shared-gke-api-server with postgres tests"
       pipeline: "nightly-build-shared-gke-api-server"
-      timeout_minutes: 180  # Increased from 120 to account for queue delays
+      timeout_minutes: 300  # p50 144m / p95 ~250m (excludes rare multi-hour hangs)
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -275,7 +265,7 @@ jobs:
       message: "nightly-build-pypi test_minimal --slurm"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "-k test_minimal --slurm", "FILE_PATTERN": "test_basic.py"}'
-      timeout_minutes: 60
+      timeout_minutes: 90  # p50 10m / p95 53m over 28 nights
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -296,9 +286,8 @@ jobs:
 
   publish-and-validate-both:
     needs: [check-date, gate-tests, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable]
-    # Allow publish/validate for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
     # Use always() so this job evaluates even if some test jobs were skipped when skip_buildkite is selected
-    if: ${{ always() && needs.check-date.outputs.is_preflight != 'true' && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-shared-gke-api-server.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
+    if: ${{ always() && needs.nightly-build-pypi.result == 'success' && (needs.gate-tests.outputs.publish_without_tests == 'true' || (needs.gate-tests.outputs.run_tests == 'true' && needs.smoke-tests-aws.result == 'success' && needs.smoke-tests-kubernetes-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy.result == 'success' && needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result == 'success' && needs.smoke-tests-remote-server-kubernetes.result == 'success' && needs.smoke-tests-kubernetes-jobs-consolidation.result == 'success' && needs.smoke-tests-shared-gke-api-server.result == 'success' && needs.smoke-tests-slurm-minimal.result == 'success' && needs.backward-compat-test-nightly.result == 'success' && needs.backward-compat-test-stable.result == 'success')) }}
     uses: ./.github/workflows/publish-and-validate-both.yml
     with:
       package_name: skypilot-nightly
@@ -308,12 +297,69 @@ jobs:
 
   trigger-docker-and-helm-release:
     needs: [check-date, publish-and-validate-both]
-    # Allow helm release for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
-    if: ${{ always() && needs.check-date.outputs.is_preflight != 'true' && needs.publish-and-validate-both.result == 'success' }}
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
     uses: ./.github/workflows/helm-docker-release.yaml
     with:
       package_name: skypilot-nightly
     secrets: inherit
+
+  # After a nightly is published, dispatch the downstream repo's workflow so it
+  # can react without polling PyPI. Fail-loud: a missing secret, bad App creds,
+  # or a non-204 turns the run red rather than silently skipping.
+  notify-downstream:
+    runs-on: ubuntu-latest
+    needs: [check-date, nightly-build-pypi, publish-and-validate-both]
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
+    steps:
+      - name: Parse downstream repo
+        id: parse
+        env:
+          DOWNSTREAM_REPO: ${{ secrets.NIGHTLY_DOWNSTREAM_REPO }}
+          DOWNSTREAM_WORKFLOW: ${{ secrets.NIGHTLY_DOWNSTREAM_WORKFLOW }}
+        run: |
+          if [[ -z "${DOWNSTREAM_REPO}" ]]; then
+            echo "::error::NIGHTLY_DOWNSTREAM_REPO secret is not set; cannot dispatch the downstream nightly."
+            exit 1
+          fi
+          if [[ -z "${DOWNSTREAM_WORKFLOW}" ]]; then
+            echo "::error::NIGHTLY_DOWNSTREAM_WORKFLOW secret is not set; cannot dispatch the downstream nightly."
+            exit 1
+          fi
+          echo "owner=${DOWNSTREAM_REPO%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${DOWNSTREAM_REPO#*/}"  >> "$GITHUB_OUTPUT"
+
+      - name: Mint downstream dispatch token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.NIGHTLY_DOWNSTREAM_CI_APP_ID }}
+          private-key: ${{ secrets.NIGHTLY_DOWNSTREAM_CI_APP_PRIVATE_KEY }}
+          owner: ${{ steps.parse.outputs.owner }}
+          repositories: ${{ steps.parse.outputs.name }}
+
+      - name: Trigger downstream workflow
+        env:
+          DISPATCH_REPO: ${{ secrets.NIGHTLY_DOWNSTREAM_REPO }}
+          DISPATCH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DISPATCH_WORKFLOW: ${{ secrets.NIGHTLY_DOWNSTREAM_WORKFLOW }}
+          DISPATCH_REF: ${{ secrets.NIGHTLY_DOWNSTREAM_REF || 'main' }}
+          NIGHTLY_VERSION: ${{ needs.nightly-build-pypi.outputs.version }}
+        run: |
+          echo "Dispatching ${DISPATCH_WORKFLOW} on ${DISPATCH_REPO}@${DISPATCH_REF} (version=${NIGHTLY_VERSION})"
+          http_code=$(curl -sS -o /tmp/dispatch-resp -w '%{http_code}' \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${DISPATCH_REPO}/actions/workflows/${DISPATCH_WORKFLOW}/dispatches" \
+            -d "{\"ref\":\"${DISPATCH_REF}\",\"inputs\":{\"version\":\"${NIGHTLY_VERSION}\"}}")
+          if [[ "${http_code}" != "204" ]]; then
+            echo "::error::Downstream dispatch to ${DISPATCH_REPO} (${DISPATCH_WORKFLOW}) failed with HTTP ${http_code}."
+            echo "Response body:"
+            cat /tmp/dispatch-resp || true
+            exit 1
+          fi
+          echo "Dispatch accepted."
 
   summary:
     runs-on: ubuntu-latest
@@ -397,14 +443,6 @@ jobs:
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           EMOJI="🚨"
-          PRECHECK_TAG=""
-          if [[ "${{ needs.check-date.outputs.is_preflight }}" == "true" ]]; then
-            PRECHECK_TAG="[Preflight check, won't release] "
-            EMOJI="🔔"
-          fi
-          if [[ -n "$PRECHECK_TAG" ]]; then
-            TITLE_TEXT="${PRECHECK_TAG}${TITLE_TEXT}"
-          fi
           BUILDKITE_MSG=""
           if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-jobs-consolidation.result }}" == "failure" || "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" || "${{ needs.smoke-tests-slurm-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
             if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then

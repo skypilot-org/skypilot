@@ -35,6 +35,7 @@ from sky.server.blob import blob_storage as bs
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common
@@ -469,10 +470,19 @@ def download_and_stream_job_log(
         backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
         local_dir: str,
-        job_ids: Optional[List[str]] = None) -> Optional[str]:
+        job_ids: Optional[List[str]] = None,
+        on_downloaded: Optional[Callable[[str], None]] = None) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
+
+    Args:
+        on_downloaded: Optional callback invoked with the local log path as
+            soon as the log has been synced down, BEFORE the (potentially
+            slow) re-streaming of the log into the controller log. The jobs
+            controller uses this to persist ``local_log_file`` immediately so
+            the dashboard can serve the job's logs without waiting for the
+            full re-stream to finish.
 
     If the log cannot be fetched for any reason, return None.
     """
@@ -507,11 +517,34 @@ def download_and_stream_job_log(
     log_dir = list(log_dirs.values())[0]
     log_file = os.path.expanduser(os.path.join(log_dir, 'run.log'))
 
+    # The log is now on local disk. Notify the caller immediately so it can
+    # persist the path (e.g. local_log_file) before the slow re-stream below,
+    # which can take minutes for multi-GB logs and would otherwise block the
+    # dashboard from serving the logs.
+    if on_downloaded is not None:
+        on_downloaded(log_file)
+
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for
     # the log_lib.tail_logs.
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
+        # newline='\n' so we split lines ONLY on '\n'. The default
+        # universal-newline mode treats every '\r' as a line boundary, which
+        # for carriage-return progress output (e.g. `aws s3 cp`'s in-place
+        # "Completed X GiB ..." updates) explodes a multi-GB log into millions
+        # of "lines" -- making this loop O(carriage-returns) (minutes for a
+        # ~160MB log) and bloating the controller log accordingly. Splitting
+        # only on '\n' keeps it O(real lines). We also drop the per-line
+        # flush: stdout is block-buffered (~8KB), so a hard crash loses at
+        # most the last buffer, not the whole copy -- and the authoritative
+        # copy is the synced run.log on disk anyway. errors='replace' so a
+        # stray invalid-UTF-8 byte in the user log can't abort the copy
+        # mid-stream (matches log_lib's decode handling).
+        with open(log_file,
+                  'r',
+                  encoding='utf-8',
+                  newline='\n',
+                  errors='replace') as f:
             # Stream the logs to the console without reading the whole file into
             # memory.
             start_streaming = False
@@ -519,7 +552,9 @@ def download_and_stream_job_log(
                 if log_lib.LOG_FILE_START_STREAMING_AT in line:
                     start_streaming = True
                 if start_streaming:
-                    print(line, end='', flush=True)
+                    print(line, end='')
+        # Flush once after the full copy instead of once per line.
+        print(end='', flush=True)
     except FileNotFoundError:
         logger.error('Failed to find the logs for the user '
                      f'program at {log_file}.')
@@ -575,8 +610,15 @@ def shared_controller_vars_to_fill(
         constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
             common_utils.get_using_remote_api_server()),
     })
-    if skypilot_config.loaded():
-        # Only set the SKYPILOT_CONFIG env var if the user has a config file.
+    # Only set the SKYPILOT_CONFIG env var when we actually file_mount a
+    # config to the controller (i.e. local_user_config was non-empty so
+    # local_user_config_path is a real tempfile that gets rsynced/SSH'd to
+    # remote_user_config_path on the controller). Previously this gated on
+    # `skypilot_config.loaded()` (API server's own config), which can be True
+    # even when local_user_config is empty — pointing the controller's
+    # SKYPILOT_CONFIG env to a file that was never created and crashing it
+    # with FileNotFoundError on startup.
+    if local_user_config_path is not None:
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     vars_to_fill['controller_envs'].update(env_vars)
@@ -625,6 +667,15 @@ def controller_only_vars_to_fill(controller: Controllers) -> Dict[str, str]:
     if override_concurrent_launches is not None:
         env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
             int(override_concurrent_launches))
+    # Forward the client's usage run id so the controller (and the worker
+    # clusters it provisions) report heartbeats under the same run id as
+    # the originating launch operation. Without this, in consolidation mode
+    # the controller process would fall back to its own
+    # usage_lib.messages.usage singleton, which is shared across all jobs
+    # served by that process and so cannot distinguish between them.
+    client_usage_run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+    if client_usage_run_id is not None:
+        env_vars[usage_constants.USAGE_RUN_ID_ENV_VAR] = client_usage_run_id
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 
@@ -991,9 +1042,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # We use uuid to generate a unique run id for the job, so that the bucket/
     # subdirectory name is unique across different jobs/services.
-    # We should not use common_utils.get_usage_run_id() here, because when
-    # Python API is used, the run id will be the same across multiple
-    # jobs.launch/serve.up calls after the sky is imported.
     run_id = _generate_run_uuid()
     user_hash = common_utils.get_user_hash()
     original_file_mounts = task.file_mounts if task.file_mounts else {}

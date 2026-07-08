@@ -1,5 +1,7 @@
 """Test the controller_utils module."""
+import contextlib
 import importlib
+import io
 import multiprocessing
 import os
 from typing import Any, Dict, Set
@@ -13,6 +15,7 @@ from sky import resources as resources_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import registry
@@ -352,9 +355,10 @@ def test_get_cloud_dependencies_installation_commands_azure_only(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
 
-    # Mock dependencies
+    # Mock dependencies. Must match the AZURE_CLI value in
+    # extras_require['azure'], since the code removes it from that list.
     monkeypatch.setattr('sky.utils.controller_utils.dependencies.AZURE_CLI',
-                        'azure-cli>=2.65.0')
+                        'azure-cli>=2.65.0,<2.87.0')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
@@ -700,6 +704,78 @@ def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
     os.unlink(local_config_path)
 
 
+# ---------------------------------------------------------------------------
+# Tests for the SKYPILOT_CONFIG env / file_mount consistency fix.
+#
+# Bug: previously, the SKYPILOT_CONFIG env var on the controller was set
+# whenever `skypilot_config.loaded()` was True (i.e. the API server itself
+# had any config). But the file that env var pointed to was only file_mount'd
+# when `local_user_config` was non-empty. If admin_policy returned an empty
+# dict (or no admin_policy was set and the API server's config happened to
+# load from an empty file), the env var would point to a path that was
+# never created — controller process would FileNotFoundError on startup.
+#
+# Fix: gate the env var on the same condition that gates the file_mount —
+# `local_user_config_path is not None`. These tests pin that contract.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_skypilot_config_env_set_when_local_config_present(
+        controller_type: str, monkeypatch):
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    user_config = {'jobs': {'controller': {'resources': {'cpus': '8+'}}}}
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/config.yaml', user_config.copy())
+
+    # local_user_config non-empty → tempfile written, file_mount populated.
+    assert result['local_user_config_path'] is not None
+    # And SKYPILOT_CONFIG env points to the file_mount target on the
+    # controller side.
+    env_vars = result['controller_envs']
+    assert env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == (
+        '/remote/path/config.yaml')
+
+    os.unlink(result['local_user_config_path'])
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_skypilot_config_env_NOT_set_when_local_config_empty(
+        controller_type: str, monkeypatch):
+    """Regression test: even if the API server's own config is loaded
+    (skypilot_config.loaded() is True), if the config we're passing to the
+    controller is empty, we MUST NOT set SKYPILOT_CONFIG — otherwise the
+    controller process tries to read a non-existent file and crashes."""
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        lambda controller: [])
+    # Force the API server's own skypilot_config to look "loaded" — this
+    # used to be the gating condition and would incorrectly set the env
+    # even when the controller-side config is empty.
+    monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/config.yaml', {})
+
+    # Empty local_user_config → no tempfile, no file_mount.
+    assert result['local_user_config_path'] is None
+    # And critically: no SKYPILOT_CONFIG env on the controller (which would
+    # otherwise point at a path that file_mounts won't materialize).
+    env_vars = result['controller_envs']
+    assert skypilot_config.ENV_VAR_SKYPILOT_CONFIG not in env_vars
+
+
 def _run_controller_cluster_name_refresh_test(controller_type: str):
     """Helper function to run in subprocess to avoid module pollution."""
     import importlib
@@ -820,6 +896,63 @@ def test_controller_cluster_name_client_side(controller_type: str):
     proc.start()
     proc.join()
     assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_envs_forward_usage_run_id(controller_type: str,
+                                              monkeypatch):
+    """The client's usage run id is forwarded into controller_envs.
+
+    Regression test for the consolidation-mode bug where a single
+    controller process serves many jobs and so cannot rely on its own
+    usage_lib.messages.usage singleton to identify which client run a
+    worker cluster's heartbeat belongs to.
+    """
+    from sky.usage import constants as usage_constants
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+    monkeypatch.setenv(usage_constants.USAGE_RUN_ID_ENV_VAR, 'client-run-xyz')
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', {})
+
+    envs = result['controller_envs']
+    assert envs.get(usage_constants.USAGE_RUN_ID_ENV_VAR) == 'client-run-xyz'
+
+    if 'local_user_config_path' in result and result['local_user_config_path']:
+        os.unlink(result['local_user_config_path'])
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_envs_skip_unset_usage_run_id(controller_type: str,
+                                                 monkeypatch):
+    """When the client did not supply a run id, controller_envs omits it
+    rather than forwarding an empty string."""
+    from sky.usage import constants as usage_constants
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+    monkeypatch.delenv(usage_constants.USAGE_RUN_ID_ENV_VAR, raising=False)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', {})
+
+    envs = result['controller_envs']
+    assert usage_constants.USAGE_RUN_ID_ENV_VAR not in envs
+
+    if 'local_user_config_path' in result and result['local_user_config_path']:
+        os.unlink(result['local_user_config_path'])
 
 
 _JOBS_SIGNAL_CONST = (
@@ -949,3 +1082,105 @@ class TestIsJobsConsolidationMode:
         with mock.patch(_JOBS_SIGNAL_CONST, str(signal_file)):
             controller_utils.is_jobs_consolidation_mode(extra_validator=extra)
             extra.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# download_and_stream_job_log
+# ---------------------------------------------------------------------------
+
+_MARKER = log_lib.LOG_FILE_START_STREAMING_AT  # 'Waiting for task resources on '
+
+
+def _backend_with_run_log(run_log_bytes: bytes, tmp_path):
+    """Build a fake backend whose sync_down_logs yields a dir with run.log.
+
+    Returns (backend, handle, local_dir). The run.log is written with raw
+    bytes so tests control '\\r' vs '\\n' exactly.
+    """
+    synced_dir = os.path.join(str(tmp_path), 'synced')
+    os.makedirs(synced_dir, exist_ok=True)
+    with open(os.path.join(synced_dir, 'run.log'), 'wb') as f:
+        f.write(run_log_bytes)
+    backend = mock.MagicMock()
+    backend.sync_down_logs.return_value = {'cluster': synced_dir}
+    handle = mock.MagicMock()
+    local_dir = os.path.join(str(tmp_path), 'managed_logs')
+    return backend, handle, local_dir
+
+
+def test_download_and_stream_job_log_persists_before_reprint(tmp_path):
+    """on_downloaded must fire with the run.log path BEFORE the log is
+    re-streamed into the controller log.
+
+    The jobs controller uses this callback to persist local_log_file
+    immediately so the dashboard can serve logs without waiting for the
+    (potentially minutes-long) re-stream.
+    """
+    run_log = (b'boilerplate-before-marker\n' + _MARKER.encode() +
+               b'42 nodes.\n'
+               b'REPRINT-CONTENT-SENTINEL\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    seen: Dict[str, Any] = {}
+    captured = io.StringIO()
+
+    def on_downloaded(path: str) -> None:
+        seen['path'] = path
+        # Snapshot what has been written to the controller log so far: the
+        # re-stream must NOT have run yet at callback time.
+        seen['stdout_at_callback'] = captured.getvalue()
+
+    with contextlib.redirect_stdout(captured):
+        result = controller_utils.download_and_stream_job_log(
+            backend, handle, local_dir, on_downloaded=on_downloaded)
+
+    out = captured.getvalue()
+    # Callback fired with the synced run.log path, and that is the return val.
+    assert seen.get('path') is not None
+    assert seen['path'].endswith(os.path.join('synced', 'run.log'))
+    assert result == seen['path']
+    # Callback fired BEFORE the re-stream emitted the post-marker content.
+    assert 'REPRINT-CONTENT-SENTINEL' not in seen['stdout_at_callback']
+    # The re-stream did eventually emit the post-marker content...
+    assert 'REPRINT-CONTENT-SENTINEL' in out
+    # ...but filtered out the pre-marker boilerplate.
+    assert 'boilerplate-before-marker' not in out
+
+
+def test_download_and_stream_job_log_does_not_split_on_carriage_return(
+        tmp_path):
+    r"""Carriage-return progress output must not be split / translated.
+
+    With the universal-newline default, every '\r' is treated as a line
+    boundary, exploding a multi-GB log (e.g. `aws s3 cp` progress) into
+    millions of lines and making the re-stream take minutes. The re-stream
+    opens the log with newline='\n' so it splits only on '\n'.
+    """
+    # One real ('\n') line after the marker, holding 3 '\r' progress updates.
+    run_log = (_MARKER.encode() + b'8 nodes.\n'
+               b'prog-a\rprog-b\rprog-c\n')
+    backend, handle, local_dir = _backend_with_run_log(run_log, tmp_path)
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        controller_utils.download_and_stream_job_log(backend, handle, local_dir)
+    out = captured.getvalue()
+
+    # The carriage returns are preserved verbatim. Pre-fix (universal
+    # newlines) this would have been emitted as 'prog-a\nprog-b\nprog-c\n'.
+    assert 'prog-a\rprog-b\rprog-c\n' in out
+
+
+def test_download_and_stream_job_log_no_logs_returns_none(tmp_path):
+    """When sync_down_logs finds nothing, return None and never call back."""
+    backend = mock.MagicMock()
+    backend.sync_down_logs.return_value = {}
+    handle = mock.MagicMock()
+    local_dir = os.path.join(str(tmp_path), 'managed_logs')
+
+    called = []
+    result = controller_utils.download_and_stream_job_log(
+        backend, handle, local_dir, on_downloaded=lambda p: called.append(p))
+
+    assert result is None
+    assert not called

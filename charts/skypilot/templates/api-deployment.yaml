@@ -14,11 +14,14 @@ spec:
   {{- if and .Values.storage.enabled (ne .Values.storage.accessMode "ReadWriteMany") }}
   {{- fail "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)." }}
   {{- end }}
+  {{- $rollingUpdate := .Values.apiService.rollingUpdate | default (dict) }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      {{- /* dig (not `default`) so an explicit 0 is honored — Go templates treat
+             0 as empty, which would silently fall back to the default. */}}
+      maxSurge: {{ dig "maxSurge" 1 $rollingUpdate }}
+      maxUnavailable: {{ dig "maxUnavailable" 0 $rollingUpdate }}
   {{- else }}
   strategy:
     type: Recreate
@@ -65,13 +68,32 @@ spec:
       - name: skypilot-api
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
         imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
+        {{- if .Values.apiService.devMode.enabled }}
+        # Dev mode: fully open securityContext. Runs as root and
+        # `privileged: true` implicitly grants all capabilities (including
+        # SYS_PTRACE for py-spy/strace) and allowPrivilegeEscalation, so the
+        # developer can edit site-packages and restart the server regardless
+        # of what the tenant configured. NEVER enable in production.
+        securityContext:
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          readOnlyRootFilesystem: false
+        {{- else }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        {{- end }}
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
+        {{- /* Detect whether POD_IP is already declared in extraEnvs (e.g. */ -}}
+        {{- /* injected by a downstream chart) so we don't emit duplicates. */ -}}
+        {{- $podIpInExtraEnvs := false }}
+        {{- range concat (default (list) $.Values.global.extraEnvs) (default (list) .Values.apiService.extraEnvs) }}
+        {{- if eq .name "POD_IP" }}{{- $podIpInExtraEnvs = true }}{{- end }}
+        {{- end }}
         {{- with $.Values.global.extraEnvs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -168,6 +190,12 @@ spec:
             resourceFieldRef:
               containerName: skypilot-api
               resource: requests.memory
+        {{- if not $podIpInExtraEnvs }}
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
@@ -240,33 +268,65 @@ spec:
           done
           {{- end }}
 
+          {{- if .Values.apiService.devMode.enabled }}
+          # Dev mode: hold the container without starting the API server so a
+          # developer can drive `sky api start` / `sky api stop` via kubectl exec.
+          exec tail -f /dev/null
+          {{- else }}
+          # Optional log mirror: when $SKYPILOT_SERVER_LOG_MIRROR_DIR is set,
+          # also write server stdout/stderr to a per-pod, per-boot file under
+          # <dir>/<HOSTNAME>/server-<UTC_ISO>.log. Survives local logrotate
+          # (copytruncate) and pod restarts; placing $HOSTNAME in the path
+          # keeps replicas from clobbering each other when the dir is shared
+          # (RWX) storage. Mirroring is opportunistic — if directory creation
+          # fails (RO mount, permissions, NFS blip) we log a warning and
+          # carry on rather than crash-loop the API server pod.
+          # Resolve mirror sink first so both the serveServerLog=true and the
+          # =false branch can use it.
+          SKYPILOT_LOG_MIRROR_FILE=""
+          if [ -n "${SKYPILOT_SERVER_LOG_MIRROR_DIR:-}" ]; then
+            SKYPILOT_LOG_MIRROR_PER_POD_DIR="${SKYPILOT_SERVER_LOG_MIRROR_DIR}/${HOSTNAME:-unknown}"
+            if mkdir -p "$SKYPILOT_LOG_MIRROR_PER_POD_DIR"; then
+              SKYPILOT_LOG_MIRROR_FILE="${SKYPILOT_LOG_MIRROR_PER_POD_DIR}/server-$(date -u +%Y%m%dT%H%M%SZ).log"
+            else
+              echo "warning: failed to create log mirror directory $SKYPILOT_LOG_MIRROR_PER_POD_DIR; mirroring disabled" >&2
+            fi
+          fi
           {{- if .Values.apiService.serveServerLog }}
           mkdir -p /root/.sky/api_server
           # Use a FIFO instead of a pipe so that exec replaces the shell,
           # allowing tini to send SIGTERM directly to the API server process
           rm -f /tmp/skylog && mkfifo /tmp/skylog
-          tee -a /root/.sky/api_server/server.log < /tmp/skylog &
+          if [ -n "$SKYPILOT_LOG_MIRROR_FILE" ]; then
+            tee -a /root/.sky/api_server/server.log "$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog &
+          else
+            tee -a /root/.sky/api_server/server.log < /tmp/skylog &
+          fi
           exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
           {{- else }}
-          exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+          if [ -n "$SKYPILOT_LOG_MIRROR_FILE" ]; then
+            # Mirror without local server.log. Still route through a FIFO so
+            # tee can fan out; tee's stdout inherits the container's stdout,
+            # so k8s pod logs continue to work just like the no-mirror case.
+            rm -f /tmp/skylog && mkfifo /tmp/skylog
+            tee -a "$SKYPILOT_LOG_MIRROR_FILE" < /tmp/skylog &
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground > /tmp/skylog 2>&1
+          else
+            exec sky api start {{ include "skypilot.apiArgs" . }} --foreground
+          fi
+          {{- end }}
           {{- end }}
         ports:
         - containerPort: 46580
+        {{- if not .Values.apiService.devMode.enabled }}
+        {{- with .Values.apiService.livenessProbe }}
         livenessProbe:
-          httpGet:
-            path: /api/health
-            port: 46580
-          periodSeconds: 30
-          {{- with .Values.apiService.probes }}
-          {{- if and .liveness .liveness.timeoutSeconds }}
-          timeoutSeconds: {{ .liveness.timeoutSeconds }}
-          {{- end }}
-          {{- end }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.apiService.readinessProbe }}
         readinessProbe:
-          httpGet:
-            path: /api/health
-            port: 46580
-          {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+          {{- if not (hasKey . "successThreshold") }}
+          {{- if eq $.Values.apiService.upgradeStrategy "RollingUpdate" }}
           # When using RollingUpdate strategy, be more patient with the new
           # API server to avoid flaky serving where one of the server process
           # returns ready of the healthz check endpoint while others may still
@@ -277,14 +337,10 @@ spec:
           # other replica to serve requests anyway.
           successThreshold: 1
           {{- end }}
-          failureThreshold: 3
-          periodSeconds: 5
-          initialDelaySeconds: 5
-          {{- with .Values.apiService.probes }}
-          {{- if and .readiness .readiness.timeoutSeconds }}
-          timeoutSeconds: {{ .readiness.timeoutSeconds }}
           {{- end }}
-          {{- end }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- end }}
         volumeMounts:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
@@ -302,9 +358,11 @@ spec:
           subPath: .sky
         {{- end }}
         {{- if .Values.storage.enabled }}
+        {{- if ne .Values.apiService.persistSSHConfig false }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        {{- end }}
         # Mount the entire sky_logs folder because the request
         # logs have been moved out of this directory
         - name: state-volume

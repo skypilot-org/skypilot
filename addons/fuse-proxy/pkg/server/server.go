@@ -115,6 +115,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 	if err != nil {
 		log.Errorf("Failed to marshal response: %v", err)
 	}
+	// Close the /dev/fuse fd after SendMsg hands it to the client via
+	// SCM_RIGHTS. If we keep ours open, the kernel's fuse_dev_release
+	// never sees dev_count drop to 0 when rclone dies, so fuse_conn_kill
+	// is skipped and in-flight FUSE requests stay wedged in
+	// request_wait_answer — making the pod un-killable.
+	if fd > 0 {
+		defer func() {
+			if err := syscall.Close(fd); err != nil {
+				log.Errorf("Failed to close fuse fd %d: %v", fd, err)
+			} else {
+				log.Infof("Closed fuse fd %d", fd)
+			}
+		}()
+	}
 	if err := mfcputil.SendMsg(unixConn, fd, b); err != nil {
 		log.Errorf("Failed to send response: %v", err)
 		return

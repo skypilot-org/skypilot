@@ -12,6 +12,17 @@ JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
+# Default fields returned by the managed jobs queue when the caller does not
+# specify `fields`. This intentionally excludes heavy fields (e.g. the task
+# YAML) so the default queue payload stays small even with many jobs. Callers
+# that need every field must pass `fields=None` explicitly.
+# Defined as a tuple so it is immutable and safe to use as a default argument.
+DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
+                              'task_name', 'resources', 'submitted_at',
+                              'end_at', 'job_duration', 'recovery_count',
+                              'status', 'pool', 'is_primary_in_job_group',
+                              'batch_total_batches', 'batch_completed_batches')
+
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
@@ -72,4 +83,20 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 19  # add cancel_managed_jobs dispatcher
+MANAGED_JOBS_VERSION = 22  # add submitted_after/submitted_before to job table
+
+# Prefix used for service-account tokens issued to managed jobs that opt in
+# to api_server_access. The expired-token-cleanup daemon uses this prefix to
+# identify managed-job tokens that should be swept once their TTL passes.
+# Keep this in sync with the token name format in
+# sky/jobs/server/core.py::_create_job_api_token.
+MANAGED_JOB_TOKEN_NAME_PREFIX = 'managed-job-'
+
+# TTL for service-account tokens issued to managed jobs with
+# api_server_access. Kept short so any tokens that leak past the controller
+# cleanup are reaped quickly by the expired-token-cleanup daemon.
+# TODO(lloyd-brown): The controller does not renew this token while the job is
+# still running, so long-running jobs (e.g. multi-day training) can have their
+# api_server_access token expire mid-run. Add token renewal so the TTL only
+# bounds leaked-token lifetime, not in-use token lifetime.
+MANAGED_JOB_TOKEN_TTL_DAYS = 3

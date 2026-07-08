@@ -280,6 +280,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
+   For Frontier AI <../frontier-ai>
 
 .. toctree::
    :hidden:
@@ -303,15 +304,15 @@ Follow updates:
    Model Training Guide <../reference/training-guide>
    Using a Pool of Workers <../examples/pools>
    Batch Inference <../examples/batch/index>
-   Job Groups <../examples/job-groups>
+   Job Groups for RL <../examples/job-groups>
 
 .. toctree::
    :hidden:
    :maxdepth: 1
    :caption: Model Serving
 
-   Getting Started <../serving/sky-serve>
-   ../serving/user-guides
+   SkyPilot Endpoints <https://blog.skypilot.co/skypilot-endpoints/>
+   SkyServe <../serving/sky-serve>
 
 .. toctree::
    :hidden:
@@ -348,6 +349,7 @@ Follow updates:
    ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
    ../examples/ports
+   ../reference/lifecycle-hooks
    ../reference/logging
    ../reference/faq
 

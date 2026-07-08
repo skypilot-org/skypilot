@@ -4,6 +4,7 @@ from datetime import datetime
 import enum
 import fnmatch
 import hashlib
+import math
 import os
 import pathlib
 import pprint
@@ -240,8 +241,55 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
     ('provider', 'security_group'),
 ]
 
+# Filenames in `file_mounts` whose content sha256 should NOT participate in the
+# cluster yaml hash computed by `_deterministic_cluster_yaml_hash`. These are
+# transient on-disk caches whose bytes drift across replicas / time without any
+# user-meaningful semantic change (e.g., gcloud token refreshes), and including
+# them in the hash makes `sky launch --fast` re-provision unexpectedly.
+#
+# These files are still uploaded to the cluster as part of file_mounts -- we
+# only skip them from the deterministic hash used for the --fast cache key.
+# The cluster's gcloud will tolerate a slightly-stale cache (refresh tokens
+# are long-lived; access tokens auto-refresh on use).
+_FILE_MOUNT_BASENAMES_SKIP_HASH = frozenset({
+    # gcloud OAuth credentials cache (refresh tokens + token metadata).
+    'credentials.db',
+    'credentials.db-journal',
+    'credentials.db-wal',
+    'credentials.db-shm',
+    # gcloud short-lived access token cache (1 hour TTL, auto-refreshed).
+    'access_tokens.db',
+    'access_tokens.db-journal',
+    'access_tokens.db-wal',
+    'access_tokens.db-shm',
+})
+
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+
+
+def _caller_is_viewer() -> bool:
+    """Return True iff the executor worker is acting for a viewer user."""
+    # pylint: disable=import-outside-toplevel
+    # In-function import to avoid pulling the permission service into
+    # processes that never need it (e.g. the controller image's CLI
+    # entry point), which would also drag in casbin's import cost.
+    from sky.users import permission
+    from sky.users import rbac as rbac_mod
+    user_id = os.environ.get(constants.USER_ID_ENV_VAR)
+    if not user_id:
+        return False
+    try:
+        enforcer = permission.permission_service._ensure_enforcer()  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        return False
+    try:
+        roles = enforcer.get_roles_for_user(user_id)
+    except Exception:  # pylint: disable=broad-except
+        return False
+    # Admin wins over viewer when both roles are present.
+    return (rbac_mod.RoleName.VIEWER.value in roles and
+            rbac_mod.RoleName.ADMIN.value not in roles)
 
 
 def is_command_length_over_limit(command: str) -> bool:
@@ -445,7 +493,11 @@ class FileMountHelper(object):
         return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
 
     @classmethod
-    def make_safe_symlink_command(cls, *, source: str, target: str) -> str:
+    def make_safe_symlink_command(cls,
+                                  *,
+                                  source: str,
+                                  target: str,
+                                  sudo_cmd: str = 'sudo') -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
         All intermediate directories of 'source' will be owned by $(whoami),
@@ -457,6 +509,12 @@ class FileMountHelper(object):
         This function is needed because a simple 'ln -s target source' may
         fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
         or may not exist, can end with a slash, or may need sudo access, etc.
+
+        'sudo_cmd' is the command prepended to privileged steps (mkdir, chown,
+        rm, ln); it defaults to 'sudo'. Pass an empty string when the caller
+        already has enough privilege and a sudo binary may be absent -- e.g. a
+        container running as root, or a minimal image without sudo installed --
+        so the command does not depend on sudo being on PATH.
 
         Cases of <target: local> file mounts and their behaviors:
 
@@ -473,7 +531,7 @@ class FileMountHelper(object):
         assert os.path.isabs(source), source
         assert not source.endswith('/') and not target.endswith('/'), (source,
                                                                        target)
-        # Below, use sudo in case the symlink needs sudo access to create.
+        sudo = f'{sudo_cmd} ' if sudo_cmd else ''
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $(whoami).
         dir_of_symlink = os.path.dirname(source)
@@ -481,27 +539,27 @@ class FileMountHelper(object):
             # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
             # chown $(whoami) on it so user can use these intermediate dirs
             # (excluding /).
-            f'sudo mkdir -p {dir_of_symlink}',
+            f'{sudo}mkdir -p {dir_of_symlink}',
             # p: path so far
             ('(p=""; '
              f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             'p=${p}/${w}; sudo chown $(whoami) $p; done)')
+             f'p=${{p}}/${{w}}; {sudo}chown $(whoami) $p; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
         #     directory).
         commands += [
             # Error out if source is an existing, non-symlink directory/file.
-            f'((test -L {source} && sudo rm {source} &>/dev/null) || '
+            f'((test -L {source} && {sudo}rm {source} >/dev/null 2>&1) || '
             f'(test ! -e {source} || '
             f'(echo "!!! Failed mounting because path exists ({source})"; '
             'exit 1)))',
         ]
         commands += [
             # Link.
-            f'sudo ln -s {target} {source}',
+            f'{sudo}ln -s {target} {source}',
             # chown.  -h to affect symlinks only.
-            f'sudo chown -h $(whoami) {source}',
+            f'{sudo}chown -h $(whoami) {source}',
         ]
         return ' && '.join(commands)
 
@@ -554,6 +612,15 @@ def _replace_yaml_dicts(
     for exclude_restore_key_name, value in excluded_results.items():
         curr = new_config
         for key in exclude_restore_key_name[:-1]:
+            # _restore_block may have replaced an ancestor block wholesale
+            # with the old config (e.g. 'provider'), which can lack an
+            # intermediate key that only exists in the new config (or have
+            # it present but null). This happens when restarting a cluster
+            # created before a feature that added a nested provider field
+            # (e.g. Nebius `provider.security_group`). Recreate the path so
+            # we can still apply the new value instead of raising KeyError.
+            if not isinstance(curr.get(key), dict):
+                curr[key] = {}
             curr = curr[key]
         curr[exclude_restore_key_name[-1]] = value
     return yaml_utils.dump_yaml_str(new_config)
@@ -583,7 +650,7 @@ def get_expirable_clouds(
             # add remote_identity of each context if it exists
             remote_identities: Optional[Union[str, List[Dict[str, str]]]] = None
             for context in contexts:
-                context_remote_identity = skypilot_config.get_effective_region_config(
+                context_remote_identity = skypilot_config.get_effective_workspace_region_config(
                     cloud='kubernetes',
                     region=context,
                     keys=('remote_identity',),
@@ -599,7 +666,7 @@ def get_expirable_clouds(
                         assert isinstance(remote_identities, list)
                         remote_identities.extend(context_remote_identity)
             # add global kubernetes remote identity if it exists, if not, add default
-            global_remote_identity = skypilot_config.get_effective_region_config(
+            global_remote_identity = skypilot_config.get_effective_workspace_region_config(
                 cloud='kubernetes',
                 region=None,
                 keys=('remote_identity',),
@@ -617,7 +684,7 @@ def get_expirable_clouds(
                 remote_identities = schemas.get_default_remote_identity(
                     str(cloud).lower())
         else:
-            remote_identities = skypilot_config.get_effective_region_config(
+            remote_identities = skypilot_config.get_effective_workspace_region_config(
                 cloud=str(cloud).lower(),
                 region=None,
                 keys=('remote_identity',),
@@ -640,7 +707,8 @@ def get_expirable_clouds(
 
 
 def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
-    path_hash = hashlib.md5(path.encode()).hexdigest()[:6]
+    path_hash = hashlib.md5(path.encode(),
+                            usedforsecurity=False).hexdigest()[:6]
     return f'{cluster_name_on_cloud}-{path_hash}'
 
 
@@ -659,6 +727,7 @@ def write_cluster_config(
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
+    extra_template_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -728,7 +797,7 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds: Set[clouds.Cloud] = set()
-    remote_identity_config = skypilot_config.get_effective_region_config(
+    remote_identity_config = skypilot_config.get_effective_workspace_region_config(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('remote_identity',),
@@ -794,7 +863,7 @@ def write_cluster_config(
             excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in registry.CLOUD_REGISTRY.items():
-        remote_identity_config = skypilot_config.get_effective_region_config(
+        remote_identity_config = skypilot_config.get_effective_workspace_region_config(
             cloud=cloud_str.lower(),
             region=region.name,
             keys=('remote_identity',),
@@ -1191,6 +1260,8 @@ def write_cluster_config(
     )
     if cloud_specific_failover_overrides is not None:
         variables.update(cloud_specific_failover_overrides)
+    if extra_template_variables is not None:
+        variables.update(extra_template_variables)
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
@@ -1483,7 +1554,9 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
         # case we hash the contents of the symlink destination.
         if os.path.isfile(expanded_src):
             config_hash.update('file'.encode('utf-8'))
-            config_hash.update(_hash_file(expanded_src))
+            if os.path.basename(expanded_src) not in (
+                    _FILE_MOUNT_BASENAMES_SKIP_HASH):
+                config_hash.update(_hash_file(expanded_src))
 
         # This can also be a symlink to a directory. os.walk will treat it as a
         # normal directory and list the contents of the symlink destination.
@@ -1513,8 +1586,14 @@ def _deterministic_cluster_yaml_hash(tmp_yaml_path: str) -> str:
                 # contents.
                 for filename in filenames:
                     config_hash.update(filename.encode('utf-8') + b'\0')
-                    config_hash.update(
-                        _hash_file(os.path.join(dirpath, filename)))
+                    # Filename is recorded above (so an add/remove of a
+                    # transient cache file is still detected); we just don't
+                    # hash the file content for the skip-list, because that
+                    # content drifts independently of any user-meaningful
+                    # change (see _FILE_MOUNT_BASENAMES_SKIP_HASH).
+                    if filename not in _FILE_MOUNT_BASENAMES_SKIP_HASH:
+                        config_hash.update(
+                            _hash_file(os.path.join(dirpath, filename)))
                 config_hash.update(b'\0')
 
         else:
@@ -2049,6 +2128,43 @@ async def async_check_network_connection():
                 continue
 
 
+# Kubeconfig assembly may rewrite a context's cluster/user `name` fields to
+# `<original>__sky__<context>` so that multiple source kubeconfigs declaring
+# the same internal name (e.g. a shared service-account user) do not collide
+# when merged into a single file. The owner identity string is
+# `<cluster>_<user>_<namespace>`, so each rewritten field contributes a
+# `__sky__<context>` segment and changes the identity shape. Strip those
+# segments before comparing a stored owner against the current identity,
+# otherwise clusters whose owner was recorded before the convention existed
+# are flagged as owner mismatches.
+_KUBE_NAME_SCOPE_SEP = '__sky__'
+
+
+def _normalize_kube_identity(identity_str: str) -> str:
+    """Strip `__sky__<context>` scope segments from a k8s owner identity.
+
+    Both the cluster and user fields are scoped by the *same* context, and a
+    Kubernetes namespace cannot contain `_`, so the context token is exactly
+    the text between the last `__sky__` and the final `_<namespace>`. Removing
+    every occurrence of that token recovers the pre-scoping identity even when
+    the context, cluster, or user names contain underscores (e.g. GKE contexts
+    like `gke_<project>_<zone>_<cluster>`).
+    """
+    sep = _KUBE_NAME_SCOPE_SEP
+    last = identity_str.rfind(sep)
+    if last == -1:
+        return identity_str
+    ctx_start = last + len(sep)
+    # The namespace is the final underscore-free field, so the last `_` in the
+    # whole string is the namespace separator; the context token sits between
+    # the last scope separator and it.
+    ns_sep = identity_str.rfind('_')
+    if ns_sep <= ctx_start:
+        return identity_str
+    ctx = identity_str[ctx_start:ns_sep]
+    return identity_str.replace(f'{sep}{ctx}', '')
+
+
 @timeline.event
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
@@ -2111,20 +2227,27 @@ def _check_owner_identity_with_record(cluster_name: str,
                 f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but ' + err_msg)
 
-    if owner_identity is None and is_k8s_cloud:
-        config = global_user_state.get_cluster_yaml_dict(handle.cluster_yaml)
-        provider_config = config['provider']
-        context = provider_config.get('context')
-        assert isinstance(context, str)
-        try:
-            identity = clouds.Kubernetes.get_identity_from_context_name(context)
-            global_user_state.set_owner_identity_for_cluster(
-                cluster_name, identity)
-            logger.debug(f'Successfully patched {cluster_name} owner identity '
-                         f'to {identity} (launched on {context}).')
-            return
-        except exceptions.CloudUserIdentityError:
-            _raise_identity_error()
+    if owner_identity is None:
+        if is_k8s_cloud:
+            config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            provider_config = config['provider']
+            context = provider_config.get('context')
+            assert isinstance(context, str)
+            try:
+                identity = clouds.Kubernetes.get_identity_from_context_name(
+                    context)
+            except exceptions.CloudUserIdentityError:
+                _raise_identity_error()
+        else:
+            identity = user_identities[0]
+            context = None
+        global_user_state.set_owner_identity_for_cluster(cluster_name, identity)
+        msg = f'Successfully patched {cluster_name} owner identity to {identity}'
+        if context is not None:
+            msg += f' (launched on context {context})'
+        logger.debug(msg)
+        return
 
     assert isinstance(owner_identity, list)
     # It is OK if the owner identity is shorter, which will happen when
@@ -2135,7 +2258,16 @@ def _check_owner_identity_with_record(cluster_name: str,
             # Clean up the owner identity for the backslash and newlines, caused
             # by the cloud CLI output, e.g. gcloud.
             owner = owner.replace('\n', '').replace('\\', '')
-            if owner == current:
+            # On Kubernetes, the stored owner may predate kubeconfig name
+            # scoping (see `_normalize_kube_identity`). Treat an owner that
+            # matches only after stripping the `__sky__<context>` suffixes as
+            # a match, and self-heal the row to the current identity so later
+            # checks match exactly and `sky status` stops reporting a stale
+            # mismatch.
+            scope_only_match = (is_k8s_cloud and owner != current and
+                                _normalize_kube_identity(owner)
+                                == _normalize_kube_identity(current))
+            if owner == current or scope_only_match:
                 if not is_k8s_cloud:
                     # We skip patching owner identities for Kubernetes as
                     # we expect users to naturally have multiple clusters
@@ -2163,6 +2295,11 @@ def _check_owner_identity_with_record(cluster_name: str,
                         # showing the warning above again.
                         global_user_state.set_owner_identity_for_cluster(
                             cluster_name, identity)
+                elif scope_only_match:
+                    # Migrate a pre-scoping owner string to the current scoped
+                    # identity so the row stops looking mismatched.
+                    global_user_state.set_owner_identity_for_cluster(
+                        cluster_name, identity)
                 return  # The user identity matches.
     _raise_identity_error()
 
@@ -2626,8 +2763,12 @@ def _update_cluster_status(
     # provider.
     cloud = handle.launched_resources.cloud
 
-    # For Slurm, skip Ray health check since it doesn't use Ray.
-    should_check_ray = cloud is not None and cloud.uses_ray()
+    # Skip Ray health check for clouds that don't use Ray (e.g. Slurm)
+    # or when the provisioner reports no Ray runtime.
+    # TODO(kevin): migrate cloud.uses_ray() -> ProvisionRuntimeMetadata, i.e.
+    # from cloud -> provision layer.
+    should_check_ray = (cloud is not None and cloud.uses_ray() and
+                        handle.provision_runtime_metadata.has_ray)
     if (all_nodes_up and (not should_check_ray or
                           run_ray_status_to_check_ray_cluster_healthy()) and
             not external_cluster_failures):
@@ -2774,6 +2915,41 @@ def _update_cluster_status(
                                                handle.launched_nodes,
                                                node_health)
 
+        # When the per-pod live status doesn't name a cause, recover it from a
+        # durable signal. Two races are covered:
+        # - Eviction (ephemeral-storage / disk / memory pressure) is emitted as
+        #   a kubelet event while the pod can still report Running/Ready and
+        #   pod.status.reason has not caught up -> read the events.
+        # - A run-phase OOMKilled lives in the container's last_state and
+        #   survives the restart, but the Ready condition flips back to True
+        #   once the container is running again, so a snapshot that raced the
+        #   restart misses it -> re-read the pods' current+previous states.
+        # Bounded: only on an abnormal k8s cluster with no status reason.
+        if not status_reason and isinstance(launched_resources.cloud,
+                                            clouds.Kubernetes):
+            try:
+                ray_config = global_user_state.get_cluster_yaml_dict(
+                    handle.cluster_yaml)
+                if ray_config and 'provider' in ray_config:
+                    pod_names = list(node_statuses.keys())
+                    status_reason = (
+                        k8s_instance.get_cluster_failure_reason_from_events(
+                            ray_config['provider'], pod_names) or
+                        k8s_instance.get_cluster_failure_reason_from_pods(
+                            ray_config['provider'], pod_names) or '')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get pod failure reason for '
+                             f'{cluster_name!r}: {e}')
+
+        # Nodes not in UP/STOPPED (e.g. INIT for a Failed k8s pod) — must
+        # be checked before some_nodes_not_stopped, which would otherwise
+        # report the misleading "some but not all nodes are stopped" for
+        # a single-node cluster whose only node is INIT.
+        abnormal_state_nodes = [
+            name for name, (s, _) in node_statuses.items()
+            if s not in (status_lib.ClusterStatus.UP,
+                         status_lib.ClusterStatus.STOPPED)
+        ]
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
         elif ray_cluster_unhealthy:
@@ -2785,6 +2961,17 @@ def _update_cluster_status(
             else:
                 init_reason = (
                     f'ray cluster is unhealthy ({ray_status_details})')
+        elif abnormal_state_nodes:
+            if status_reason:
+                init_reason = status_reason
+                status_reason = ''
+            else:
+                distinct_states = sorted(
+                    {node_statuses[n][0].value for n in abnormal_state_nodes})
+                init_reason = (
+                    f'{len(abnormal_state_nodes)} of {handle.launched_nodes} '
+                    f'node(s) in unexpected state: '
+                    f'{", ".join(distinct_states)}')
         elif some_nodes_not_stopped:
             init_reason = 'some but not all nodes are stopped'
         logger.debug('The cluster is abnormal. Setting to INIT status. '
@@ -2886,12 +3073,14 @@ def _update_cluster_status(
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = (f'^Cluster is abnormal because '
-                                 f'{re.escape(init_reason)}.*')
-        log_message = f'Cluster is abnormal because {init_reason}'
+            init_reason_regex = (
+                f'^{re.escape(global_user_state.ABNORMAL_STATUS_REASON_PREFIX)}'
+                f' {re.escape(init_reason)}.*')
+        log_message = (f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} '
+                       f'{init_reason}')
         if status_reason:
             log_message += f' ({status_reason})'
-        log_message += '. Transitioned to INIT.'
+        log_message += '. Transitioned to INIT (details: cluster is unhealthy).'
         # Do not add event if the cluster is already in INIT status.
         if status != status_lib.ClusterStatus.INIT:
             global_user_state.add_cluster_event(
@@ -2933,6 +3122,40 @@ def _update_cluster_status(
 
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
+
+    # For Kubernetes, recover an autodown that completed between two refreshes.
+    # On k8s, autostop is implemented as autodown (pod termination); if skylet
+    # deleted the pods before a refresh caught the cluster in AUTOSTOPPING, we
+    # would otherwise record only the generic cleanup event below. Skylet leaves
+    # a durable Event breadcrumb
+    # (kubernetes/instance.py::emit_autostop_event_best_effort) that outlives the
+    # deleted pods, so read it back and attribute the termination to autostop.
+    # nop_if_duplicate keeps the timeline clean in the non-race case where
+    # 'Cluster is autostopping.' was already recorded. Only attempt this when the
+    # cluster was configured with autostop/autodown -- otherwise the breadcrumb
+    # cannot exist and the lookup is pointless.
+    if (record['autostop'] >= 0 and to_terminate and
+            isinstance(launched_resources.cloud, clouds.Kubernetes)):
+        try:
+            ray_config = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            if ray_config and 'provider' in ray_config:
+                autostop_event = k8s_instance.get_cluster_autostop_event(
+                    ray_config['provider'],
+                    handle.cluster_name_on_cloud,
+                    since=record['launched_at'])
+                if autostop_event is not None:
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        None,
+                        'Cluster was autodowned (idle timeout).',
+                        global_user_state.ClusterEventType.STATUS_CHANGE,
+                        nop_if_duplicate=True,
+                        transitioned_at=autostop_event.get('transitioned_at'))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug('Failed to record autodown event for '
+                         f'{cluster_name!r}: {e}')
+
     global_user_state.add_cluster_event(
         cluster_name,
         None,
@@ -3652,6 +3875,20 @@ def get_clusters(
         terminated, the record will be omitted from the returned list.
     """
     accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+
+    # Defense-in-depth: even if some caller bypasses the HTTP layer's
+    # role_filter shim and reaches here with include_credentials=True
+    # on behalf of a viewer-roled user, refuse to embed SSH key
+    # contents in the response. We resolve the caller via
+    # USER_ID_ENV_VAR which the executor propagates into the worker
+    # process (sky/server/requests/executor.py:377). Reading from the
+    # in-memory casbin enforcer state (get_roles_for_user) avoids a
+    # DB roundtrip on the hot status path.
+    if include_credentials:
+        if _caller_is_viewer():
+            logger.debug('Suppressing include_credentials for viewer caller')
+            include_credentials = False
+
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -3947,6 +4184,16 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     if resources is not None and resources.accelerators is not None:
         resources_dict.update(resources.accelerators)
     return resources_dict
+
+
+def get_num_gpus_per_node(task: 'task_lib.Task') -> int:
+    """Returns the number of GPUs per node for the task."""
+    demands = get_task_demands_dict(task)
+    demands.pop('CPU', None)
+    if not demands:
+        return 0
+    acc_count = list(demands.values())[0]
+    return int(math.ceil(acc_count))
 
 
 def get_task_resources_str(task: 'task_lib.Task',
@@ -4318,6 +4565,99 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
 T = TypeVar('T')
 
 
+def _raise_if_ctx_canceled() -> None:
+    """If we are running inside a cancelled SkyPilotContext, raise immediately.
+
+    Used between gRPC retry attempts so a context cancelled during the
+    backoff sleep does not silently start a new RPC that nobody is waiting
+    for.
+    """
+    ctx = context_lib.get()
+    if ctx is not None and ctx.is_canceled():
+        raise asyncio.CancelledError(
+            'SkyPilotContext cancelled during Skylet retry')
+
+
+def _cancelled_via_ctx(ctx: 'context_lib.SkyPilotContext',
+                       err: 'grpc.RpcError') -> bool:
+    """Did this RpcError come from ctx.cancel() firing our call.cancel()?"""
+    return ctx.is_canceled() and err.code() == grpc.StatusCode.CANCELLED
+
+
+def invoke_grpc_unary(method: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call a gRPC unary method; cancel it on SkyPilotContext cancel.
+
+    Without this wrapper, ``method(request, timeout=...)`` blocks the worker
+    thread inside ``threading.Condition.wait()`` until the gRPC deadline
+    fires, even if the surrounding asyncio task has already been cancelled
+    and nobody is waiting for the result.
+
+    Using ``method.future(...)`` exposes the underlying call object, which
+    can be cancelled from any thread; we register that cancellation with the
+    active SkyPilotContext so it fires on client disconnect, request
+    cancellation, or any other code path that calls ``ctx.cancel()``.
+
+    When the surrounding ctx cancels the call, the gRPC ``CANCELLED``
+    ``RpcError`` is re-raised as ``asyncio.CancelledError`` so the request
+    executor classifies the request as CANCELLED rather than FAILED.
+
+    With no active context, this falls through to the plain blocking call.
+    ``*args`` / ``**kwargs`` are forwarded verbatim so callers can pass
+    ``metadata``, ``credentials``, ``wait_for_ready`` and other gRPC
+    options unchanged.
+    """
+    ctx = context_lib.get()
+    if ctx is None:
+        return method(*args, **kwargs)
+    call = method.future(*args, **kwargs)
+    ctx.register_cancel_callback(call.cancel)
+    try:
+        return call.result()
+    except grpc.RpcError as e:
+        if _cancelled_via_ctx(ctx, e):
+            raise asyncio.CancelledError(
+                'Skylet gRPC call cancelled via SkyPilotContext') from e
+        raise
+    finally:
+        ctx.unregister_cancel_callback(call.cancel)
+
+
+def invoke_grpc_streaming(method: Any, *args: Any,
+                          **kwargs: Any) -> Iterator[Any]:
+    """Call a gRPC unary-stream method; cancel it on SkyPilotContext cancel.
+
+    The streaming iterator returned by gRPC is a ``_MultiThreadedRendezvous``
+    whose ``.cancel()`` aborts the RPC and unblocks any thread stuck in
+    ``__next__``. We register that on the current SkyPilotContext so a
+    client disconnect tears the stream down instead of leaking a worker
+    thread until the (often absent) deadline.
+
+    When the surrounding ctx cancels the stream, the gRPC ``CANCELLED``
+    ``RpcError`` is re-raised as ``asyncio.CancelledError`` (same
+    rationale as ``invoke_grpc_unary``).
+
+    The returned generator unregisters the callback on completion or
+    error, so successful streams that outlive the cancel scope don't leak
+    the iterator's ``.cancel`` reference. ``*args`` / ``**kwargs`` are
+    forwarded verbatim.
+    """
+    ctx = context_lib.get()
+    call = method(*args, **kwargs)
+    if ctx is None:
+        yield from call
+        return
+    ctx.register_cancel_callback(call.cancel)
+    try:
+        yield from call
+    except grpc.RpcError as e:
+        if _cancelled_via_ctx(ctx, e):
+            raise asyncio.CancelledError(
+                'Skylet gRPC stream cancelled via SkyPilotContext') from e
+        raise
+    finally:
+        ctx.unregister_cancel_callback(call.cancel)
+
+
 def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     """Generic helper for making Skylet gRPC requests.
 
@@ -4330,6 +4670,7 @@ def invoke_skylet_with_retries(func: Callable[..., T]) -> T:
     last_exception: Optional[Exception] = None
 
     for _ in range(max_attempts):
+        _raise_if_ctx_canceled()
         try:
             return func()
         except grpc.RpcError as e:
@@ -4349,6 +4690,7 @@ def invoke_skylet_streaming_with_retries(
     last_exception: Optional[Exception] = None
 
     for _ in range(max_attempts):
+        _raise_if_ctx_canceled()
         try:
             for response in stream_func():
                 yield response

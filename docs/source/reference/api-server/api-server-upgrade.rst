@@ -1,12 +1,87 @@
 .. _sky-api-server-upgrade:
 
-Upgrading SkyPilot API Server
-=============================
+Upgrades and High Availability
+==============================
 
-This page provides an overview of the steps you should follow to upgrade a remote SkyPilot API server:
+This page covers how to keep a remote SkyPilot API server resilient and up to date:
 
-* :ref:`sky-api-server-helm-upgrade`
-* :ref:`sky-api-server-vm-upgrade`
+* :ref:`api-server-ha` — back the API server with an external PostgreSQL database for production deployments
+* :ref:`sky-api-server-helm-upgrade` — upgrade a Helm-deployed API server gracefully
+* :ref:`sky-api-server-vm-upgrade` — upgrade an API server deployed on a VM
+
+.. _api-server-ha:
+
+High availability
+-----------------
+
+The SkyPilot API server can be configured for high availability by making it fully stateless — backing it with an external PostgreSQL database decouples API server state from the API server pod, allowing the pod to be restarted, rescheduled, or upgraded (including via :ref:`rolling updates <sky-api-server-upgrade-strategy>`) without losing state.
+
+.. note::
+
+    Multi-replica API server deployments are not supported in open-source SkyPilot.
+
+.. tip::
+
+    **Scaling SkyPilot beyond 20 users or 1,000 GPUs, or need multi-replica high availability?** We would love to talk to you. SkyPilot has been supporting teams with 200+ users and 10,000+ GPUs with high availability and up to 10× faster performance — `sign up here <https://forms.gle/d2q9AVYeMA3eaKXW6>`_.
+
+.. _api-server-persistence-db:
+
+Back the API server with a persistent database
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The API server can optionally be configured with a PostgreSQL database to persist state. It can be an externally managed database.
+
+If a persistent DB is not specified, the API server uses a Kubernetes persistent volume to persist state.
+
+.. note::
+
+  Database configuration must be set in the Helm deployment.
+
+Configure PostgreSQL during the first Helm deployment using one of the two options below.
+
+**Option 1: Set the DB connection URI in helm values**
+
+Set :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` to ``postgresql://<username>:<password>@<host>:<port>/<database>`` in the helm values:
+
+.. code-block:: bash
+
+    # --reuse-values keeps the Helm chart values set in the previous step
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
+
+**Option 2: Set the DB connection URI via Kubernetes secret**
+
+(available on nightly version 20250626 and later)
+
+Create a Kubernetes secret that contains the DB connection URI:
+
+.. code-block:: bash
+
+    kubectl create secret generic skypilot-db-connection-uri \
+      --namespace $NAMESPACE \
+      --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
+
+When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
+
+You can also directly set this value in the ``values.yaml`` file, e.g.:
+
+.. code-block:: yaml
+
+    apiService:
+      dbConnectionSecretName: skypilot-db-connection-uri
+
+.. note::
+
+    Once :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>` or :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` is specified, no other SkyPilot configuration can be specified in the helm chart. That is, :ref:`apiService.config <helm-values-apiService-config>` must be ``null``. To set any other SkyPilot configuration, see :ref:`sky-api-server-config`.
 
 .. _sky-api-server-helm-upgrade:
 

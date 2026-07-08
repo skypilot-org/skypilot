@@ -214,13 +214,13 @@ class DO(clouds.Cloud):
         else:
             custom_resources = None
         image_id = None
-        if (resources.image_id is not None and
-                resources.extract_docker_image() is None):
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is not None:
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                assert region.name in resources.image_id
-                image_id = resources.image_id[region.name]
+                assert region.name in cloud_image_id
+                image_id = cloud_image_id[region.name]
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,

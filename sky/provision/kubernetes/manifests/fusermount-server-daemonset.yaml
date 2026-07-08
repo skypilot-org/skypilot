@@ -23,7 +23,7 @@ spec:
         effect: NoExecute
       containers:
       - name: server
-        image: berkeleyskypilot/fusermount-server:0.2.1
+        image: berkeleyskypilot/fusermount-server:0.2.2
         securityContext:
           privileged: true
         volumeMounts:

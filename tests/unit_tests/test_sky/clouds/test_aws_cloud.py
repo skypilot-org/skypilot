@@ -627,6 +627,35 @@ class TestEfaHelpers:
             aws_mod._get_max_efa_interfaces('g6.12xlarge', 'ap-northeast-1')
 
 
+class TestAwsLoginIdentityDetection:
+    """Detection of the `aws login` credential provider (2026 AWS CLI command)."""
+
+    @mock.patch('sky.adaptors.aws.get_workspace_profile')
+    @mock.patch('subprocess.run')
+    def test_aws_login_detected_as_LOGIN_identity_type(self, mock_run,
+                                                       mock_get_profile):
+        """`aws configure list` Type column 'login' → AWSIdentityType.LOGIN."""
+        configure_list_output = (
+            b'      Name                    Value             Type    Location\n'
+            b'      ----                    -----             ----    --------\n'
+            b'   profile                <not set>             None    None\n'
+            b'access_key     ****************abcd            login\n'
+            b'secret_key     ****************abcd            login\n'
+            b'    region                ap-northeast-1      config-file    ~/.aws/config\n'
+        )
+        mock_run.return_value = mock.Mock(returncode=0,
+                                          stdout=configure_list_output)
+        mock_get_profile.return_value = None
+        aws_mod.AWS._aws_configure_list.cache_clear()
+
+        identity_type = aws_mod.AWS._current_identity_type()
+        assert identity_type == aws_mod.AWSIdentityType.LOGIN
+
+    def test_login_credentials_do_not_auto_expire(self):
+        """LOGIN auto-rotates via refresh token, so should not be in expirable set."""
+        assert not aws_mod.AWSIdentityType.LOGIN.can_credential_expire()
+
+
 class TestAwsConfigureList:
 
     @mock.patch('sky.adaptors.aws.get_workspace_profile')
@@ -773,3 +802,39 @@ class TestAwsConfigFileEnvVar:
         assert mounts == {
             aws_mod._DEFAULT_AWS_CONFIG_PATH: str(credential_file)
         }
+
+
+class TestGetDefaultAmi:
+    """Tests for AWS._get_default_ami GPU image selection."""
+
+    def _patch(self, monkeypatch, acc, arch):
+        # Echo the requested tag back so we can assert which image was chosen.
+        monkeypatch.setattr(aws_mod.catalog, 'get_image_id_from_tag',
+                            lambda tag, region, clouds: tag)
+        monkeypatch.setattr(aws_mod.AWS, 'get_accelerators_from_instance_type',
+                            classmethod(lambda cls, instance_type: acc))
+        monkeypatch.setattr(aws_mod.AWS, 'get_arch_from_instance_type',
+                            classmethod(lambda cls, instance_type: arch))
+
+    def test_turing_gpu_uses_cuda13_default(self, monkeypatch):
+        self._patch(monkeypatch, {'T4': 1}, 'x86_64')
+        result = aws_mod.AWS._get_default_ami('us-east-1', 'g4dn.xlarge')
+        assert result == aws_mod._DEFAULT_GPU_IMAGE_ID
+
+    @pytest.mark.parametrize('acc_name', ['V100', 'M60'])
+    def test_pre_turing_gpu_uses_legacy_cuda12(self, monkeypatch, acc_name):
+        self._patch(monkeypatch, {acc_name: 1}, 'x86_64')
+        result = aws_mod.AWS._get_default_ami('us-east-1', 'p3.2xlarge')
+        assert result == aws_mod._DEFAULT_GPU_CUDA12_IMAGE_ID
+
+    def test_k80_uses_k80_image(self, monkeypatch):
+        self._patch(monkeypatch, {'K80': 1}, 'x86_64')
+        result = aws_mod.AWS._get_default_ami('us-east-1', 'p2.xlarge')
+        assert result == aws_mod._DEFAULT_GPU_K80_IMAGE_ID
+
+    def test_arm64_gpu_uses_cuda13_arm64(self, monkeypatch):
+        # All arm64 GPUs (e.g. GH200) are Turing+, so they use the default
+        # cuda13 arm64 image.
+        self._patch(monkeypatch, {'GH200': 1}, 'arm64')
+        result = aws_mod.AWS._get_default_ami('us-east-1', 'g5g.xlarge')
+        assert result == aws_mod._DEFAULT_GPU_ARM64_IMAGE_ID

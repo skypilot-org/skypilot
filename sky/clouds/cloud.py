@@ -190,6 +190,8 @@ class Cloud:
         """Returns whether this cloud uses Ray as the distributed
         execution framework.
         """
+        # TODO(kevin): migrate this to ProvisionRuntimeMetadata, i.e. from cloud
+        # -> provision layer.
         return True
 
     #### Regions/Zones ####

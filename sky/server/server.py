@@ -19,6 +19,7 @@ import shlex
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -27,11 +28,11 @@ import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
+import zlib
 
 import aiofiles
 import anyio
 import fastapi
-from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import jwt as pyjwt
 import starlette.background
@@ -48,6 +49,7 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.data import storage_utils
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -59,6 +61,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
+from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -82,10 +85,12 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
+from sky.users import rbac
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
@@ -122,6 +127,11 @@ _SERVER_USER_HASH_KEY = 'server_user_hash'
 
 logger = sky_logging.init_logger(__name__)
 
+# Resolved once at import so `subprocess.Popen(executable=...)` gets an
+# absolute path — a required precondition for Python subprocess to route
+# through posix_spawn instead of fork_exec.
+_KUBECTL_PATH: Optional[str] = shutil.which('kubectl')
+
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
 # need to be detached from the main requests queue. Otherwise, the streaming
 # response will block other requests from being processed.
@@ -131,7 +141,26 @@ def _basic_auth_401_response(content: str):
     """Return a 401 response with basic auth realm."""
     return fastapi.responses.JSONResponse(
         status_code=401,
-        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        headers={
+            'WWW-Authenticate': 'Basic realm=\"SkyPilot\"',
+            # Prevent CDNs/browsers from caching auth failures on cacheable
+            # URLs (e.g. /dashboard/_next/...), which would otherwise poison
+            # the dashboard for all subsequent users.
+            'Cache-Control': 'no-store',
+        },
+        content=content)
+
+
+def _bearer_auth_401_response(content):
+    """Return a 401 response for bearer token authentication failures."""
+    return fastapi.responses.JSONResponse(
+        status_code=401,
+        headers={
+            # Prevent CDNs/browsers from caching auth failures on cacheable
+            # URLs (e.g. /dashboard/_next/...), which would otherwise poison
+            # the dashboard for all subsequent users.
+            'Cache-Control': 'no-store',
+        },
         content=content)
 
 
@@ -254,8 +283,11 @@ def _extract_user_from_header(
     if not user_name:
         return None
 
+    # MD5 only derives a stable user id from the (non-secret) user name;
+    # not a security use.
     user_hash = hashlib.md5(
-        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        user_name.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
     if proxy_config.enabled:
         return models.User(id=user_hash,
                            name=user_name,
@@ -399,15 +431,14 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         # After this point, all requests must be validated.
 
         if auth_header is None:
-            return fastapi.responses.JSONResponse(
-                status_code=401, content={'detail': 'Authentication required'})
+            return _bearer_auth_401_response(
+                {'detail': 'Authentication required'})
 
         # Extract token
         split_header = auth_header.split(' ', 1)
         if split_header[0].lower() != 'bearer':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Invalid authentication method'})
+            return _bearer_auth_401_response(
+                {'detail': 'Invalid authentication method'})
         sa_token = split_header[1]
 
         # Handle SkyPilot service account tokens
@@ -421,9 +452,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         sa_enabled = os.environ.get(constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
                                     'false').lower()
         if sa_enabled != 'true':
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={'detail': 'Service account authentication disabled'})
+            return _bearer_auth_401_response(
+                {'detail': 'Service account authentication disabled'})
 
         try:
             # Import here to avoid circular imports
@@ -435,11 +465,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             if payload is None:
                 logger.warning('Service account token verification failed')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={
-                        'detail': 'Invalid or expired service account token'
-                    })
+                return _bearer_auth_401_response(
+                    {'detail': 'Invalid or expired service account token'})
 
             # Extract user information from JWT payload
             user_id = payload.get('sub')
@@ -449,23 +476,46 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             if not user_id or not token_id:
                 logger.warning(
                     'Invalid token payload: missing user_id or token_id')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={'detail': 'Invalid token payload'})
+                return _bearer_auth_401_response(
+                    {'detail': 'Invalid token payload'})
+
+            # Look up the token row by its sha256 hash. This is what makes
+            # revocation (row deleted) and rotation (row's hash replaced)
+            # take effect at request time -- the JWT alone cannot be revoked.
+            # We match on hash rather than token_id because rotation updates
+            # the row's hash but keeps the original token_id, while the new
+            # JWT carries a freshly-generated token_id; only the hash is
+            # consistent between the live JWT and the live DB row.
+            incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
+            token_row = global_user_state.get_service_account_token_by_hash(
+                incoming_hash)
+            if token_row is None:
+                logger.warning(
+                    f'Service account token {token_id} not found in DB '
+                    '(revoked or rotated)')
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account token revoked or rotated'})
+
+            if (token_row['expires_at'] is not None and
+                    token_row['expires_at'] < int(time.time())):
+                logger.warning(f'Service account token {token_id} has expired')
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
             user_info = global_user_state.get_user(user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
-                return fastapi.responses.JSONResponse(
-                    status_code=401,
-                    content={'detail': 'Service account user no longer exists'})
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account user no longer exists'})
 
-            # Update last used timestamp for token tracking
+            # Update last used timestamp for token tracking. Use the
+            # DB row's token_id (not the JWT's): after rotation the JWT
+            # carries a different token_id than the DB row.
             try:
                 global_user_state.update_service_account_token_last_used(
-                    token_id)
+                    token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to update token last used time: {e}')
 
@@ -479,11 +529,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
-            return fastapi.responses.JSONResponse(
-                status_code=401,
-                content={
-                    'detail': f'Service account authentication failed: {str(e)}'
-                })
+            return _bearer_auth_401_response(
+                {'detail': f'Service account authentication failed: {str(e)}'})
 
         return await call_next(request)
 
@@ -529,8 +576,13 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
-                permission.permission_service.add_user_if_not_exists(
-                    auth_user.id)
+                # Offload the blocking config reload + role seed to a worker
+                # thread so this async middleware doesn't block the event loop.
+                # The reload lets a runtime `rbac.default_role` change take
+                # effect for this new user without a restart (the main
+                # API-server process does not reload config per request).
+                await asyncio.to_thread(permission.seed_new_user_role,
+                                        auth_user.id)
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
@@ -644,22 +696,96 @@ async def cleanup_download_tmp():
                          f'{common_utils.format_exception(e)}')
 
 
+def _prune_sky_logs(cutoff: float) -> int:
+    """Remove ~/sky_logs artifacts older than cutoff; returns count removed.
+
+    Only sky-* dirs are swept, sparing the job/request log trees that share
+    ~/sky_logs (api_server/, jobs_controller/, managed_jobs/, <job_id>-*).
+    Dirs holding the provision log of an existing cluster are kept regardless
+    of age so /provision_logs keeps serving live clusters; once the cluster
+    is terminated its logs fall back to the age-based retention.
+    """
+    sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+    if not os.path.isdir(sky_logs_dir):
+        return 0
+    protected_dirs = {
+        os.path.basename(os.path.dirname(path))
+        for path in global_user_state.get_all_cluster_provision_log_paths()
+    }
+    removed = 0
+    for entry in os.scandir(sky_logs_dir):
+        if not entry.name.startswith('sky-') or entry.name in protected_dirs:
+            continue
+        try:
+            if (entry.is_dir(follow_symlinks=False) and
+                    entry.stat().st_mtime < cutoff):
+                shutil.rmtree(entry.path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            pass
+    # sky.client.common.FILE_UPLOAD_LOGS_DIR; not imported since the server
+    # should not depend on the client.
+    file_uploads_dir = os.path.join(sky_logs_dir, 'file_uploads')
+    if os.path.isdir(file_uploads_dir):
+        for entry in os.scandir(file_uploads_dir):
+            try:
+                if (entry.is_file(follow_symlinks=False) and
+                        entry.stat().st_mtime < cutoff):
+                    os.remove(entry.path)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+async def cleanup_sky_logs():
+    """Hourly GC of expired per-operation ~/sky_logs artifacts."""
+    while True:
+        try:
+            skypilot_config.reload_config()
+            retention_hours = skypilot_config.get_nested(
+                ('api_server', 'logs_retention_hours'),
+                server_constants.DEFAULT_LOGS_RETENTION_HOURS)
+            if retention_hours >= 0:
+                cutoff = time.time() - retention_hours * 3600
+                removed = await asyncio.to_thread(_prune_sky_logs, cutoff)
+                if removed:
+                    logger.info(f'Cleaned up {removed} ~/sky_logs artifact(s) '
+                                f'older than {retention_hours} hours')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_sky_logs: '
+                         f'{common_utils.format_exception(e)}')
+        await asyncio.sleep(3600)
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
 
     pid = str(os.getpid())
     lag_threshold = perf_utils.get_loop_lag_threshold()
+    # Tumbling 30s window peak per process — paired with the pid-less lag
+    # histogram so we keep per-worker visibility without histogram cardinality.
+    # Uses loop.time() (monotonic) so NTP adjustments cannot warp the window.
+    lag_max_window_seconds = 30.0
+    lag_max_window_end = loop.time() + lag_max_window_seconds
+    lag_max_in_window = 0.0
 
     def tick():
-        nonlocal target
+        nonlocal target, lag_max_window_end, lag_max_in_window
         now = loop.time()
         lag = max(0.0, now - target)
         if lag_threshold is not None and lag > lag_threshold:
             logger.warning(f'Event loop lag {lag} seconds exceeds threshold '
                            f'{lag_threshold} seconds.')
-        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.labels(
-            pid=pid).observe(lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_SECONDS.observe(lag)
+        if now >= lag_max_window_end:
+            lag_max_window_end = now + lag_max_window_seconds
+            lag_max_in_window = lag
+        else:
+            lag_max_in_window = max(lag_max_in_window, lag)
+        metrics_utils.SKY_APISERVER_EVENT_LOOP_LAG_MAX_SECONDS.labels(
+            pid=pid).set(lag_max_in_window)
         target = now + interval
         loop.call_at(target, tick)
 
@@ -688,26 +814,15 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
 
-    # Startup: Run background tasks
+    # Startup: Run background tasks. Delete any persisted daemon rows whose
+    # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
+    # removed in code), then submit each current daemon.
+    await requests_lib.delete_orphan_internal_daemons_async(
+        daemons.INTERNAL_REQUEST_DAEMONS)
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
             continue
-        try:
-            await executor.schedule_request_async(
-                request_id=event.id,
-                request_name=event.name,
-                request_body=payloads.RequestBody(),
-                func=event.run_event,
-                schedule_type=requests_lib.ScheduleType.SHORT,
-                is_skypilot_system=True,
-                # Request deamon should be retried if the process pool is
-                # broken.
-                retryable=True,
-            )
-        except exceptions.RequestAlreadyExistsError:
-            # Lifespan will be executed in each uvicorn worker process, we
-            # can safely ignore the error if the task is already scheduled.
-            logger.debug(f'Request {event.id} already exists.')
+        await executor.schedule_internal_daemon_async(event)
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
@@ -813,7 +928,19 @@ class CacheControlStaticMiddleware(starlette.middleware.base.BaseHTTPMiddleware
     async def dispatch(self, request: fastapi.Request, call_next):
         if request.url.path.startswith('/dashboard/_next'):
             response = await call_next(request)
-            response.headers['Cache-Control'] = 'max-age=3600'
+            # Respect an explicit Cache-Control set by downstream middleware
+            # or handlers (e.g. an auth middleware that set 'no-store' on a
+            # 401). Otherwise, fall back to the static-asset defaults.
+            if 'Cache-Control' not in response.headers:
+                if response.status_code >= 400:
+                    # Error responses (e.g. 401 from an auth middleware) must
+                    # not be cached: a CDN that caches them for the same path
+                    # will serve the error to all subsequent users until the
+                    # cache entry expires, breaking the dashboard for
+                    # everyone.
+                    response.headers['Cache-Control'] = 'no-store'
+                else:
+                    response.headers['Cache-Control'] = 'max-age=3600'
             return response
         return await call_next(request)
 
@@ -945,7 +1072,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 # TODO(aylei): move uvicorn app out of the top-level module to avoid
 # duplicate app initialization.
 if __name__ == 'sky.server.server':
-    plugins.load_plugins(plugins.ExtensionContext(app=app))
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.UVICORN,
+                                 app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -1409,13 +1538,17 @@ async def _receive_and_assemble_chunks(
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
+    # Write chunk to a unique private path first, so concurrent uploads for
+    # a same blob does not interleave with each other.
     if total_chunks == 1:
         await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = base_dir / f'{zip_name}.zip'
+        final_path = base_dir / f'{zip_name}.zip'
+        zip_file_path = base_dir / f'{zip_name}.tmp.{uuid.uuid4().hex}.zip'
     else:
         chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
+        final_path = chunk_dir / f'part{chunk_index}'
+        zip_file_path = chunk_dir / f'part{chunk_index}.tmp.{uuid.uuid4().hex}'
 
     try:
         async with aiofiles.open(zip_file_path, 'wb') as f:
@@ -1437,35 +1570,64 @@ async def _receive_and_assemble_chunks(
                     f'{common_utils.format_exception(e)}'))
 
     def get_missing_chunks(total_chunks: int) -> Set[str]:
-        return set(f'part{i}' for i in range(total_chunks)) - set(
-            p.name for p in chunk_dir.glob('part*'))
+        existing = set()
+        for p in chunk_dir.glob('part*'):
+            # Filter out tmp files (e.g. ``part0.tmp.<hex>``) that may
+            # belong to in-flight concurrent writers.  Only renamed
+            # final names ``part{N}`` count toward completion.
+            name = p.name
+            suffix = name[len('part'):] if name.startswith('part') else ''
+            if suffix.isdigit():
+                existing.add(name)
+        return set(f'part{i}' for i in range(total_chunks)) - existing
+
+    # Rename the writer-unique tmp file to its final name.
+    os.rename(str(zip_file_path), str(final_path))
+    zip_file_path = final_path
 
     if total_chunks > 1:
-        zip_file_path.rename(zip_file_path.with_suffix(''))
         missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        if assemble:
-            zip_file_path = base_dir / f'{zip_name}.zip'
-            async with aiofiles.open(zip_file_path, 'wb') as zip_file:
-                for chunk in range(total_chunks):
-                    async with aiofiles.open(chunk_dir / f'part{chunk}',
-                                             'rb') as f:
-                        while True:
-                            # Use 64KB buffer to avoid memory overflow, same
-                            # size as shutil.copyfileobj.
-                            data = await f.read(64 * 1024)
-                            if not data:
-                                break
-                            await zip_file.write(data)
-    logger.info(f'Uploaded zip file: {zip_file_path}')
+    logger.info(f'Uploaded chunk: {zip_file_path}')
+    if assemble:
+        await _finalize_chunked_upload(base_dir=base_dir,
+                                       zip_name=zip_name,
+                                       total_chunks=total_chunks,
+                                       extract=extract)
+    return None
+
+
+async def _finalize_chunked_upload(
+    base_dir: pathlib.Path,
+    zip_name: str,
+    total_chunks: int,
+    extract: bool,
+) -> None:
+    """Assemble parts into a single zip and optionally extract it."""
+    if total_chunks > 1:
+        chunk_dir = base_dir / zip_name
+        zip_file_path = base_dir / f'{zip_name}.zip'
+        async with aiofiles.open(zip_file_path, 'wb') as zip_file:
+            for chunk in range(total_chunks):
+                async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
+                    while True:
+                        # Use 64KB buffer to avoid memory overflow, same
+                        # size as shutil.copyfileobj.
+                        data = await f.read(64 * 1024)
+                        if not data:
+                            break
+                        await zip_file.write(data)
+    else:
+        # ``{base_dir}/{zip_name}.zip`` (renamed by the receive step).
+        zip_file_path = base_dir / f'{zip_name}.zip'
+
     if extract:
         await unzip_file(zip_file_path, base_dir)
-    if total_chunks > 1 and assemble:
-        await asyncio.to_thread(shutil.rmtree, chunk_dir)
-    return None
+    if total_chunks > 1:
+        await asyncio.to_thread(shutil.rmtree, base_dir / zip_name)
 
 
 # TODO(aylei): for backward compatibility, remove after v0.14.0
@@ -1557,27 +1719,35 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
+    # Receive the chunk WITHOUT holding the upload lock.  Each chunk
+    # writes to a writer-unique tmp file, then atomic-renames to its
+    # final ``part{N}`` name, so concurrent chunk POSTs (parallel
+    # workers, retries, or two clients racing on the same content-
+    # hashed blob_id) don't need lock coordination here.
+    # Note that we skip assemble and extract here since cocurrent chunk
+    # uploads will race, and we do finalize with the upload_lock instead.
+    staging_dir = storage.get_staging_dir(user_id, upload_id)
+    result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                zip_name='staging',
+                                                request=request,
+                                                chunk_index=chunk_index,
+                                                total_chunks=total_chunks,
+                                                extract=False,
+                                                assemble=False)
+    if result is not None:
+        return result
+
+    # All chunks present — finalize and publish under the upload
+    # lock so exactly one caller does the assemble/extract/rename.
     async with storage.acquire_upload_lock(user_id, upload_id):
-        # Re-check after acquiring the lock: another upload may have
-        # completed while we were waiting.
         if target_dir.exists():
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.COMPLETED.value)
-
-        # Receive chunks, assemble, and extract into staging dir.
-        staging_dir = storage.get_staging_dir(user_id, upload_id)
-        result = await _receive_and_assemble_chunks(
-            base_dir=staging_dir,
-            zip_name='staging',
-            request=request,
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            extract=storage.extract_on_upload(),
-            assemble=storage.assemble_on_upload())
-        if result is not None:
-            return result
-        # Atomic rename of the extracted staging dir to the final
-        # directory (same filesystem).
+        if storage.assemble_on_upload() or storage.extract_on_upload():
+            await _finalize_chunked_upload(base_dir=staging_dir,
+                                           zip_name='staging',
+                                           total_chunks=total_chunks,
+                                           extract=storage.extract_on_upload())
         await storage.store_blob(user_id, upload_id, staging_dir)
         logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
@@ -1725,7 +1895,8 @@ async def stop(request: fastapi.Request,
 @app.post('/status')
 async def status(
     request: fastapi.Request,
-    status_body: payloads.StatusBody = payloads.StatusBody()
+    status_body: payloads.StatusBody = fastapi.Depends(
+        role_filter.force_viewer_status_body),
 ) -> None:
     """Gets cluster statuses."""
     if state.get_block_requests():
@@ -1767,7 +1938,7 @@ async def down(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_DOWN,
         request_body=down_body,
-        func=core.down,
+        func=core.user_initiated_down,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=down_body.cluster_name,
         auth_user=request.state.auth_user,
@@ -1961,14 +2132,18 @@ async def download(download_body: payloads.DownloadBody,
             'X-Home-Path': str(pathlib.Path.home())
         }
 
-        # Return the zip file as a download
+        # Return the zip file as a download. starlette.background.BackgroundTask
+        # (singular) runs after the response body is sent. The earlier
+        # `BackgroundTasks().add_task(...)` form was a bug — `.add_task`
+        # returns None, so the unlink never ran and prepared zips
+        # accumulated on disk per download.
         return fastapi.responses.FileResponse(
             path=zip_path,
             filename=zip_filename,
             media_type='application/zip',
             headers=headers,
-            background=fastapi.BackgroundTasks().add_task(
-                lambda: zip_path.unlink(missing_ok=True)))
+            background=starlette.background.BackgroundTask(zip_path.unlink,
+                                                           missing_ok=True))
     except Exception as e:
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
@@ -2044,20 +2219,23 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     )
 
 
-@app.post('/autostop_logs')
-async def autostop_logs(
-    request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,
+@app.post('/hook_logs')
+async def hook_logs(
+    request: fastapi.Request, hook_logs_body: payloads.HookLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    """Tails the autostop hook logs of a cluster."""
+    """Tails lifecycle-hook logs of a cluster.
+
+    If ``event`` is None, auto-selects whichever hook event has fired.
+    """
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
-        request_body=autostop_logs_body,
-        func=core.tail_autostop_logs,
+        request_name=request_names.RequestName.CLUSTER_HOOK_LOGS,
+        request_body=hook_logs_body,
+        func=core.tail_hook_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=autostop_logs_body.cluster_name,
+        request_cluster_name=hook_logs_body.cluster_name,
         auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
@@ -2170,7 +2348,7 @@ async def get_expanded_request_id(request_id: str) -> str:
 
 
 # === API server related APIs ===
-@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/api/get')
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     # Validate request_id prefix matches a single request.
@@ -2223,6 +2401,19 @@ async def stream(
     # 'console': console for CLI/API clients
     # pylint: disable=redefined-builtin
     format: Literal['auto', 'plain', 'html', 'console'] = 'auto',
+    # When set, return the stream as an attachment (browser download)
+    # with this filename. Forces plain-text formatting so the saved
+    # file is the raw log content. Use this to download large running
+    # job logs via `<a download href=/api/stream?...>`: bytes start
+    # flowing the moment the underlying request emits its first chunk,
+    # so the user sees the OS save dialog immediately instead of
+    # waiting for sync_down to complete.
+    download: Optional[str] = None,  # pylint: disable=redefined-outer-name
+    # When 'gz', gzip-stream the bytes inline and adjust the saved
+    # filename to end in .gz. Text logs compress ~10-30x, which makes
+    # multi-GB downloads dramatically faster and smaller; macOS Finder
+    # and most Linux file managers auto-extract on open.
+    compress: Optional[Literal['gz']] = None,
 ) -> fastapi.responses.Response:
     """Streams the logs of a request.
 
@@ -2255,8 +2446,13 @@ async def stream(
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
 
-    # Determine if we should use HTML format
-    if format == 'auto':
+    # download mode forces a plain-text streaming response with an
+    # attachment header — the browser saves the bytes to disk as they
+    # arrive instead of rendering them.
+    if download is not None:
+        format = 'plain'
+        use_html = False
+    elif format == 'auto':
         # Check if request is coming from a browser
         user_agent = request.headers.get('user-agent', '').lower()
         use_html = any(browser in user_agent
@@ -2341,6 +2537,18 @@ async def stream(
         headers[server_constants.STREAM_REQUEST_HEADER] = (
             user_supplied_request_id
             if user_supplied_request_id else request_id)
+    if download is not None:
+        # Sanitize the filename to prevent header injection (CR/LF) and
+        # path traversal (slashes, ..). Restrict to a conservative
+        # ASCII set so we don't have to worry about UTF-8 truncation
+        # landing mid-codepoint.
+        safe_filename = re.sub(r'[^A-Za-z0-9._-]+', '_', download)[:200]
+        if not safe_filename:
+            safe_filename = 'download'
+        if compress == 'gz' and not safe_filename.endswith('.gz'):
+            safe_filename = f'{safe_filename}.gz'
+        headers['Content-Disposition'] = (
+            f'attachment; filename="{safe_filename}"')
 
     if request_id is not None:
         content = log_provider.get_log_provider().log_stream(
@@ -2358,9 +2566,56 @@ async def stream(
                                             follow=follow,
                                             polling_interval=polling_interval)
 
+    media_type = 'text/plain'
+    if compress == 'gz':
+        # Gzip-stream the chunks. We do this as PAYLOAD (not transport)
+        # encoding because the browser would decompress the latter
+        # before saving — defeating the bandwidth/disk savings. The
+        # downloaded file is a real .log.gz that double-clicks open
+        # on macOS / extracts trivially with `gunzip` on Linux.
+        media_type = 'application/gzip'
+        # zlib.MAX_WBITS | 16 = gzip wrapper.
+        compressor = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+
+        async def gzipped():
+            # Track whether we ever observed a non-empty source chunk so
+            # the empty-stream signal (used by the SDK to fall back to
+            # the rsync path for terminal jobs) survives gzip framing.
+            # The gzip header alone is ~10 bytes; we suppress it
+            # entirely for an empty source by skipping the trailing
+            # flush() in that case.
+            saw_payload = False
+            try:
+                async for chunk in content:
+                    if isinstance(chunk, str):
+                        chunk_bytes = chunk.encode('utf-8')
+                    else:
+                        chunk_bytes = chunk
+                    if chunk_bytes:
+                        saw_payload = True
+                        compressed = compressor.compress(chunk_bytes)
+                        if compressed:
+                            yield compressed
+            except (asyncio.CancelledError, GeneratorExit):  # pylint: disable=try-except-raise
+                # Client disconnect: PEP 525 forbids yielding while a
+                # GeneratorExit is propagating, so we explicitly do
+                # not run the flush() yield below.
+                raise
+            # Natural EOF only — emit the gzip trailer if we actually
+            # produced anything; otherwise the response stays empty so
+            # the SDK's bytes_written==0 fallback fires.
+            if saw_payload:
+                tail_bytes = compressor.flush()
+                if tail_bytes:
+                    yield tail_bytes
+
+        out_content: Any = gzipped()
+    else:
+        out_content = content
+
     return fastapi.responses.StreamingResponse(
-        content=content,
-        media_type='text/plain',
+        content=out_content,
+        media_type=media_type,
         headers=headers,
     )
 
@@ -2396,10 +2651,7 @@ async def api_status(
     if request_ids is None:
         statuses = None
         if not all_status:
-            statuses = [
-                requests_lib.RequestStatus.PENDING,
-                requests_lib.RequestStatus.RUNNING,
-            ]
+            statuses = requests_lib.RequestStatus.active_statuses()
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
@@ -2425,7 +2677,29 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/dashboard_config')
+async def dashboard_config() -> Dict[str, Any]:
+    """Returns admin-configured dashboard settings consumed by the UI.
+
+    Currently exposes the optional `external_links` allowlist that the dashboard
+    matches against streamed logs to render labeled external links on cluster
+    and job detail pages.
+    """
+    external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
+                                                [])
+    sanitized: List[Dict[str, str]] = []
+    if isinstance(external_links, list):
+        for entry in external_links:
+            if not isinstance(entry, dict):
+                continue
+            label = entry.get('label')
+            regex = entry.get('regex')
+            if isinstance(label, str) and isinstance(regex, str):
+                sanitized.append({'label': label, 'regex': regex})
+    return {'external_links': sanitized}
+
+
+@app.get('/api/plugins')
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
     plugin_infos = []
@@ -2524,6 +2798,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         latest_version=latest_version,
         # Whether telemetry/usage collection is enabled
         telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
+        # Whether GET /workspaces/config is restricted to admins (so the
+        # dashboard can hide the config UI for non-admins when enabled)
+        restrict_config_to_admins=rbac.restrict_config_to_admins(),
     )
 
 
@@ -2607,19 +2884,58 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
+    # Under hostNetwork the pod's sshd binds a probed port (not 22,
+    # which is owned by the K8s node's own sshd). head_ssh_port flows
+    # from InstanceInfo.ssh_port through cached_external_ssh_ports.
+    head_ssh_port = handle.head_ssh_port or 22
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
-        port_forward=[(None, 22)])
-    proc = await asyncio.create_subprocess_exec(
-        *kubectl_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT)
+        port_forward=[(None, head_ssh_port)])
+    # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
+    # `uv_spawn`, which on Linux always uses fork().
+    # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
+    # Python objects; if any sqlite3 statement is in that set, its
+    # destructor calls `sqlite3_free → pthread_mutex_lock` on the sqlite3
+    # static allocator mutex. That mutex was held by another parent thread at
+    # the fork moment (aiosqlite worker), and the child only has one thread,
+    # so no one ever releases it. Child deadlocks before execv, leaks the
+    # parent's inherited fds (including every `.<request>.lock` flock), and
+    # the parent's event loop stall trips uvicorn's 5s ping-timeout →
+    # parent SIGKILL.
+    # Run `subprocess.Popen` in a worker thread to bypass uvloop's transport
+    # entirely.
+    if _KUBECTL_PATH is None or not os.path.isabs(_KUBECTL_PATH):
+        raise RuntimeError(
+            'kubectl not found on PATH with an absolute path; refusing to '
+            'fall back to fork-based spawn which risks the SQLite-mutex '
+            'ghost-worker deadlock.')
+    argv = [_KUBECTL_PATH] + list(kubectl_cmd[1:])
+
+    def _spawn_sync() -> subprocess.Popen:
+        return subprocess.Popen(
+            argv,
+            executable=_KUBECTL_PATH,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            close_fds=False,
+        )
+
+    loop = asyncio.get_running_loop()
+    proc = await loop.run_in_executor(None, _spawn_sync)
     logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
+
+    # Wrap the sync Popen's stdout pipe as an asyncio StreamReader so the
+    # rest of this handler can stay async.
+    assert proc.stdout is not None
+    stdout_reader = asyncio.StreamReader(loop=loop)
+    await loop.connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(stdout_reader, loop=loop),
+        proc.stdout)
 
     # Wait for port-forward to be ready and get the local port
     local_port = None
-    assert proc.stdout is not None
     while True:
-        stdout_line = await proc.stdout.readline()
+        stdout_line = await stdout_reader.readline()
         if stdout_line:
             decoded_line = stdout_line.decode()
             logger.info(f'kubectl port-forward stdout: {decoded_line}')
@@ -2661,7 +2977,7 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             logger.info('Terminating kubectl port-forward process')
             proc.terminate()
         except ProcessLookupError:
-            stdout = await proc.stdout.read()
+            stdout = await stdout_reader.read()
             logger.error('kubectl port-forward was terminated before the '
                          'ssh websocket connection was closed. Remaining '
                          f'output: {str(stdout)}')
@@ -2675,6 +2991,17 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                 reason = 'ClientClosed'
         metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
             pid=os.getpid(), reason=reason).inc()
+        # Reap the kubectl child. `asyncio.create_subprocess_exec` had this
+        # handled by asyncio's child watcher; `subprocess.Popen` is outside
+        # that watcher so we must wait() ourselves or leave a zombie.
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, proc.wait),
+                                   timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning(
+                'kubectl did not exit 5s after SIGTERM; sending SIGKILL.')
+            proc.kill()
+            await loop.run_in_executor(None, proc.wait)
 
 
 @app.websocket('/slurm-job-ssh-proxy')
@@ -3104,6 +3431,16 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
             return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
+    # Build assets under _next/ are content-hashed static files; a missing
+    # one must 404 instead of falling through to the index.html SPA shell
+    # below. Returning HTML (200) for a missing .js/.css lets a CDN cache the
+    # shell under the asset URL, which then fails the browser's strict MIME
+    # check and blanks the dashboard until the cache entry expires.
+    if safe_full_path.startswith('_next/'):
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Not found',
+                                    headers={'Cache-Control': 'no-store'})
+
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
@@ -3208,7 +3545,8 @@ if __name__ == '__main__':
     # will also run uvicorn server when num_worker=1 and then the plugins will
     # be installed twice in main process (second time with the uvicorn app).
     # This is okay since plugin install is considered idempotent.
-    plugins.load_plugins(plugins.ExtensionContext())
+    plugins.load_plugins(
+        plugins.ExtensionContext(context=plugins.PluginContext.MAIN))
 
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
@@ -3228,10 +3566,13 @@ if __name__ == '__main__':
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
     managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
-    # Pre-load plugin RBAC rules before initializing permission service.
-    # This ensures plugin RBAC rules are available when policies are created.
-    logger.info('Pre-loading plugin RBAC rules')
+    # Pre-load plugin RBAC rules + viewer allowlist before initializing
+    # the permission service. The permission service reads both during
+    # _maybe_initialize_policies (blocklist seeded into Casbin; viewer
+    # allowlist built into an in-memory structure).
+    logger.info('Pre-loading plugin RBAC rules + viewer allowlist')
     plugins.load_plugin_rbac_rules()
+    plugins.load_plugin_viewer_allowlist()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
@@ -3267,6 +3608,13 @@ if __name__ == '__main__':
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
             global_tasks.append(background.create_task(metrics_server.serve()))
+            # Reap per-pid prometheus multiproc files left behind by
+            # workers that crashed (SIGKILL, OOM, hard crash) and never
+            # called mark_process_dead. Without this, MultiProcessCollector
+            # keeps serving the dead pid's last live-gauge value on every
+            # /metrics scrape.
+            global_tasks.append(
+                background.create_task(metrics.multiproc_reaper_daemon()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
         global_tasks.append(
@@ -3280,7 +3628,28 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
+
+        # managed-job-status-refresh runs as a thread inside this
+        # supervisor process so the leader role and the controller
+        # subprocesses it spawns share a single OS lifecycle.  Routing
+        # this daemon through the executor task queue (as other daemons
+        # do) lets it drift between replicas while the controllers stay
+        # behind, which causes cross-replica controller orphans.  See
+        # sky/jobs/managed_job_refresh_thread.py for details.
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import managed_job_refresh_thread
+        managed_job_refresh_thread.start_managed_job_refresh_daemon()
+
+        # Snapshot a clean copy of os.environ BEFORE spawning workers and
+        # before any per-request env mutation can happen. Used when
+        # spawning consolidation-mode controllers so they don't inherit
+        # the client request's env vars (e.g. SKYPILOT_API_SERVER_ENDPOINT).
+        # The same snapshot is forwarded to workers via initargs (see
+        # executor.start) and to coroutine-path requests running in this
+        # same process.
+        clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
 

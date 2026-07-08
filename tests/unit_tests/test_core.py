@@ -589,11 +589,11 @@ def _stub_launch_preamble(monkeypatch):
                         lambda *a, **kw: None)
 
 
-@pytest.mark.parametrize('api_version', [None, 1, 24, 49])
+@pytest.mark.parametrize('api_version', [None, 1, 24, 55])
 def test_sdk_launch_resize_errors_on_old_server(api_version,
                                                 _stub_launch_preamble,
                                                 monkeypatch):
-    """sdk.launch(resize=True) should error if remote API version < 50."""
+    """sdk.launch(resize=True) should error if remote API version < 56."""
     import sky
     from sky import exceptions
     from sky.client import sdk
@@ -610,13 +610,13 @@ def test_sdk_launch_resize_errors_on_old_server(api_version,
 def test_sdk_launch_resize_allowed_on_new_server(_stub_launch_preamble,
                                                  monkeypatch):
     """sdk.launch(resize=True) should pass the guard when remote API version
-    >= 50. We short-circuit the real launch path with a sentinel so reaching
+    >= 56. We short-circuit the real launch path with a sentinel so reaching
     it proves the guard didn't raise."""
     import sky
     from sky.client import sdk
 
     monkeypatch.setattr('sky.client.sdk.versions.get_remote_api_version',
-                        lambda: 50)
+                        lambda: 56)
 
     sentinel = RuntimeError('reached _launch')
     monkeypatch.setattr('sky.client.sdk._launch',
@@ -835,3 +835,64 @@ def test_launch_confirm_resize_nodes_field_missing(monkeypatch):
     # Generic fallback: no "from N to M" comparison, just target count.
     assert 'to 4 node' in msg
     assert 'from' not in msg
+
+
+class _FakeLogReader:
+    """A LogReader stub recording its call and returning a fixed exit code."""
+
+    def __init__(self, result) -> None:
+        self.result = result
+        self.calls = []
+
+    def read_cluster_job_logs(self, cluster_name, job_id, *, follow, tail):
+        self.calls.append((cluster_name, job_id, follow, tail))
+        return self.result
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_readback_when_cluster_not_up(
+        mock_check_cluster_available) -> None:
+    """When the cluster is not up, the reader's exit code is returned."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterNotUpError(
+        'not up', cluster_status=None)
+    reader = _FakeLogReader(result=0)
+    with mock.patch('sky.logs.get_log_reader', return_value=reader):
+        ret = core.tail_logs('test-cluster', job_id=7, follow=False, tail=10)
+    assert ret == 0
+    assert reader.calls == [('test-cluster', 7, False, 10)]
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_readback_propagates_exit_code(
+        mock_check_cluster_available) -> None:
+    """A non-zero exit code from the reader is propagated (not masked)."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterDoesNotExist(
+        'gone')
+    reader = _FakeLogReader(result=100)
+    with mock.patch('sky.logs.get_log_reader', return_value=reader):
+        ret = core.tail_logs('test-cluster', job_id=None, follow=True, tail=0)
+    assert ret == 100
+    assert reader.calls == [('test-cluster', None, True, 0)]
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_reraises_when_no_reader(
+        mock_check_cluster_available) -> None:
+    """With no reader registered, the original error is preserved."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterNotUpError(
+        'not up', cluster_status=None)
+    with mock.patch('sky.logs.get_log_reader', return_value=None):
+        with pytest.raises(exceptions.ClusterNotUpError):
+            core.tail_logs('test-cluster', job_id=7)
+
+
+@mock.patch('sky.backends.backend_utils.check_cluster_available')
+def test_tail_logs_reraises_when_reader_finds_nothing(
+        mock_check_cluster_available) -> None:
+    """A reader that returns None falls through to the original error."""
+    mock_check_cluster_available.side_effect = exceptions.ClusterDoesNotExist(
+        'gone')
+    reader = _FakeLogReader(result=None)
+    with mock.patch('sky.logs.get_log_reader', return_value=reader):
+        with pytest.raises(exceptions.ClusterDoesNotExist):
+            core.tail_logs('test-cluster', job_id=7)

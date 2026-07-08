@@ -1,4 +1,5 @@
 """Implementation of the SkyServe core APIs."""
+import os
 import pathlib
 import re
 import shlex
@@ -23,6 +24,7 @@ from sky.backends import backend_utils
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
+from sky.serve import runner as serve_runner
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -319,6 +321,13 @@ def up(
             run_script = '\n'.join(env_cmds + [run_script])
             # Dump script for high availability recovery.
             serve_state.set_ha_recovery_script(service_name, run_script)
+            self_pod_ip_dbg = os.environ.get('POD_IP', '<unset>')
+            logger.debug(f'Serve up() run_on_head: spawning controller '
+                         f'subprocess locally on {self_pod_ip_dbg}')
+            # LocalProcessCommandRunner (used for consolidation-mode spawns)
+            # supplies a clean server env to the subprocess so per-request
+            # env pollution doesn't leak into the long-lived serve
+            # controller. See LocalProcessCommandRunner.run for details.
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style
@@ -703,6 +712,36 @@ def apply(
             service_record = _get_service_record(service_name, pool, handle,
                                                  backend)
             if service_record is not None:
+                # Refuse update for terminal-state rows (CONTROLLER_FAILED /
+                # FAILED_CLEANUP / SHUTTING_DOWN). The controller HTTP
+                # listener may already be gone, so update would just hit
+                # ECONNREFUSED with a confusing error. SHUTTING_DOWN is the
+                # ambiguous case: it can be a normal in-progress shutdown
+                # (will self-resolve in seconds) or a zombie (cleanup died
+                # mid-flight; recoverable only via --purge). We give it a
+                # friendlier message so a user who just ran `sky serve down`
+                # and immediately re-applies isn't pushed to --purge.
+                svc_status = service_record['status']
+                if svc_status in (
+                        serve_state.ServiceStatus.terminal_statuses()):
+                    noun = 'pool' if pool else 'service'
+                    purge_cmd = (f'sky jobs pool down {service_name} --purge'
+                                 if pool else
+                                 f'sky serve down {service_name} --purge')
+                    if svc_status == serve_state.ServiceStatus.SHUTTING_DOWN:
+                        msg = (f'{noun.capitalize()} {service_name!r} is '
+                               f'shutting down. Wait for shutdown to '
+                               f'complete, then re-apply. If it stays in '
+                               f'this state for a long time, the cleanup '
+                               f'may be stuck; run `{purge_cmd}` to '
+                               f'force-clean.')
+                    else:
+                        msg = (f'{noun.capitalize()} {service_name!r} is '
+                               f'in {svc_status.value} state and cannot '
+                               f'be updated. Run `{purge_cmd}` to clean '
+                               f'it up and retry.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(msg)
                 return update(task, service_name, mode, pool, workers)
         except exceptions.ClusterNotUpError:
             pass
@@ -776,6 +815,60 @@ def down(
     logger.info(stdout)
 
 
+class _DefaultServiceStatusRunner:
+    """Default implementation — gRPC with codegen + run_on_head fallback.
+
+    Registered lazily by ``sky.serve.runner.current()``. Plugins override
+    by calling ``sky.serve.runner.register()`` with their own
+    implementation (e.g. an in-process runner for consolidation mode).
+    """
+
+    def get_service_status(
+        self,
+        *,
+        handle: 'backends.CloudVmRayResourceHandle',
+        service_names: Optional[List[str]],
+        pool: bool,
+    ) -> List[Dict[str, Any]]:
+        noun = 'pool' if pool else 'service'
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        service_records: List[Dict[str, Any]] = []
+        if not use_legacy:
+            try:
+                service_records = serve_rpc_utils.RpcRunner.get_service_status(
+                    handle, service_names, pool)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+
+            code = serve_utils.ServeCodeGen.get_service_status(service_names,
+                                                               pool=pool)
+            returncode, serve_status_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   f'Failed to fetch {noun}s',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+
+            service_records = serve_utils.load_service_status(
+                serve_status_payload)
+
+        return service_records
+
+
 def status(
     service_names: Optional[Union[str, List[str]]] = None,
     pool: bool = False,
@@ -800,38 +893,9 @@ def status(
         replace('service', noun))
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    use_legacy = not handle.is_grpc_enabled_with_flag
 
-    if not use_legacy:
-        try:
-            service_records = serve_rpc_utils.RpcRunner.get_service_status(
-                handle, service_names, pool)
-        except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
-
-    if use_legacy:
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-
-        code = serve_utils.ServeCodeGen.get_service_status(service_names,
-                                                           pool=pool)
-        returncode, serve_status_payload, stderr = backend.run_on_head(
-            handle,
-            code,
-            require_outputs=True,
-            stream_logs=False,
-            separate_stderr=True)
-
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               f'Failed to fetch {noun}s',
-                                               stderr,
-                                               stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
-
-        service_records = serve_utils.load_service_status(serve_status_payload)
+    service_records = serve_runner.current().get_service_status(
+        handle=handle, service_names=service_names, pool=pool)
 
     # Get the endpoint for each service
     for service_record in service_records:

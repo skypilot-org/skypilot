@@ -1,8 +1,8 @@
 """holds common utility function/constants to be used by the providers."""
 
 import logging
-import time
 from pathlib import Path
+import time
 
 RAY_RECYCLABLE = "ray-recyclable"
 
@@ -21,8 +21,7 @@ def get_logger(caller_name):
     logs_path = LOGS_FOLDER + caller_name + time.strftime("%Y-%m-%d--%H-%M-%S")
     # pylint: disable=line-too-long
     file_formatter = logging.Formatter(
-        "%(asctime)s %(levelname)-8s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-    )
+        "%(asctime)s %(levelname)-8s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
     file_handler = logging.FileHandler(logs_path)
     file_handler.setFormatter(file_formatter)

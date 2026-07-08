@@ -158,6 +158,10 @@ def test_cli_auto_retry(generic_cloud: str):
     port = common_utils.find_free_port(23456)
     server_url = smoke_tests_utils.get_api_server_url()
     parsed = parse.urlparse(server_url)
+    if parsed.scheme == 'https':
+        pytest.skip(
+            'chaos_proxy does not support HTTPS upstreams; the test cannot '
+            'exercise CLI auto-retry with a TLS API server endpoint.')
     api_proxy_url = f'http://127.0.0.1:{port}'
     if parsed.username and parsed.password:
         api_proxy_url = f'http://{parsed.username}:{parsed.password}@127.0.0.1:{port}'
@@ -168,6 +172,12 @@ def test_cli_auto_retry(generic_cloud: str):
         [
             # Chaos proxy will kill TCP connections every 30 seconds.
             f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Wait until the proxy is actually listening on the port. The
+            # background `&` returns control immediately and on slower CI
+            # workers the first sky-launch would otherwise race the proxy
+            # startup and fail with ApiServerConnectionError before any
+            # connection is ever established.
+            f'for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/{port}) >/dev/null 2>&1 && break; sleep 0.5; done',
             # Both launch streaming and logs streaming should survive the chaos.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} \'{run_command}\'',
             # Test managed job controller logs streaming through the chaos
@@ -175,6 +185,16 @@ def test_cli_auto_retry(generic_cloud: str):
             # least one connection drop (30s interval), then verify
             # sky jobs logs --controller in follow mode completes successfully.
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d \'{job_run_command}\'',
+            # Exercise the *resumable* log streaming path. `sky jobs logs
+            # --tail 0` (without --controller) tails job output with
+            # `tail=0`, which the SDK maps to `resumable=True` (see
+            # sky/jobs/client/sdk.py::tail_logs). After a chaos-proxy
+            # disconnect the server replays from line 1; the client must
+            # skip already-printed lines via RetryContext.line_processed
+            # rather than double-printing them. Default `--controller`
+            # paths use `--tail 1000` (`resumable=False`) and don't cover
+            # this branch.
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --tail 0 -n {name}',
             f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky jobs logs --controller -n {name}',
             f'kill $(cat /tmp/{name}-chaos.pid)',
         ],
@@ -230,8 +250,14 @@ def test_debug_dump_recent(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'debug_dump_recent',
         [
-            # Create a debug dump with --recent-minutes (no clusters/jobs needed)
-            'sky debug-dump --recent-minutes 60 --output /tmp/test_debug_dump_recent.zip',
+            # Any positive value works for --recent-minutes: the server always
+            # injects a handful of system daemon request IDs into every dump
+            # regardless of the time window, so request_count > 0 is always
+            # satisfied. We use 5 rather than 60 because on a shared CI server
+            # that runs tests continuously, a 60-minute window collects
+            # thousands of user requests and takes 5+ minutes to zip up,
+            # blowing the per-command timeout.
+            'sky debug-dump --recent-minutes 5 --output /tmp/test_debug_dump_recent.zip',
             # Verify the zip file was created and is a valid zip
             'test -f /tmp/test_debug_dump_recent.zip',
             's=$(unzip -l /tmp/test_debug_dump_recent.zip) && echo "$s" && '
@@ -266,7 +292,9 @@ def test_debug_dump_recent(generic_cloud: str):
         ],
         teardown='rm -f /tmp/test_debug_dump_recent.zip && '
         'rm -rf /tmp/test_debug_dump_recent',
-        timeout=2 * 60,
+        # On shared staging servers the dump collects active managed jobs via
+        # controller SSH, which takes several minutes. 10 minutes is safe.
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

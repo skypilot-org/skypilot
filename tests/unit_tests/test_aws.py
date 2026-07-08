@@ -573,3 +573,55 @@ def test_ssm_explicit_default(monkeypatch):
             wheel_hash='fake-wheel-hash',
             region=Region(name='fake-region'),
             zones=[Zone(name='fake-zone')])
+
+
+def test_subnet_names_multi_az_no_error(monkeypatch):
+    """Test that subnet_names spanning multiple AZs does not raise MISMATCH.
+
+    When user specifies subnets in us-east-1a and us-east-1b, and SkyPilot
+    picks AZ us-east-1a, the us-east-1b subnet is filtered out. This is
+    expected behavior, not a mismatch error.
+    """
+    vpc_id = 'test-vpc-id'
+    region = 'us-east-1'
+
+    mock_subnet_1a = MagicMock()
+    mock_subnet_1a.vpc_id = vpc_id
+    mock_subnet_1a.subnet_id = 'subnet-1a'
+    mock_subnet_1a.state = 'available'
+    mock_subnet_1a.availability_zone = 'us-east-1a'
+    mock_subnet_1a.map_public_ip_on_launch = False
+
+    mock_subnet_1b = MagicMock()
+    mock_subnet_1b.vpc_id = vpc_id
+    mock_subnet_1b.subnet_id = 'subnet-1b'
+    mock_subnet_1b.state = 'available'
+    mock_subnet_1b.availability_zone = 'us-east-1b'
+    mock_subnet_1b.map_public_ip_on_launch = False
+
+    filtered_subnets = [mock_subnet_1a, mock_subnet_1b]
+
+    subnets_mock = MagicMock()
+    subnets_mock.all.return_value = filtered_subnets
+    subnets_mock.filter.return_value = filtered_subnets
+
+    mock_ec2 = MagicMock()
+    mock_ec2.subnets = subnets_mock
+
+    monkeypatch.setattr('sky.provision.aws.config._is_subnet_public',
+                        lambda *args, **kwargs: True)
+
+    # Launch with AZ us-east-1a — should succeed with only subnet-1a
+    result_subnets, result_vpc_id = config._get_subnet_and_vpc_id(
+        ec2=mock_ec2,
+        security_group_ids=None,
+        region=region,
+        availability_zone='us-east-1a',
+        use_internal_ips=False,
+        vpc_name=None,
+        subnet_names=['subnet-1a-name', 'subnet-1b-name'])
+
+    assert result_vpc_id == vpc_id
+    # Only the subnet in the chosen AZ should remain
+    assert len(result_subnets) == 1
+    assert result_subnets[0].availability_zone == 'us-east-1a'

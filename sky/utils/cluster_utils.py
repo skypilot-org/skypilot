@@ -571,11 +571,9 @@ class SSHConfigHelper:
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
 
-        with open(cluster_config_path,
-                  'w',
-                  encoding='utf-8',
-                  opener=functools.partial(os.open, mode=0o644)) as f:
-            f.write(codegen)
+        # Atomic write: shared FS readers never see a
+        # torn / zero-byte stanza file mid-update.
+        common_utils.atomic_write_text(cluster_config_path, codegen, mode=0o644)
 
         # Also add to Windows SSH config if running in WSL
         # This enables VSCode on Windows to connect to clusters launched in WSL

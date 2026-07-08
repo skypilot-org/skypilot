@@ -1,10 +1,11 @@
 """Load plugins for the SkyPilot API server."""
 import abc
 import dataclasses
+import enum
 import importlib
 import os
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, FrozenSet, List, Optional, Tuple
 
 from fastapi import FastAPI
 
@@ -33,6 +34,35 @@ _PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}PLUGINS_CONFIG')
 _REMOTE_PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}REMOTE_PLUGINS_CONFIG')
+
+
+class PluginContext(enum.Enum):
+    """The process context in which plugins are being loaded.
+
+    Used by plugins to declare via ``BasePlugin.load_contexts`` which process
+    types they want to be installed in. Plugins that don't override
+    ``load_contexts`` load in every context (backward compatible).
+    """
+    # The API server's main process (the entrypoint that runs bootstrap:
+    # DB init, request reset, RBAC pre-load, then uvicorn.run). No FastAPI
+    # ``app`` is exposed here. Use this for plugins that need to register
+    # backends BEFORE main-process bootstrap consumes them.
+    MAIN = 'main'
+    # A uvicorn worker process (or the main process when uvicorn runs
+    # in-process with ``--deploy=false`` / single worker, on the second
+    # plugin load). Has the FastAPI ``app`` available; use this for
+    # registering routes / middleware.
+    UVICORN = 'uvicorn'
+    # A request executor worker subprocess that runs sky API request bodies.
+    EXECUTOR = 'executor'
+    # A jobs/serve controller process, including the codegen prefix that runs
+    # on the remote managed-jobs controller cluster.
+    CONTROLLER = 'controller'
+
+
+# All known contexts. Used as the default for ``BasePlugin.load_contexts`` so
+# that plugins which don't opt in stay loaded in every context.
+ALL_PLUGIN_CONTEXTS: FrozenSet[PluginContext] = frozenset(PluginContext)
 
 
 class ManagedSecretsProvider(abc.ABC):
@@ -86,7 +116,13 @@ class ExtensionContext:
         ]
     """
 
-    def __init__(self, app: Optional[FastAPI] = None):
+    def __init__(
+        self,
+        # Default exists for backward compatibility.
+        context: PluginContext = PluginContext.UVICORN,
+        app: Optional[FastAPI] = None,
+    ):
+        self.context = context
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
         self._managed_secrets_provider: Optional[ManagedSecretsProvider] = None
@@ -191,6 +227,15 @@ class RBACRule:
 class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
 
+    # Process contexts in which this plugin should be loaded. Defaults to all
+    # known contexts so existing plugins keep loading everywhere.
+    load_contexts: ClassVar[FrozenSet[PluginContext]] = ALL_PLUGIN_CONTEXTS
+
+    @classmethod
+    def should_load(cls, context: PluginContext) -> bool:
+        """Return whether this plugin should be loaded in the given context."""
+        return context in cls.load_contexts
+
     @property
     def name(self) -> Optional[str]:
         """Plugin name for display purposes."""
@@ -251,6 +296,35 @@ class BasePlugin(abc.ABC):
                       method='POST')),
                     ('user', RBACRule(path='/plugins/api/foo/*',
                       method='DELETE')),
+                ]
+        """
+        return []
+
+    @property
+    def viewer_allowlist(self) -> List['RBACRule']:
+        """Endpoints this plugin exposes to viewer-role users.
+
+        Override this property to opt the plugin's read endpoints in to
+        the strictly-read-only `viewer` role.  Endpoints NOT declared
+        here are denied for viewers by default.
+
+        Path patterns use the same Casbin `keyMatch2` syntax as
+        `rbac_rules` (e.g. `/plugins/api/foo/*`, `/plugins/api/foo/:id`).
+
+        Returns:
+            List of `RBACRule` instances (the same dataclass used by
+            `rbac_rules`).  The `description` field is optional; the
+            rule is interpreted as "allow viewers to call this
+            (path, method)".
+
+        Example:
+            @property
+            def viewer_allowlist(self):
+                return [
+                    RBACRule(path='/plugins/api/foo/list',
+                             method='GET'),
+                    RBACRule(path='/plugins/api/foo/status',
+                             method='POST'),
                 ]
         """
         return []
@@ -453,6 +527,10 @@ def load_plugins(extension_context: ExtensionContext):
         if not issubclass(plugin_cls, BasePlugin):
             raise TypeError(
                 f'Plugin {class_path} must inherit from BasePlugin.')
+        if not plugin_cls.should_load(extension_context.context):
+            logger.debug(f'Skipping plugin {class_path}: not enabled for '
+                         f'context {extension_context.context.value}')
+            continue
         parameters = plugin_config.get('parameters') or {}
         plugin = plugin_cls(**parameters)
         plugin.install(extension_context)
@@ -496,6 +574,11 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
             plugin_cls = getattr(module, class_name)
             if not issubclass(plugin_cls, BasePlugin):
                 continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # in either API-server context, even if they declare rbac_rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
             parameters = plugin_config.get('parameters') or {}
             plugin = plugin_cls(**parameters)
 
@@ -531,6 +614,69 @@ def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
         }
     """
     return _PLUGIN_RBAC_RULES
+
+
+_PLUGIN_VIEWER_ALLOWLIST: List[Dict[str, str]] = []
+
+
+def load_plugin_viewer_allowlist() -> List[Dict[str, str]]:
+    """Load viewer-allowlist entries from plugins without calling install().
+
+    Mirrors `load_plugin_rbac_rules`: instantiates each configured
+    plugin in API-server-loading contexts and reads its
+    `viewer_allowlist` property.  Side-effect-free.
+
+    Plugins that don't override `viewer_allowlist` inherit the
+    BasePlugin default (empty list), so default behaviour for any
+    plugin endpoint is "denied for viewer".
+
+    Returns:
+        Flat list of `{path, method}` records to add to the viewer
+        allowlist.
+    """
+    global _PLUGIN_VIEWER_ALLOWLIST
+
+    config = _load_plugin_config()
+    if not config:
+        return []
+
+    allowlist: List[Dict[str, str]] = []
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            # RBAC is an API-server concern; skip plugins that don't load
+            # in either API-server context, even if they declare viewer
+            # rules.
+            if not (plugin_cls.should_load(PluginContext.MAIN) or
+                    plugin_cls.should_load(PluginContext.UVICORN)):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            for rule in plugin.viewer_allowlist:
+                allowlist.append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected viewer allowlist entry from '
+                             f'{class_path}: {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load viewer allowlist from '
+                           f'{class_path}: {e}')
+
+    _PLUGIN_VIEWER_ALLOWLIST = allowlist
+    return allowlist
+
+
+def get_plugin_viewer_allowlist() -> List[Dict[str, str]]:
+    """Return the cached viewer-allowlist entries collected from plugins."""
+    return _PLUGIN_VIEWER_ALLOWLIST
 
 
 def get_extension_context() -> Optional[ExtensionContext]:

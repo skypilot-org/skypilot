@@ -16,5 +16,7 @@ pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://do
 mkdir -p data
 mkdir -p saved_models
 cd data
-wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz \
+    || wget --quiet -O cifar-10-python.tar.gz \
+        "https://web.archive.org/web/20241225200100im_/https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
 tar -xvzf cifar-10-python.tar.gz

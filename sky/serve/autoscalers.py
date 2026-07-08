@@ -74,6 +74,7 @@ def _generate_scale_down_decisions(
 def _select_nonterminal_replicas_to_scale_down(
     num_replica_to_scale_down: int,
     replica_infos: Iterable['replica_managers.ReplicaInfo'],
+    service_name: Optional[str] = None,
 ) -> List[int]:
     """Select nonterminal replicas to scale down.
 
@@ -83,7 +84,10 @@ def _select_nonterminal_replicas_to_scale_down(
             later stage may become ready soon.
         2. Based on the version in ascending order, so we scale down the older
             versions first.
-        3. Based on the replica_id in descending order, which is also the order
+        3. For pools, based on the number of running jobs in ascending order,
+            so we scale down idle workers first. For SkyServe services, job
+            counts will be zero so this criterion has no effect.
+        4. Based on the replica_id in descending order, which is also the order
             of the replicas being launched. We scale down the replicas that are
             launched earlier first, as the replicas that are launched later may
             become ready soon.
@@ -91,6 +95,8 @@ def _select_nonterminal_replicas_to_scale_down(
     Args:
         num_replica_to_scale_down: The number of replicas to scale down.
         replica_infos: The list of replica informations to select from.
+        service_name: The name of the pool to query job counts for. When
+            provided, replicas with fewer running jobs are scaled down first.
 
     Returns:
         The list of replica ids to scale down.
@@ -100,12 +106,27 @@ def _select_nonterminal_replicas_to_scale_down(
     assert all(info.status in status_order for info in replicas), (
         'All replicas to scale down should be in provisioning or launched '
         'status.', replicas)
+
+    # Get the number of running jobs for each replica. For pools this
+    # prioritizes scaling down idle workers; when service_name is not
+    # provided all counts default to 0 and the sort falls through.
+    cluster_job_counts: Dict[str, int] = {}
+    if service_name is not None:
+        cluster_job_counts = (
+            managed_job_state.get_nonterminal_job_counts_by_pool(service_name))
+    replica_job_counts: Dict[int, int] = {}
+    for info in replicas:
+        replica_job_counts[info.replica_id] = (cluster_job_counts.get(
+            info.cluster_name, 0))
+
     replicas = sorted(
         replicas,
         key=lambda info: (
             status_order.index(info.status),
             # version in ascending order
             info.version,
+            # number of running jobs in ascending order
+            replica_job_counts[info.replica_id],
             # replica_id in descending order, i.e. launched order
             -info.replica_id))
     assert len(replicas) >= num_replica_to_scale_down, (
@@ -1258,7 +1279,8 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
                 # Select replicas to scale down from idle replicas only
                 replicas_to_scale_down = (
                     _select_nonterminal_replicas_to_scale_down(
-                        actual_num_to_scale_down, idle_replicas))
+                        actual_num_to_scale_down, idle_replicas,
+                        self._service_name))
                 logger.info(
                     f'[QueueLengthAutoscaler] Number of replicas to scale down:'
                     f' {actual_num_to_scale_down} {replicas_to_scale_down}')

@@ -1,18 +1,26 @@
-FROM continuumio/miniconda3:23.3.1-0
+# Ubuntu 22.04 to match the GPU image's base (nvidia/cuda:*-ubuntu22.04 is
+# layered on top of ubuntu:22.04).
+FROM ubuntu:22.04
 
-# TODO(romilb): Investigate if this image can be consolidated with the skypilot
-#  client image (`Dockerfile`)
-
-ARG DEBIAN_FRONTEND=noninteractive
-# Detect architecture
+# Detect architecture using ARG with default value
 ARG TARGETARCH
+ARG DEBIAN_FRONTEND=noninteractive
 
-# Initialize conda for root user, install ssh and other local dependencies
-RUN apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl autossh jq -y && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt remove -y python3 && \
-    conda init
+# Install ssh and other local dependencies.
+# FUSE setup mirrors sky/templates/kubernetes-ray.yml.j2:825-832 — install
+# fuse (FUSE 2) in the main batch, then fuse3 in a separate apt-get call.
+# fuse and fuse3 cannot be installed together (fuse3 Breaks: fuse — both ship
+# /usr/bin/fusermount), but in two steps apt resolves the conflict by removing
+# the `fuse` package while leaving `libfuse2`. Final state: libfuse.so.2 +
+# libfuse3.so.3 both in ldconfig (covers hf-mount + legacy FUSE 2 clients).
+RUN apt-get update -y && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git build-essential rsync sudo patch openssh-server \
+        pciutils nano fuse unzip socat netcat-openbsd curl wget autossh jq && \
+    apt-get install -y --no-install-recommends fuse3 && \
+    rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
 RUN mkdir -p /var/run/sshd && \
@@ -21,14 +29,12 @@ RUN mkdir -p /var/run/sshd && \
     cd /etc/ssh/ && \
     ssh-keygen -A
 
-# Setup new user named sky and add to sudoers. Also add /opt/conda/bin to sudo path.
+# Setup new user named sky and add to sudoers. secure_path is hardcoded
+# (sudoers cannot expand $HOME) with /home/sky/miniconda3/bin so that
+# `sudo conda ...` resolves — conda lives in $HOME/miniconda3 in this image.
 RUN useradd -m -s /bin/bash sky && \
     echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
-    echo 'Defaults        secure_path="/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
-
-# give sky group write permission to /opt/conda
-RUN chown -R :sky /opt/conda && \
-    chmod -R g+w /opt/conda
+    echo 'Defaults        secure_path="/home/sky/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
 
 # Switch to sky user
 USER sky
@@ -41,20 +47,34 @@ WORKDIR /home/sky
 
 SHELL ["/bin/bash", "-c"]
 
-# Install skypilot dependencies
-RUN conda init && \
-    export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
-    source ~/skypilot-runtime/bin/activate && \
-    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-    $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
+# Install conda and other dependencies based on architecture
+# Keep the conda and Ray versions below in sync with the ones in skylet.constants
+# Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
+RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
+    if [ "$ARCH" = "arm64" ]; then \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-aarch64.sh -o miniconda.sh; \
+    else \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
+    fi && \
+    bash miniconda.sh -b -p $HOME/miniconda3 && \
+    rm miniconda.sh && \
+    eval "$($HOME/miniconda3/bin/conda shell.bash hook)" && \
+    conda init && \
+    conda config --set auto_activate_base true && \
+    export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
+    source ~/skypilot-runtime/bin/activate && \
+    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' \
+        'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
+    curl -LO "https://dl.k8s.io/release/v1.33.12/bin/linux/$ARCH/kubectl" && \
+    # Install kubectl to user's local bin instead of system path to avoid
+    # sudo-related issues during cross-architecture builds, especially on ARM
     chmod +x kubectl && \
     mkdir -p $HOME/.local/bin && \
     mv kubectl $HOME/.local/bin/ && \

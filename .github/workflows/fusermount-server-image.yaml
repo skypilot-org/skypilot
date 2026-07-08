@@ -6,7 +6,7 @@ on:
       tag:
         description: 'Docker image tag'
         required: false
-        default: '0.2.1'
+        default: '0.2.2'
 
 jobs:
   build:

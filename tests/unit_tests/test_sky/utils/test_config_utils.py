@@ -970,3 +970,48 @@ def test_merge_k8s_configs_env_still_merged_by_name():
     # FOO should be updated
     foo = next(e for e in container['env'] if e['name'] == 'FOO')
     assert foo['value'] == 'updated'
+
+
+def test_merge_k8s_configs_claims_merged_by_name():
+    """Container-level DRA resources.claims merge by name, no duplicates."""
+    base_config = {
+        'containers': [{
+            'name': 'ray-node',
+            'resources': {
+                'claims': [
+                    {
+                        'name': 'roce-claim'
+                    },
+                    {
+                        'name': 'cd'
+                    },
+                ],
+            },
+        }],
+    }
+    override_config = {
+        'containers': [{
+            'name': 'ray-node',
+            'resources': {
+                'claims': [
+                    {
+                        'name': 'roce-claim'
+                    },
+                    {
+                        'name': 'cd'
+                    },
+                    {
+                        'name': 'extra-claim'
+                    },
+                ],
+            },
+        }],
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    claims = base_config['containers'][0]['resources']['claims']
+    names = [c['name'] for c in claims]
+    assert len(claims) == 3
+    assert names == ['roce-claim', 'cd', 'extra-claim']
+    assert len(names) == len(set(names))
