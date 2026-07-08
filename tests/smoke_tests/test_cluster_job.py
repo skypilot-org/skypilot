@@ -3521,11 +3521,14 @@ def test_kubernetes_set_pod_resource_limits():
         test = smoke_tests_utils.Test(
             'kubernetes_set_pod_resource_limits',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
-                # Launch a cluster with set_pod_resource_limits=2.0
-                # Using --cpus 2 --memory 2 so limits should be 4 CPU, 4G memory
+                # Launch the cluster under test first; it may land on any
+                # context. Using --cpus 2 --memory 2 so limits should be
+                # 4 CPU, 4G memory with the 2x multiplier.
                 f'sky launch -y -c {name} --infra kubernetes --cpus 2 --memory 2',
+                # Resolve its context and pin the cloud-cmd cluster to the same
+                # context so the cloud-cmd pod's in-cluster kubectl can see it.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify CPU limit is set (should be 4 with 2x multiplier)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
