@@ -35,7 +35,11 @@ import {
   TableCell,
   EmptyTableState,
 } from '@/components/ui/table';
-import { isForceEmpty } from '@/lib/utils';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
 import {
   getClusters,
   getClusterHistory,
@@ -69,6 +73,11 @@ import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { evaluateCondition } from '@/components/shared/FilterSystem';
 import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
+
+// Page-size ("rows per page") options for the clusters table, and the
+// localStorage key used to remember the user's last choice across reloads.
+const CLUSTERS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const CLUSTERS_PAGE_SIZE_STORAGE_KEY = 'skypilot-clusters-page-size';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -599,9 +608,19 @@ export function ClusterTable({
   };
   const getInitialLimit = () => {
     if (typeof window !== 'undefined') {
+      // An explicit URL query param wins (e.g. a shared/bookmarked link);
+      // otherwise fall back to the last choice persisted in localStorage,
+      // and finally to the default of 10.
       const params = new URLSearchParams(window.location.search);
       const ps = parseInt(params.get('pageSize'), 10);
-      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+      if (CLUSTERS_PAGE_SIZE_OPTIONS.includes(ps)) {
+        return ps;
+      }
+      return getPersistedPageSize(
+        CLUSTERS_PAGE_SIZE_STORAGE_KEY,
+        CLUSTERS_PAGE_SIZE_OPTIONS,
+        10
+      );
     }
     return 10;
   };
@@ -826,6 +845,8 @@ export function ClusterTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setLimit(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(CLUSTERS_PAGE_SIZE_STORAGE_KEY, newSize);
   };
 
   // Get plugin columns
@@ -1232,6 +1253,7 @@ export function ClusterTable({
           }
           pageSize={limit}
           onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={CLUSTERS_PAGE_SIZE_OPTIONS}
         />
       )}
     </div>
