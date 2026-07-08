@@ -790,31 +790,6 @@ async def send_metrics_request_with_port_forward(
             stop_svc_port_forward(port_forward_process)
 
 
-def _add_empty_cluster_matcher(pattern: str) -> str:
-    """Restricts a federate match[] selector to never-stamped series.
-
-    Adds `cluster=""` to the selector. Raw exporter series carry no
-    `cluster` label, so this matches everything a compute cluster's
-    Prometheus scraped itself while excluding stamped copies (which carry
-    `cluster!=""`). Two consequences:
-      - If a local context is ever misclassified as remote (detection
-        unavailable), federating from the API server's own Prometheus
-        cannot loop: the stamped copies it re-ingests are never
-        federated again.
-      - Stamped series on a genuinely remote Prometheus (e.g. the remote
-        cluster hosts its own SkyPilot API server) are not re-exported
-        under this server's context name.
-    """
-    stripped = pattern.strip()
-    if stripped.endswith('}'):
-        selector_body = stripped[:-1].rstrip()
-        if selector_body.endswith('{'):
-            return selector_body + 'cluster=""}'
-        return selector_body + ',cluster=""}'
-    # Bare metric name without a selector.
-    return stripped + '{cluster=""}'
-
-
 # Matches one `name="value"` label token in the label section of an
 # exposition-format metric line. Label values may contain escaped
 # characters (\", \\, \n). Iterating tokens left-to-right (instead of
@@ -976,10 +951,7 @@ async def _federate_metrics_for_context(
     """Federates and stamps the given series from one context's Prometheus.
 
     Shared by /gpu-metrics and /endpoints-metrics; the routes only pass
-    remote contexts (see split_local_remote_contexts). Every selector is
-    restricted to never-stamped series (cluster="") so that even a
-    misclassified local context cannot re-federate its own stamped
-    output (no self-federation loop).
+    remote contexts (see split_local_remote_contexts).
     """
     prometheus_namespace, prometheus_service, prometheus_port = (
         _get_prometheus_target())
@@ -990,9 +962,7 @@ async def _federate_metrics_for_context(
         service=prometheus_service,
         service_port=prometheus_port,
         endpoint_path='/federate',
-        match_patterns=[
-            _add_empty_cluster_matcher(pattern) for pattern in match_patterns
-        ],
+        match_patterns=match_patterns,
         route=route,
         stats=stats)
 

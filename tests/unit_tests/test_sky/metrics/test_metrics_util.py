@@ -291,15 +291,6 @@ def test_get_in_cluster_identity_uid_empty_uid_is_none():
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 
-def test_add_empty_cluster_matcher():
-    add = utils._add_empty_cluster_matcher  # pylint: disable=protected-access
-    assert add('{__name__=~"DCGM_.*"}') == '{__name__=~"DCGM_.*",cluster=""}'
-    assert add('node_cpu_seconds_total{mode="idle"}') == (
-        'node_cpu_seconds_total{mode="idle",cluster=""}')
-    assert add('kube_pod_labels') == 'kube_pod_labels{cluster=""}'
-    assert add('metric{}') == 'metric{cluster=""}'
-
-
 def test_add_cluster_name_label_basic():
     text = ('# HELP foo Foo metric\n'
             '# TYPE foo gauge\n'
@@ -405,8 +396,8 @@ def test_get_metrics_for_context_uses_configured_prometheus_target():
     assert kwargs['service_port'] == 9090
 
 
-def test_get_metrics_for_context_guards_and_stamps():
-    """Federation guards selectors with cluster="" and stamps the result."""
+def test_get_metrics_for_context_patterns_unchanged_and_stamps():
+    """Federation sends the upstream match patterns and stamps the result."""
     send_port_forward = mock.AsyncMock(return_value='foo{bar="baz"} 1.0')
     with mock.patch.object(utils, '_get_prometheus_target',
                            return_value=('skypilot',
@@ -421,19 +412,12 @@ def test_get_metrics_for_context_guards_and_stamps():
     assert kwargs['namespace'] == 'skypilot'
     assert kwargs['service'] == 'skypilot-prometheus-server'
     assert kwargs['service_port'] == 80
-    patterns = kwargs['match_patterns']
-    assert patterns, 'expected non-empty match patterns'
-    # Every selector must exclude already-stamped series so that a
-    # misclassified local context can never re-federate its own stamped
-    # output (loop guard) and another API server's stamped copies are
-    # never re-exported under this context name.
-    for pattern in patterns:
-        assert 'cluster=""' in pattern, pattern
+    assert kwargs['match_patterns'] == utils.GPU_METRICS_MATCH_PATTERNS
     assert result == 'foo{cluster="ctx-remote",bar="baz"} 1.0'
 
 
-def test_get_endpoint_metrics_for_context_guards_and_stamps():
-    """/endpoints-metrics shares the guard + stamping with /gpu-metrics."""
+def test_get_endpoint_metrics_for_context_patterns_unchanged_and_stamps():
+    """/endpoints-metrics shares the federation + stamping path."""
     send_port_forward = mock.AsyncMock(return_value='vllm:foo{bar="baz"} 1.0')
     with mock.patch.object(utils, '_get_prometheus_target',
                            return_value=('skypilot',
@@ -446,8 +430,7 @@ def test_get_endpoint_metrics_for_context_guards_and_stamps():
     send_port_forward.assert_awaited_once()
     kwargs = send_port_forward.await_args.kwargs
     assert kwargs['route'] == 'endpoints-metrics'
-    for pattern in kwargs['match_patterns']:
-        assert 'cluster=""' in pattern, pattern
+    assert kwargs['match_patterns'] == utils.ENDPOINT_METRICS_MATCH_PATTERNS
     assert result == 'vllm:foo{cluster="ctx-remote",bar="baz"} 1.0'
 
 
