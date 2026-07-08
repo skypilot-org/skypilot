@@ -945,6 +945,44 @@ def _launch(
                           f'does not exist)')
             prompt = (f'Launching a new cluster {cluster_name!r}.{suffix} '
                       'Proceed?')
+        elif resize:
+            # Check resize before STOPPED: a --resize on a stopped cluster
+            # should show a resize-aware prompt (and note the restart), not
+            # the generic "Restarting the stopped cluster" message.
+            current_nodes = cluster_record.get('nodes')
+            target_nodes = dag.tasks[0].num_nodes
+            user_name_str = ''
+            if cluster_user_hash != common_utils.get_user_hash():
+                user_name_str = (f' (created by another user '
+                                 f'{cluster_user_name!r}'
+                                 f'{cluster_user_hash_str})')
+            # A stopped cluster is restarted as part of the resize.
+            resume_str = ''
+            if cluster_status == status_lib.ClusterStatus.STOPPED:
+                resume_str = ' The stopped cluster will be restarted.'
+            if current_nodes is None:
+                # Record is missing the 'nodes' field (e.g. older server or
+                # partial status response). Avoid TypeError from comparing
+                # int to None; show a generic resize prompt without the
+                # delta.
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'to {target_nodes} node(s).{resume_str} Proceed?')
+            elif current_nodes == target_nodes:
+                prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
+                          f'has {current_nodes} node(s); --resize is a '
+                          f'no-op.{resume_str} Proceed?')
+            elif target_nodes > current_nodes:
+                delta = target_nodes - current_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(+{delta} worker(s), scale up).{resume_str} '
+                          f'Proceed?')
+            else:
+                delta = current_nodes - target_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(-{delta} worker(s), scale down). Excess '
+                          f'workers will be terminated.{resume_str} Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
@@ -953,36 +991,6 @@ def _launch(
                                  f'{cluster_user_hash_str}')
             prompt = (f'Restarting the stopped cluster {cluster_name!r}'
                       f'{user_name_str}. Proceed?')
-        elif resize:
-            current_nodes = cluster_record.get('nodes')
-            target_nodes = dag.tasks[0].num_nodes
-            user_name_str = ''
-            if cluster_user_hash != common_utils.get_user_hash():
-                user_name_str = (f' (created by another user '
-                                 f'{cluster_user_name!r}'
-                                 f'{cluster_user_hash_str})')
-            if current_nodes is None:
-                # Record is missing the 'nodes' field (e.g. older server or
-                # partial status response). Avoid TypeError from comparing
-                # int to None; show a generic resize prompt without the
-                # delta.
-                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
-                          f'to {target_nodes} node(s). Proceed?')
-            elif current_nodes == target_nodes:
-                prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
-                          f'has {current_nodes} node(s); --resize is a '
-                          f'no-op. Proceed?')
-            elif target_nodes > current_nodes:
-                delta = target_nodes - current_nodes
-                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
-                          f'from {current_nodes} to {target_nodes} node(s) '
-                          f'(+{delta} worker(s), scale up). Proceed?')
-            else:
-                delta = current_nodes - target_nodes
-                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
-                          f'from {current_nodes} to {target_nodes} node(s) '
-                          f'(-{delta} worker(s), scale down). Excess '
-                          f'workers will be terminated. Proceed?')
         elif cluster_user_hash != common_utils.get_user_hash():
             # Prompt if the cluster was created by a different user.
             prompt = (f'Cluster {cluster_name!r} was created by another user '

@@ -273,23 +273,54 @@ def test_resize_scale_down_ssh_failure_aborts():
         backend._handle_resize_pre_provision(handle, task, 'test-cluster')
 
 
-def test_resize_scale_down_on_stopped_cluster_rejected():
-    """Scale-down on a non-UP cluster should fail fast rather than hang on
-    SSH. Addresses PR review comment on run_on_head + STOPPED."""
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+def test_resize_scale_down_on_stopped_cluster_skips_ssh_and_terminates(
+        mock_get_yaml, mock_terminate):
+    """Scale-down on a STOPPED cluster must skip the SSH job-queue check (a
+    stopped cluster has no running jobs and its head node is unreachable) and
+    proceed to terminate the excess workers; bulk provisioning later restarts
+    the cluster at the new size. Addresses gemini/SeungjinYang review on
+    run_on_head + STOPPED."""
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
     task = _make_mock_task(num_nodes=1)
 
-    # Should not even attempt SSH when cluster is STOPPED.
+    mock_get_yaml.return_value = {'provider': {'type': 'aws'}}
+    # SSH must NOT be attempted on a STOPPED cluster.
     backend.run_on_head = mock.MagicMock(side_effect=AssertionError(
-        'run_on_head must not be called on a non-UP cluster'))
+        'run_on_head must not be called on a STOPPED cluster'))
 
-    with pytest.raises(ValueError, match=r"Cannot scale down.*'STOPPED'"):
+    backend._handle_resize_pre_provision(
+        handle,
+        task,
+        'test-cluster',
+        cluster_status=status_lib.ClusterStatus.STOPPED)
+
+    mock_terminate.assert_called_once_with(
+        mock.ANY,  # cloud_name
+        handle.cluster_name_on_cloud,
+        {'type': 'aws'},
+        worker_only=True,
+    )
+
+
+def test_resize_scale_down_on_init_cluster_rejected():
+    """Scale-down on a non-UP, non-STOPPED cluster (e.g. INIT) cannot safely
+    determine the job state, so it must be rejected without attempting SSH."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=1)
+
+    backend.run_on_head = mock.MagicMock(side_effect=AssertionError(
+        'run_on_head must not be called on an INIT cluster'))
+
+    with pytest.raises(ValueError, match=r"Cannot scale down.*'INIT'"):
         backend._handle_resize_pre_provision(
             handle,
             task,
             'test-cluster',
-            cluster_status=status_lib.ClusterStatus.STOPPED)
+            cluster_status=status_lib.ClusterStatus.INIT)
 
 
 @mock.patch('sky.provision.terminate_instances')

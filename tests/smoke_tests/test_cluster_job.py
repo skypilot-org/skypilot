@@ -3624,15 +3624,41 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
 
 
 # ---------- Cluster Resize ----------
-@pytest.mark.kubernetes
 def test_resize(generic_cloud: str):
-    """Test cluster resize: scale up, scale down, and busy-worker rejection."""
+    """Test cluster resize: scale up, scale down, busy-worker rejection, and
+    (on stop-capable clouds) resizing a STOPPED cluster.
+
+    Not marked ``@pytest.mark.kubernetes`` so it runs on the selected
+    ``generic_cloud``. The stopped-cluster scenario is skipped on Kubernetes,
+    which does not support ``sky stop`` (see sky/clouds/kubernetes.py).
+    """
     name = smoke_tests_utils.get_cluster_name()
+    # Kubernetes cannot stop clusters, so the stopped-cluster resize scenario
+    # only runs on stop-capable clouds (e.g. AWS/GCP). On those clouds a
+    # `--resize` of a STOPPED cluster should restart AND resize it in one
+    # operation: scale-up adds workers; scale-down skips the SSH job-queue
+    # check (a stopped cluster has no running jobs) and then restarts at the
+    # new size.
+    stopped_resize_commands = []
+    if generic_cloud != 'kubernetes':
+        stopped_resize_commands = [
+            # Stop the (now 1-node) cluster.
+            f'sky stop -y {name}',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep STOPPED',
+            # --- Resize a STOPPED cluster: scale up (restarts + grows) ---
+            f'sky launch -y -c {name} --resize --num-nodes 2',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x" && echo "$s" | grep UP',
+            # Stop again, then resize down: stopped => no jobs => the SSH
+            # job-queue check is skipped and the cluster restarts at 1 node.
+            f'sky stop -y {name}',
+            f'sky launch -y -c {name} --resize --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "1x" && echo "$s" | grep UP',
+        ]
     test = smoke_tests_utils.Test(
         'resize',
         [
             # Launch a single-node cluster.
-            f'sky launch -y -c {name} --infra kubernetes --cpus 2 --num-nodes 1',
+            f'sky launch -y -c {name} --infra {generic_cloud} --cpus 2 --num-nodes 1',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
             # --- Scale up ---
             f'sky launch -y -c {name} --resize --num-nodes 3',
@@ -3653,9 +3679,11 @@ def test_resize(generic_cloud: str):
             'sleep 5',
             f'sky launch -y -c {name} --resize --num-nodes 1',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "1x"',
-        ],
+        ] + stopped_resize_commands,
         f'sky down -y {name}',
-        timeout=10 * 60,
+        # Stop/start cycles on a real cloud (AWS/GCP) are much slower than the
+        # Kubernetes-only path.
+        timeout=(35 * 60 if generic_cloud != 'kubernetes' else 10 * 60),
     )
     smoke_tests_utils.run_one_test(test)
 

@@ -5975,42 +5975,55 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(f'Resizing cluster {cluster_name!r} from {current_nodes} '
                     f'to {requested_nodes} node(s) (-{to_remove} worker(s)).')
 
-        # Scale-down requires SSH to the head node to verify no running jobs.
-        # Reject early if the cluster is not UP rather than letting
-        # run_on_head hang/fail with an opaque SSH error.
-        if (cluster_status is not None and
-                cluster_status != status_lib.ClusterStatus.UP):
+        # Before terminating workers, make sure no jobs are running. How we
+        # verify depends on the cluster's current status:
+        #   - STOPPED: a stopped cluster has no running jobs by definition, and
+        #     its head node is unreachable via SSH. Skip the SSH-based job-queue
+        #     check and proceed; bulk provisioning will restart the cluster at
+        #     the new size.
+        #   - UP (or unknown/None): SSH to the head node and inspect the job
+        #     queue; abort if any job is in progress.
+        #   - Any other state (e.g. INIT): we cannot determine the job state
+        #     safely, so reject and ask the user to wait.
+        if cluster_status == status_lib.ClusterStatus.STOPPED:
+            logger.info(
+                f'Cluster {cluster_name!r} is STOPPED; skipping the '
+                'running-jobs check (a stopped cluster has no running jobs). '
+                'It will be restarted at the new size.')
+        elif (cluster_status is None or
+              cluster_status == status_lib.ClusterStatus.UP):
+            # Check for running jobs via SSH to the head node.
+            returncode, stdout, stderr = self.run_on_head(
+                handle,
+                job_lib.JobLibCodeGen.get_job_queue(user_hash=None,
+                                                    all_jobs=False),
+                require_outputs=True,
+                stream_logs=False)
+            if returncode != 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(f'Failed to check job queue on cluster '
+                                       f'{cluster_name!r} before scale-down. '
+                                       f'Aborting resize for safety.\n'
+                                       f'stderr: {stderr}')
+            jobs = job_lib.load_job_queue(stdout)
+            in_progress = [
+                j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
+                                                   job_lib.JobStatus.SETTING_UP,
+                                                   job_lib.JobStatus.PENDING)
+            ]
+            if in_progress:
+                job_ids = ', '.join(str(j['job_id']) for j in in_progress)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot scale down: {len(in_progress)} job(s) still '
+                        f'running (IDs: {job_ids}). Cancel them first with: '
+                        f'sky cancel {cluster_name} -a')
+        else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Cannot scale down cluster {cluster_name!r}: the '
-                    f'cluster is in status {cluster_status.value!r}. '
-                    f'Start it first with: sky start {cluster_name}')
-
-        # Check for running jobs.
-        returncode, stdout, stderr = self.run_on_head(
-            handle,
-            job_lib.JobLibCodeGen.get_job_queue(user_hash=None, all_jobs=False),
-            require_outputs=True,
-            stream_logs=False)
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(f'Failed to check job queue on cluster '
-                                   f'{cluster_name!r} before scale-down. '
-                                   f'Aborting resize for safety.\n'
-                                   f'stderr: {stderr}')
-        jobs = job_lib.load_job_queue(stdout)
-        in_progress = [
-            j for j in jobs if j['status'] in (job_lib.JobStatus.RUNNING,
-                                               job_lib.JobStatus.SETTING_UP,
-                                               job_lib.JobStatus.PENDING)
-        ]
-        if in_progress:
-            job_ids = ', '.join(str(j['job_id']) for j in in_progress)
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot scale down: {len(in_progress)} job(s) still '
-                    f'running (IDs: {job_ids}). Cancel them first with: '
-                    f'sky cancel {cluster_name} -a')
+                    f'Cannot scale down cluster {cluster_name!r}: the cluster '
+                    f'is in status {cluster_status.value!r}. Wait until it is '
+                    f'UP or STOPPED, then retry.')
 
         # Terminate all worker nodes. Since we verified no jobs are
         # running, all workers are idle. The subsequent bulk_provision
