@@ -5269,3 +5269,30 @@ def test_diagnose_terminated_pod_substitutes_dashboard_url_token(monkeypatch):
     assert msg is not None
     assert '{dashboard_url}' not in msg
     assert 'the SkyPilot dashboard infra page' in msg
+
+
+def test_get_spot_label_karpenter():
+    """use_spot on a Karpenter context maps to karpenter.sh/capacity-type."""
+    kat = utils.kubernetes_enums.KubernetesAutoscalerType
+    with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
+         mock.patch.object(utils, 'get_autoscaler_type',
+                           return_value=kat.KARPENTER):
+        assert utils.get_spot_label('ctx') == ('karpenter.sh/capacity-type',
+                                               'spot')
+
+
+def test_get_spot_label_gke_unchanged():
+    """GKE spot label is unchanged by the Karpenter addition."""
+    kat = utils.kubernetes_enums.KubernetesAutoscalerType
+    with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
+         mock.patch.object(utils, 'get_autoscaler_type',
+                           return_value=kat.GKE):
+        assert utils.get_spot_label('ctx') == ('cloud.google.com/gke-spot',
+                                               'true')
+
+
+def test_get_spot_label_none_without_known_autoscaler():
+    """No autoscaler (or one without a known spot label) -> no spot label."""
+    with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
+         mock.patch.object(utils, 'get_autoscaler_type', return_value=None):
+        assert utils.get_spot_label('ctx') == (None, None)

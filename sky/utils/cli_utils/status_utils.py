@@ -273,7 +273,14 @@ def _get_workspace(cluster_record: _ClusterRecord,
 def _get_status_colored(cluster_record: _ClusterRecord,
                         truncate: bool = True) -> str:
     del truncate
-    return _get_status(cluster_record).colored_str()
+    status = _get_status(cluster_record)
+    # INIT is overloaded: a cluster in INIT is either actively launching or
+    # stuck in an abnormal/unhealthy state. Mirror the dashboard and render
+    # the latter as UNHEALTHY (display only; the stored status remains INIT).
+    if (status is status_lib.ClusterStatus.INIT and
+            cluster_record.get('init_kind') == status_lib.INIT_KIND_UNHEALTHY):
+        return f'{colorama.Fore.RED}UNHEALTHY{colorama.Style.RESET_ALL}'
+    return status.colored_str()
 
 
 def _get_resources(cluster_record: _ClusterRecord,

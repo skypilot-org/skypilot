@@ -56,7 +56,7 @@ AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 # node; from a cold cluster it finds none, so network_tier: best would omit the
 # EFA request and NCCL would silently fall back to TCP. An unknown accelerator
 # is left out (falls back to today's behavior). See examples/aws_efa/README.md
-# and https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards
+# for the per-instance EFA interface counts.
 AWS_EFA_ACCELERATOR_EFA_COUNT: Dict[str, Tuple[int, int]] = {
     'A100': (8, 4),  # p4d.24xlarge
     'A100-80GB': (8, 4),  # p4de.24xlarge
@@ -850,7 +850,12 @@ class Kubernetes(clouds.Cloud):
         # Configure spot labels, if requested and supported
         spot_label_key, spot_label_value = None, None
         if resources.use_spot:
-            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+            # Pass the provisioning context so get_spot_label() can resolve the
+            # autoscaler type per-context. Without it, only a global
+            # kubernetes.autoscaler setting is honored, and per-context configs
+            # (context_configs.<ctx>.autoscaler) never inject the spot label.
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label(
+                context)
 
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
