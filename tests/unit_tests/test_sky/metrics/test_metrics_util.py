@@ -193,17 +193,42 @@ def test_is_local_context_renamed_in_cluster_context():
         assert not h.probe_calls
 
 
+class _IdentityUidHarness:
+    """Patches the adaptor pieces _get_in_cluster_identity_uid depends on."""
+
+    def __init__(self, core=None, core_exc=None):
+        patch_core = (mock.patch('sky.adaptors.kubernetes.core_api',
+                                 side_effect=core_exc) if core_exc is not None
+                      else mock.patch('sky.adaptors.kubernetes.core_api',
+                                      return_value=core))
+        self._patches = [
+            patch_core,
+            mock.patch('sky.adaptors.kubernetes.config_exception',
+                       return_value=_FakeConfigException),
+            mock.patch('sky.adaptors.kubernetes.api_exception',
+                       return_value=_FakeApiException),
+            mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
+                       return_value='in-cluster'),
+        ]
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *args):
+        for p in self._patches:
+            p.stop()
+        return False
+
+
 def test_get_in_cluster_identity_uid_caches_success_only():
     core = mock.MagicMock()
     core.read_namespace.side_effect = [
         TimeoutError('api server not ready'),
         _fake_namespace('uid-1'),
     ]
-    with mock.patch('sky.adaptors.kubernetes.core_api', return_value=core), \
-         mock.patch('sky.adaptors.kubernetes.config_exception',
-                    return_value=_FakeConfigException), \
-         mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
-                    return_value='in-cluster'):
+    with _IdentityUidHarness(core=core):
         # Failure is not cached; the next call retries and succeeds.
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
         assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
@@ -216,12 +241,29 @@ def test_get_in_cluster_identity_uid_caches_success_only():
 
 def test_get_in_cluster_identity_uid_not_in_pod():
     """Outside a pod there is no cluster identity: detection disabled."""
-    with mock.patch('sky.adaptors.kubernetes.core_api',
-                    side_effect=_FakeConfigException('no in-cluster config')), \
-         mock.patch('sky.adaptors.kubernetes.config_exception',
-                    return_value=_FakeConfigException), \
-         mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
-                    return_value='in-cluster'):
+    with _IdentityUidHarness(
+            core_exc=_FakeConfigException('no in-cluster config')):
+        assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
+
+
+def test_get_in_cluster_identity_uid_permission_denied_not_cached():
+    """401/403 disables detection for this attempt but is retried later."""
+    core = mock.MagicMock()
+    core.read_namespace.side_effect = [
+        _FakeApiException(403),
+        _fake_namespace('uid-1'),
+    ]
+    with _IdentityUidHarness(core=core):
+        assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
+        # After RBAC is fixed, the next attempt succeeds.
+        assert utils._get_in_cluster_identity_uid() == 'uid-1'  # pylint: disable=protected-access
+
+
+def test_get_in_cluster_identity_uid_empty_uid_is_none():
+    """A namespace without a UID yields no identity anchor."""
+    core = mock.MagicMock()
+    core.read_namespace.return_value = _fake_namespace('')
+    with _IdentityUidHarness(core=core):
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 

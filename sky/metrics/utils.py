@@ -456,11 +456,39 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
         core = kubernetes_adaptors.core_api(
             kubernetes_adaptors.in_cluster_context_name())
         uid = _read_cluster_identity_uid(core)
+        if not uid:
+            logger.debug(
+                f'The {_CLUSTER_IDENTITY_NAMESPACE!r} namespace was read '
+                f'through in-cluster credentials but carries no UID; '
+                f'local-context detection is disabled until the next '
+                f'attempt.')
+            return None
     except kubernetes_adaptors.config_exception():
         # Not running inside a Kubernetes pod: there are no in-cluster
         # credentials, hence no local cluster to detect.
         logger.debug('No in-cluster credentials; local-context detection '
                      'is disabled.')
+        return None
+    except kubernetes_adaptors.api_exception() as e:
+        status = getattr(e, 'status', None)
+        if status in (401, 403):
+            logger.warning(
+                f'The in-cluster service account is not allowed to read '
+                f'the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
+                f'(status={status}); local-context detection is disabled '
+                f'and only the in-cluster context will be treated as '
+                f'local. Grant `get` on the '
+                f'{_CLUSTER_IDENTITY_NAMESPACE!r} namespace to the API '
+                f'server service account (included in the Helm chart '
+                f'default rbac.clusterRules) to enable detection: '
+                f'{common_utils.format_exception(e)}')
+        else:
+            logger.warning(
+                f'Failed to read the {_CLUSTER_IDENTITY_NAMESPACE!r} '
+                f'namespace through in-cluster credentials '
+                f'(status={status}); local-context detection is disabled '
+                f'until the next attempt: '
+                f'{common_utils.format_exception(e)}')
         return None
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
@@ -469,8 +497,6 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
             f'disabled until the next attempt and only the in-cluster '
             f'context will be treated as local: '
             f'{common_utils.format_exception(e)}')
-        return None
-    if not uid:
         return None
     with _in_cluster_identity_uid_lock:
         _in_cluster_identity_uid = uid
