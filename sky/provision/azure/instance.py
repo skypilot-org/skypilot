@@ -206,7 +206,7 @@ def _create_network_interface(
         name = f'{vm_name}-nic-private'
         ip_config = network.IPConfiguration(
             name=f'ip-config-private-{vm_name}',
-            subnet=compute.SubResource(id=provider_config['subnet']),
+            subnet=network.SubResource(id=provider_config['subnet']),
             private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC)
     else:
         name = f'{vm_name}-nic-public'
@@ -223,7 +223,7 @@ def _create_network_interface(
                     f'with address {ip_poller.result().ip_address}.')
         ip_config = network.IPConfiguration(
             name=f'ip-config-public-{vm_name}',
-            subnet=compute.SubResource(id=provider_config['subnet']),
+            subnet=network.SubResource(id=provider_config['subnet']),
             private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC,
             public_ip_address=network.PublicIPAddress(id=ip_poller.result().id))
 
