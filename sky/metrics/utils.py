@@ -51,11 +51,6 @@ _DEFAULT_PROMETHEUS_NAMESPACE = 'skypilot'
 _DEFAULT_PROMETHEUS_SERVICE = 'skypilot-prometheus-server'
 _DEFAULT_PROMETHEUS_SERVICE_PORT = 80
 
-# Path where the pod's service account namespace is mounted. Used only to
-# detect whether the API server runs inside a Kubernetes pod.
-_SERVICEACCOUNT_NAMESPACE_PATH = (
-    '/var/run/secrets/kubernetes.io/serviceaccount/namespace')
-
 # Namespace whose UID is used as the cluster identity for local-context
 # detection. kube-system exists in every cluster, cannot be deleted, and
 # its UID is stable for the lifetime of the cluster, making it the
@@ -453,9 +448,6 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
     with _in_cluster_identity_uid_lock:
         if _in_cluster_identity_uid is not None:
             return _in_cluster_identity_uid
-    if not os.path.exists(_SERVICEACCOUNT_NAMESPACE_PATH):
-        # Not running inside a Kubernetes pod.
-        return None
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
     # pylint: disable=import-outside-toplevel
@@ -464,6 +456,12 @@ def _get_in_cluster_identity_uid() -> Optional[str]:
         core = kubernetes_adaptors.core_api(
             kubernetes_adaptors.in_cluster_context_name())
         uid = _read_cluster_identity_uid(core)
+    except kubernetes_adaptors.config_exception():
+        # Not running inside a Kubernetes pod: there are no in-cluster
+        # credentials, hence no local cluster to detect.
+        logger.debug('No in-cluster credentials; local-context detection '
+                     'is disabled.')
+        return None
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             f'Failed to read the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '

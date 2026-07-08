@@ -17,6 +17,10 @@ class _FakeApiException(Exception):
         self.status = status
 
 
+class _FakeConfigException(Exception):
+    """Stands in for kubernetes.config.config_exception.ConfigException."""
+
+
 def _fake_namespace(uid):
     namespace = mock.MagicMock()
     namespace.metadata.uid = uid
@@ -195,8 +199,9 @@ def test_get_in_cluster_identity_uid_caches_success_only():
         TimeoutError('api server not ready'),
         _fake_namespace('uid-1'),
     ]
-    with mock.patch.object(utils.os.path, 'exists', return_value=True), \
-         mock.patch('sky.adaptors.kubernetes.core_api', return_value=core), \
+    with mock.patch('sky.adaptors.kubernetes.core_api', return_value=core), \
+         mock.patch('sky.adaptors.kubernetes.config_exception',
+                    return_value=_FakeConfigException), \
          mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
                     return_value='in-cluster'):
         # Failure is not cached; the next call retries and succeeds.
@@ -211,7 +216,12 @@ def test_get_in_cluster_identity_uid_caches_success_only():
 
 def test_get_in_cluster_identity_uid_not_in_pod():
     """Outside a pod there is no cluster identity: detection disabled."""
-    with mock.patch.object(utils.os.path, 'exists', return_value=False):
+    with mock.patch('sky.adaptors.kubernetes.core_api',
+                    side_effect=_FakeConfigException('no in-cluster config')), \
+         mock.patch('sky.adaptors.kubernetes.config_exception',
+                    return_value=_FakeConfigException), \
+         mock.patch('sky.adaptors.kubernetes.in_cluster_context_name',
+                    return_value='in-cluster'):
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 
