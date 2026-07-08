@@ -581,6 +581,26 @@ def is_local_context(context: str) -> bool:
     return is_local
 
 
+def split_local_remote_contexts(
+        contexts: List[str]) -> Tuple[List[str], List[str]]:
+    """Partitions contexts into (local, remote) via is_local_context().
+
+    The single source of truth for "which contexts point at the API
+    server's own cluster", shared by the federation routes (which skip
+    local contexts — the central Prometheus already scrapes the local
+    cluster's exporters directly, so federating them again would only
+    duplicate the raw series under a stamped copy) and by the dashboard
+    (which matches the local cluster's series with cluster="" instead of
+    a context name). May issue one blocking Kubernetes API probe per
+    uncached context; call from a thread in async code.
+    """
+    local: List[str] = []
+    remote: List[str] = []
+    for context in contexts:
+        (local if is_local_context(context) else remote).append(context)
+    return local, remote
+
+
 def start_svc_port_forward(context: str, namespace: str, service: str,
                            service_port: int) -> Tuple[subprocess.Popen, int]:
     """Starts a port forward to a service in a Kubernetes cluster.
@@ -752,8 +772,38 @@ async def send_metrics_request_with_port_forward(
                                 stats.port_forward_seconds)
 
         endpoint = f'http://localhost:{local_port}{endpoint_path}'
-        return await _send_federate_request(endpoint, match_patterns, timeout,
-                                            context, route, stats)
+        # httpx sends `Accept-Encoding: gzip, deflate` by default and
+        # transparently decompresses, so a Prometheus that compresses
+        # /federate (any version >= 2.0) is already gzipped on the wire;
+        # stats captures content-encoding + wire vs. decompressed size so
+        # this is observable rather than assumed.
+        federate_start = time.monotonic()
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if match_patterns:
+                params = [('match[]', pattern) for pattern in match_patterns]
+                response = await client.get(endpoint, params=params)
+            else:
+                response = await client.get(endpoint)
+
+            response.raise_for_status()
+            text = response.text
+            # response.content is the decompressed body (already
+            # materialized for a non-streamed request, no await);
+            # num_bytes_downloaded is the raw on-wire (compressed) count.
+            stats.body_bytes = len(response.content)
+            stats.wire_bytes = response.num_bytes_downloaded
+            stats.content_encoding = response.headers.get(
+                'content-encoding', 'identity')
+            # Assign federate_seconds LAST so that (federate_seconds is
+            # not None) structurally implies the byte fields are set —
+            # summary() relies on this. The body is already materialized
+            # above, so measuring the duration here does not lose any
+            # transfer time.
+            stats.federate_seconds = time.monotonic() - federate_start
+            record_federation_phase(context, route, 'federate',
+                                    stats.federate_seconds)
+            record_federation_payload(context, route, stats.body_bytes)
+            return text
     finally:
         # Clean up port forward synchronously to guarantee cleanup
         # even if the task is cancelled by asyncio.wait_for().
@@ -763,106 +813,20 @@ async def send_metrics_request_with_port_forward(
             stop_svc_port_forward(port_forward_process)
 
 
-async def _send_federate_request(endpoint: str,
-                                 match_patterns: Optional[List[str]],
-                                 timeout: float, context: str, route: str,
-                                 stats: FederationStats) -> str:
-    """GETs a Prometheus endpoint and records the federate timing/size.
-
-    Shared by the port-forward and local (in-cluster DNS) senders. httpx
-    sends `Accept-Encoding: gzip, deflate` by default and transparently
-    decompresses, so a Prometheus that compresses /federate (any version
-    >= 2.0) is already gzipped on the wire; stats captures
-    content-encoding + wire vs. decompressed size so this is observable
-    rather than assumed.
-    """
-    federate_start = time.monotonic()
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        if match_patterns:
-            params = [('match[]', pattern) for pattern in match_patterns]
-            response = await client.get(endpoint, params=params)
-        else:
-            response = await client.get(endpoint)
-
-        response.raise_for_status()
-        text = response.text
-        # response.content is the decompressed body (already materialized
-        # for a non-streamed request, no await); num_bytes_downloaded is
-        # the raw on-wire (compressed) count.
-        stats.body_bytes = len(response.content)
-        stats.wire_bytes = response.num_bytes_downloaded
-        stats.content_encoding = response.headers.get('content-encoding',
-                                                      'identity')
-        # Assign federate_seconds LAST so that (federate_seconds is not
-        # None) structurally implies the byte fields are set — summary()
-        # relies on this. The body is already materialized above, so
-        # measuring the duration here does not lose any transfer time.
-        stats.federate_seconds = time.monotonic() - federate_start
-        record_federation_phase(context, route, 'federate',
-                                stats.federate_seconds)
-        record_federation_payload(context, route, stats.body_bytes)
-        return text
-
-
-async def send_local_metrics_request(
-        namespace: str,
-        service: str,
-        service_port: int,
-        endpoint_path: str = '/federate',
-        match_patterns: Optional[List[str]] = None,
-        timeout: float = 30.0,
-        context: str = 'local',
-        route: str = 'gpu-metrics',
-        stats: Optional[FederationStats] = None) -> str:
-    """Sends a metrics request to a Prometheus Service in the local cluster.
-
-    Used instead of send_metrics_request_with_port_forward() when the
-    context points at the cluster the API server runs in: the Service is
-    reachable directly over in-cluster DNS, so no `kubectl port-forward`
-    subprocess is needed.
-
-    Args:
-        namespace: Namespace where the service is located
-        service: Service name to request
-        service_port: Port on the service
-        endpoint_path: Path to append to the service endpoint (e.g.,
-            '/federate')
-        match_patterns: List of metric patterns to match (for federate
-            endpoint)
-        timeout: Request timeout in seconds
-        context: Context name, used only as the metrics/logs label; the
-            request itself always targets the local cluster's Service.
-        route: Federation route label for metrics/logs ('gpu-metrics' or
-            'endpoints-metrics'); does not affect the request itself.
-        stats: Optional FederationStats filled in so the caller can report
-            the federate timing/size breakdown even if this call is
-            cancelled by a timeout. There is no port-forward phase on the
-            local path, so port_forward_seconds stays None.
-    Returns:
-        Response text containing the metrics
-    Raises:
-        httpx.HTTPError: If the direct in-cluster request fails.
-    """
-    if stats is None:
-        stats = FederationStats()
-    endpoint = (f'http://{service}.{namespace}.svc:{service_port}'
-                f'{endpoint_path}')
-    try:
-        return await _send_federate_request(endpoint, match_patterns, timeout,
-                                            context, route, stats)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.error(f'Failed to send local metrics request to {endpoint}: '
-                     f'{common_utils.format_exception(e)}')
-        raise
-
-
 def _add_empty_cluster_matcher(pattern: str) -> str:
     """Restricts a federate match[] selector to never-stamped series.
 
-    Adds `cluster=""` to the selector. This is what makes stamping plus
-    re-ingestion loop-free when the API server federates from the same
-    Prometheus that scrapes /gpu-metrics: stamped copies carry
-    `cluster!=""` and are excluded from the next federation round.
+    Adds `cluster=""` to the selector. Raw exporter series carry no
+    `cluster` label, so this matches everything a compute cluster's
+    Prometheus scraped itself while excluding stamped copies (which carry
+    `cluster!=""`). Two consequences:
+      - If a local context is ever misclassified as remote (detection
+        unavailable), federating from the API server's own Prometheus
+        cannot loop: the stamped copies it re-ingests are never
+        federated again.
+      - Stamped series on a genuinely remote Prometheus (e.g. the remote
+        cluster hosts its own SkyPilot API server) are not re-exported
+        under this server's context name.
     """
     stripped = pattern.strip()
     if stripped.endswith('}'):
@@ -1034,42 +998,28 @@ async def _federate_metrics_for_context(
         stats: Optional[FederationStats] = None) -> str:
     """Federates and stamps the given series from one context's Prometheus.
 
-    Shared by /gpu-metrics and /endpoints-metrics: picks the local
-    (in-cluster DNS) or remote (port-forward) path based on
-    is_local_context() and stamps each line with the context name.
+    Shared by /gpu-metrics and /endpoints-metrics. Contexts that point at
+    the API server's own cluster never reach this function — the routes
+    filter them out with filter_remote_contexts() because the central
+    Prometheus already scrapes the local cluster's exporters directly
+    (federating them again would only produce stamped duplicates of the
+    raw series). Every selector is still restricted to never-stamped
+    series (cluster="") so that even a misclassified local context cannot
+    re-federate its own stamped output (no self-federation loop).
     """
     prometheus_namespace, prometheus_service, prometheus_port = (
         _get_prometheus_target())
 
-    # is_local_context() may issue a blocking Kubernetes API probe on
-    # cache miss; run it in a thread to keep the event loop responsive.
-    if await asyncio.to_thread(is_local_context, context):
-        # The context points at the cluster this API server runs in:
-        # reach the Prometheus Service directly over in-cluster DNS (no
-        # port-forward) and federate only never-stamped series
-        # (cluster="") so that stamped copies re-ingested by the local
-        # Prometheus are never federated again (no self-federation loop).
-        local_match_patterns = [
+    metrics_text = await send_metrics_request_with_port_forward(
+        context=context,
+        namespace=prometheus_namespace,
+        service=prometheus_service,
+        service_port=prometheus_port,
+        endpoint_path='/federate',
+        match_patterns=[
             _add_empty_cluster_matcher(pattern) for pattern in match_patterns
-        ]
-        metrics_text = await send_local_metrics_request(
-            namespace=prometheus_namespace,
-            service=prometheus_service,
-            service_port=prometheus_port,
-            endpoint_path='/federate',
-            match_patterns=local_match_patterns,
-            context=context,
-            route=route,
-            stats=stats)
-    else:
-        metrics_text = await send_metrics_request_with_port_forward(
-            context=context,
-            namespace=prometheus_namespace,
-            service=prometheus_service,
-            service_port=prometheus_port,
-            endpoint_path='/federate',
-            match_patterns=match_patterns,
-            route=route,
-            stats=stats)
+        ],
+        route=route,
+        stats=stats)
 
     return await add_cluster_name_label(metrics_text, context)

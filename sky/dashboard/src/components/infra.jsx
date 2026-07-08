@@ -52,6 +52,7 @@ import {
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
+import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 import {
   getSSHNodePools,
   updateSSHNodePools,
@@ -634,6 +635,10 @@ export function ContextDetails({
   });
   const [isLoadingHosts, setIsLoadingHosts] = useState(false);
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+  // Contexts the API server detected as pointing at its own cluster. Their
+  // GPU series are scraped raw by the central Prometheus (no `cluster`
+  // label), so queries must match cluster="" instead of the context name.
+  const [localContexts, setLocalContexts] = useState(['in-cluster']);
 
   // Check Grafana availability on mount
   useEffect(() => {
@@ -647,6 +652,23 @@ export function ContextDetails({
     }
   }, []);
 
+  // Fetch the server-detected local contexts (cached per session).
+  useEffect(() => {
+    let cancelled = false;
+    getDashboardConfig().then((config) => {
+      if (!cancelled && Array.isArray(config?.localContexts)) {
+        setLocalContexts(config.localContexts);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The local cluster's series carry no cluster label; ^$ matches only
+  // the missing/empty label. External clusters match their context name.
+  const clusterParam = localContexts.includes(contextName) ? '^$' : contextName;
+
   // Function to fetch available hosts from Prometheus for the specific cluster
   const fetchAvailableHosts = useCallback(async () => {
     if (!isGrafanaAvailable) return;
@@ -654,7 +676,6 @@ export function ContextDetails({
     setIsLoadingHosts(true);
     try {
       const grafanaUrl = getGrafanaUrl();
-      const clusterParam = contextName === 'in-cluster' ? '^$' : contextName;
 
       // Build query to get nodes for specific cluster
       const query =
@@ -683,7 +704,7 @@ export function ContextDetails({
               .sort();
             setAvailableHosts(nodes);
             console.log(
-              `Successfully fetched hosts for cluster ${clusterParam || 'in-cluster'}:`,
+              `Successfully fetched hosts for cluster ${contextName}:`,
               nodes
             );
           } else {
@@ -706,7 +727,7 @@ export function ContextDetails({
     } finally {
       setIsLoadingHosts(false);
     }
-  }, [isGrafanaAvailable, contextName]);
+  }, [isGrafanaAvailable, contextName, clusterParam]);
 
   // Fetch hosts when component mounts and Grafana is available
   useEffect(() => {
@@ -720,11 +741,6 @@ export function ContextDetails({
     const grafanaUrl = getGrafanaUrl();
     // When "All Nodes" is selected (.*), pass .* directly to match all nodes
     const hostParam = selectedHosts;
-
-    // Cluster parameter logic for k8s contexts only
-    // For in-cluster: regex to match only missing/empty cluster labels
-    // For external clusters: exact cluster name
-    const clusterParam = contextName === 'in-cluster' ? '^$' : contextName;
 
     return `${grafanaUrl}/d-solo/skypilot-dcgm-cluster-dashboard/skypilot-dcgm-kubernetes-cluster-dashboard?orgId=1&timezone=browser&var-datasource=prometheus&var-host=${encodeURIComponent(hostParam)}&var-gpu=$__all&var-cluster=${encodeURIComponent(clusterParam)}&refresh=5s&theme=light&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
