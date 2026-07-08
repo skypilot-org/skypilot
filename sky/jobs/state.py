@@ -25,6 +25,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
+from sky.jobs import constants as managed_job_constants
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
@@ -1376,14 +1377,20 @@ def is_legacy_controller_process(job_id: int) -> bool:
         row = session.execute(
             sqlalchemy.select(
                 job_info_table.c.controller_pid,
-                job_info_table.c.controller_pid_started_at).where(
+                job_info_table.c.controller_pid_started_at,
+                job_info_table.c.schedule_state).where(
                     job_info_table.c.spot_job_id == job_id)).fetchone()
         if row is None:
             raise ValueError(f'Job {job_id} not found')
         if row[0] is None:
-            # Job is from before #4485, so controller_pid is not set
-            # This is a legacy single-job controller process (running in ray!)
-            return True
+            # A scheduler-managed job (schedule_state set) with no
+            # controller_pid is not legacy - it just has no controller right
+            # now: it may not have been claimed yet, or it may have been reset
+            # to WAITING for recovery after its controller process died.
+            # Only jobs from before #4485, which predate the scheduler
+            # entirely (schedule_state is NULL), are legacy single-job
+            # controller processes (running in ray!).
+            return row[2] is None
         started_at = row[1]
         if started_at is not None:
             # controller_pid_started_at is only set after #7847, so we know this
@@ -3665,6 +3672,111 @@ def reset_job_for_recovery(job_id: int) -> None:
                     ManagedJobScheduleState.WAITING.value,
             })
         session.commit()
+
+
+class JobRequeueOutcome(enum.Enum):
+    """Outcome of try_requeue_job_for_recovery."""
+    # The job was reset to WAITING and its recovery budget was charged.
+    REQUEUED = 'REQUEUED'
+    # The job's recovery budget is exhausted; nothing was written.
+    BUDGET_EXHAUSTED = 'BUDGET_EXHAUSTED'
+    # The job's owner record changed between the caller's observation and this
+    # call (re-claimed, marked DONE, or already reset); nothing was written.
+    LOST_RACE = 'LOST_RACE'
+
+
+@db_retries.retry
+def try_requeue_job_for_recovery(
+        job_id: int, observed_pid: int, observed_pid_started_at: Optional[float]
+) -> Tuple[JobRequeueOutcome, int]:
+    """Requeue a dead-controller job for recovery, charging its budget.
+
+    Atomically (in one transaction): verify the job is still owned by the
+    controller process the caller observed dead, check the emergency-recovery
+    budget (shared with the controller's in-place emergency retries - one
+    budget per job regardless of which layer spends it), and reset the job to
+    WAITING with the budget charged. A fresh controller will then claim the
+    job and resume it from the DB via the normal resume path.
+
+    The (pid, pid_started_at) fence makes a requeue that loses a race with a
+    concurrent re-claim (or another janitor invocation) a no-op, so a stale
+    "dead" observation can never reset a job out from under a new owner.
+
+    Returns:
+        (outcome, attempt): attempt is the budget attempt just charged for
+        REQUEUED, or the attempt that would have been needed for
+        BUDGET_EXHAUSTED. It is meaningless (0) for LOST_RACE.
+    """
+    now = time.time()
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at,
+                job_info_table.c.schedule_state,
+                job_info_table.c.emergency_recovery_count,
+                job_info_table.c.last_emergency_recovery_at).where(
+                    job_info_table.c.spot_job_id ==
+                    job_id).with_for_update()).fetchone()
+        if row is None:
+            return JobRequeueOutcome.LOST_RACE, 0
+        (current_pid, current_pid_started_at, current_schedule_state,
+         recovery_count, last_recovery_at) = row
+        if (current_pid != observed_pid or
+                current_pid_started_at != observed_pid_started_at):
+            # The job was re-claimed (or reset) since the caller observed the
+            # dead controller.
+            return JobRequeueOutcome.LOST_RACE, 0
+        if current_schedule_state in [
+                ManagedJobScheduleState.DONE.value,
+                ManagedJobScheduleState.WAITING.value,
+                ManagedJobScheduleState.INACTIVE.value,
+        ]:
+            # DONE: the controller finished between the observation and now.
+            # WAITING/INACTIVE: the job is not claimed, so there is nothing to
+            # requeue (and a pid should not be set) - treat as a lost race and
+            # let the next sweep re-evaluate.
+            return JobRequeueOutcome.LOST_RACE, 0
+
+        # Decay-aware budget check, mirroring the controller's in-place
+        # emergency retry: a job whose last recovery attempt is older than the
+        # reset window starts a new episode at attempt 1.
+        attempt = 1
+        if (last_recovery_at is not None and now - last_recovery_at <
+                managed_job_constants.EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS):
+            attempt = (recovery_count or 0) + 1
+        if attempt > managed_job_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS:
+            return JobRequeueOutcome.BUDGET_EXHAUSTED, attempt
+
+        # NULL-safe fence on the started_at we observed: pre-#7847 rows have
+        # no controller_pid_started_at.
+        if observed_pid_started_at is None:
+            started_at_fence = (
+                job_info_table.c.controller_pid_started_at.is_(None))
+        else:
+            started_at_fence = (job_info_table.c.controller_pid_started_at ==
+                                observed_pid_started_at)
+        count = session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(
+                    job_info_table.c.spot_job_id == job_id,
+                    job_info_table.c.controller_pid == observed_pid,
+                    started_at_fence,
+                    job_info_table.c.schedule_state == current_schedule_state,
+                )).values({
+                    job_info_table.c.controller_pid: None,
+                    job_info_table.c.controller_pid_started_at: None,
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.WAITING.value,
+                    job_info_table.c.emergency_recovery_count: attempt,
+                    job_info_table.c.last_emergency_recovery_at: now,
+                })).rowcount
+        if count != 1:
+            session.rollback()
+            return JobRequeueOutcome.LOST_RACE, 0
+        session.commit()
+        return JobRequeueOutcome.REQUEUED, attempt
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
