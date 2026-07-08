@@ -48,23 +48,6 @@ _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
-# EFA network interfaces on the canonical EFA-capable AWS instance for each GPU
-# family, as (GPUs per node, EFA interfaces per node). Used to derive a pod's
-# EFA request from the requested accelerator when no EFA node is running yet
-# (scale-from-zero: Karpenter / cluster-autoscaler at min=0). The node scan in
-# _detect_network_type can only read an EFA count off an already-running GPU+EFA
-# node; from a cold cluster it finds none, so network_tier: best would omit the
-# EFA request and NCCL would silently fall back to TCP. An unknown accelerator
-# is left out (falls back to today's behavior). See examples/aws_efa/README.md
-# for the per-instance EFA interface counts.
-AWS_EFA_ACCELERATOR_EFA_COUNT: Dict[str, Tuple[int, int]] = {
-    'A100': (8, 4),  # p4d.24xlarge
-    'A100-80GB': (8, 4),  # p4de.24xlarge
-    'H100': (8, 32),  # p5.48xlarge
-    'H200': (8, 32),  # p5e.48xlarge
-    'B200': (8, 8),  # p6-b200.48xlarge
-}
-
 # Cluster-autoscaler caps graceful pod termination at this many
 # seconds by default (--max-graceful-termination-sec=600). Rendering a
 # higher `terminationGracePeriodSeconds` doesn't extend the autoscaler's
@@ -1542,6 +1525,44 @@ class Kubernetes(clouds.Cloud):
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 
+    @staticmethod
+    def _derive_efa_count_from_catalog(acc_type: str,
+                                       acc_count: int) -> Optional[int]:
+        """EFA interfaces to request for ``acc_type:acc_count``, or None.
+
+        Resolves the requested accelerator to its cheapest AWS instance type,
+        reads that instance's EFA interface count from the catalog, and scales
+        it to the requested GPU count with the same proportional rule the
+        live-node scan uses. Returns None -- so the caller leaves EFA unset,
+        i.e. today's behavior -- whenever the catalog can't answer (no
+        MaximumEfaInterfaces column yet, or the accelerator/instance can't be
+        resolved). Generic and autoscaler-agnostic.
+        """
+        # Local import: keeps the AWS-specific catalog off non-AWS import paths.
+        from sky.catalog import aws_catalog
+        try:
+            instance_types, _ = catalog.get_instance_type_for_accelerator(
+                acc_type, acc_count, clouds='aws')
+            if not instance_types:
+                return None
+            instance_type = instance_types[0]  # cheapest exact match
+            node_efa_count = aws_catalog.get_efa_interface_count(instance_type)
+            if not node_efa_count:  # None or 0 -> can't size an EFA fabric
+                return None
+            accelerators = catalog.get_accelerators_from_instance_type(
+                instance_type, clouds='aws')
+            if not accelerators:
+                return None
+            node_gpu_count = int(next(iter(accelerators.values())))
+            if node_gpu_count <= 0:
+                return None
+            calculated_efa = math.floor(acc_count / node_gpu_count *
+                                        node_efa_count)
+            return max(1, min(calculated_efa, node_efa_count))
+        except (ValueError, KeyError, ImportError):
+            # Any catalog miss/parse issue -> degrade to no EFA (today's path).
+            return None
+
     @classmethod
     def _detect_network_type(
         cls,
@@ -1714,24 +1735,18 @@ class Kubernetes(clouds.Cloud):
         # AWS EFA scale-from-zero fallback: the node scan above can only read an
         # EFA count off an already-running GPU+EFA node. On a cold cluster
         # (Karpenter / cluster-autoscaler at min=0) it finds none, so derive the
-        # count from the requested accelerator instead -- otherwise
-        # network_tier: best omits the EFA request and NCCL silently falls back
-        # to TCP. Mirrors the GKE machine-type fallback below. Gated on having
-        # seen an AWS node (any EKS node carries the cloud-provider labels, even
-        # a system node), so this never fires on non-AWS clusters. Conservative:
-        # only short-circuit when we can actually derive a count from a known
-        # accelerator. If we can't (no GPU request, or an accelerator not in the
-        # catalog), fall through to the existing behavior below rather than
-        # reporting an EFA fabric we can't size.
+        # count from the requested accelerator via the instance-type catalog --
+        # otherwise network_tier: best omits the EFA request and NCCL silently
+        # falls back to TCP. Mirrors the GKE machine-type fallback below. Gated
+        # on having seen an AWS node (any EKS node carries the cloud-provider
+        # labels, even a system node), so this never fires on non-AWS clusters.
+        # Degrades to today's behavior (no EFA metadata) whenever the catalog
+        # can't answer -- e.g. a hosted catalog predating the
+        # MaximumEfaInterfaces column, or an accelerator/instance it can't
+        # resolve -- rather than reporting an EFA fabric it can't size.
         if saw_aws_efa_node and acc_type is not None and acc_count:
-            # Case-insensitive lookup: accelerator casing can vary by source
-            # (e.g. 'h100' vs 'H100'); catalog keys are uppercase.
-            efa_info = AWS_EFA_ACCELERATOR_EFA_COUNT.get(acc_type.upper())
-            if efa_info is not None:
-                node_gpu_count, node_efa_count = efa_info
-                calculated_efa = math.floor(acc_count / node_gpu_count *
-                                            node_efa_count)
-                efa_count = max(1, min(calculated_efa, node_efa_count))
+            efa_count = cls._derive_efa_count_from_catalog(acc_type, acc_count)
+            if efa_count is not None:
                 return (KubernetesHighPerformanceNetworkType.AWS_EFA, {
                     'efa_count': efa_count
                 })

@@ -673,6 +673,28 @@ def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
     return f'{mode}:{int(total_size)}'
 
 
+def get_efa_interface_count_impl(
+    df: 'pd.DataFrame',
+    instance_type: str,
+) -> Optional[int]:
+    """Max EFA network interfaces for an instance type, or None.
+
+    Returns None (rather than raising) when the instance type is absent, the
+    catalog has no ``MaximumEfaInterfaces`` column (older/hosted catalog
+    without it), or the value is missing/NaN. The caller is a best-effort
+    high-performance-networking detection path that must degrade silently.
+    EFA interface count is a property of the instance type (region-agnostic).
+    """
+    df = _get_instance_type(df, instance_type, None)
+    if df.empty:
+        return None
+    row = df.iloc[0]
+    value = row.get('MaximumEfaInterfaces')
+    if value is None or pd.isna(value):
+        return None
+    return int(value)
+
+
 def get_instance_type_for_accelerator_impl(
     df: 'pd.DataFrame',
     acc_name: str,

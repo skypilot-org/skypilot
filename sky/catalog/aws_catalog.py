@@ -295,6 +295,16 @@ def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
         _get_df(), instance_type)
 
 
+def get_efa_interface_count(instance_type: str) -> Optional[int]:
+    """Max EFA network interfaces for an AWS instance type, or None.
+
+    None when the catalog lacks the ``MaximumEfaInterfaces`` column (e.g. a
+    hosted catalog predating it), the instance type is missing, or the value
+    is NaN.
+    """
+    return common.get_efa_interface_count_impl(_get_df(), instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
