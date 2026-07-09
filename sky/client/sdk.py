@@ -1015,6 +1015,19 @@ def _launch(
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
+    # Task.blocked_resources is runtime-only state (e.g. set by the managed
+    # jobs controller during EAGER_NEXT_REGION recovery to exclude the
+    # preempted region) and is not part of the task YAML spec, so it is
+    # dropped by the dag serialization above. Carry it in the request body so
+    # the server-side provisioner can still exclude the blocked resources.
+    # Old servers ignore the extra field via Pydantic ``extra='ignore'`` and
+    # simply launch without blocking, matching their previous behavior.
+    blocked_resources_config = None
+    if len(dag.tasks) == 1 and dag.tasks[0].blocked_resources:
+        blocked_resources_config = [
+            r.to_yaml_config() for r in dag.tasks[0].blocked_resources
+        ]
+
     # Only request credential bundling when the remote server advertises
     # support for it. Old servers ignore the field via Pydantic
     # ``extra='ignore'`` so this is also safe to send unconditionally,
@@ -1047,6 +1060,7 @@ def _launch(
         resize=resize,
         extra_launch_context=_extra_launch_context or {},
         include_credentials=include_credentials,
+        blocked_resources=blocked_resources_config,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)

@@ -1060,18 +1060,24 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                      'cloud/region.')
         if self._launched_resources is not None:
             task = self.dag.tasks[0]
-            requested_resources = self._launched_resources
-            if (requested_resources.region is None and
-                    requested_resources.zone is None):
+            # Guard on the resources the user requested (task.resources), not
+            # on the launched resources: launched resources always carry a
+            # concrete region, which made this check always False and turned
+            # the region-blocking step below into dead code (#10021). The
+            # launched resources are only used to decide WHICH region to
+            # block.
+            requested_resources = task.resources
+            if all(r.region is None and r.zone is None
+                   for r in requested_resources):
                 # Optimization: We only block the previously launched region,
-                # if the requested resources does not specify a region or zone,
+                # if the requested resources do not specify a region or zone,
                 # because, otherwise, we will spend unnecessary time for
                 # skipping the only specified region/zone.
                 launched_cloud = self._launched_resources.cloud
                 launched_region = self._launched_resources.region
                 task.blocked_resources = {
-                    requested_resources.copy(cloud=launched_cloud,
-                                             region=launched_region)
+                    r.copy(cloud=launched_cloud, region=launched_region)
+                    for r in requested_resources
                 }
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = await self._launch(raise_on_failure=False,
