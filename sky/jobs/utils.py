@@ -1867,6 +1867,8 @@ def stream_logs_by_id(
                     # configured). Stream the logs back from the external store
                     # for this task's ephemeral cluster. The cluster ran exactly
                     # one job, so read the latest indexed one (job_id=None).
+                    # external_logging is only True when a reader is registered.
+                    assert log_reader is not None
                     pool = managed_job_state.get_pool_from_job_id(job_id)
                     if pool is not None:
                         cluster_name, _ = (
