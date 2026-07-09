@@ -48,6 +48,47 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+
+def encode_cluster_handle(cluster_handle: 'backends.ResourceHandle') -> bytes:
+    """Encode a cluster handle for the clusters table.
+
+    [DEPICKLE PROTOTYPE] JSON-encodes handles that support
+    to_state_dict() (CloudVmRayResourceHandle); falls back to pickle for
+    other handle types or non-JSON-able content, recording a pitfall.
+    """
+    # pylint: disable=import-outside-toplevel
+    import orjson
+
+    to_state_dict = getattr(cluster_handle, 'to_state_dict', None)
+    if to_state_dict is None:
+        from sky.server.requests.serializers import depickle
+        depickle.log_pitfall('cluster-handle-no-state-dict',
+                             type(cluster_handle).__name__)
+        return pickle.dumps(cluster_handle)
+    try:
+        return orjson.dumps(to_state_dict())
+    except Exception as e:  # pylint: disable=broad-except
+        from sky.server.requests.serializers import depickle
+        depickle.log_pitfall('cluster-handle-not-json',
+                             f'{type(cluster_handle).__name__}: {e!r}')
+        return pickle.dumps(cluster_handle)
+
+
+def decode_cluster_handle(blob: bytes) -> 'backends.ResourceHandle':
+    """Decode a cluster handle from the clusters table.
+
+    Accepts both the JSON encoding (new rows) and legacy pickle blobs.
+    """
+    if blob[:1] == b'{':
+        # pylint: disable=import-outside-toplevel
+        import orjson
+
+        from sky.backends import cloud_vm_ray_backend
+        return cloud_vm_ray_backend.CloudVmRayResourceHandle.from_state_dict(
+            orjson.loads(blob))
+    return pickle.loads(blob)
+
+
 _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
@@ -707,7 +748,7 @@ def add_or_update_cluster(cluster_name: str,
     engine = _db_manager.get_engine()
 
     # FIXME: launched_at will be changed when `sky launch -c` is called.
-    handle = pickle.dumps(cluster_handle)
+    handle = encode_cluster_handle(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_current_command() if is_launch else None
     status = status_lib.ClusterStatus.INIT
@@ -1442,7 +1483,7 @@ def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
 def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     engine = _db_manager.get_engine()
-    handle = pickle.dumps(cluster_handle)
+    handle = encode_cluster_handle(cluster_handle)
 
     # Extract current node names and merge with existing lineage
     current_names = None
@@ -1519,7 +1560,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
                 handle.stable_internal_external_ips = None
             current_time = int(time.time())
             session.query(cluster_table).filter_by(name=cluster_name).update({
-                cluster_table.c.handle: pickle.dumps(handle),
+                cluster_table.c.handle: encode_cluster_handle(handle),
                 cluster_table.c.status: status_lib.ClusterStatus.STOPPED.value,
                 cluster_table.c.status_updated_at: current_time
             })
@@ -1537,7 +1578,7 @@ def get_handle_from_cluster_name(
             cluster_table.c.handle).filter_by(name=cluster_name).first())
     if row is None:
         return None
-    return pickle.loads(row.handle)
+    return decode_cluster_handle(row.handle)
 
 
 @metrics_lib.time_me
@@ -1559,7 +1600,7 @@ def get_handles_from_cluster_names(
                                  cluster_table.c.handle).filter(
                                      cluster_table.c.name.in_(batch)).all()
             for row in rows:
-                result[row.name] = (pickle.loads(row.handle)
+                result[row.name] = (decode_cluster_handle(row.handle)
                                     if row is not None else None)
     return result
 
@@ -1577,7 +1618,7 @@ def get_cluster_name_to_handle_map(
     name_to_handle = {}
     for row in rows:
         if row.handle and len(row.handle) > 0:
-            name_to_handle[row.name] = pickle.loads(row.handle)
+            name_to_handle[row.name] = decode_cluster_handle(row.handle)
         else:
             name_to_handle[row.name] = None
     return name_to_handle
@@ -2056,7 +2097,7 @@ def get_cluster_from_name(
     record = {
         'name': row.name,
         'launched_at': row.launched_at,
-        'handle': pickle.loads(row.handle),
+        'handle': decode_cluster_handle(row.handle),
         'last_use': row.last_use,
         'status': status_lib.ClusterStatus[row.status],
         'autostop': row.autostop,
@@ -2147,7 +2188,7 @@ def get_clusters_from_names(
                 record: Dict[str, Any] = {
                     'name': row.name,
                     'launched_at': row.launched_at,
-                    'handle': pickle.loads(row.handle),
+                    'handle': decode_cluster_handle(row.handle),
                     'last_use': row.last_use,
                     'status': status_lib.ClusterStatus[row.status],
                     'autostop': row.autostop,
@@ -2298,7 +2339,7 @@ def get_clusters(
             cluster_hashes)
 
     for row in rows:
-        handle = pickle.loads(row.handle)
+        handle = decode_cluster_handle(row.handle)
         priority = (handle.launched_resources.priority
                     if handle.launched_resources is not None else None)
         priority_class = (handle.launched_resources.priority_class

@@ -1,10 +1,8 @@
 """Unit tests for sky.server.requests.serializers.encoders module."""
-import base64
-import pickle
-
 from sky import resources as resources_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.schemas.api import responses
+from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
 from sky.utils import status_lib
 
@@ -46,22 +44,18 @@ class TestEncodeStatus:
         assert cluster_data['name'] == "test-cluster"
         assert cluster_data['status'] == status_lib.ClusterStatus.UP.value
 
+        # [DEPICKLE PROTOTYPE] encode_handle now emits a JSON dict.
         encoded_handle = cluster_data['handle']
-        assert isinstance(encoded_handle, str)
-        decoded_bytes = base64.b64decode(encoded_handle)
-        unpickled_handle = pickle.loads(decoded_bytes)
+        assert isinstance(encoded_handle, dict)
+        decoded_handle = decoders.decode_handle(encoded_handle)
 
-        # NOTE: We have removed the skylet_ssh_tunnel attribute
-        # from the handle, but we keep this test for future reference.
-        assert not hasattr(unpickled_handle, 'skylet_ssh_tunnel')
-        # Previously, this test tests that the handle has SSH tunnel info
-        # removed for backwards compatibility.
-        # assert hasattr(unpickled_handle, 'skylet_ssh_tunnel')
-        # assert unpickled_handle.skylet_ssh_tunnel is None
+        # NOTE: skylet_ssh_tunnel is not part of the wire projection
+        # (to_dict/from_dict); it lives in its own DB column.
+        assert getattr(decoded_handle, 'skylet_ssh_tunnel', None) is None
 
         # Other attributes should be preserved
-        assert unpickled_handle.cluster_name == "test-cluster"
-        assert unpickled_handle.cluster_name_on_cloud == "test-cluster-123"
+        assert decoded_handle.cluster_name == "test-cluster"
+        assert decoded_handle.cluster_name_on_cloud == "test-cluster-123"
 
     def test_encode_status(self):
         """Test that encode_status works normally when handle has no SSH tunnel info."""
@@ -95,11 +89,12 @@ class TestEncodeStatus:
         assert cluster_data['name'] == "test-cluster"
         assert cluster_data['status'] == status_lib.ClusterStatus.UP.value
 
+        # [DEPICKLE PROTOTYPE] encode_handle now emits a JSON dict.
         encoded_handle = cluster_data['handle']
-        decoded_bytes = base64.b64decode(encoded_handle)
-        unpickled_handle = pickle.loads(decoded_bytes)
-        assert unpickled_handle.cluster_name == "test-cluster"
-        assert unpickled_handle.cluster_name_on_cloud == "test-cluster-123"
+        assert isinstance(encoded_handle, dict)
+        decoded_handle = decoders.decode_handle(encoded_handle)
+        assert decoded_handle.cluster_name == "test-cluster"
+        assert decoded_handle.cluster_name_on_cloud == "test-cluster-123"
 
 
 class TestEncodeJobsQueue:

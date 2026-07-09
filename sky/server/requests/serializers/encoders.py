@@ -122,8 +122,10 @@ def encode_status(
         # TODO (syang) We still need to return this field for backwards
         # compatibility.
         # Remove this field at or after v0.12.0
-        response_cluster['storage_mounts_metadata'] = pickle_and_encode(
-            None)  # Always returns None.
+        # [DEPICKLE PROTOTYPE] Was pickle_and_encode(None); the client
+        # never decodes this field (decode_status ignores it), so send a
+        # plain JSON null.
+        response_cluster['storage_mounts_metadata'] = None
         response.append(response_cluster)
     return response
 

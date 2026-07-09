@@ -2691,6 +2691,33 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 provision_common.ProvisionRuntimeMetadata())
         return handle
 
+    def to_state_dict(self) -> dict:
+        """Serialize for server-side state persistence (clusters table).
+
+        [DEPICKLE PROTOTYPE] Unlike to_dict() — the wire projection for
+        clients, which intentionally omits cached_cluster_info — this
+        includes cached_cluster_info because the server relies on it
+        across restarts (cached IPs/ports, provider metadata).
+        skylet_ssh_tunnel is NOT included: it lives in its own DB column
+        (see get/set_cluster_skylet_ssh_tunnel_metadata).
+        """
+        d = self.to_dict()
+        d['cached_cluster_info'] = (self.cached_cluster_info.to_dict()
+                                    if self.cached_cluster_info is not None else
+                                    None)
+        return d
+
+    @classmethod
+    def from_state_dict(cls, d: dict) -> 'CloudVmRayResourceHandle':
+        """Reconstruct from a dict produced by to_state_dict()."""
+        d = dict(d)
+        cached_cluster_info = d.pop('cached_cluster_info', None)
+        handle = cls.from_dict(d)
+        if cached_cluster_info is not None:
+            handle.cached_cluster_info = provision_common.ClusterInfo.from_dict(
+                cached_cluster_info)
+        return handle
+
     def __getstate__(self):
         state = self.__dict__.copy()
         # For backwards compatibility. Refer to

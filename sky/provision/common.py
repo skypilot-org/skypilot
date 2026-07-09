@@ -198,6 +198,31 @@ class ClusterInfo:
         """Get the number of instances in the cluster."""
         return sum(len(instances) for instances in self.instances.values())
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-compatible dict."""
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'ClusterInfo':
+        """Reconstruct from a dict produced by to_dict().
+
+        Unknown fields are ignored for forward compatibility.
+        """
+        instance_fields = {f.name for f in dataclasses.fields(InstanceInfo)}
+        instances = {
+            instance_id: [
+                InstanceInfo(
+                    **{k: v
+                       for k, v in info.items()
+                       if k in instance_fields})
+                for info in infos
+            ] for instance_id, infos in (d.get('instances') or {}).items()
+        }
+        cluster_fields = {f.name for f in dataclasses.fields(cls)}
+        kwargs = {k: v for k, v in d.items() if k in cluster_fields}
+        kwargs['instances'] = instances
+        return cls(**kwargs)
+
     def get_head_instance(self) -> Optional[InstanceInfo]:
         """Get the instance metadata of the head node"""
         if self.head_instance_id is None:
