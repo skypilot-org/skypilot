@@ -9,20 +9,28 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import contextlib
 import runpy
 import sys
+import time
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 import warnings
 
+import filelock
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
+from sky.jobs.controller import _task_run_action
+from sky.jobs.controller import _TaskRunAction
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import common
 from sky.utils import status_lib
@@ -206,223 +214,337 @@ class TestNormalJobRecovery:
 class TestPipelineJobRecovery:
     """Tests for pipeline (sequential multi-task) job recovery.
 
-    When a controller restarts during a pipeline job:
-    - Tasks with task_id < latest_task_id: Already completed, skip
-    - Task with task_id == latest_task_id: Resume based on status
-    - Tasks with task_id > latest_task_id: Will be run after current completes
-
-    Pipeline jobs run tasks sequentially, so only one task is active at a time.
+    When a controller restarts during a pipeline job, ``_run_one_task``
+    classifies each task from its OWN persisted status via the real
+    ``_task_run_action`` helper -- NOT from the job's aggregate "latest
+    non-terminal task" status. These tests drive that real helper directly,
+    with per-task status combinations for a 3-task pipeline, mirroring the
+    sequential loop in ``JobController.run()`` (stop at the first task whose
+    action isn't SKIP).
     """
 
-    @pytest.fixture
-    def mock_pipeline_dag(self):
-        """Create a mock DAG with 3 sequential tasks."""
-        dag = MagicMock()
-        dag.name = 'test-pipeline'
-        tasks = []
-        for i in range(3):
-            t = MagicMock()
-            t.name = f'pipeline-task-{i}'
-            t.envs = {}
-            t.run = f'echo task-{i}'
-            tasks.append(t)
-        dag.tasks = tasks
-        dag.is_job_group.return_value = False
-        return dag
+    def _actions_for_pipeline(
+        self, task_statuses: List[Optional[managed_job_state.ManagedJobStatus]]
+    ) -> Dict[int, _TaskRunAction]:
+        """Classify a sequence of per-task statuses via the real helper.
+
+        Mirrors the sequential loop in ``JobController.run()``: stop after
+        the first task whose action isn't SKIP, since that's the task the
+        controller will actually run next.
+        """
+        actions: Dict[int, _TaskRunAction] = {}
+        for task_id, status in enumerate(task_statuses):
+            action = _task_run_action(status)
+            actions[task_id] = action
+            if action != _TaskRunAction.SKIP:
+                break
+        return actions
+
+    def test_resume_first_task_running(self):
+        """First task (task_id=0) was RUNNING; later tasks still PENDING."""
+        statuses = [
+            managed_job_state.ManagedJobStatus.RUNNING,
+            managed_job_state.ManagedJobStatus.PENDING,
+            managed_job_state.ManagedJobStatus.PENDING,
+        ]
+        assert self._actions_for_pipeline(statuses) == {
+            0: _TaskRunAction.RESUME
+        }
+
+    def test_resume_middle_task_running(self):
+        """Task 0 SUCCEEDED, middle task (task_id=1) was RUNNING."""
+        statuses = [
+            managed_job_state.ManagedJobStatus.SUCCEEDED,
+            managed_job_state.ManagedJobStatus.RUNNING,
+            managed_job_state.ManagedJobStatus.PENDING,
+        ]
+        assert self._actions_for_pipeline(statuses) == {
+            0: _TaskRunAction.SKIP,
+            1: _TaskRunAction.RESUME,
+        }
+
+    def test_resume_last_task_running(self):
+        """Tasks 0, 1 SUCCEEDED; last task (task_id=2) was RUNNING."""
+        statuses = [
+            managed_job_state.ManagedJobStatus.SUCCEEDED,
+            managed_job_state.ManagedJobStatus.SUCCEEDED,
+            managed_job_state.ManagedJobStatus.RUNNING,
+        ]
+        assert self._actions_for_pipeline(statuses) == {
+            0: _TaskRunAction.SKIP,
+            1: _TaskRunAction.SKIP,
+            2: _TaskRunAction.RESUME,
+        }
+
+    def test_skip_completed_task_in_pipeline(self):
+        """A task in any terminal state classifies as SKIP, regardless of
+        its position in the pipeline."""
+        for status in managed_job_state.ManagedJobStatus.terminal_statuses():
+            assert _task_run_action(status) == _TaskRunAction.SKIP, status
+
+    def test_fresh_launch_all_pending(self):
+        """All tasks PENDING: only task 0 is reached, and it's a fresh
+        launch."""
+        statuses = [
+            managed_job_state.ManagedJobStatus.PENDING,
+            managed_job_state.ManagedJobStatus.PENDING,
+            managed_job_state.ManagedJobStatus.PENDING,
+        ]
+        assert self._actions_for_pipeline(statuses) == {0: _TaskRunAction.FRESH}
+
+    def test_resume_recovering_task(self):
+        """Task 0 SUCCEEDED, task 1 was RECOVERING when the controller
+        died."""
+        statuses = [
+            managed_job_state.ManagedJobStatus.SUCCEEDED,
+            managed_job_state.ManagedJobStatus.RECOVERING,
+            managed_job_state.ManagedJobStatus.PENDING,
+        ]
+        assert self._actions_for_pipeline(statuses) == {
+            0: _TaskRunAction.SKIP,
+            1: _TaskRunAction.RESUME,
+        }
+
+    def test_resume_starting_task(self):
+        """Task 0 was STARTING when the controller died."""
+        statuses = [
+            managed_job_state.ManagedJobStatus.STARTING,
+            managed_job_state.ManagedJobStatus.PENDING,
+            managed_job_state.ManagedJobStatus.PENDING,
+        ]
+        assert self._actions_for_pipeline(statuses) == {
+            0: _TaskRunAction.RESUME
+        }
+
+    def test_earlier_succeeded_later_pending_is_skip_not_fresh(self):
+        """Regression: an earlier SUCCEEDED task must classify as SKIP even
+        though a later task is still PENDING (which is what the job's
+        aggregate "latest non-terminal task" status would report). Before
+        this fix, the gate was keyed on that aggregate status, so it treated
+        the finished earlier task as a fresh start and tried to re-issue
+        STARTING for it.
+        """
+        task0_status = managed_job_state.ManagedJobStatus.SUCCEEDED
+        task1_status = managed_job_state.ManagedJobStatus.PENDING
+        assert _task_run_action(task0_status) == _TaskRunAction.SKIP
+        assert _task_run_action(task1_status) == _TaskRunAction.FRESH
+
+    def test_task_run_action_none_status_is_fresh(self):
+        """A task with no persisted status yet (None) is a fresh start."""
+        assert _task_run_action(None) == _TaskRunAction.FRESH
+
+    @pytest.mark.parametrize('status', list(managed_job_state.ManagedJobStatus))
+    def test_task_run_action_covers_every_status(
+            self, status: managed_job_state.ManagedJobStatus):
+        """Table-driven: every ManagedJobStatus member must land in exactly
+        the expected bucket, so a newly added status can't silently fall
+        into the wrong one.
+        """
+        action = _task_run_action(status)
+        if status.is_terminal():
+            assert action == _TaskRunAction.SKIP, status
+        elif status == managed_job_state.ManagedJobStatus.PENDING:
+            assert action == _TaskRunAction.FRESH, status
+        else:
+            assert action == _TaskRunAction.RESUME, status
+
+
+@pytest.fixture
+def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
+    """Create a temporary SQLite DB for managed jobs state and monkeypatch
+    the module-level engines used by ``sky.jobs.state``.
+
+    Copied from the fixture of the same name in test_jobs_state.py, so that
+    tests here can exercise the real ``sky.jobs.state`` read/write path
+    instead of mocking it.
+    """
+    db_path = tmp_path / 'managed_jobs_testing.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+    async_engine = create_async_engine(f'sqlite+aiosqlite:///{db_path}',
+                                       connect_args={'timeout': 30})
+
+    # Monkeypatch Alembic DB lock to a workspace path to avoid writing to
+    # ~/.sky
+    @contextlib.contextmanager
+    def _tmp_db_lock(_section: str):
+        lock_path = tmp_path / f'.{_section}.lock'
+        with filelock.FileLock(str(lock_path), timeout=10):
+            yield
+
+    monkeypatch.setattr(managed_job_state.migration_utils, 'db_lock',
+                        _tmp_db_lock)
+
+    # Monkeypatch module-level engines used by state.
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine', engine)
+    monkeypatch.setattr(managed_job_state._db_manager, '_engine_async',
+                        async_engine)
+
+    # Create schema.
+    managed_job_state.create_table(engine)
+
+    yield engine
+
+
+@pytest.fixture
+def _seed_pipeline_task0_succeeded_task1_pending(_mock_managed_jobs_db_conn):
+    """Seed a real 2-task pipeline job: task 0 SUCCEEDED, task 1 PENDING.
+
+    This is exactly the state a chain-DAG managed job is left in if the
+    controller restarts right after the first task finishes but before the
+    second task is picked up. Returns the seeded job_id.
+    """
+
+    async def mock_callback(status: str):
+        del status  # unused
+
+    async def create_job() -> int:
+        job_id = managed_job_state.set_job_info_without_job_id(
+            name='pipeline-job',
+            workspace='default',
+            entrypoint='ep',
+            pool=None,
+            pool_hash=None,
+            user_hash='user1')
+        managed_job_state.set_pending(job_id,
+                                      task_id=0,
+                                      task_name='extract',
+                                      resources_str='{}',
+                                      metadata='{}')
+        managed_job_state.set_pending(job_id,
+                                      task_id=1,
+                                      task_name='transform',
+                                      resources_str='{}',
+                                      metadata='{}')
+        # Drive task 0 to SUCCEEDED through the real state transitions.
+        await managed_job_state.set_starting_async(job_id, 0, 'run_0',
+                                                   time.time(), '{}', {},
+                                                   mock_callback)
+        await managed_job_state.set_started_async(job_id, 0, time.time(),
+                                                  mock_callback)
+        await managed_job_state.set_succeeded_async(job_id, 0, time.time(),
+                                                    mock_callback)
+        # Task 1 is left PENDING (never started).
+        return job_id
+
+    return asyncio.run(create_job())
+
+
+class TestPipelineRestartWithPendingLaterTask:
+    """Regression test: a controller restart mid-pipeline must not re-run an
+    already-SUCCEEDED earlier task just because a later task is still
+    PENDING.
+
+    Before the fix, ``_run_one_task``'s skip/resume gate was keyed on the
+    job's aggregate "latest non-terminal task" status
+    (``get_latest_task_id_status_async``). For [task0=SUCCEEDED,
+    task1=PENDING] that aggregate status is PENDING, so the gate never took
+    the "already executed -> skip" branch for task 0: the restarted
+    controller treated task 0 as a fresh start and called
+    ``set_starting_async`` on it. That update only matches rows that are
+    still PENDING with a NULL ``end_at``, and task 0 already has ``end_at``
+    set, so it silently updated zero rows and the controller raised
+    ``exceptions.ManagedJobStatusError``. The subsequent FAILED_CONTROLLER
+    write for task 0 is itself a no-op (``set_failed_async`` is also scoped
+    to ``end_at IS NULL``, which task 0 no longer satisfies); what actually
+    tears down the pipeline is ``run()``'s ``finally`` block, which sweeps
+    every task with a NULL ``end_at`` to CANCELLED -- taking the
+    still-PENDING task 1 down with it. Observed end state:
+    ``{0: SUCCEEDED, 1: CANCELLED}``, job CANCELLED.
+
+    These tests exercise the real ``JobController._run_one_task`` against a
+    real (temp SQLite) state DB, so a regression here is caught by exercising
+    production code end-to-end rather than a hand-rolled copy of the gate
+    logic.
+    """
+
+    def _make_controller(self, job_id: int) -> JobController:
+        """Build a JobController without running __init__ (which needs a
+        live DB connection and DAG file on disk that this test doesn't set
+        up).
+
+        Sets the attributes the skip/resume gate touches before it returns
+        early: `_job_id` (queried and logged), plus `_dag` and `_pool`.
+        Also sets `_backend`, `starting`, `starting_lock`, and
+        `starting_signal` -- these are only ever read by the PRE-FIX code
+        path on its way to `set_starting_async` (see the anti-vacuity test
+        below); fixed code never touches them because the gate returns
+        before reaching that point.
+        """
+        controller = JobController.__new__(JobController)
+        controller._job_id = job_id
+        controller._dag = MagicMock()
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller._backend.run_timestamp = 'sky-2024-01-01-00-00-00-000000'
+        controller.starting = set()
+        controller.starting_lock = asyncio.Lock()
+        controller.starting_signal = MagicMock()
+        return controller
 
     @pytest.mark.asyncio
-    async def test_resume_first_task_running(self, mock_pipeline_dag):
-        """Test resuming when first task (task_id=0) was RUNNING."""
+    async def test_succeeded_earlier_task_is_skipped_not_restarted(
+            self, _seed_pipeline_task0_succeeded_task1_pending):
+        """The regression: re-running task 0 must skip it (it already
+        SUCCEEDED) instead of trying to relaunch it, and must never call
+        ``set_starting_async`` for it.
+        """
+        job_id = _seed_pipeline_task0_succeeded_task1_pending
+        controller = self._make_controller(job_id)
+        task = MagicMock()
+        task.name = 'extract'
+        task.metadata = {}
+        task.run = 'echo hi'
+        task.envs = {constants.TASK_ID_ENV_VAR: 'test-task-id'}
+        task.resources = None
 
-        async def mock_get_latest(job_id):
-            return (0, managed_job_state.ManagedJobStatus.RUNNING)
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError(
+                'set_starting_async must not be called for task 0: it '
+                'already SUCCEEDED. This means the skip/resume gate '
+                'regressed to keying off the aggregate "latest task" '
+                'status instead of this task\'s own status.')
 
-        with patch('sky.jobs.state.get_latest_task_id_status_async',
-                   side_effect=mock_get_latest):
-            latest_task_id, last_task_prev_status = await mock_get_latest(
-                job_id=1)
+        # Only the PRE-FIX code path ever reaches these; on fixed code the
+        # gate returns before any of them are used. They exist so a
+        # regression fails loudly at set_starting_async rather than
+        # incidentally on a missing mock attribute.
+        with patch('sky.jobs.controller._add_k8s_annotations'), \
+             patch('sky.jobs.controller._build_task_specs'), \
+             patch('sky.jobs.recovery_strategy.StrategyExecutor.make'), \
+             patch('sky.jobs.state.get_file_mounts_blob_id',
+                   return_value=None), \
+             patch('sky.jobs.state.set_starting_async',
+                   side_effect=_fail_if_called):
+            result = await controller._run_one_task(0, task)
 
-            # Simulate the loop in run()
-            task_actions: Dict[int, str] = {}  # 'skip', 'resume', 'launch'
-            for task_id, task in enumerate(mock_pipeline_dag.tasks):
-                if (latest_task_id is not None and last_task_prev_status !=
-                        managed_job_state.ManagedJobStatus.PENDING):
-                    if latest_task_id > task_id:
-                        task_actions[task_id] = 'skip'
-                        continue
-                    elif latest_task_id == task_id:
-                        task_actions[task_id] = 'resume'
-                        # In real code, we'd run the task here
-                        break  # Simulate sequential execution
-                else:
-                    task_actions[task_id] = 'launch'
-                    break
+        # Task 0 already succeeded, so skipping it should propagate success.
+        assert result is True
 
-            # Task 0 should resume, tasks 1 and 2 not yet processed
-            assert task_actions == {0: 'resume'}
-
-    @pytest.mark.asyncio
-    async def test_resume_middle_task_running(self, mock_pipeline_dag):
-        """Test resuming when middle task (task_id=1) was RUNNING."""
-
-        async def mock_get_latest(job_id):
-            return (1, managed_job_state.ManagedJobStatus.RUNNING)
-
-        with patch('sky.jobs.state.get_latest_task_id_status_async',
-                   side_effect=mock_get_latest):
-            latest_task_id, last_task_prev_status = await mock_get_latest(
-                job_id=1)
-
-            task_actions: Dict[int, str] = {}
-            for task_id, task in enumerate(mock_pipeline_dag.tasks):
-                if (latest_task_id is not None and last_task_prev_status !=
-                        managed_job_state.ManagedJobStatus.PENDING):
-                    if latest_task_id > task_id:
-                        task_actions[task_id] = 'skip'
-                        continue
-                    elif latest_task_id == task_id:
-                        task_actions[task_id] = 'resume'
-                        break
-                else:
-                    task_actions[task_id] = 'launch'
-                    break
-
-            # Task 0 should be skipped, task 1 should resume
-            assert task_actions == {0: 'skip', 1: 'resume'}
+        # The DB must be untouched by this call: task 0 still SUCCEEDED,
+        # task 1 still PENDING.
+        task0_status = await (
+            managed_job_state.get_job_status_with_task_id_async(job_id=job_id,
+                                                                task_id=0))
+        task1_status = await (
+            managed_job_state.get_job_status_with_task_id_async(job_id=job_id,
+                                                                task_id=1))
+        assert task0_status == managed_job_state.ManagedJobStatus.SUCCEEDED
+        assert task1_status == managed_job_state.ManagedJobStatus.PENDING
 
     @pytest.mark.asyncio
-    async def test_resume_last_task_running(self, mock_pipeline_dag):
-        """Test resuming when last task (task_id=2) was RUNNING."""
-
-        async def mock_get_latest(job_id):
-            return (2, managed_job_state.ManagedJobStatus.RUNNING)
-
-        with patch('sky.jobs.state.get_latest_task_id_status_async',
-                   side_effect=mock_get_latest):
-            latest_task_id, last_task_prev_status = await mock_get_latest(
-                job_id=1)
-
-            task_actions: Dict[int, str] = {}
-            for task_id, task in enumerate(mock_pipeline_dag.tasks):
-                if (latest_task_id is not None and last_task_prev_status !=
-                        managed_job_state.ManagedJobStatus.PENDING):
-                    if latest_task_id > task_id:
-                        task_actions[task_id] = 'skip'
-                        continue
-                    elif latest_task_id == task_id:
-                        task_actions[task_id] = 'resume'
-                        break
-                else:
-                    task_actions[task_id] = 'launch'
-                    break
-
-            # Tasks 0, 1 should be skipped, task 2 should resume
-            assert task_actions == {0: 'skip', 1: 'skip', 2: 'resume'}
-
-    @pytest.mark.asyncio
-    async def test_skip_completed_task_in_pipeline(self, mock_pipeline_dag):
-        """Test that _run_one_task returns True for completed tasks."""
-        # When task_id < latest_task_id, the task should return True (success)
-        # without actually running, allowing the pipeline to continue
-
-        latest_task_id = 2
-
-        for task_id in range(3):
-            should_skip = latest_task_id > task_id
-
-            if task_id == 0:
-                assert should_skip is True
-            elif task_id == 1:
-                assert should_skip is True
-            elif task_id == 2:
-                assert should_skip is False
-
-    @pytest.mark.asyncio
-    async def test_fresh_launch_all_pending(self, mock_pipeline_dag):
-        """Test fresh launch when all tasks are PENDING."""
-
-        async def mock_get_latest(job_id):
-            return (0, managed_job_state.ManagedJobStatus.PENDING)
-
-        with patch('sky.jobs.state.get_latest_task_id_status_async',
-                   side_effect=mock_get_latest):
-            latest_task_id, last_task_prev_status = await mock_get_latest(
-                job_id=1)
-
-            task_actions: Dict[int, str] = {}
-            for task_id, task in enumerate(mock_pipeline_dag.tasks):
-                if (latest_task_id is not None and last_task_prev_status !=
-                        managed_job_state.ManagedJobStatus.PENDING):
-                    if latest_task_id > task_id:
-                        task_actions[task_id] = 'skip'
-                        continue
-                    elif latest_task_id == task_id:
-                        task_actions[task_id] = 'resume'
-                        break
-                else:
-                    task_actions[task_id] = 'launch'
-                    break
-
-            # First task should be fresh launch (PENDING)
-            assert task_actions == {0: 'launch'}
-
-    @pytest.mark.asyncio
-    async def test_resume_recovering_task(self, mock_pipeline_dag):
-        """Test resuming when task was in RECOVERING state."""
-
-        async def mock_get_latest(job_id):
-            return (1, managed_job_state.ManagedJobStatus.RECOVERING)
-
-        with patch('sky.jobs.state.get_latest_task_id_status_async',
-                   side_effect=mock_get_latest):
-            latest_task_id, last_task_prev_status = await mock_get_latest(
-                job_id=1)
-
-            task_actions: Dict[int, str] = {}
-            for task_id, task in enumerate(mock_pipeline_dag.tasks):
-                if (latest_task_id is not None and last_task_prev_status !=
-                        managed_job_state.ManagedJobStatus.PENDING):
-                    if latest_task_id > task_id:
-                        task_actions[task_id] = 'skip'
-                        continue
-                    elif latest_task_id == task_id:
-                        task_actions[task_id] = 'resume'
-                        break
-                else:
-                    task_actions[task_id] = 'launch'
-                    break
-
-            # Task 0 skipped, task 1 should resume from RECOVERING
-            assert task_actions == {0: 'skip', 1: 'resume'}
-
-    @pytest.mark.asyncio
-    async def test_resume_starting_task(self, mock_pipeline_dag):
-        """Test resuming when task was in STARTING state."""
-
-        async def mock_get_latest(job_id):
-            return (0, managed_job_state.ManagedJobStatus.STARTING)
-
-        with patch('sky.jobs.state.get_latest_task_id_status_async',
-                   side_effect=mock_get_latest):
-            latest_task_id, last_task_prev_status = await mock_get_latest(
-                job_id=1)
-
-            task_actions: Dict[int, str] = {}
-            for task_id, task in enumerate(mock_pipeline_dag.tasks):
-                if (latest_task_id is not None and last_task_prev_status !=
-                        managed_job_state.ManagedJobStatus.PENDING):
-                    if latest_task_id > task_id:
-                        task_actions[task_id] = 'skip'
-                        continue
-                    elif latest_task_id == task_id:
-                        task_actions[task_id] = 'resume'
-                        break
-                else:
-                    task_actions[task_id] = 'launch'
-                    break
-
-            # Task 0 should resume from STARTING
-            assert task_actions == {0: 'resume'}
+    async def test_pending_later_task_classifies_as_fresh(
+            self, _seed_pipeline_task0_succeeded_task1_pending):
+        """Task 1 (still PENDING) must classify as FRESH, so once task 0 is
+        skipped, ``JobController.run()``'s sequential loop proceeds to
+        launch task 1 fresh -- not treat it as already running, and not loop
+        back to task 0.
+        """
+        job_id = _seed_pipeline_task0_succeeded_task1_pending
+        task1_status = await (
+            managed_job_state.get_job_status_with_task_id_async(job_id=job_id,
+                                                                task_id=1))
+        assert task1_status == managed_job_state.ManagedJobStatus.PENDING
+        assert _task_run_action(task1_status) == _TaskRunAction.FRESH
 
 
 class TestJobGroupRecovery:
