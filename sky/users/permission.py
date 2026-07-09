@@ -650,6 +650,15 @@ class PermissionService:
         Idempotent and concurrency-safe: policy writes are guarded by the
         distributed policy lock and ``add_policy`` skips duplicates, so
         concurrent replicas / workers converge on the same result.
+
+        The config is re-read and matches recomputed inside the policy
+        lock: a workspace update (`update_workspace_fn`) persists the new
+        config and then rewrites the workspace's policies under this same
+        lock, so recomputing after acquiring it guarantees we never
+        re-grant access based on a config snapshot from before an admin
+        removed this user. The pre-lock computation is only a cheap early
+        exit so user creation skips the distributed lock entirely when no
+        private workspace names the user.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             return
@@ -659,24 +668,29 @@ class PermissionService:
         # pylint: disable=import-outside-toplevel
         from sky.users import resolver as user_resolver
 
-        workspaces = skypilot_config.get_nested(('workspaces',),
-                                                default_value={})
-        resolver = user_resolver.UserResolver()
-        # Every form of this user that could appear in an allowed_users list:
-        # the user_id itself plus the unique username, if any.
-        user_entries = set(resolver.entries_for(user_id))
+        def _matching_workspaces() -> List[str]:
+            workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+            resolver = user_resolver.UserResolver()
+            # Every form of this user that could appear in an allowed_users
+            # list: the user_id itself plus the unique username, if any.
+            user_entries = set(resolver.entries_for(user_id))
+            return [
+                workspace_name
+                for workspace_name, workspace_config in workspaces.items()
+                if workspace_config.get('private', False) and user_entries.
+                intersection(workspace_config.get('allowed_users', []))
+            ]
 
-        matching_workspaces = [
-            workspace_name
-            for workspace_name, workspace_config in workspaces.items()
-            if workspace_config.get('private', False) and
-            user_entries.intersection(workspace_config.get('allowed_users', []))
-        ]
-        if not matching_workspaces:
+        if not _matching_workspaces():
             return
 
         added_any = False
         with _policy_lock():
+            # Recompute from a fresh config read now that concurrent
+            # workspace updates are excluded (see docstring).
+            skypilot_config.safe_reload_config()
+            matching_workspaces = _matching_workspaces()
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             for workspace_name in matching_workspaces:
