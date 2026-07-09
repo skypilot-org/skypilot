@@ -443,7 +443,13 @@ SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
     'sudo bash -c \''
     'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
     'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
-    '(systemctl reload sshd || service ssh reload); '
+    # Make the live reload best-effort. On containers with no systemd (all K8s
+    # pods) `systemctl reload sshd` fails, and on non-Debian images (RHEL/UBI)
+    # there is also no `service` command, so this line exited 127 and failed the
+    # whole runtime setup even though sshd is already running. The
+    # MaxSessions/MaxStartups config is applied on the next sshd start; a failed
+    # live reload must not abort the launch.
+    '(systemctl reload sshd || service ssh reload || true); '
     '\'')
 
 # Internal: Env var indicating the system is running with a remote API server.

@@ -933,7 +933,97 @@ available_node_types:
                 # for hf-mount, rclone, blobfuse2, etc.). On Ubuntu 22.04+
                 # `fuse3 Breaks: fuse` (both ship /usr/bin/fusermount), so the
                 # two packages cannot coexist. FUSE is handled out-of-band below.
-                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server";
+                # `which` is included because SkyPilot's own runtime setup calls
+                # `uv run which ray`; Debian ships it (debianutils) but minimal
+                # RHEL/UBI base images do not, so without it a non-Debian launch
+                # dies at "Failed to spawn: which". Same package name everywhere.
+                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server which";
+
+                # --- Portable package-manager support (CC-328 / TICKET-039) ---
+                # This bootstrap historically assumed apt/dpkg (Debian/Ubuntu).
+                # Detect the image's package manager, gate installs on BINARY
+                # presence (`command -v`) rather than `dpkg -l`, and dispatch the
+                # install through the right tool. Effect: a non-Debian image
+                # (RHEL/UBI/Alpine/SUSE) that already ships the prereqs needs no
+                # install at all; one that's missing them installs via dnf/apk/etc.
+                # The apt path is UNCHANGED — INSTALL_FIRST/MISSING carry generic
+                # names and map_pkg_names() translates them back to the exact apt
+                # names (e.g. netcat -> netcat-openbsd) the old code used, so
+                # Debian/Ubuntu behavior is byte-for-byte identical.
+                PKG_MGR=""
+                if   command -v apt-get  >/dev/null 2>&1; then PKG_MGR=apt
+                elif command -v dnf      >/dev/null 2>&1; then PKG_MGR=dnf
+                elif command -v microdnf >/dev/null 2>&1; then PKG_MGR=microdnf
+                elif command -v yum      >/dev/null 2>&1; then PKG_MGR=yum
+                elif command -v apk      >/dev/null 2>&1; then PKG_MGR=apk
+                elif command -v zypper   >/dev/null 2>&1; then PKG_MGR=zypper
+                fi
+
+                # Is a generic package present? Prove via its BINARY (portable
+                # across distros; `dpkg -l` doesn't exist on RHEL/Alpine/SUSE).
+                pkg_present() {
+                  case "$1" in
+                    netcat)         command -v nc          >/dev/null 2>&1 ;;
+                    openssh-server) command -v sshd        >/dev/null 2>&1 ;;
+                    pciutils)       command -v lspci       >/dev/null 2>&1 ;;
+                    fuse)           command -v fusermount  >/dev/null 2>&1 ;;
+                    fuse3)          command -v fusermount3 >/dev/null 2>&1 ;;
+                    *)              command -v "$1"        >/dev/null 2>&1 ;;
+                  esac
+                }
+
+                # Translate generic package names to per-manager names. apt names
+                # match the SkyPilot defaults (so the apt path is unchanged); the
+                # non-apt managers need a few translations.
+                map_pkg_names() {
+                  local out="" g
+                  for g in "$@"; do
+                    case "$g" in
+                      netcat)
+                        case "$PKG_MGR" in
+                          dnf|yum|microdnf) out="$out nmap-ncat" ;;
+                          *)                out="$out netcat-openbsd" ;;
+                        esac ;;
+                      fuse)
+                        case "$PKG_MGR" in
+                          dnf|yum|microdnf) out="$out fuse fuse-libs" ;;
+                          *)                out="$out fuse" ;;
+                        esac ;;
+                      fuse3)
+                        case "$PKG_MGR" in
+                          dnf|yum|microdnf) out="$out fuse3 fuse3-libs" ;;
+                          *)                out="$out fuse3" ;;
+                        esac ;;
+                      openssh-server)
+                        case "$PKG_MGR" in
+                          apk) out="$out openssh" ;;
+                          *)   out="$out openssh-server" ;;
+                        esac ;;
+                      *) out="$out $g" ;;
+                    esac
+                  done
+                  echo "$out"
+                }
+
+                # Install with the detected NON-apt manager under a sanitized loader
+                # environment: a conda/custom image can put its own libs ahead on
+                # LD_LIBRARY_PATH/PATH and break the system dnf/yum itself (e.g.
+                # `libdnf.so.2: undefined symbol: repo_add_rpm`; or a baked
+                # LD_PRELOAD like libnccl.so breaking the manager's Python with a
+                # GLIBCXX error). Drop the loader-pollution vars and pin a system
+                # PATH, but KEEP http(s)_proxy/no_proxy + CA env so proxied clusters
+                # can still reach their repos. (apt keeps its own mirror-fallback.)
+                pkg_install() {
+                  local names; names="$(map_pkg_names "$@")"
+                  local CLEAN="env -u LD_LIBRARY_PATH -u LD_PRELOAD -u PYTHONPATH -u PYTHONHOME PATH=/usr/sbin:/usr/bin:/sbin:/bin"
+                  case "$PKG_MGR" in
+                    dnf|yum)  $(prefix_cmd) $CLEAN "$PKG_MGR" install -y $names ;;
+                    microdnf) $(prefix_cmd) $CLEAN microdnf install -y $names ;;
+                    apk)      $(prefix_cmd) $CLEAN apk add --no-cache $names ;;
+                    zypper)   $(prefix_cmd) $CLEAN zypper --non-interactive install $names ;;
+                    *)        return 1 ;;
+                  esac
+                }
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl, rsync, ssh and wget are available sooner to unblock the following
@@ -942,17 +1032,16 @@ available_node_types:
                 INSTALL_FIRST="";
                 MISSING_PACKAGES="";
                 for pkg in $PACKAGES; do
-                  if [ "$pkg" == "netcat" ]; then
-                    if ! dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; then
-                      INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
-                    fi
-                  elif ! dpkg -l | grep -q "^ii  $pkg "; then
-                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "wget" ]; then
-                      INSTALL_FIRST="$INSTALL_FIRST $pkg";
-                    else
-                      MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
-                    fi
-                  fi
+                  pkg_present "$pkg" && continue
+                  # curl/rsync/wget are core (needed early to unblock conda + rsync).
+                  # Everything else — incl. netcat — is best-effort: worker readiness
+                  # uses bash /dev/tcp (not `nc`), so netcat is not a launch blocker,
+                  # and its per-distro name (nmap-ncat / netcat-openbsd) can't fail
+                  # the launch.
+                  case "$pkg" in
+                    curl|rsync|wget) INSTALL_FIRST="$INSTALL_FIRST $pkg" ;;
+                    *)               MISSING_PACKAGES="$MISSING_PACKAGES $pkg" ;;
+                  esac
                 done;
 
                 # FUSE handling — four cases for (fuse_installed, fuse3_installed):
@@ -967,8 +1056,8 @@ available_node_types:
                 #           this.
                 #   (1, 1): impossible on Ubuntu 22.04+ (Breaks declaration);
                 #           treated as no-op for forward-compat.
-                HAS_FUSE=0; dpkg -l 2>/dev/null | grep -q "^ii  fuse " && HAS_FUSE=1
-                HAS_FUSE3=0; dpkg -l 2>/dev/null | grep -q "^ii  fuse3 " && HAS_FUSE3=1
+                HAS_FUSE=0; command -v fusermount  >/dev/null 2>&1 && HAS_FUSE=1
+                HAS_FUSE3=0; command -v fusermount3 >/dev/null 2>&1 && HAS_FUSE3=1
                 if [ "$HAS_FUSE" = "0" ] && [ "$HAS_FUSE3" = "0" ]; then
                   INSTALL_FIRST="$INSTALL_FIRST fuse"
                   MISSING_PACKAGES="$MISSING_PACKAGES fuse3"
@@ -1037,7 +1126,7 @@ available_node_types:
                   # Try INSTALL_FIRST (required core packages)
                   if [ ! -z "$INSTALL_FIRST" ]; then
                     echo "Installing core packages: $INSTALL_FIRST" >> /tmp/apt-update.log;
-                    apt_update_install_with_retries $INSTALL_FIRST >> /tmp/apt-update.log 2>&1 || {
+                    apt_update_install_with_retries $(map_pkg_names $INSTALL_FIRST) >> /tmp/apt-update.log 2>&1 || {
                       echo "Install failed with ${candidate:-default sources}: $INSTALL_FIRST" >> /tmp/apt-update.log
                       continue
                     }
@@ -1056,7 +1145,7 @@ available_node_types:
                   if [ ! -z "$MISSING_PACKAGES" ]; then
                     echo "Installing missing packages individually: $MISSING_PACKAGES" >> /tmp/apt-update.log;
                     for pkg in $MISSING_PACKAGES; do
-                      apt_install_with_retries $pkg >> /tmp/apt-update.log 2>&1 || echo "Optional package $pkg installation failed, skip." >> /tmp/apt-update.log;
+                      apt_install_with_retries $(map_pkg_names $pkg) >> /tmp/apt-update.log 2>&1 || echo "Optional package $pkg installation failed, skip." >> /tmp/apt-update.log;
                     done
                   fi
 
@@ -1066,16 +1155,47 @@ available_node_types:
                 restore_source
                 }
 
+                # Non-apt install path (dnf/microdnf/yum/apk/zypper): mirror the
+                # apt path's INSTALL_FIRST (fatal) / MISSING (best-effort) split.
+                run_pkg_install_nonapt() {
+                  INSTALL_SUCCESS=false
+                  if [ ! -z "$INSTALL_FIRST" ]; then
+                    echo "Installing core packages via $PKG_MGR: $INSTALL_FIRST" >> /tmp/apt-update.log
+                    pkg_install $INSTALL_FIRST >> /tmp/apt-update.log 2>&1 || {
+                      echo "Core install failed via $PKG_MGR: $INSTALL_FIRST" >> /tmp/apt-update.log
+                      return
+                    }
+                  fi
+                  if [ ! -z "$MISSING_PACKAGES" ]; then
+                    echo "Installing missing packages individually via $PKG_MGR: $MISSING_PACKAGES" >> /tmp/apt-update.log
+                    for pkg in $MISSING_PACKAGES; do
+                      pkg_install $pkg >> /tmp/apt-update.log 2>&1 || echo "Optional package $pkg installation failed via $PKG_MGR, skip." >> /tmp/apt-update.log
+                    done
+                  fi
+                  INSTALL_SUCCESS=true
+                }
+
                 INSTALL_SUCCESS=false
                 if [ -z "$INSTALL_FIRST" ] && [ -z "$MISSING_PACKAGES" ]; then
-                  echo "All required packages already installed; skipping apt-update/install." >> /tmp/apt-update.log
+                  echo "All required packages already installed; skipping package install." >> /tmp/apt-update.log
                   INSTALL_SUCCESS=true
-                else
+                elif [ "$PKG_MGR" = "apt" ]; then
                   run_apt_install_with_fallback
+                elif [ -n "$PKG_MGR" ]; then
+                  run_pkg_install_nonapt
+                else
+                  echo "Error: no supported package manager (apt/dnf/microdnf/yum/apk/zypper) found and prereqs are missing: $INSTALL_FIRST $MISSING_PACKAGES" >> /tmp/apt-update.log
                 fi
+                # Drop to set +e for the subsequent "ok to fail" steps (SSH setup
+                # etc.). The apt path already does this inside its fallback helper;
+                # the non-apt and already-installed paths must match, or a later
+                # tolerated Debian-ism (e.g. `service ssh restart`) would abort the
+                # step under set -e on a non-Debian image. The core-install guard
+                # below is an explicit test, unaffected by set +e.
+                set +e
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
-                  echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  echo "Error: core package installation failed." >> /tmp/apt-update.log
                   dump_apt_log
                   exit 1
                 fi;
@@ -1116,7 +1236,16 @@ available_node_types:
               skypilot:ssh_public_key_content
               SKYPILOT_SSH_KEY_EOF
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
-                $(prefix_cmd) service ssh restart;
+                # Start sshd portably: the service is `ssh` on Debian/Ubuntu but
+                # `sshd` on RHEL/UBI/SUSE, and minimal containers often have no
+                # service manager at all — fall back to launching the daemon
+                # directly. `|| true` so a benign restart failure never aborts.
+                $(prefix_cmd) service ssh restart 2>/dev/null \
+                  || $(prefix_cmd) service sshd restart 2>/dev/null \
+                  || $(prefix_cmd) systemctl restart ssh 2>/dev/null \
+                  || $(prefix_cmd) systemctl restart sshd 2>/dev/null \
+                  || $(prefix_cmd) /usr/sbin/sshd 2>/dev/null \
+                  || true;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
 
                 {% if k8s_enable_docker_build %}
@@ -1150,7 +1279,7 @@ available_node_types:
                 mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
                 # Wait for `curl` package to be installed before installing conda
                 # and ray.
-                until dpkg -l | grep -q "^ii  curl "; do
+                until command -v curl >/dev/null 2>&1; do
                   sleep 0.1
                   echo "Waiting for curl package to be installed..."
                 done
@@ -1161,9 +1290,18 @@ available_node_types:
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
-                # Wait for `patch` package to be installed before applying ray patches
-                until dpkg -l | grep -q "^ii  patch "; do
+                # Wait for `patch` to be installed before applying ray patches.
+                # patch is best-effort (an image may ship none and have no usable
+                # repo), so bound the wait: proceed after 60s and let the patch
+                # step below fail loudly rather than hang this step forever.
+                _patch_wait=0
+                until command -v patch >/dev/null 2>&1; do
                   sleep 0.1
+                  _patch_wait=$((_patch_wait + 1))
+                  if [ "$_patch_wait" -ge 600 ]; then
+                    echo "WARNING: patch not installed after 60s; proceeding."
+                    break
+                  fi
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
@@ -1190,12 +1328,12 @@ available_node_types:
                   # by the worker probe inside ray_worker_start_command.
 {% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
-                  # Wait until the ray cluster is started on the head pod
-                  until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
-                    sleep 0.1
-                    echo "Waiting for netcat package to be installed..."
-                  done
-                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
+                  # Wait until the ray head's port is reachable. Use bash's
+                  # /dev/tcp (the pod entrypoint is /bin/bash) rather than `nc -z`:
+                  # RHEL/UBI ship nmap-ncat, whose `nc` has no `-z` flag, so the old
+                  # probe spun forever there with no diagnostic. /dev/tcp is
+                  # nc-dialect-independent and needs no netcat at all.
+                  until timeout 1 bash -c ": < /dev/tcp/${SKYPILOT_RAY_HEAD_IP}/${SKYPILOT_RAY_PORT}" 2>/dev/null; do
                     sleep 0.1
                   done
 {% endif %}
