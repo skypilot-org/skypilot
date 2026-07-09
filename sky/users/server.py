@@ -282,11 +282,11 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
 
+    # Main-process handler: refresh config so runtime `rbac.default_role` /
+    # `workspaces` changes are honored without a server restart (executor
+    # requests reload per request, sync handlers like this one do not).
+    skypilot_config.safe_reload_config()
     if not role:
-        # Main-process handler: refresh config so a runtime `rbac.default_role`
-        # change is honored without a server restart (executor requests reload
-        # per request, sync handlers like this one do not).
-        skypilot_config.safe_reload_config()
         role = rbac.get_default_role()
 
     # Create user
@@ -308,6 +308,11 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
                         password=password_hash,
                         user_type=models.UserType.BASIC.value))
         permission.permission_service.update_role(user_hash, role)
+        # Grant any private-workspace access the config's allowed_users owes
+        # this user: an admin may have listed this username before the account
+        # existed, in which case the startup / config-update sync dropped it.
+        permission.permission_service.resync_workspace_policies_for_new_user(
+            user_hash)
 
 
 @router.post('/update')

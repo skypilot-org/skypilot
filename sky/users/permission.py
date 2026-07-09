@@ -630,6 +630,68 @@ class PermissionService:
             # check.
             self.invalidate_workspace_permission_cache(workspace_name)
 
+    def resync_workspace_policies_for_new_user(self, user_id: str) -> None:
+        """Grant a newly-created user any workspace access owed by config.
+
+        Private workspaces list their members in ``allowed_users`` (a mix
+        of user_ids and usernames). Those entries are resolved to casbin
+        policies at server startup and on workspace-config updates, but an
+        entry can only resolve once a matching user record exists, and a
+        user record is first created on login. An admin who adds a user to
+        ``allowed_users`` before that user has ever logged in therefore
+        produces an entry that resolves to nothing at sync time.
+
+        This method re-resolves the config from the perspective of a single
+        newly-created user: for each private workspace whose
+        ``allowed_users`` names this user (by id or unique username), it
+        adds the missing ``(user_id, workspace_name, '*')`` policy. It is
+        scoped to this one user and does not rebuild all policies.
+
+        Idempotent and concurrency-safe: policy writes are guarded by the
+        distributed policy lock and ``add_policy`` skips duplicates, so
+        concurrent replicas / workers converge on the same result.
+        """
+        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+            return
+
+        # Lazy imports to avoid a circular import: `sky.users.resolver`
+        # imports this module.
+        # pylint: disable=import-outside-toplevel
+        from sky.users import resolver as user_resolver
+
+        workspaces = skypilot_config.get_nested(('workspaces',),
+                                                default_value={})
+        resolver = user_resolver.UserResolver()
+        # Every form of this user that could appear in an allowed_users list:
+        # the user_id itself plus the unique username, if any.
+        user_entries = set(resolver.entries_for(user_id))
+
+        matching_workspaces = [
+            workspace_name
+            for workspace_name, workspace_config in workspaces.items()
+            if workspace_config.get('private', False) and
+            user_entries.intersection(workspace_config.get('allowed_users', []))
+        ]
+        if not matching_workspaces:
+            return
+
+        added_any = False
+        with _policy_lock():
+            self._load_policy_no_lock()
+            enforcer = self._ensure_enforcer()
+            for workspace_name in matching_workspaces:
+                # add_policy returns False if the policy already exists.
+                if enforcer.add_policy(user_id, workspace_name, '*'):
+                    logger.info(
+                        f'Granting user {user_id} access to private workspace '
+                        f'{workspace_name!r} on user creation (matched '
+                        'allowed_users after the user record was created).')
+                    added_any = True
+            if added_any:
+                enforcer.save_policy()
+        if added_any:
+            self.invalidate_user_permission_cache(user_id)
+
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
         with _policy_lock():
@@ -663,16 +725,22 @@ permission_service = PermissionService()
 
 
 def seed_new_user_role(user_id: str) -> None:
-    """Reload config, then assign the default role to a new user.
+    """Reload config, then set up policies for a newly-created user.
+
+    Assigns the default role and grants any private-workspace access that
+    the config's `allowed_users` lists owe this user (see
+    `resync_workspace_policies_for_new_user` for why this can only happen
+    once the user record exists).
 
     Refreshes the in-memory config first so a runtime change to
-    `rbac.default_role` is honored without a server restart: the main API-server
-    process (auth middlewares, sync handlers) bypasses the executor's
-    per-request config reload. `add_user_if_not_exists` is a no-op if the user
-    already has a role.
+    `rbac.default_role` or `workspaces` is honored without a server restart:
+    the main API-server process (auth middlewares, sync handlers) bypasses the
+    executor's per-request config reload. `add_user_if_not_exists` is a no-op if
+    the user already has a role.
 
     Blocking (config file/DB read + policy lock). Async callers MUST offload it
     via `asyncio.to_thread` so it does not block the event loop.
     """
     skypilot_config.safe_reload_config()
     permission_service.add_user_if_not_exists(user_id)
+    permission_service.resync_workspace_policies_for_new_user(user_id)
