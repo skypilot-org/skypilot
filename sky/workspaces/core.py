@@ -1141,6 +1141,22 @@ def set_user_preferred_workspace(user: models.User,
     global_user_state.set_user_preferred_workspace(user.id, workspace)
 
 
+def _try_resync_new_user_grants(user: models.User) -> None:
+    """Best-effort one-shot re-sync of a possibly-missed first-login grant.
+
+    Swallows (and logs) failures: callers are on a deny path and should
+    fall through to their normal denial rather than surface a transient
+    lock/DB error as a 500.
+    """
+    try:
+        permission.permission_service.resync_workspace_policies_for_new_user(
+            user.id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Workspace policy re-sync for user {user.name} '
+                     f'({user.id}) failed; denying based on current policies: '
+                     f'{common_utils.format_exception(e)}')
+
+
 def resolve_workspace_for_user(
         user: models.User,
         requested: Optional[str] = None) -> WorkspaceResolution:
@@ -1184,7 +1200,14 @@ def resolve_workspace_for_user(
             chosen, and the user has no access to 'default'.
     """
     if requested is not None:
-        check_workspace_permission(user, requested)
+        try:
+            check_workspace_permission(user, requested)
+        except exceptions.PermissionDeniedError:
+            # The denial can be a first-login grant that was never
+            # materialized (see the zero-accessible branch below); re-sync
+            # once and re-check before denying for real.
+            _try_resync_new_user_grants(user)
+            check_workspace_permission(user, requested)
         return WorkspaceResolution(
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
@@ -1201,8 +1224,7 @@ def resolve_workspace_for_user(
         # user is about to be denied everything) and the re-sync is
         # idempotent and race-safe, so the retry also heals users whose
         # records predate the re-sync.
-        permission.permission_service.resync_workspace_policies_for_new_user(
-            user.id)
+        _try_resync_new_user_grants(user)
         accessible = sorted(
             _accessible_workspace_names_for_user(
                 user.id, set(_load_workspaces().keys())))

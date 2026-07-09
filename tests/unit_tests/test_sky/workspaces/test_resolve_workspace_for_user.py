@@ -645,6 +645,75 @@ class TestZeroAccessibleResync(unittest.TestCase):
         self.assertEqual(res.workspace, 'private-ws')
 
 
+class TestResyncEdgeCases(unittest.TestCase):
+    """Hardening around the one-shot re-sync on deny paths."""
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def test_resync_failure_still_raises_clean_denial(self):
+        """A transient re-sync error must surface as NoWorkspaceAccessError,
+        not as the transient error (a 500 to the user)."""
+        patches = [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value={'private-ws': {
+                                  'private': True
+                              }}),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              return_value=set()),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user',
+                              side_effect=RuntimeError('lock timeout')),
+        ]
+        with _Patcher(patches):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user)
+
+    def test_explicit_requested_heals_missed_grant(self):
+        """An explicit requested workspace also gets the one-shot heal:
+        denied -> re-sync -> re-check passes."""
+        check_calls = []
+
+        def _check(user, workspace):
+            del user  # Signature mirrors check_workspace_permission.
+            check_calls.append(workspace)
+            if len(check_calls) == 1:
+                raise exceptions.PermissionDeniedError('no access')
+
+        resync = mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'resync_workspace_policies_for_new_user')
+        with mock.patch.object(workspaces_core,
+                               'check_workspace_permission',
+                               side_effect=_check):
+            with resync as mock_resync:
+                res = workspaces_core.resolve_workspace_for_user(
+                    self.user, requested='private-ws')
+        mock_resync.assert_called_once_with('alice')
+        self.assertEqual(check_calls, ['private-ws', 'private-ws'])
+        self.assertEqual(res.workspace, 'private-ws')
+        self.assertEqual(res.source,
+                         workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
+
+    def test_explicit_requested_still_denied_after_resync(self):
+        """If the re-sync does not help, the original denial propagates and
+        the re-sync ran exactly once (no retry loop)."""
+        resync = mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'resync_workspace_policies_for_new_user')
+        with mock.patch.object(
+                workspaces_core,
+                'check_workspace_permission',
+                side_effect=exceptions.PermissionDeniedError('no access')):
+            with resync as mock_resync:
+                with self.assertRaises(exceptions.PermissionDeniedError):
+                    workspaces_core.resolve_workspace_for_user(
+                        self.user, requested='private-ws')
+        mock_resync.assert_called_once_with('alice')
+
+
 class TestNoWorkspaceAccessError(unittest.TestCase):
     """NoWorkspaceAccessError must remain a PermissionDeniedError subclass
     so existing `except PermissionDeniedError` handlers keep catching the

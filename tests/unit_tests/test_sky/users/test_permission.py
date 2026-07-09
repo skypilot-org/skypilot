@@ -1628,16 +1628,15 @@ class TestResyncWorkspacePoliciesForNewUser:
         service._load_policy_no_lock = mock.Mock()
         return service
 
-    @mock.patch('sky.users.permission.skypilot_config.safe_reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_new_user_matched_by_username_gets_policy(self, mock_get_users,
-                                                      mock_get_nested,
-                                                      mock_policy_lock,
-                                                      mock_kv_cache,
-                                                      mock_reload):
+    def test_new_user_matched_by_username_gets_policy(
+            self, mock_get_users, mock_get_nested, mock_policy_lock,
+            mock_kv_cache, mock_config_lock, mock_reload):
         """A pre-login allowed_users entry (username) grants access now."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1661,6 +1660,7 @@ class TestResyncWorkspacePoliciesForNewUser:
         service = self._make_service(mock_enforcer)
         service.resync_workspace_policies_for_new_user('u-alice')
 
+        mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         mock_enforcer.add_policy.assert_called_once_with(
             'u-alice', 'private-ws', '*')
@@ -1671,16 +1671,15 @@ class TestResyncWorkspacePoliciesForNewUser:
             mock_kv_cache.delete_cache_entries_by_prefix_suffix.call_args[1])
         assert 'u-alice' in call_kwargs['suffix']
 
-    @mock.patch('sky.users.permission.skypilot_config.safe_reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_new_user_matched_by_user_id_gets_policy(self, mock_get_users,
-                                                     mock_get_nested,
-                                                     mock_policy_lock,
-                                                     mock_kv_cache,
-                                                     mock_reload):
+    def test_new_user_matched_by_user_id_gets_policy(
+            self, mock_get_users, mock_get_nested, mock_policy_lock,
+            mock_kv_cache, mock_config_lock, mock_reload):
         """A pre-login allowed_users entry (user_id) grants access now."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1701,6 +1700,7 @@ class TestResyncWorkspacePoliciesForNewUser:
         service = self._make_service(mock_enforcer)
         service.resync_workspace_policies_for_new_user('u-alice')
 
+        mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         mock_enforcer.add_policy.assert_called_once_with(
             'u-alice', 'private-ws', '*')
@@ -1766,15 +1766,15 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_enforcer.add_policy.assert_not_called()
         mock_enforcer.save_policy.assert_not_called()
 
-    @mock.patch('sky.users.permission.skypilot_config.safe_reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_idempotent_when_policy_already_exists(self, mock_get_users,
-                                                   mock_get_nested,
-                                                   mock_policy_lock,
-                                                   mock_kv_cache, mock_reload):
+    def test_idempotent_when_policy_already_exists(
+            self, mock_get_users, mock_get_nested, mock_policy_lock,
+            mock_kv_cache, mock_config_lock, mock_reload):
         """If the policy already exists, no save or cache invalidation."""
         os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -1796,6 +1796,7 @@ class TestResyncWorkspacePoliciesForNewUser:
         service = self._make_service(mock_enforcer)
         service.resync_workspace_policies_for_new_user('u-alice')
 
+        mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         mock_enforcer.add_policy.assert_called_once_with(
             'u-alice', 'private-ws', '*')
@@ -1803,15 +1804,15 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_enforcer.save_policy.assert_not_called()
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
 
-    @mock.patch('sky.users.permission.skypilot_config.safe_reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
     @mock.patch('sky.global_user_state.get_all_users')
-    def test_no_grant_when_user_removed_before_lock(self, mock_get_users,
-                                                    mock_get_nested,
-                                                    mock_policy_lock,
-                                                    mock_kv_cache, mock_reload):
+    def test_no_grant_when_user_removed_before_lock(
+            self, mock_get_users, mock_get_nested, mock_policy_lock,
+            mock_kv_cache, mock_config_lock, mock_reload):
         """An admin removal that lands before the lock must win.
 
         The pre-lock match is only an early-exit optimization; matches are
@@ -1848,11 +1849,87 @@ class TestResyncWorkspacePoliciesForNewUser:
         service = self._make_service(mock_enforcer)
         service.resync_workspace_policies_for_new_user('u-alice')
 
+        mock_config_lock.assert_called_once()
         mock_reload.assert_called_once()
         assert mock_get_nested.call_count == 2
         mock_enforcer.add_policy.assert_not_called()
         mock_enforcer.save_policy.assert_not_called()
         mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+
+    @mock.patch('sky.users.permission.skypilot_config.reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    @mock.patch('sky.users.permission.skypilot_config.get_nested')
+    @mock.patch('sky.global_user_state.get_all_users')
+    def test_config_lock_timeout_skips_grant(self, mock_get_users,
+                                             mock_get_nested, mock_policy_lock,
+                                             mock_kv_cache, mock_config_lock,
+                                             mock_reload):
+        """A config-lock timeout skips the grant instead of using stale
+        config (the zero-accessible resolver retry picks it up later)."""
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        mock_config_lock.return_value.__enter__ = mock.Mock(
+            side_effect=locks.LockTimeout('busy'))
+
+        mock_get_users.return_value = [
+            models.User(id='u-alice', name='alice@corp.com')
+        ]
+        mock_get_nested.return_value = {
+            'private-ws': {
+                'private': True,
+                'allowed_users': ['alice@corp.com'],
+            },
+        }
+        mock_enforcer = mock.Mock()
+
+        service = self._make_service(mock_enforcer)
+        service.resync_workspace_policies_for_new_user('u-alice')  # No raise.
+
+        mock_policy_lock.assert_not_called()
+        mock_reload.assert_not_called()
+        mock_enforcer.add_policy.assert_not_called()
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_not_called()
+
+    @mock.patch('sky.users.permission.skypilot_config.reload_config')
+    @mock.patch('sky.users.permission.skypilot_config.get_skypilot_config_lock')
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    @mock.patch('sky.users.permission.skypilot_config.get_nested')
+    @mock.patch('sky.global_user_state.get_all_users')
+    def test_config_lock_acquired_before_policy_lock(
+            self, mock_get_users, mock_get_nested, mock_policy_lock,
+            mock_kv_cache, mock_config_lock, mock_reload):
+        """Lock order must match update_workspace: config lock, THEN policy
+        lock — the reverse order deadlocks against a concurrent workspace
+        update (AB-BA)."""
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        order = []
+        mock_config_lock.return_value.__enter__ = mock.Mock(
+            side_effect=lambda *a: order.append('config'))
+        mock_config_lock.return_value.__exit__ = mock.Mock(return_value=False)
+        mock_policy_lock.return_value.__enter__ = mock.Mock(
+            side_effect=lambda *a: order.append('policy'))
+        mock_policy_lock.return_value.__exit__ = mock.Mock(return_value=False)
+
+        mock_get_users.return_value = [
+            models.User(id='u-alice', name='alice@corp.com')
+        ]
+        mock_get_nested.return_value = {
+            'private-ws': {
+                'private': True,
+                'allowed_users': ['alice@corp.com'],
+            },
+        }
+        mock_enforcer = mock.Mock()
+        mock_enforcer.add_policy.return_value = True
+
+        service = self._make_service(mock_enforcer)
+        service.resync_workspace_policies_for_new_user('u-alice')
+
+        assert order == ['config', 'policy']
+        mock_reload.assert_called_once()
+        mock_kv_cache.delete_cache_entries_by_prefix_suffix.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.skypilot_config.get_nested')
