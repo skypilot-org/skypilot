@@ -3653,9 +3653,10 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
         yield 'Mutated schedule_state during LAUNCHING.'
 
         # Subject under test, strict from here on: an EMERGENCY-tagged
-        # RECOVERING event must appear (the backoff before the retry is
-        # >= 60s, so a 5s poll cannot miss it), and the cluster must never
-        # be duplicated.
+        # RECOVERING event must appear (it is recorded when the emergency is
+        # detected, before the backoff, and persists in job_events, so the
+        # 5s poll over 300s cannot miss it), and the cluster must never be
+        # duplicated.
         observed = False
         deadline = time.time() + 300
         while time.time() < deadline:
@@ -3683,8 +3684,24 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
 
         smoke_tests_utils.wait_for_managed_job_status_sdk(
             name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        # A managed job is marked SUCCEEDED before its cluster is torn down:
+        # set_succeeded runs first for responsiveness, then the controller
+        # downloads logs and terminates the cluster, and only then does its
+        # schedule_state reach DONE (run_job_loop calls _cleanup before
+        # scheduler.job_done). So wait for DONE — the controller's own
+        # "fully cleaned up" signal — before checking for a leaked cluster,
+        # rather than racing the teardown right after SUCCEEDED.
+        done_sql = (f"SELECT COUNT(*) FROM job_info WHERE name='{name}' "
+                    "AND schedule_state='DONE'")
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            if run_sql(done_sql) >= 1:
+                break
+            time.sleep(5)
+        assert run_sql(done_sql) >= 1, (
+            'Controller never reached schedule_state DONE after SUCCEEDED.')
         assert _count_job_clusters() == 0, (
-            'Job cluster still exists after SUCCEEDED.')
+            'Job cluster still exists after the controller finished (DONE).')
         yield 'Job recovered and succeeded with no leaked cluster.'
 
     test = smoke_tests_utils.Test(
