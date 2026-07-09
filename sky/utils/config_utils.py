@@ -186,6 +186,27 @@ def _recursive_update(
     return base_config
 
 
+def remove_none_values(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively drops keys whose value is literally None.
+
+    Empty dicts (``{}``) and empty lists (``[]``) are preserved; only leaves
+    whose value is ``None`` are removed. This is used to sanitize a client
+    config override before it is merged over the server config: YAML loads an
+    unset nested field as ``None``, and without this the recursive merge would
+    clobber a valid server value with ``None`` and then fail schema
+    re-validation (e.g. ``None is not of type 'string'``).
+    """
+    result: Dict[str, Any] = {}
+    for key, value in config.items():
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            result[key] = remove_none_values(value)
+        else:
+            result[key] = value
+    return result
+
+
 def _get_nested(configs: Optional[Dict[str, Any]],
                 keys: Tuple[str, ...],
                 default_value: Any,

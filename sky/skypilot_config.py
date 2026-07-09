@@ -873,6 +873,12 @@ def override_skypilot_config(
     original_config = _get_loaded_config()
     original_config_path = loaded_config_path_serialized()
     override_configs = config_utils.Config(override_configs)
+    # Drop leaves whose value is explicitly None before merging over the
+    # server config. YAML loads an unset nested field as None, and the
+    # recursive merge would otherwise let such a None clobber a valid server
+    # value and fail schema re-validation (e.g. None is not of type 'string').
+    override_configs = config_utils.Config(
+        config_utils.remove_none_values(override_configs))
     if override_config_path_serialized is None:
         override_config_path = []
     else:

@@ -1960,3 +1960,75 @@ class TestRemoveQueueNameFromConfig:
                 ]:
                     assert current.get_nested(
                         keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+
+
+def test_override_skypilot_config_strips_none_leaves(monkeypatch, tmp_path):
+    """A None-valued override leaf must not clobber a valid server value.
+
+    Regression test: a client config override may carry an explicitly unset
+    (None) nested leaf (YAML loads an empty field as None). Such a leaf must be
+    dropped before the merge, otherwise it overwrites a valid server value and
+    the request fails schema re-validation with e.g.
+    "None is not of type 'string'".
+    """
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(
+        textwrap.dedent("""\
+            kubernetes:
+                context_configs:
+                    contextA:
+                        quota:
+                            queue: server-queue
+            """))
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    skypilot_config.reload_config()
+
+    queue_keys = ('kubernetes', 'context_configs', 'contextA', 'quota', 'queue')
+    assert skypilot_config.get_nested(queue_keys, None) == 'server-queue'
+
+    # A None override leaf must not raise and must not clobber the server value.
+    none_override = {
+        'kubernetes': {
+            'context_configs': {
+                'contextA': {
+                    'quota': {
+                        'queue': None
+                    }
+                }
+            }
+        }
+    }
+    with skypilot_config.override_skypilot_config(none_override):
+        assert skypilot_config.get_nested(queue_keys, None) == 'server-queue'
+    # The server value is restored after the context exits.
+    assert skypilot_config.get_nested(queue_keys, None) == 'server-queue'
+
+    # A legit non-null override value still wins.
+    value_override = copy.deepcopy(none_override)
+    value_override['kubernetes']['context_configs']['contextA']['quota'][
+        'queue'] = 'override-queue'
+    with skypilot_config.override_skypilot_config(value_override):
+        assert skypilot_config.get_nested(queue_keys, None) == 'override-queue'
+
+
+def test_remove_none_values_preserves_empty_containers():
+    """remove_none_values drops only None leaves; {} and [] are preserved."""
+    override = {
+        'a': None,
+        'b': 'value',
+        'c': {},
+        'd': [],
+        'e': {
+            'f': None,
+            'g': 'nested',
+        },
+    }
+    assert config_utils.remove_none_values(override) == {
+        'b': 'value',
+        'c': {},
+        'd': [],
+        'e': {
+            'g': 'nested',
+        },
+    }
