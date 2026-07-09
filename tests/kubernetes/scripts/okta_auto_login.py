@@ -159,7 +159,8 @@ class OktaAutoLogin:
                 except Exception as exc:
                     cur = f'<err:{exc.__class__.__name__}>'
                 _trace.append((round(time.monotonic() - _t2, 2), href, cur))
-                url = href if isinstance(href, str) else cur
+                url = (href if isinstance(href, str) and
+                       not href.startswith('<jserr:') else cur)
                 return isinstance(url, str) and '/dashboard/clusters' in url
 
             WebDriverWait(self.driver, 60,
@@ -181,7 +182,7 @@ class OktaAutoLogin:
                 res = self.driver.execute_script(
                     "return (performance.getEntriesByType('resource')||[])"
                     ".concat(performance.getEntriesByType('navigation')||[])"
-                    ".map(function(e){return [e.name, Math.round(e.duration)];})")
+                    ".map(function(e){return [e.name, Math.round(e.duration) || 0];})")
                 res = sorted(res, key=lambda e: -e[1])[:8]
                 logger.info("⏱️  slowest requests (url, ms): %s", res)
             except Exception as exc:  # pylint: disable=broad-except
