@@ -1082,6 +1082,59 @@ class TestDownloadLogsForCancelledJob:
                 1, mock_handle_1, None)
 
 
+class TestDownloadLogAndStreamLoggingAgentGate:
+    """download_log_and_stream skips pulling logs when a logging agent is set.
+
+    When a logging agent is configured, job logs are forwarded to an external
+    store, so the controller must not download/persist a local copy.
+    """
+
+    def _make_controller(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = (
+            JobController.download_log_and_stream.__get__(
+                controller, JobController))
+        return controller
+
+    def test_skips_download_when_logging_agent_configured(self):
+        controller = self._make_controller()
+        handle = MagicMock()
+
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=True), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+
+            controller.download_log_and_stream(0, handle, None)
+
+            # No local copy persisted and no download performed.
+            mock_state.set_local_log_file.assert_not_called()
+            mock_runtime.download_logs.assert_not_called()
+            mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_downloads_when_no_logging_agent(self):
+        controller = self._make_controller()
+        handle = MagicMock()
+
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=False), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+
+            mock_runtime.is_registered.return_value = False
+            mock_cutils.download_and_stream_job_log.return_value = (
+                '/tmp/run.log')
+
+            controller.download_log_and_stream(0, handle, None)
+
+            # Falls back to the normal controller download path.
+            mock_cutils.download_and_stream_job_log.assert_called_once()
+
+
 class TestJobGroupResumeDoesNotReissueStarting:
     """Regression: a resumed JobGroup task must not be re-issued STARTING.
 

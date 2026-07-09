@@ -1,6 +1,7 @@
 """Unit tests for sky.jobs.utils functions."""
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -1355,3 +1356,82 @@ class TestIsRelayedStatusPayloadLine:
     def test_plain_log_line_not_detected(self):
         assert jobs_utils._is_relayed_status_payload_line(
             'Preparing SkyPilot runtime (1/3)\n') is False
+
+
+class TestStreamLogsByIdExternalStoreFallback:
+    """stream_logs_by_id falls back to the external log reader for terminal jobs.
+
+    When a logging agent is configured, terminal managed-job logs are streamed
+    back from the external store (the controller no longer persists a local
+    copy). When no logging agent is configured, the reader is not consulted.
+    """
+
+    def _patch_terminal_job(self, monkeypatch, task_info):
+        """Stub managed_job_state so stream_logs_by_id hits the terminal branch.
+
+        task_info: list of (task_id, task_name, task_status, log_file,
+            logs_cleaned_at) tuples.
+        """
+        status = managed_job_state.ManagedJobStatus.SUCCEEDED
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = len(task_info)
+        mock_state.get_status.return_value = status
+        mock_state.get_all_task_ids_names_statuses_logs.return_value = task_info
+        mock_state.get_pool_from_job_id.return_value = None
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        return mock_state
+
+    def test_reads_from_external_store_when_agent_configured(self, monkeypatch):
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = 0
+        mock_logs = MagicMock()
+        mock_logs.is_logging_agent_configured.return_value = True
+        mock_logs.get_log_reader.return_value = fake_reader
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        msg, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_called_once_with(
+            'sky-managed-5-mytask', None, follow=False, tail=0)
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_reader_not_consulted_when_no_agent(self, monkeypatch):
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        mock_logs = MagicMock()
+        mock_logs.is_logging_agent_configured.return_value = False
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        mock_logs.get_log_reader.assert_not_called()
+        assert 'already in terminal state' in msg
+
+    def test_falls_through_when_reader_returns_none(self, monkeypatch):
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = None
+        mock_logs = MagicMock()
+        mock_logs.is_logging_agent_configured.return_value = True
+        mock_logs.get_log_reader.return_value = fake_reader
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_called_once()
+        assert 'already in terminal state' in msg

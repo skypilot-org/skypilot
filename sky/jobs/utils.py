@@ -32,6 +32,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -1769,6 +1770,12 @@ def stream_logs_by_id(
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file_ever_existed = False
+            # When a logging agent is configured, managed-job logs are not
+            # pulled back to the controller (see download_log_and_stream). The
+            # cluster is gone by the time the job is terminal, so stream the
+            # logs back from the external store via the registered log reader,
+            # mirroring core.tail_logs' fallback.
+            external_logging = logs.is_logging_agent_configured()
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
@@ -1840,6 +1847,43 @@ def stream_logs_by_id(
                     # Show task finished message for multi-task or filtering
                     if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
+                        if task_status.is_terminal():
+                            print(ux_utils.finishing_message(
+                                f'{task_str} finished '
+                                f'(status: {task_status.value}).'),
+                                  flush=True)
+                elif external_logging:
+                    # No local log was persisted (a logging agent is
+                    # configured). Stream the logs back from the external store
+                    # for this task's ephemeral cluster. The cluster ran exactly
+                    # one job, so read the latest indexed one (job_id=None).
+                    reader = logs.get_log_reader()
+                    if reader is None:
+                        continue
+                    pool = managed_job_state.get_pool_from_job_id(job_id)
+                    if pool is not None:
+                        cluster_name, _ = (
+                            managed_job_state.get_pool_submit_info(job_id))
+                    else:
+                        cluster_name = generate_managed_job_cluster_name(
+                            task_name, job_id)
+                    if cluster_name is None:
+                        continue
+                    task_str = (f'Task {task_name}({task_id})'
+                                if task_name else f'Task {task_id}')
+                    if num_tasks > 1 or task is not None:
+                        print(f'=== {task_str} ===')
+                    returncode = reader.read_cluster_job_logs(
+                        cluster_name,
+                        None,
+                        follow=False,
+                        tail=tail if tail is not None else 0)
+                    if returncode is None:
+                        # No logs in the external store for this task; fall
+                        # through to the terminal-state message below.
+                        continue
+                    log_file_ever_existed = True
+                    if num_tasks > 1 or task is not None:
                         if task_status.is_terminal():
                             print(ux_utils.finishing_message(
                                 f'{task_str} finished '
