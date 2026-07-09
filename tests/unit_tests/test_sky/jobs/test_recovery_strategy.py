@@ -114,3 +114,25 @@ def test_eager_failover_skips_blocking_when_region_pinned():
     assert asyncio.run(executor.recover()) == 42.0
     # Only the final unconstrained launch should run, with no blocking.
     assert blocked_seen == [None]
+
+
+def test_eager_failover_skips_blocking_for_kubernetes():
+    """Per maintainer guidance on #10021: a preemption on Kubernetes (or
+    Slurm) does not mean the whole "region" (context) is bad, so recover()
+    must retry the same context instead of blocking it."""
+    task = task_lib.Task(run='echo hi')
+    task.set_resources({resources_lib.Resources(cloud=clouds.Kubernetes())})
+    launched = resources_lib.Resources(cloud=clouds.Kubernetes())
+    executor = _make_eager_executor(task, launched)
+
+    blocked_seen = []
+
+    async def fake_launch(*args, **kwargs):
+        blocked_seen.append(task.blocked_resources)
+        return 7.0
+
+    executor._launch = fake_launch
+
+    assert asyncio.run(executor.recover()) == 7.0
+    # The blocking step must be skipped entirely for Kubernetes.
+    assert blocked_seen == [None]

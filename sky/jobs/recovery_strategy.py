@@ -13,6 +13,7 @@ import typing
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
 from sky import backends
+from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
@@ -1060,6 +1061,15 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                      'cloud/region.')
         if self._launched_resources is not None:
             task = self.dag.tasks[0]
+            launched_cloud = self._launched_resources.cloud
+            # For Kubernetes (including SSH node pools, a Kubernetes
+            # subclass) and Slurm, a "region" is a context/partition over a
+            # fixed set of machines: a preemption there does not mean the
+            # whole context is bad, so retry the same one instead of eagerly
+            # blocking it. Eager region blocking only helps on clouds, where
+            # a preemption signals regional spot capacity pressure.
+            retry_same_context = isinstance(launched_cloud,
+                                            (clouds.Kubernetes, clouds.Slurm))
             # Guard on the resources the user requested (task.resources), not
             # on the launched resources: launched resources always carry a
             # concrete region, which made this check always False and turned
@@ -1067,13 +1077,13 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
             # launched resources are only used to decide WHICH region to
             # block.
             requested_resources = task.resources
-            if all(r.region is None and r.zone is None
-                   for r in requested_resources):
+            if not retry_same_context and all(
+                    r.region is None and r.zone is None
+                    for r in requested_resources):
                 # Optimization: We only block the previously launched region,
                 # if the requested resources do not specify a region or zone,
                 # because, otherwise, we will spend unnecessary time for
                 # skipping the only specified region/zone.
-                launched_cloud = self._launched_resources.cloud
                 launched_region = self._launched_resources.region
                 task.blocked_resources = {
                     r.copy(cloud=launched_cloud, region=launched_region)
