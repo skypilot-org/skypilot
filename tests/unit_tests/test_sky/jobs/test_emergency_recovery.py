@@ -118,6 +118,13 @@ def _make_callback():
     return callback, calls
 
 
+def _assert_jittered(sleeps, nominals):
+    """The emergency backoff is jittered +/-50% around each nominal value."""
+    assert len(sleeps) == len(nominals), (sleeps, nominals)
+    for actual, nom in zip(sleeps, nominals):
+        assert 0.5 * nom <= actual <= 1.5 * nom, (actual, nom)
+
+
 class TestEmergencyRecoveryState:
     """State transitions and budget bookkeeping on a real SQLite DB."""
 
@@ -562,9 +569,8 @@ class TestEmergencyRetryLoop:
         # One attempt recorded with the first backoff.
         h.record_attempt.assert_awaited_once()
         assert h.record_attempt.await_args.args[1] == 1  # attempt count
-        assert h.sleeps == [
-            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
-        ]
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
         # The doomed cluster is torn down during the bookkeeping (before the
         # backoff), not left running until the retry's forced recovery.
         h.jc._cleanup_cluster.assert_awaited_once()
@@ -659,9 +665,8 @@ class TestEmergencyRetryLoop:
         with pytest.raises(asyncio.CancelledError):
             await h.jc.run()
 
-        assert h.sleeps == [
-            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
-        ]
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
         h.set_cancelling.assert_awaited_once()
         h.set_cancelled.assert_not_awaited()
 
@@ -719,12 +724,37 @@ class TestEmergencyRetryLoop:
 
         base = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
         cap = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS
-        expected = [min(base * 2**i, cap) for i in range(max_attempts)]
-        assert h.sleeps == expected
+        nominal = [min(base * 2**i, cap) for i in range(max_attempts)]
+        # The sleep is jittered +/-50% around the nominal backoff, so assert
+        # each falls in [nominal/2, 3*nominal/2] rather than an exact value.
+        assert len(h.sleeps) == max_attempts
+        for actual, nom in zip(h.sleeps, nominal):
+            assert 0.5 * nom <= actual <= 1.5 * nom, (actual, nom)
         assert h.jc._run_one_task.call_count == max_attempts + 1
         h.jc._update_failed_task_state.assert_awaited_once()
         assert h.jc._update_failed_task_state.await_args.args[1] == (
             state.ManagedJobStatus.FAILED_CONTROLLER)
+
+    @pytest.mark.asyncio
+    async def test_backoff_is_jittered(self, monkeypatch):
+        """The backoff is not deterministic: repeated attempts at the same
+        nominal (the capped steady state) produce different sleeps, each
+        within +/-50% of the nominal."""
+        max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+        h = _RetryLoopHarness(monkeypatch, RuntimeError('boom'))
+        now = time.time()
+        h.get_budget.side_effect = [
+            (i, None if i == 0 else now) for i in range(max_attempts + 1)
+        ]
+
+        await h.jc.run()
+
+        cap = jobs_constants.EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS
+        # The tail of the schedule is all at the cap; jitter must make those
+        # sleeps differ (a deterministic backoff would repeat the cap value).
+        capped = [s for s in h.sleeps if 0.5 * cap <= s <= 1.5 * cap]
+        assert len(capped) >= 2
+        assert len(set(capped)) > 1, capped
 
     @pytest.mark.asyncio
     async def test_emergency_releases_launch_slot_during_backoff(
@@ -794,9 +824,8 @@ class TestEmergencyRetryLoop:
 
         h.set_emergency.assert_not_awaited()
         h.record_attempt.assert_awaited()
-        assert h.sleeps == [
-            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS
-        ]
+        _assert_jittered(
+            h.sleeps, [jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS])
         h.jc._update_failed_task_state.assert_not_called()
         assert h.jc._run_one_task.call_count == 2
 

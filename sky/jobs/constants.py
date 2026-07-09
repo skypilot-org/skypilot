@@ -93,9 +93,14 @@ MANAGED_JOBS_VERSION = 22  # add submitted_after/submitted_before to job table
 # Max attempts in one episode before giving up and marking the job
 # FAILED_CONTROLLER (with full resource cleanup).
 EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
-# Backoff before attempt N is
+# Nominal backoff before attempt N is
 # min(BASE * 2^(N-1), CAP) = 1m, 2m, 4m, 8m, 16m, then 30m (capped) —
-# ~3h of total backoff across a full episode. The backoff may exceed the
+# ~3h of total backoff across a full episode. The actual sleep is jittered
+# +/-50% around this nominal value (so the average is unchanged): a systemic
+# incident pushes many jobs into emergency recovery at once, and a
+# deterministic backoff would resynchronize their retries into DB-load waves
+# (worst under consolidation mode's shared DB). The controller logs both the
+# nominal and the jittered sleep. The backoff may exceed the
 # jobs-controller's 10-minute idle autostop window: that is safe because
 # the job's schedule_state stays ALIVE throughout the backoff (the
 # emergency bookkeeping resets launch-adjacent states back to ALIVE, which

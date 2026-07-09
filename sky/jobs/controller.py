@@ -5,6 +5,7 @@ import io
 import json
 import os
 import pathlib
+import random
 import resource
 import shutil
 import sys
@@ -1969,8 +1970,10 @@ class JobController:
                     if self._emergency_backoff_seconds is not None:
                         backoff = self._emergency_backoff_seconds
                         self._emergency_backoff_seconds = None
-                        logger.info(f'Sleeping {backoff:.0f}s before emergency '
-                                    f'recovery attempt for job {self._job_id}')
+                        logger.info(
+                            f'Sleeping {backoff:.0f}s (jittered) before '
+                            'emergency recovery attempt for job '
+                            f'{self._job_id}')
                         await asyncio.sleep(backoff)
 
                     succeeded = True
@@ -2312,14 +2315,23 @@ class JobController:
         # may have left the in-memory task objects mutated (see _load_dag).
         await asyncio.to_thread(self._load_dag)
 
-        self._emergency_backoff_seconds = min(
+        nominal_backoff = min(
             jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS *
             2**(attempt - 1),
             jobs_constants.EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS)
+        # Jitter +/-50% around the nominal backoff (so the average is still the
+        # nominal value): a systemic incident tends to push many jobs into
+        # emergency recovery at the same instant, and a deterministic backoff
+        # would resynchronize their retries into DB-load waves. The retry's
+        # bookkeeping is all DB writes, so spreading the waves matters most on
+        # the shared DB in consolidation mode.
+        self._emergency_backoff_seconds = nominal_backoff * random.uniform(
+            0.5, 1.5)
         logger.info(
             f'Emergency recovery attempt {attempt}/{max_attempts} for job '
             f'{self._job_id}: retrying the job loop in '
-            f'{self._emergency_backoff_seconds:.0f}s.')
+            f'{self._emergency_backoff_seconds:.0f}s '
+            f'(nominal {nominal_backoff:.0f}s, jittered +/-50%).')
         return None
 
     async def _update_failed_task_state(
