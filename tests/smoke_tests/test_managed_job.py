@@ -361,6 +361,54 @@ def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_terminal_logs_no_logging_agent(generic_cloud: str):
+    """`sky jobs logs` serves a finished job's logs from the controller-local
+    copy when no logging agent is configured (the default).
+
+    Regression guard for the on-demand log path: when a logging agent is
+    configured the controller stops persisting logs locally and `sky jobs logs`
+    falls back to the registered external log reader. With NO logging agent
+    (the open-source default, and no external reader), that fallback must not
+    engage -- the controller must still download the logs and `sky jobs logs`
+    must read them back from the local file, unchanged from before.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    marker = 'MANAGED_JOB_LOG_READBACK_OK'
+    # Resolve the job id by name from any column of `sky jobs queue --all`.
+    get_job_id_cmd = (
+        's=$(sky jobs queue --all); echo "$s" | '
+        'awk -v n=' + name +
+        ' \'{for (i=1; i<=NF; i++) if ($i==n) {print $1; break}}\' | '
+        'sort -un | head -1')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(f'run: |\n  echo {marker}\n')
+        f.flush()
+        file_path = f.name
+        test = smoke_tests_utils.Test(
+            'managed_jobs_terminal_logs_no_logging_agent',
+            [
+                f'sky jobs launch -n {name} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=360),
+                # No logging agent -> the controller downloaded the logs, so
+                # `sky jobs logs` must read them back from the local file.
+                f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
+                f'echo "$s"; echo "$s" | grep {marker}',
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_pipeline_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible after a pipeline job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
