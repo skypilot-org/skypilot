@@ -315,18 +315,19 @@ def _extract_marked_tests(
         if param:
             function_name_param_map[clean_function_name].append(param)
 
-    # A run shares one API server across all its tests only when it targets a
-    # remote/env-file server; the local lane starts a fresh server per test
-    # step, so exclusivity doesn't apply there.
-    shared_server = remote_server or '--env-file' in extra_args
+    # Exclusivity only matters when tests share one API server. Only the
+    # --env-file lane does that -- it points every test at a single external
+    # endpoint. --remote-server launches a fresh Docker-container server per
+    # test, and the local lane restarts a fresh server per test step; both
+    # isolate each test, so exclusive tests need no serializing there.
+    shared_server = '--env-file' in extra_args
 
     function_cloud_map = {}
     for function_name, marks in function_name_marks_map.items():
         # Partition exclusive vs normal tests. In an --exclusive run, only
         # exclusive tests are selected (and serialized). Otherwise, exclusive
-        # tests are excluded only when the run shares one server across
-        # tests; on the local lane (its own server per test) they behave like
-        # any other test.
+        # tests are excluded only on a shared-server run; when each test gets
+        # its own server they behave like any other test.
         is_exclusive = 'exclusive' in marks
         if exclusive_run:
             if not is_exclusive:
