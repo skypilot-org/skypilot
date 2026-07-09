@@ -159,6 +159,15 @@ _FETCH_IP_MAX_ATTEMPTS = 3
 _TEARDOWN_WAIT_MAX_ATTEMPTS = 10
 _TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS = 1
 
+# During a resize scale-down we terminate the worker instances and then
+# re-provision to the target count. terminate_instances() can return before
+# the terminated instances have fully disappeared from the provider's view
+# (e.g. on Kubernetes a force-deleted pod lingers in the Running phase until
+# the kubelet finalizes it), so we poll until only the head remains before
+# re-provisioning. How many times to poll, and how long to wait between polls.
+_RESIZE_SCALE_DOWN_WAIT_MAX_ATTEMPTS = 60
+_RESIZE_SCALE_DOWN_WAIT_BETWEEN_ATTEMPTS_SECONDS = 1
+
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
     '{cluster_name}. {extra_reason}'
@@ -6058,6 +6067,49 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                           handle.cluster_name_on_cloud,
                                           provider_config,
                                           worker_only=True)
+
+        # terminate_instances() may return before the workers have actually
+        # disappeared from the provider's view. On Kubernetes, for example,
+        # pods are force-deleted asynchronously and linger in the Running
+        # phase until the kubelet finalizes them. The bulk_provision that
+        # follows counts the instances still present to decide how many
+        # workers to (re)create, and aborts if it sees more instances than
+        # requested -- mistaking the not-yet-removed workers for a resource
+        # leak. Wait until only the head node remains so the recount is
+        # accurate. This is a no-op for clouds whose terminate is already
+        # synchronous (the first query returns immediately).
+        for attempt in range(_RESIZE_SCALE_DOWN_WAIT_MAX_ATTEMPTS):
+            remaining = provision_lib.query_instances(
+                cloud_name,
+                handle.cluster_name,
+                handle.cluster_name_on_cloud,
+                provider_config,
+                non_terminated_only=True)
+            if len(remaining) <= 1:
+                # Only the head node remains; the workers are gone.
+                break
+            logger.debug(
+                f'Waiting for {len(remaining) - 1} terminated worker(s) of '
+                f'cluster {cluster_name!r} to be removed before '
+                f're-provisioning (attempt '
+                f'{attempt + 1}/{_RESIZE_SCALE_DOWN_WAIT_MAX_ATTEMPTS}).')
+            time.sleep(_RESIZE_SCALE_DOWN_WAIT_BETWEEN_ATTEMPTS_SECONDS)
+        else:
+            # The workers were terminated but have not disappeared from the
+            # provider within the timeout (e.g. pods stuck terminating). We
+            # already tore the workers down, so the cluster cannot stay at its
+            # original size; rather than let bulk_provision misread the stale
+            # instances as a resource leak, fail with an actionable message.
+            timeout_seconds = (_RESIZE_SCALE_DOWN_WAIT_MAX_ATTEMPTS *
+                               _RESIZE_SCALE_DOWN_WAIT_BETWEEN_ATTEMPTS_SECONDS)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Timed out after {timeout_seconds}s waiting for the '
+                    f'terminated worker(s) of cluster {cluster_name!r} to be '
+                    f'removed during scale-down. The cluster may now have '
+                    f'fewer nodes than before; run "sky down {cluster_name}" '
+                    f'and relaunch at the desired size, or retry the resize '
+                    f'once the cluster settles.')
 
     @timeline.event
     def _check_existing_cluster(

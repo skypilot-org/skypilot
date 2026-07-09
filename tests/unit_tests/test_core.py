@@ -273,10 +273,11 @@ def test_resize_scale_down_ssh_failure_aborts():
         backend._handle_resize_pre_provision(handle, task, 'test-cluster')
 
 
+@mock.patch('sky.provision.query_instances', return_value={})
 @mock.patch('sky.provision.terminate_instances')
 @mock.patch('sky.global_user_state.get_cluster_yaml_dict')
 def test_resize_scale_down_on_stopped_cluster_skips_ssh_and_terminates(
-        mock_get_yaml, mock_terminate):
+        mock_get_yaml, mock_terminate, mock_query):
     """Scale-down on a STOPPED cluster must skip the SSH job-queue check (a
     stopped cluster has no running jobs and its head node is unreachable) and
     proceed to terminate the excess workers; bulk provisioning later restarts
@@ -323,12 +324,14 @@ def test_resize_scale_down_on_init_cluster_rejected():
             cluster_status=status_lib.ClusterStatus.INIT)
 
 
+@mock.patch('sky.provision.query_instances', return_value={})
 @mock.patch('sky.provision.terminate_instances')
 @mock.patch('sky.global_user_state.get_cluster_yaml_dict')
 @mock.patch('sky.skylet.job_lib.load_job_queue')
 def test_resize_scale_down_handles_missing_cluster_yaml(mock_load_queue,
                                                         mock_get_yaml,
-                                                        mock_terminate):
+                                                        mock_terminate,
+                                                        mock_query):
     """If get_cluster_yaml_dict returns None (e.g. yaml file missing), the
     resize path must not crash with AttributeError."""
     backend = CloudVmRayBackend()
@@ -353,11 +356,12 @@ def test_resize_scale_down_handles_missing_cluster_yaml(mock_load_queue,
 # --- Scale-down: success cases (the happy path) ---
 
 
+@mock.patch('sky.provision.query_instances', return_value={})
 @mock.patch('sky.provision.terminate_instances')
 @mock.patch('sky.global_user_state.get_cluster_yaml_dict')
 @mock.patch('sky.skylet.job_lib.load_job_queue')
 def test_resize_scale_down_idle_cluster_terminates_workers(
-        mock_load_queue, mock_get_yaml, mock_terminate):
+        mock_load_queue, mock_get_yaml, mock_terminate, mock_query):
     """Scale-down on an idle cluster should terminate excess workers."""
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=4)
@@ -378,12 +382,13 @@ def test_resize_scale_down_idle_cluster_terminates_workers(
     )
 
 
+@mock.patch('sky.provision.query_instances', return_value={})
 @mock.patch('sky.provision.terminate_instances')
 @mock.patch('sky.global_user_state.get_cluster_yaml_dict')
 @mock.patch('sky.skylet.job_lib.load_job_queue')
 def test_resize_scale_down_completed_jobs_allowed(mock_load_queue,
-                                                  mock_get_yaml,
-                                                  mock_terminate):
+                                                  mock_get_yaml, mock_terminate,
+                                                  mock_query):
     """Completed/failed jobs should not block scale-down."""
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
@@ -411,11 +416,12 @@ def test_resize_scale_down_completed_jobs_allowed(mock_load_queue,
     mock_terminate.assert_called_once()
 
 
+@mock.patch('sky.provision.query_instances', return_value={})
 @mock.patch('sky.provision.terminate_instances')
 @mock.patch('sky.global_user_state.get_cluster_yaml_dict')
 @mock.patch('sky.skylet.job_lib.load_job_queue')
 def test_resize_scale_down_to_one_node(mock_load_queue, mock_get_yaml,
-                                       mock_terminate):
+                                       mock_terminate, mock_query):
     """Scale-down to 1 node (head-only) should work."""
     backend = CloudVmRayBackend()
     handle = _make_mock_handle(launched_nodes=3)
@@ -426,6 +432,88 @@ def test_resize_scale_down_to_one_node(mock_load_queue, mock_get_yaml,
     mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
 
     backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+    mock_terminate.assert_called_once()
+
+
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+@mock.patch('sky.provision.query_instances')
+def test_resize_scale_down_waits_for_terminated_workers(mock_query,
+                                                        mock_load_queue,
+                                                        mock_get_yaml,
+                                                        mock_terminate):
+    """After terminating the workers, the resize path must poll the provider
+    and only return once the workers are actually gone (only the head
+    remains). Otherwise the subsequent bulk_provision can miscount
+    not-yet-removed instances as a resource leak and abort the scale-down."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=2)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = []
+    mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
+
+    up = status_lib.ClusterStatus.UP
+    # First two polls still see terminating workers (3 then 2 instances); the
+    # third sees only the head. The loop must keep polling until then.
+    mock_query.side_effect = [
+        {
+            'head': (up, None),
+            'w1': (up, None),
+            'w2': (up, None)
+        },
+        {
+            'head': (up, None),
+            'w1': (up, None)
+        },
+        {
+            'head': (up, None)
+        },
+    ]
+
+    with mock.patch('sky.backends.cloud_vm_ray_backend.time.sleep') as m_sleep:
+        backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+
+    mock_terminate.assert_called_once()
+    # Polled until only the head remained.
+    assert mock_query.call_count == 3
+    # Waited between the two polls that still saw workers.
+    assert m_sleep.call_count == 2
+    # query_instances must run only after the workers were terminated.
+    assert mock_query.call_args.kwargs['non_terminated_only'] is True
+
+
+@mock.patch('sky.provision.terminate_instances')
+@mock.patch('sky.global_user_state.get_cluster_yaml_dict')
+@mock.patch('sky.skylet.job_lib.load_job_queue')
+@mock.patch('sky.provision.query_instances')
+def test_resize_scale_down_raises_if_workers_never_terminate(
+        mock_query, mock_load_queue, mock_get_yaml, mock_terminate):
+    """If the terminated workers never disappear (e.g. pods stuck
+    terminating), the resize must fail with a clear error instead of letting
+    bulk_provision misread the stale instances as a resource leak."""
+    backend = CloudVmRayBackend()
+    handle = _make_mock_handle(launched_nodes=3)
+    task = _make_mock_task(num_nodes=2)
+
+    backend.run_on_head = mock.MagicMock(return_value=(0, 'payload', ''))
+    mock_load_queue.return_value = []
+    mock_get_yaml.return_value = {'provider': {'type': 'kubernetes'}}
+
+    up = status_lib.ClusterStatus.UP
+    # Workers never go away: every poll still reports more than the head.
+    mock_query.return_value = {
+        'head': (up, None),
+        'w1': (up, None),
+        'w2': (up, None)
+    }
+
+    with mock.patch('sky.backends.cloud_vm_ray_backend.time.sleep'):
+        with pytest.raises(RuntimeError, match=r'Timed out.*scale-down'):
+            backend._handle_resize_pre_provision(handle, task, 'test-cluster')
+
     mock_terminate.assert_called_once()
 
 
