@@ -8,10 +8,13 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import orjson
+
 from sky import models
 from sky.catalog import common
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
+from sky.server.requests.serializers import depickle
 from sky.utils import serialize_utils
 
 if typing.TYPE_CHECKING:
@@ -36,16 +39,40 @@ def encode_handle(handle: Any) -> Any:
     """Encode a ResourceHandle for the REST API response.
 
     Plugin extension point — do not inline into callers.
+
+    [DEPICKLE PROTOTYPE] JSON-dict first (decode_handle already accepts
+    dicts); falls back to pickle for handle types without to_dict().
     """
-    return pickle_and_encode(handle)
+    if handle is None:
+        return None
+    try:
+        encoded = handle.to_dict()
+        orjson.dumps(encoded)  # Probe JSON-safety.
+        return encoded
+    except Exception as e:  # pylint: disable=broad-except
+        depickle.log_pitfall('handle-not-json',
+                             f'{type(handle).__name__}: {e!r}')
+        return pickle_and_encode(handle)
 
 
 def encode_resources(resources: Any) -> Any:
     """Encode a Resources object for the REST API response.
 
     Plugin extension point — do not inline into callers.
+
+    [DEPICKLE PROTOTYPE] YAML-config dict first (decode_resources already
+    accepts dicts); falls back to pickle on failure.
     """
-    return pickle_and_encode(resources)
+    if resources is None:
+        return None
+    try:
+        encoded = resources.to_yaml_config()
+        orjson.dumps(encoded)  # Probe JSON-safety.
+        return encoded
+    except Exception as e:  # pylint: disable=broad-except
+        depickle.log_pitfall('resources-not-json',
+                             f'{type(resources).__name__}: {e!r}')
+        return pickle_and_encode(resources)
 
 
 def register_encoder(*names: str):

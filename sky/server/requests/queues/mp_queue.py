@@ -1,6 +1,7 @@
 """Shared queues for multiprocessing."""
 import multiprocessing
 from multiprocessing import managers
+import os
 import queue
 import time
 from typing import List
@@ -11,7 +12,12 @@ logger = sky_logging.init_logger(__name__)
 
 # The default port used by SkyPilot API server's request queue.
 # We avoid 50010, as it might be taken by HDFS.
-DEFAULT_QUEUE_MANAGER_PORT = 50011
+# [DEPICKLE PROTOTYPE] Env override so a second local server can coexist
+# with an already-running one (local mode always takes the MP-queue path:
+# get_queue_backend_factory() never returns None, so the LOCAL branch in
+# executor.start() is unreachable).
+DEFAULT_QUEUE_MANAGER_PORT = int(
+    os.environ.get('SKYPILOT_QUEUE_MANAGER_PORT', '50011'))
 
 
 # Have to create custom manager to handle different processes connecting to the

@@ -35,6 +35,7 @@ from sky.server.blob import blob_storage as bs
 from sky.server.requests import payloads
 from sky.server.requests import storage as request_storage
 from sky.server.requests.serializers import decoders
+from sky.server.requests.serializers import depickle
 from sky.server.requests.serializers import encoders
 from sky.server.requests.serializers import return_value_serializers
 from sky.skylet import constants as skylet_constants
@@ -211,18 +212,15 @@ class Request:
         # TODO(zhwu): pickle.dump does not work well with custom exceptions if
         # it has more than 1 arguments.
         serialized = exceptions.serialize_exception(error)
-        self.error = {
-            'object': encoders.pickle_and_encode(serialized),
-            'type': type(error).__name__,
-            'message': str(error),
-        }
+        self.error = depickle.encode_error(serialized,
+                                           type(error).__name__, str(error))
 
     def get_error(self) -> Optional[Dict[str, Any]]:
         """Get the error."""
         if self.error is None:
             return None
-        unpickled = decoders.decode_and_unpickle(self.error['object'])
-        deserialized = exceptions.deserialize_exception(unpickled)
+        serialized = depickle.decode_error_object(self.error)
+        deserialized = exceptions.deserialize_exception(serialized)
         return {
             'object': deserialized,
             'type': self.error['type'],
@@ -317,8 +315,8 @@ class Request:
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
-                entrypoint=encoders.pickle_and_encode(self.entrypoint),
-                request_body=encoders.pickle_and_encode(self.request_body),
+                entrypoint=depickle.encode_entrypoint(self.entrypoint),
+                request_body=depickle.encode_request_body(self.request_body),
                 status=_status_value_for_client(self.status.value),
                 return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
@@ -357,7 +355,7 @@ class Request:
         back to a placeholder instead of failing the whole request.
         """
         try:
-            return decoders.decode_and_unpickle(encoded_entrypoint)
+            return depickle.decode_entrypoint(encoded_entrypoint)
         except (AttributeError, ImportError) as e:
             logger.debug(
                 'Could not resolve the request entrypoint while decoding '
@@ -373,7 +371,7 @@ class Request:
                 request_id=payload.request_id,
                 name=payload.name,
                 entrypoint=cls._decode_entrypoint(payload.entrypoint),
-                request_body=decoders.decode_and_unpickle(payload.request_body),
+                request_body=depickle.decode_request_body(payload.request_body),
                 status=RequestStatus(payload.status),
                 return_value=orjson.loads(payload.return_value),
                 error=orjson.loads(payload.error),
@@ -1406,7 +1404,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         # from sibling uvicorn workers in the same process write the
         # same values; cross-pod UPDATEs from a newer generation win
         # by virtue of happening last.
-        encoded_body = encoders.pickle_and_encode(request.request_body)
+        encoded_body = depickle.encode_request_body(request.request_body)
         await _DB.execute_and_commit_async(
             f'UPDATE {REQUEST_TABLE} '
             f'SET request_body=?, name=?, schedule_type=? '
