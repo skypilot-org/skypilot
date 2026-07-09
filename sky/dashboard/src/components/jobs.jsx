@@ -20,7 +20,11 @@ import {
   EmptyTableState,
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/elements/EmptyState';
-import { isForceEmpty } from '@/lib/utils';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
 import { BriefcaseIcon } from '@/components/elements/icons';
 import {
   formatDuration,
@@ -82,6 +86,11 @@ import {
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
 import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
+
+// Page-size ("rows per page") options for the managed jobs queue, and the
+// localStorage key used to remember the user's last choice across reloads.
+const JOBS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-jobs-page-size';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -498,6 +507,19 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+function JobNameLink({ href, name }) {
+  return (
+    <NonCapitalizedTooltip content={name}>
+      <Link
+        href={href}
+        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
+      >
+        {name}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 export function ManagedJobsTable({
   refreshInterval,
   setLoading,
@@ -527,9 +549,19 @@ export function ManagedJobsTable({
   });
   const [pageSize, setPageSize] = useState(() => {
     if (typeof window !== 'undefined') {
+      // An explicit URL query param wins (e.g. a shared/bookmarked link);
+      // otherwise fall back to the last choice persisted in localStorage,
+      // and finally to the default of 10.
       const params = new URLSearchParams(window.location.search);
       const ps = parseInt(params.get('pageSize'), 10);
-      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+      if (JOBS_PAGE_SIZE_OPTIONS.includes(ps)) {
+        return ps;
+      }
+      return getPersistedPageSize(
+        JOBS_PAGE_SIZE_STORAGE_KEY,
+        JOBS_PAGE_SIZE_OPTIONS,
+        10
+      );
     }
     return 10;
   });
@@ -1393,6 +1425,8 @@ export function ManagedJobsTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(JOBS_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
@@ -1498,9 +1532,7 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
-                    {item.name}
-                  </Link>
+                  <JobNameLink href={`/jobs/${jobId}`} name={item.name} />
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
@@ -1539,9 +1571,7 @@ export function ManagedJobsTable({
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                  {item.name}
-                </Link>
+                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -2597,6 +2627,7 @@ export function ManagedJobsTable({
         }
         pageSize={pageSize}
         onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={JOBS_PAGE_SIZE_OPTIONS}
         itemLabel="Jobs"
       />
 
