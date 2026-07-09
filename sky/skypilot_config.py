@@ -1249,12 +1249,15 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
 
-    # Run registered validators before persisting or mutating the config, so
-    # a validator can veto the save by raising. Exceptions propagate to abort
-    # the update.
-    current = to_dict()
-    for validator in list(_CONFIG_SAVE_VALIDATORS):
-        validator(current, config)
+    # Run registered validators before persisting the config, so a validator
+    # can veto the save by raising; exceptions propagate to abort the update.
+    # Validators must not mutate the config, so hand them a deep copy of the
+    # incoming config (to_dict() already returns a fresh copy for `current`).
+    if _CONFIG_SAVE_VALIDATORS:
+        current = to_dict()
+        incoming = copy.deepcopy(config)
+        for validator in list(_CONFIG_SAVE_VALIDATORS):
+            validator(current, incoming)
 
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
