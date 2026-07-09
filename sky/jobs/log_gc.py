@@ -67,7 +67,14 @@ def gc_controller_logs_for_job():
 
 
 def gc_task_logs_for_job():
-    """Garbage collect task logs for job."""
+    """Garbage collect task logs for job.
+
+    Only local task logs are garbage collected here: the cleanup query
+    requires ``local_log_file IS NOT NULL``. When a logging agent forwards a
+    job's logs to an external store the controller does not persist a local
+    copy, so those logs are not subject to this retention -- their lifetime is
+    governed by the external store's own retention policy.
+    """
     while True:
         skypilot_config.reload_config()
         task_logs_retention = skypilot_config.get_nested(
