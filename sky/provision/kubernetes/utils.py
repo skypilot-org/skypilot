@@ -206,6 +206,80 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             return {'nvidia.com/rdma_ib': accelerator_count}
         return {}
 
+    def get_gpudirect_env_vars(self, is_a4: bool = False) -> Dict[str, str]:
+        """NCCL/GPUDirect container env for the GCP GPUDirect fabrics.
+
+        The tuned NCCL settings a pod needs to drive this cluster's GPUDirect
+        transport (TCPX / TCPXO / GPUDirect-RDMA). Ordered; values are strings
+        (k8s env values must be strings). Empty for non-GCP-GPUDirect types,
+        whose env is carried by ``get_network_env_vars`` instead. Single source
+        of truth for the GPUDirect env, shared by the pod-spec renderers.
+        """
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPX:
+            return {
+                'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64:/usr/local/tcpx/lib64',
+                'NCCL_GPUDIRECTTCPX_SOCKET_IFNAME': 'eth1,eth2,eth3,eth4',
+                'NCCL_GPUDIRECTTCPX_CTRL_DEV': 'eth0',
+                'NCCL_GPUDIRECTTCPX_TX_BINDINGS':
+                    ('eth1:8-21,112-125;eth2:8-21,112-125;'
+                     'eth3:60-73,164-177;eth4:60-73,164-177'),
+                'NCCL_GPUDIRECTTCPX_RX_BINDINGS':
+                    ('eth1:22-35,126-139;eth2:22-35,126-139;'
+                     'eth3:74-87,178-191;eth4:74-87,178-191'),
+                'NCCL_GPUDIRECTTCPX_PROGRAM_FLOW_STEERING_WAIT_MICROS': '500000',
+                'NCCL_GPUDIRECTTCPX_UNIX_CLIENT_PREFIX': '/tmp',
+                'NCCL_GPUDIRECTTCPX_FORCE_ACK': '0',
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'NCCL_CROSS_NIC': '0',
+                'NCCL_ALGO': 'Ring',
+                'NCCL_PROTO': 'Simple',
+                'NCCL_NSOCKS_PERTHREAD': '4',
+                'NCCL_SOCKET_NTHREADS': '1',
+                'NCCL_NET_GDR_LEVEL': 'PIX',
+                'NCCL_DYNAMIC_CHUNK_SIZE': '524288',
+                'NCCL_P2P_PXN_LEVEL': '0',
+                'NCCL_P2P_NET_CHUNKSIZE': '524288',
+                'NCCL_P2P_PCI_CHUNKSIZE': '524288',
+                'NCCL_P2P_NVL_CHUNKSIZE': '1048576',
+                'NCCL_BUFFSIZE': '4194304',
+                'NCCL_MAX_NCHANNELS': '8',
+                'NCCL_MIN_NCHANNELS': '8',
+                'CUDA_VISIBLE_DEVICES': '0,1,2,3,4,5,6,7',
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_TCPXO:
+            return {
+                'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64',
+                'NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY': '/dev/aperture_devices',
+                'NCCL_FASTRAK_CTRL_DEV': 'eth0',
+                'NCCL_FASTRAK_IFNAME': 'eth1,eth2,eth3,eth4,eth5,eth6,eth7,eth8',
+                'NCCL_SOCKET_IFNAME': 'eth0',
+                'NCCL_CROSS_NIC': '0',
+                'NCCL_ALGO': 'Ring,Tree',
+                'NCCL_PROTO': 'Simple,LL128',
+                'NCCL_MIN_NCHANNELS': '4',
+                'NCCL_TUNER_PLUGIN': 'libnccl-tuner.so',
+                'NCCL_TUNER_CONFIG_PATH':
+                    '/usr/local/nvidia/lib64/a3plus_tuner_config.textproto',
+                'CUDA_VISIBLE_DEVICES': '0,1,2,3,4,5,6,7',
+            }
+        if self == KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA:
+            return {
+                'LD_LIBRARY_PATH': '/usr/local/nvidia/lib64',
+                'NCCL_NET': 'gIB',
+                'NCCL_CROSS_NIC': '0',
+                'NCCL_NET_GDR_LEVEL': 'PIX',
+                'NCCL_P2P_NET_CHUNKSIZE': '131072',
+                'NCCL_NVLS_CHUNKSIZE': '524288',
+                'NCCL_IB_ADAPTIVE_ROUTING': '1',
+                'NCCL_IB_QPS_PER_CONNECTION': '4',
+                'NCCL_IB_TC': '52',
+                'NCCL_IB_FIFO_TC': '84',
+                'NCCL_TUNER_CONFIG_PATH':
+                    ('/usr/local/gib/configs/tuner_config_a4.txtpb' if is_a4 else
+                     '/usr/local/gib/configs/tuner_config_a3u.txtpb'),
+            }
+        return {}
+
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'

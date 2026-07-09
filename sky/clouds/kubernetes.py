@@ -1098,6 +1098,11 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_rdma_resource_requests'] = (
             network_type.get_rdma_resource_requests(acc_count))
 
+        # Tuned NCCL/GPUDirect container env for the GCP GPUDirect fabrics
+        # (empty for the others). Rendered as an ordered env block.
+        deploy_vars['k8s_gpudirect_env'] = network_type.get_gpudirect_env_vars(
+            is_a4=deploy_vars['k8s_enable_gpudirect_rdma_a4'])
+
         # OCI OKE RoCE: requires hostNetwork, privileged containers, and a
         # hostPath mount of /dev/infiniband (no device plugin on OCI). The
         # hostNetwork part also feeds k8s_host_network above (see comment
