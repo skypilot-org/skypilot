@@ -1435,3 +1435,20 @@ class TestStreamLogsByIdExternalStoreFallback:
 
         fake_reader.read_cluster_job_logs.assert_called_once()
         assert 'already in terminal state' in msg
+
+    def test_warns_when_agent_configured_but_no_reader(self, monkeypatch,
+                                                       capsys):
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        mock_logs = MagicMock()
+        mock_logs.is_logging_agent_configured.return_value = True
+        mock_logs.get_log_reader.return_value = None
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        # A warning is printed and we fall back to the terminal-state message.
+        assert 'no external log reader is registered' in capsys.readouterr().out
+        assert 'already in terminal state' in msg

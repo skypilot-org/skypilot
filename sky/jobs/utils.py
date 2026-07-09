@@ -1776,6 +1776,16 @@ def stream_logs_by_id(
             # logs back from the external store via the registered log reader,
             # mirroring core.tail_logs' fallback.
             external_logging = logs.is_logging_agent_configured()
+            log_reader = logs.get_log_reader() if external_logging else None
+            if external_logging and log_reader is None:
+                # A logging agent forwards logs to an external store but no
+                # reader is registered to stream them back. Warn instead of
+                # silently reporting the job as unreadable.
+                print(f'{colorama.Fore.YELLOW}Warning: a logging agent is '
+                      f'configured but no external log reader is registered; '
+                      f'cannot stream logs for job {job_id} from the external '
+                      f'store.{colorama.Style.RESET_ALL}')
+                external_logging = False
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
@@ -1857,23 +1867,24 @@ def stream_logs_by_id(
                     # configured). Stream the logs back from the external store
                     # for this task's ephemeral cluster. The cluster ran exactly
                     # one job, so read the latest indexed one (job_id=None).
-                    reader = logs.get_log_reader()
-                    if reader is None:
-                        continue
                     pool = managed_job_state.get_pool_from_job_id(job_id)
                     if pool is not None:
                         cluster_name, _ = (
                             managed_job_state.get_pool_submit_info(job_id))
-                    else:
+                    elif task_name:
                         cluster_name = generate_managed_job_cluster_name(
                             task_name, job_id)
+                    else:
+                        # Without a task name we cannot derive the ephemeral
+                        # cluster name; fall through to the terminal message.
+                        cluster_name = None
                     if cluster_name is None:
                         continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
                     if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
-                    returncode = reader.read_cluster_job_logs(
+                    returncode = log_reader.read_cluster_job_logs(
                         cluster_name,
                         None,
                         follow=False,
