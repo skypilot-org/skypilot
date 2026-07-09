@@ -757,4 +757,14 @@ def seed_new_user_role(user_id: str) -> None:
     """
     skypilot_config.safe_reload_config()
     permission_service.add_user_if_not_exists(user_id)
-    permission_service.resync_workspace_policies_for_new_user(user_id)
+    try:
+        permission_service.resync_workspace_policies_for_new_user(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail the user's first request over a transient grant
+        # failure (lock timeout, DB error): the grant is retried on the
+        # zero-accessible-workspaces path in
+        # `workspaces.core.resolve_workspace_for_user`, which re-syncs
+        # once more before denying access.
+        logger.error('Failed to grant private-workspace access for new '
+                     f'user {user_id}; will retry on their next workspace '
+                     f'resolution: {common_utils.format_exception(e)}')

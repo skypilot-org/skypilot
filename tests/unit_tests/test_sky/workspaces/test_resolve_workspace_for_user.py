@@ -45,6 +45,11 @@ def _patch_resolver(accessible, workspaces=None):
         mock.patch.object(workspaces_core,
                           '_accessible_workspace_names_for_user',
                           return_value=set(accessible)),
+        # Neutralize the zero-accessible one-shot re-sync: these tests
+        # exercise resolver precedence, not the self-heal (which has its
+        # own tests in TestZeroAccessibleResync).
+        mock.patch.object(workspaces_core.permission.permission_service,
+                          'resync_workspace_policies_for_new_user'),
     ]
 
 
@@ -581,6 +586,63 @@ class TestWorkspaceAmbiguousErrorSignature(unittest.TestCase):
         self.assertEqual(de.accessible, ['team-a', 'team-b', 'team-c'])
         self.assertEqual(de.note, "preferred 'team-x' not accessible")
         self.assertEqual(str(original), str(de))
+
+
+class TestZeroAccessibleResync(unittest.TestCase):
+    """Zero accessible workspaces triggers a one-shot policy re-sync.
+
+    The first-login grant (`resync_workspace_policies_for_new_user`) is keyed
+    on user creation and can fail transiently; the resolver retries it once
+    before denying, so a missed grant heals on the user's next request.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def _patches(self, accessible_side_effect):
+        workspaces = {
+            'private-ws': {
+                'private': True,
+                'allowed_users': ['alice'],
+            },
+        }
+        resync = mock.patch.object(
+            workspaces_core.permission.permission_service,
+            'resync_workspace_policies_for_new_user')
+        return [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value=workspaces),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=accessible_side_effect),
+        ], resync
+
+    def test_resync_heals_missed_grant(self):
+        """Empty, then the re-sync grants -> resolution succeeds."""
+        patches, resync_patch = self._patches([set(), {'private-ws'}])
+        with _Patcher(patches), resync_patch as mock_resync:
+            res = workspaces_core.resolve_workspace_for_user(self.user)
+        mock_resync.assert_called_once_with('alice')
+        self.assertEqual(res.workspace, 'private-ws')
+        self.assertEqual(res.source,
+                         workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+
+    def test_resync_called_once_then_denied(self):
+        """Still empty after the one-shot re-sync -> denied, no retry loop."""
+        patches, resync_patch = self._patches([set(), set()])
+        with _Patcher(patches), resync_patch as mock_resync:
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user)
+        mock_resync.assert_called_once_with('alice')
+
+    def test_no_resync_when_accessible(self):
+        """A user with access never pays for the re-sync."""
+        patches, resync_patch = self._patches([{'private-ws'}])
+        with _Patcher(patches), resync_patch as mock_resync:
+            res = workspaces_core.resolve_workspace_for_user(self.user)
+        mock_resync.assert_not_called()
+        self.assertEqual(res.workspace, 'private-ws')
 
 
 class TestNoWorkspaceAccessError(unittest.TestCase):

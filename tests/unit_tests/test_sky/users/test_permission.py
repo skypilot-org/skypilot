@@ -1589,6 +1589,28 @@ class TestSeedNewUserRole:
 
         assert calls == ['reload', 'add:u1', 'resync:u1']
 
+    def test_resync_failure_does_not_fail_seed(self, monkeypatch):
+        # A transient re-sync failure (lock timeout, DB error) must not fail
+        # the user's first request: the grant is retried on the
+        # zero-accessible path in `resolve_workspace_for_user`. The role
+        # seeding itself must have completed by then.
+        calls = []
+        monkeypatch.setattr(permission.skypilot_config, 'safe_reload_config',
+                            lambda: calls.append('reload'))
+        monkeypatch.setattr(permission.permission_service,
+                            'add_user_if_not_exists',
+                            lambda user_id: calls.append(f'add:{user_id}'))
+
+        def _boom(user_id):
+            raise RuntimeError('lock timeout')
+
+        monkeypatch.setattr(permission.permission_service,
+                            'resync_workspace_policies_for_new_user', _boom)
+
+        permission.seed_new_user_role('u1')  # Must not raise.
+
+        assert calls == ['reload', 'add:u1']
+
 
 @pytest.mark.usefixtures("cleanup_env_vars")
 class TestResyncWorkspacePoliciesForNewUser:
