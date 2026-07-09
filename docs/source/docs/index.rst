@@ -311,8 +311,8 @@ Follow updates:
    :maxdepth: 1
    :caption: Model Serving
 
-   Getting Started <../serving/sky-serve>
-   ../serving/user-guides
+   SkyPilot Endpoints <https://blog.skypilot.co/skypilot-endpoints/>
+   SkyServe <../serving/sky-serve>
 
 .. toctree::
    :hidden:

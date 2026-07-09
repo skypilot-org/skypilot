@@ -1,7 +1,7 @@
 """Track job claim identity.
 
-Revision ID: 021
-Revises: 020
+Revision ID: 023
+Revises: 022
 Create Date: 2026-06-13
 
 """
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '021'
-down_revision: Union[str, Sequence[str], None] = '020'
+revision: str = '023'
+down_revision: Union[str, Sequence[str], None] = '022'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

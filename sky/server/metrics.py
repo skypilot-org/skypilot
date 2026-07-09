@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -27,6 +27,8 @@ from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.utils import annotations
 from sky.utils import common
+from sky.utils import common_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -334,6 +336,23 @@ class ManagedJobsCollector:
         yield metric
 
 
+# Transient statuses we report time-in-state for. UP / STOPPED are steady
+# states by design (no upper bound on residence time, alerting on age is
+# meaningless). PENDING is display-only per status_lib.ClusterStatus.
+_TIME_IN_STATE_STATUSES: Tuple[status_lib.ClusterStatus, ...] = (
+    status_lib.ClusterStatus.INIT,
+    status_lib.ClusterStatus.AUTOSTOPPING,
+)
+
+# Hard upper bound on rows emitted by sky_cluster_time_in_state_seconds.
+# A tenant launching/failing many clusters in tight succession (bug, retry
+# storm, or just heavy churn) can produce many simultaneously-transient
+# cluster_name series; capping defends Prometheus's series budget.
+# Sorting by age first means the clusters most likely to be stuck (and
+# therefore most likely to be alertable) survive the cap.
+_TIME_IN_STATE_MAX_SERIES = 100
+
+
 class WorkspaceUsageCollector:
     """Per-workspace / per-user cluster usage metrics.
 
@@ -348,6 +367,14 @@ class WorkspaceUsageCollector:
       * ``sky_clusters_gpus_in_flight{workspace,user,cloud,gpu_type,kind}``
         — GPU count by accelerator model across ``UP`` clusters,
         summed over ``launched_nodes``.
+      * ``sky_cluster_time_in_state_seconds{workspace,status,cloud,kind,
+        cluster_name}`` — Seconds in current state, per cluster, for
+        transient statuses (INIT / AUTOSTOPPING). Operators alert on
+        this to catch clusters stuck mid-transition; ``cluster_name``
+        on the label set means the alert series identifies exactly
+        which cluster is stuck. Source of truth is the
+        ``cluster_events`` STATUS_CHANGE log so the timer is not reset
+        by refresh paths that re-write ``cluster.status_updated_at``.
 
     All gauges share one cache to keep the cost of a scrape bounded to
     a single ``get_clusters()`` call (the same query
@@ -365,6 +392,7 @@ class WorkspaceUsageCollector:
         self._cached: dict = {
             'counts': {},
             'gpus': {},
+            'time_in_state': {},
         }
 
     @staticmethod
@@ -399,6 +427,15 @@ class WorkspaceUsageCollector:
         clusters = global_user_state.get_clusters(summary_response=True)
         counts: dict = {}
         gpus: dict = {}
+        # Per-transient-status: list of (label_key, cluster_hash). label_key
+        # is (workspace, status, cloud, kind, cluster_name) — the labels
+        # the metric ultimately emits. We resolve the entered-at timestamps
+        # in one batched DB call per status, then emit one gauge row per
+        # cluster (no aggregation at the collector — alerts/dashboards can
+        # max/sum however they want).
+        transient: Dict[str, List[Tuple[Tuple[str, str, str, str, str],
+                                        str]]] = {}
+        transient_statuses = {s.name for s in _TIME_IN_STATE_STATUSES}
 
         for cluster in clusters:
             workspace = _label_or_default(cluster.get('workspace'),
@@ -421,6 +458,16 @@ class WorkspaceUsageCollector:
             count_key = (workspace, user, status_name, cloud, kind)
             counts[count_key] = counts.get(count_key, 0) + 1
 
+            # ── time-in-state, transient statuses only ──
+            if status_name in transient_statuses:
+                cluster_hash = cluster.get('cluster_hash')
+                cluster_name = cluster.get('name')
+                if cluster_hash and cluster_name:
+                    label_key = (workspace, status_name, cloud, kind,
+                                 cluster_name)
+                    transient.setdefault(status_name, []).append(
+                        (label_key, cluster_hash))
+
             # ── GPUs, only for UP clusters ──
             if status_name != 'UP':
                 continue
@@ -434,9 +481,45 @@ class WorkspaceUsageCollector:
                 gpus[gpu_key] = (gpus.get(gpu_key, 0.0) +
                                  float(acc_count) * num_nodes)
 
+        # Resolve the entered-at timestamp per cluster. One DB call per
+        # transient status; total cost bounded by # of distinct transient
+        # statuses observed (≤ |_TIME_IN_STATE_STATUSES|).
+        now_seconds = int(time.time())
+        time_in_state: Dict[Tuple[str, str, str, str, str], float] = {}
+        for status_name, entries in transient.items():
+            try:
+                status_enum = status_lib.ClusterStatus[status_name]
+            except KeyError:
+                continue
+            hashes = {h for _, h in entries}
+            entered_at = global_user_state.get_last_status_change_times(
+                hashes, status_enum)
+            for label_key, cluster_hash in entries:
+                ts = entered_at.get(cluster_hash)
+                if ts is None:
+                    # Cluster has no recorded STATUS_CHANGE event for this
+                    # status — typically a launch in the sub-second window
+                    # before the event row is written, or a row written
+                    # before the cluster_events table existed. Either way
+                    # the residence is too short to alert on.
+                    continue
+                time_in_state[label_key] = max(0.0, float(now_seconds - ts))
+
+        if len(time_in_state) > _TIME_IN_STATE_MAX_SERIES:
+            logger.warning(
+                'sky_cluster_time_in_state_seconds: %d transient clusters '
+                'observed; capping to top %d by age. Oldest clusters '
+                'survive the cap so any alertable case is preserved.',
+                len(time_in_state), _TIME_IN_STATE_MAX_SERIES)
+            time_in_state = dict(
+                sorted(time_in_state.items(),
+                       key=lambda kv: kv[1],
+                       reverse=True)[:_TIME_IN_STATE_MAX_SERIES])
+
         return {
             'counts': counts,
             'gpus': gpus,
+            'time_in_state': time_in_state,
         }
 
     def describe(self):
@@ -450,6 +533,15 @@ class WorkspaceUsageCollector:
             'GPU count across UP clusters, by workspace, user, cloud, '
             'gpu_type, kind',
             labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_cluster_time_in_state_seconds',
+            'Seconds in current state, per cluster, for transient statuses '
+            '(INIT, AUTOSTOPPING). Source is the cluster_events '
+            'STATUS_CHANGE log; only transient statuses emit, so steady '
+            'cardinality is bounded by # in-flight transitions. Capped at '
+            'the top 100 oldest clusters per scrape to defend Prometheus '
+            'series budget against pathological churn.',
+            labels=['workspace', 'status', 'cloud', 'kind', 'cluster_name'])
 
     def collect(self):
         now = time.time()
@@ -479,6 +571,20 @@ class WorkspaceUsageCollector:
             labels=['workspace', 'user', 'cloud', 'gpu_type', 'kind'])
         for (workspace, user, cloud, gpu_type, kind), v in data['gpus'].items():
             m.add_metric([workspace, user, cloud, gpu_type, kind], v)
+        yield m
+
+        m = prom_core.GaugeMetricFamily(
+            'sky_cluster_time_in_state_seconds',
+            'Seconds in current state, per cluster, for transient statuses '
+            '(INIT, AUTOSTOPPING). Source is the cluster_events '
+            'STATUS_CHANGE log; only transient statuses emit, so steady '
+            'cardinality is bounded by # in-flight transitions. Capped at '
+            'the top 100 oldest clusters per scrape to defend Prometheus '
+            'series budget against pathological churn.',
+            labels=['workspace', 'status', 'cloud', 'kind', 'cluster_name'])
+        for key, v in data['time_in_state'].items():
+            workspace, status, cloud, kind, cluster_name = key
+            m.add_metric([workspace, status, cloud, kind, cluster_name], v)
         yield m
 
 
@@ -550,9 +656,9 @@ def metrics() -> fastapi.Response:
 # Without a per-context timeout, a single hanging port-forward (e.g. 30s
 # httpx timeout) would block the entire /gpu-metrics response.
 #
-# 20s accommodates large compute clusters where federate latency plus
+# 30s accommodates large compute clusters where federate latency plus
 # port-forward setup can run 5-10s warm and longer cold.
-_PER_CONTEXT_TIMEOUT_SECONDS = 20
+_PER_CONTEXT_TIMEOUT_SECONDS = 30
 
 _CREDENTIAL_MANAGER_KUBECONFIG_PATH = (
     '/var/skypilot/credentials/kubeconfig/kubeconfig')
@@ -610,6 +716,51 @@ async def gpu_metrics_debug() -> dict:
     }
 
 
+def _handle_federation_result(context: str, route: str, result: object,
+                              stats: metrics_utils.FederationStats,
+                              all_metrics: List[str]) -> None:
+    """Classifies one federation task result and records its outcome.
+
+    On success appends the metrics text; on failure logs a readable, per-
+    cluster message that names the context and includes the port-forward vs.
+    /federate timing breakdown (so a timeout shows which phase blew the
+    budget). Records the per-context outcome counter. Re-raises non-Exception
+    BaseExceptions (KeyboardInterrupt/SystemExit) to preserve prior behavior.
+
+    All work here is synchronous and non-blocking — no awaits, no I/O beyond
+    logging — so it cannot hang the gather loop.
+    """
+    # asyncio.TimeoutError is an Exception subclass, so check it first.
+    if isinstance(result, asyncio.TimeoutError):
+        metrics_utils.record_federation_outcome(context, route, 'timeout')
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'timed out after {_PER_CONTEXT_TIMEOUT_SECONDS}s '
+            f'({stats.summary()}); kubectl port-forward + /federate exceeded '
+            f'the per-context budget; series for this cluster are omitted from '
+            f'this scrape')
+        return
+    if isinstance(result, Exception):
+        metrics_utils.record_federation_outcome(context, route, 'error')
+        # format_exception already renders as '<ClassName>: <message>'.
+        logger.error(
+            f'Failed to get metrics for context {context} (route {route}): '
+            f'{common_utils.format_exception(result)} ({stats.summary()})')
+        return
+    if isinstance(result, BaseException):
+        # Avoid changing behavior for non-Exception BaseExceptions like
+        # KeyboardInterrupt/SystemExit: re-raise them.
+        raise result
+    metrics_utils.record_federation_outcome(context, route, 'success')
+    # debug: one line per context per scrape; the timeout/error paths above
+    # log at error level, and the Prometheus metrics capture this regardless.
+    logger.debug(f'Federated metrics for context {context} (route {route}): '
+                 f'{stats.summary()}')
+    # The three guards above leave only the success case: a metrics-text str.
+    assert isinstance(result, str)
+    all_metrics.append(result)
+
+
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
@@ -623,34 +774,27 @@ async def gpu_metrics() -> fastapi.Response:
     annotations.clear_request_level_cache()
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
-    successful_contexts = 0
 
     remote_contexts = [
         context for context in contexts if context != 'in-cluster'
     ]
+    # One stats record per context, filled in by get_metrics_for_context even
+    # if the task is later cancelled by the wait_for timeout — so the timeout
+    # log can report how far the attempt got (port-forward vs. federate).
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(
-                metrics_utils.get_metrics_for_context(context),
+                metrics_utils.get_metrics_for_context(context, stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
-            )) for context in remote_contexts
+            )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(
-                f'Failed to get metrics for context {remote_contexts[i]}: '
-                f'{result}')
-        elif isinstance(result, BaseException):
-            # Avoid changing behavior for non-Exception BaseExceptions
-            # like KeyboardInterrupt/SystemExit: re-raise them.
-            raise result
-        else:
-            metrics_text = result
-            all_metrics.append(metrics_text)
-            successful_contexts += 1
+        _handle_federation_result(remote_contexts[i], 'gpu-metrics', result,
+                                  stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)
 
@@ -680,25 +824,21 @@ async def endpoint_metrics() -> fastapi.Response:
     remote_contexts = [
         context for context in contexts if context != 'in-cluster'
     ]
+    stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(
             asyncio.wait_for(
-                metrics_utils.get_endpoint_metrics_for_context(context),
+                metrics_utils.get_endpoint_metrics_for_context(context,
+                                                               stats=stats),
                 timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
-            )) for context in remote_contexts
+            )) for context, stats in zip(remote_contexts, stats_list)
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(f'Failed to get endpoint metrics for context '
-                         f'{remote_contexts[i]}: {result}')
-        elif isinstance(result, BaseException):
-            raise result
-        else:
-            metrics_text = result
-            all_metrics.append(metrics_text)
+        _handle_federation_result(remote_contexts[i], 'endpoints-metrics',
+                                  result, stats_list[i], all_metrics)
 
     combined_metrics = '\n\n'.join(all_metrics)
 

@@ -13,8 +13,8 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
-                    Set, Tuple)
+from typing import (Any, Callable, Dict, Generator, List, NamedTuple, NoReturn,
+                    Optional, Set, Tuple)
 import uuid
 
 import anyio
@@ -44,6 +44,20 @@ from sky.utils import ux_utils
 from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _unresolved_entrypoint(*args: Any, **kwargs: Any) -> NoReturn:
+    """Placeholder for a request entrypoint that could not be unpickled.
+
+    Used by ``Request.decode`` when the encoded entrypoint references a symbol
+    this (older) client does not have. The entrypoint is never invoked on the
+    client; this only guards the unlikely case of someone calling it.
+    """
+    raise RuntimeError(
+        'This request entrypoint could not be resolved on the client, likely '
+        'due to a client/server version mismatch. Upgrade the SkyPilot client '
+        'to match the API server version.')
+
 
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
@@ -91,6 +105,18 @@ class RequestStatus(enum.Enum):
     def active_statuses(cls) -> List['RequestStatus']:
         """Statuses of requests that are not finished yet."""
         return [cls.PENDING, cls.WAITING, cls.RUNNING]
+
+    @classmethod
+    def executable_statuses(cls) -> List['RequestStatus']:
+        """Statuses from which a dequeued request may start executing.
+
+        A request is enqueued as PENDING. It may also be re-enqueued while in
+        WAITING -- the state it is parked in while waiting to resume (e.g. a
+        retry backoff or an external continue-condition). In both cases the
+        worker should pick it up and run it. Any other status (RUNNING, a
+        finished status, or CANCELLED) means the request must not be executed.
+        """
+        return [cls.PENDING, cls.WAITING]
 
 
 _STATUS_TO_COLOR = {
@@ -204,8 +230,23 @@ class Request:
         }
 
     def set_return_value(self, return_value: Any) -> None:
-        """Set the return value."""
-        self.return_value = encoders.get_encoder(self.name)(return_value)
+        """Set the encoded return value.
+
+        On encoder failure, drop to None. An exception here would escape the
+        wrapper's else-block (outside its try/except) and leave the row stuck
+        in RUNNING with the worker pid populated — enabling the
+        SIGTERM-to-idle-worker pool break. All return-value serializers
+        already guard `if return_value is not None`, so None persists as JSON
+        `null`.
+        """
+        encoder = encoders.get_encoder(self.name)
+        try:
+            self.return_value = encoder(return_value)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Encoder for request {self.request_id} ({self.name}) '
+                f'failed; storing None: {common_utils.format_exception(e)}')
+            self.return_value = None
 
     def get_return_value(self) -> Any:
         """Get the return value."""
@@ -303,6 +344,27 @@ class Request:
                 exc_info=e)
             raise
 
+    @staticmethod
+    def _decode_entrypoint(encoded_entrypoint: str) -> Callable:
+        """Unpickle the entrypoint, tolerating an unresolvable reference.
+
+        The entrypoint is a server-side callable that is pickled by reference
+        (module + qualname). The client deserializes it for bookkeeping but
+        never invokes it. When the client is older than the server, the server
+        may reference a symbol this client does not have (e.g. a newly-added
+        ``sky.core`` function), which makes unpickling raise ``AttributeError``
+        /``ImportError``. Since the value is never called on the client, fall
+        back to a placeholder instead of failing the whole request.
+        """
+        try:
+            return decoders.decode_and_unpickle(encoded_entrypoint)
+        except (AttributeError, ImportError) as e:
+            logger.debug(
+                'Could not resolve the request entrypoint while decoding '
+                f'(likely a client/server version skew): {e}. The entrypoint '
+                'is not used on the client, so falling back to a placeholder.')
+            return _unresolved_entrypoint
+
     @classmethod
     def decode(cls, payload: payloads.RequestPayload) -> 'Request':
         """Deserialize the SkyPilot API request."""
@@ -310,7 +372,7 @@ class Request:
             return cls(
                 request_id=payload.request_id,
                 name=payload.name,
-                entrypoint=decoders.decode_and_unpickle(payload.entrypoint),
+                entrypoint=cls._decode_entrypoint(payload.entrypoint),
                 request_body=decoders.decode_and_unpickle(payload.request_body),
                 status=RequestStatus(payload.status),
                 return_value=orjson.loads(payload.return_value),

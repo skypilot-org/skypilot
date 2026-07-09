@@ -364,6 +364,28 @@ export function ManagedJobs() {
     trackFilterUsed('job', { property, value });
   };
 
+  // Clicking a user in the table adds (or replaces) a "User" filter rather
+  // than navigating to the users page. Replace-not-stack is intentional:
+  // two AND'd user filters would yield zero results.
+  const handleUserFilterClick = React.useCallback(
+    (username) => {
+      if (!username) return;
+      setFilters((prevFilters) => {
+        const withoutUser = prevFilters.filter(
+          (f) => (f.property || '').toLowerCase() !== 'user'
+        );
+        const updatedFilters = [
+          ...withoutUser,
+          { property: 'User', operator: ':', value: username },
+        ];
+        sharedUpdateURLParams(router, updatedFilters);
+        return updatedFilters;
+      });
+      trackFilterUsed('job', { property: 'User', value: username });
+    },
+    [router]
+  );
+
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
@@ -427,6 +449,7 @@ export function ManagedJobs() {
         setLoading={setLoading}
         refreshDataRef={jobsRefreshRef}
         filters={filters}
+        onUserFilter={handleUserFilterClick}
         onRefresh={handleRefresh}
         poolsData={poolsData}
         poolsLoading={poolsLoading}
@@ -475,6 +498,7 @@ export function ManagedJobsTable({
   setLoading,
   refreshDataRef,
   filters,
+  onUserFilter,
   onRefresh,
   poolsData,
   poolsLoading,
@@ -1532,7 +1556,11 @@ export function ManagedJobsTable({
         ),
         renderCell: (item) => (
           <TableCell>
-            <UserDisplay username={item.user} userHash={item.user_hash} />
+            <UserDisplay
+              username={item.user}
+              userHash={item.user_hash}
+              onUserClick={onUserFilter}
+            />
           </TableCell>
         ),
       },
@@ -1886,6 +1914,7 @@ export function ManagedJobsTable({
       expandedRowId,
       poolsLoading,
       poolsData,
+      onUserFilter,
     ]
   );
 

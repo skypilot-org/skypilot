@@ -21,15 +21,32 @@ export const yamlHighlightStyle = HighlightStyle.define([
   { tag: t.punctuation, color: '#6b7280' },
 ]);
 
-const gutterTheme = EditorView.theme({
+// I-beam over the entire editor box (gutter + content + empty area)
+// so the whole surface reads as a single text region. CodeMirror's
+// default only puts the I-beam on `.cm-content` (the contenteditable
+// text), leaving the gutter on the default arrow — fine for IDEs,
+// but in a small embedded YAML viewer the box feels split otherwise.
+export const yamlTextCursorTheme = EditorView.theme({
+  '&': { cursor: 'text' },
+});
+
+export const yamlGutterTheme = EditorView.theme({
   '.cm-gutters': {
-    backgroundColor: '#f9fafb',
-    borderRight: '1px solid #e5e7eb',
-    color: '#9ca3af',
+    backgroundColor: '#ffffff',
+    border: 'none',
+    color: '#8c959f',
   },
+  // Fixed-width line-number column so the gutter doesn't jitter when the
+  // line count crosses 1 → 2 → 3 digits. Right-aligned within a 4em box
+  // (fits 3-digit numbers at 13px font without growing).
   '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 12px 0 8px',
-    minWidth: '2.5em',
+    padding: '0 16px 0 8px',
+    minWidth: '4em',
+    boxSizing: 'border-box',
+    textAlign: 'right',
+  },
+  '&.cm-focused': {
+    outline: 'none',
   },
 });
 
@@ -48,7 +65,7 @@ export function YamlEditor({
 }) {
   return (
     <div
-      className={`rounded-md border border-gray-300 overflow-hidden flex flex-col ${className || ''}`}
+      className={`rounded-md border border-gray-200 overflow-hidden flex flex-col ${className || ''}`}
       style={{
         width: '100%',
         maxWidth: '100%',
@@ -63,7 +80,8 @@ export function YamlEditor({
         onChange={onChange}
         extensions={[
           yaml(),
-          gutterTheme,
+          yamlGutterTheme,
+          yamlTextCursorTheme,
           Prec.highest(syntaxHighlighting(yamlHighlightStyle)),
           // Pass CSP nonce so CodeMirror's injected <style> tags are allowed.
           ...(getNonce() ? [EditorView.cspNonce.of(getNonce())] : []),
@@ -74,7 +92,7 @@ export function YamlEditor({
         maxHeight={height ? undefined : maxHeight}
         basicSetup={{
           lineNumbers: true,
-          foldGutter: true,
+          foldGutter: false,
           highlightActiveLineGutter: false,
           highlightActiveLine: false,
           indentOnInput: true,

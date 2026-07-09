@@ -65,7 +65,6 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 ## Model Serving
 
 - [Getting Started]({{BASE_URL}}/serving/sky-serve.html.md): Production-ready model serving with SkyServe
-- [User Guides]({{BASE_URL}}/serving/user-guides.html.md): Comprehensive serving guides
 - [Autoscaling]({{BASE_URL}}/serving/autoscaling.html.md): Scale replicas based on load
 - [Authentication]({{BASE_URL}}/serving/auth.html.md): Secure your serving endpoints
 - [HTTPS Support]({{BASE_URL}}/serving/https.html.md): Enable HTTPS for serving

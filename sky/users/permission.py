@@ -182,8 +182,10 @@ class PermissionService:
             return
         username, password = basic_auth.split(':', 1)
         if username and password:
-            user_hash = hashlib.md5(
-                username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user id from the (non-secret)
+            # username; the password is checked separately. Not a security use.
+            user_hash = hashlib.md5(username.encode(), usedforsecurity=False
+                                   ).hexdigest()[:common_utils.USER_HASH_LENGTH]
             user_info = global_user_state.get_user(user_hash)
             if user_info:
                 logger.debug(f'Basic auth user {username} already exists')

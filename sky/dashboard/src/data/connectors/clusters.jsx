@@ -170,6 +170,11 @@ export async function getClusterHistory(
     const requestBody = {
       days: days,
       dashboard_summary_response: true,
+      // Hide clusters that back managed jobs/services from the history view.
+      // These controller-launched clusters are already excluded from the
+      // active cluster list (sky.core.status), so excluding them here keeps
+      // the "Show history" view consistent.
+      exclude_managed_clusters: true,
     };
 
     // If a specific cluster hash is provided, include it in the request

@@ -1,5 +1,6 @@
 """Kubernetes."""
 import concurrent.futures
+import fnmatch
 import math
 import os
 import re
@@ -20,6 +21,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -43,10 +45,6 @@ logger = sky_logging.init_logger(__name__)
 # same cluster (even if they might be running in different namespaces).
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
-
-# Shared directory to communicate with fusermount-server, refer to
-# addons/fuse-proxy/README.md for more details.
-_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
@@ -800,9 +798,13 @@ class Kubernetes(clouds.Cloud):
             override_configs=resources.cluster_config_overrides)
 
         if isinstance(remote_identity, dict):
-            # If remote_identity is a dict, use the service account for the
-            # current context
-            k8s_service_account_name = remote_identity.get(context, None)
+            # If remote_identity is a dict, match the current context against
+            # patterns using fnmatch (consistent with AWS/GCP behavior).
+            k8s_service_account_name = None
+            for pattern, sa_name in remote_identity.items():
+                if fnmatch.fnmatchcase(context, str(pattern)):
+                    k8s_service_account_name = sa_name
+                    break
             if k8s_service_account_name is None:
                 err_msg = (f'Context {context!r} not found in '
                            'remote identities from config.yaml')
@@ -980,7 +982,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
-            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
+            'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
+            'k8s_fusermount_setup_command':
+                kubernetes_fuse.get_fusermount_shim_setup_command(
+                    sudo_cmd='$(prefix_cmd)',
+                    shared_dir=kubernetes_fuse.FUSERMOUNT_SHARED_DIR),
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,

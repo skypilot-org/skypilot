@@ -789,3 +789,87 @@ async def test_serve_dashboard_client_route_falls_back_to_index(tmp_path):
         response = await server.serve_dashboard(request, full_path='clusters')
 
     assert response.status_code == 200
+
+
+def _api_get_dummy_entrypoint():
+    """Module-level entrypoint so Request.encode() can pickle it."""
+    pass
+
+
+def test_api_get_endpoint_serializes_request_payload(monkeypatch):
+    """/api/get returns a JSON-serialized RequestPayload over the wire.
+
+    Guards the response serialization path: after removing the deprecated
+    ORJSONResponse response_class, FastAPI must natively serialize the
+    returned Pydantic RequestPayload model into valid JSON.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
+
+    created_at = 1234567890.0
+    request = requests_lib.Request(
+        request_id='test-req-123',
+        name='test-request',
+        entrypoint=_api_get_dummy_entrypoint,
+        request_body=payloads.RequestBody(),
+        status=requests_lib.RequestStatus.SUCCEEDED,
+        created_at=created_at,
+        user_id='user-123',
+    )
+
+    async def fake_expand(request_id):
+        return request_id
+
+    async def fake_status(request_id, include_msg=False):
+        return requests_lib.StatusWithMsg(
+            status=requests_lib.RequestStatus.SUCCEEDED)
+
+    async def fake_get_request(request_id):
+        return request
+
+    monkeypatch.setattr(server, 'get_expanded_request_id', fake_expand)
+    monkeypatch.setattr(requests_lib, 'get_request_status_async', fake_status)
+    monkeypatch.setattr(requests_lib, 'get_request_async', fake_get_request)
+
+    client = TestClient(server.app)
+    response = client.get('/api/get', params={'request_id': 'test-req-123'})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['request_id'] == 'test-req-123'
+    assert data['name'] == 'test-request'
+    assert data['status'] == 'SUCCEEDED'
+    assert data['created_at'] == created_at
+    assert data['user_id'] == 'user-123'
+
+
+def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
+    """/dashboard_config returns JSON-serialized dashboard settings.
+
+    Guards the response serialization path after removing the deprecated
+    ORJSONResponse response_class: FastAPI must natively serialize the
+    returned dict into valid JSON.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        skypilot_config, 'get_nested', lambda keys, default: [{
+            'label': 'Grafana',
+            'regex': 'https://grafana.example.com/.*'
+        }])
+
+    client = TestClient(server.app)
+    response = client.get('/dashboard_config')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {
+        'external_links': [{
+            'label': 'Grafana',
+            'regex': 'https://grafana.example.com/.*'
+        }]
+    }

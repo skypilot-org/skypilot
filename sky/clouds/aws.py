@@ -1347,7 +1347,7 @@ class AWS(clouds.Cloud):
             # - aws credentials are not set, proceed anyway to get unified error
             #   message for users
             return cls._sts_get_caller_identity()
-        config_hash = hashlib.md5(stdout).hexdigest()[:8]
+        config_hash = hashlib.md5(stdout, usedforsecurity=False).hexdigest()[:8]
         # Getting aws identity cost ~1s, so we cache the result with the output of
         # `aws configure list` as cache key. Different `aws configure list` output
         # can have same aws identity, our assumption is the output would be stable

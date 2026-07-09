@@ -4681,12 +4681,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             logger.info('No jobs cancelled. They may be in terminal states.')
 
-    def sync_down_logs(
-            self,
-            handle: CloudVmRayResourceHandle,
-            job_ids: Optional[List[str]],
-            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+    def sync_down_logs(self,
+                       handle: CloudVmRayResourceHandle,
+                       job_ids: Optional[List[str]],
+                       local_dir: str = constants.SKY_LOGS_DIRECTORY,
+                       head_only: bool = False) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
+
+        Args:
+            head_only: if True, rsync only from the head node. The head's
+                ``run.log`` already aggregates every node's task output, so
+                this captures the full log without touching workers -- which
+                may be unreachable (e.g. a node died, triggering recovery).
 
         Returns:
             A dictionary mapping job_id to log path.
@@ -4762,6 +4768,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             local_log_dirs.append(local_log_dir)
 
         runners = handle.get_command_runners()
+        if head_only:
+            # Head's run.log already aggregates all nodes' output; rsyncing
+            # only the head avoids exec-ing into workers that may be gone.
+            runners = runners[:1]
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -6421,7 +6431,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 read_only = bool(storage_obj.mount_config and
                                  storage_obj.mount_config.read_only)
-                mount_cmd = store.mount_command(dst, read_only=read_only)
+                if isinstance(store, storage_lib.HuggingFaceStore):
+                    # getattr guards against MountConfig instances serialized
+                    # before hf_mount_args existed (and against a None config).
+                    hf_mount_args = getattr(storage_obj.mount_config,
+                                            'hf_mount_args', None)
+                    mount_cmd = store.mount_command(dst,
+                                                    read_only=read_only,
+                                                    hf_mount_args=hf_mount_args)
+                else:
+                    mount_cmd = store.mount_command(dst, read_only=read_only)
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED

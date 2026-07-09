@@ -216,26 +216,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
 
 def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
-    if not job_ids:
-        return ''
-
-    if len(job_ids) == 1:
-        return str(job_ids[0])
-
-    job_ids = sorted(job_ids)
-    ranges = []
-    start = prev = job_ids[0]
-
-    for n in job_ids[1:]:
-        if n == prev + 1:
-            prev = n
-            continue
-        ranges.append(f'{start}-{prev}' if start != prev else str(start))
-        start = prev = n
-
-    # append last range
-    ranges.append(f'{start}-{prev}' if start != prev else str(start))
-    return ','.join(ranges)
+    return managed_job_utils.format_job_ids_as_ranges(job_ids)
 
 
 class _DefaultManagedJobRunner:
@@ -393,6 +374,10 @@ def _consolidated_launch(
     os.makedirs(log_dir, exist_ok=True)
     job_ids_str = _job_ids_to_str(job_ids)
     log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    # LocalProcessCommandRunner (used for consolidation-mode spawns) sets
+    # a clean server env on the subprocess by default to keep per-request
+    # env pollution from leaking into the long-lived controller process
+    # tree. See LocalProcessCommandRunner.run for details.
     backend.run_on_head(local_handle, run_script, log_path=log_path)
     ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
     return job_ids, local_handle
@@ -877,9 +862,6 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-    if num_jobs and pool is None:
-        raise ValueError('Cannot specify num_jobs without pool.')
-
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
     # need to serialize the pool name in the dag. The dag object will be
@@ -1234,7 +1216,15 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
+    # The deprecated v1 queue body cannot request specific fields, so default
+    # to the lightweight field set to avoid returning heavy fields (e.g. the
+    # task YAML) for every job, which is expensive with many jobs.
+    jobs, _, _, _ = queue_v2(
+        refresh,
+        skip_finished,
+        all_users,
+        job_ids,
+        fields=list(managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS))
 
     return jobs
 

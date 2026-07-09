@@ -176,6 +176,37 @@ async def test_api_cancel_race_condition(isolated_database):
     assert updated.status == requests_lib.RequestStatus.CANCELLED
 
 
+@pytest.mark.asyncio
+async def test_waiting_request_is_executed_not_skipped(mock_fd_operations,
+                                                       mock_global_user_state,
+                                                       mock_skypilot_config):
+    """A dequeued WAITING request must execute, not be skipped.
+
+    WAITING is the state a request is parked in while waiting to resume (retry
+    backoff or an external continue-condition). When such a request is
+    re-enqueued and dequeued, the execution wrapper must pick it up and run it
+    just like PENDING. Regression test: the guard previously accepted only
+    PENDING, so a re-enqueued WAITING request was silently dropped and stranded.
+    """
+    req = requests_lib.Request(request_id='waiting-executes',
+                               name='test',
+                               entrypoint=_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.WAITING,
+                               created_at=0.0,
+                               user_id='test-user')
+    await requests_lib.create_if_not_exists_async(req)
+
+    executor._request_execution_wrapper('waiting-executes',
+                                        ignore_return_value=False)
+
+    # The request ran to completion instead of being skipped while WAITING.
+    updated = requests_lib.get_request('waiting-executes')
+    assert updated is not None
+    assert updated.status == requests_lib.RequestStatus.SUCCEEDED
+    assert updated.return_value == 'success'
+
+
 def _test_isolation_worker_fn(expected_env_a: str, expected_env_b: str,
                               expected_labels: dict, **kwargs):
     """Worker that verifies it sees the correct env vars and config overrides."""
@@ -1030,6 +1061,108 @@ def test_resolve_blob_missing_file(tmp_path, monkeypatch):
     from sky.server import common as server_common
     with pytest.raises(FileNotFoundError, match='Blob not found'):
         server_common.resolve_blob_dir(blob_id, 'testuser')
+
+
+# Gated SIGTERM handler tests.
+
+
+@pytest.fixture()
+def reset_sigterm_gate():
+    """Reset module-level flag (shared across tests in same process)."""
+    import signal as _signal
+    original_handler = _signal.getsignal(_signal.SIGTERM)
+    executor._in_request_execution = False
+    yield
+    executor._in_request_execution = False
+    _signal.signal(_signal.SIGTERM, original_handler)
+
+
+def test_gated_sigterm_handler_raises_when_active(reset_sigterm_gate):
+    import signal as _signal
+    executor._in_request_execution = True
+    with pytest.raises(KeyboardInterrupt):
+        executor._gated_sigterm_handler(_signal.SIGTERM, None)
+
+
+def test_gated_sigterm_handler_swallows_when_idle(reset_sigterm_gate):
+    import signal as _signal
+    executor._in_request_execution = False
+    # Must not raise; pool would break if SIGTERM escapes _process_worker.
+    executor._gated_sigterm_handler(_signal.SIGTERM, None)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_clears_in_request_execution_after_success(
+        isolated_database, reset_sigterm_gate):
+    req = requests_lib.Request(request_id='gate-cleared-on-success',
+                               name='test',
+                               entrypoint=_gate_clears_after_success_entrypoint,
+                               request_body=payloads.RequestBody(),
+                               status=requests_lib.RequestStatus.PENDING,
+                               created_at=0.0,
+                               user_id='test-user')
+    assert await requests_lib.create_if_not_exists_async(req) is True
+
+    executor._request_execution_wrapper('gate-cleared-on-success',
+                                        ignore_return_value=False)
+
+    assert executor._in_request_execution is False
+
+
+def _gate_clears_after_success_entrypoint():
+    return 'ok'
+
+
+def _install_gated_handler_in_worker():
+    import signal as _signal
+
+    from sky.server.requests import executor as _executor
+    _signal.signal(_signal.SIGTERM, _executor._gated_sigterm_handler)
+    _executor._in_request_execution = False
+
+
+def _worker_pid():
+    return os.getpid()
+
+
+def _identity(x):
+    return x
+
+
+def test_idle_worker_survives_sigterm_with_gated_handler():
+    """Regression: SIGTERM to an idle worker must not break the pool.
+
+    With the bare _sigterm_handler (always raises KI), the post-SIGTERM
+    submit below fails with BrokenProcessPool.
+    """
+    import signal as _signal
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=2,
+            initializer=_install_gated_handler_in_worker) as pool:
+        pid = pool.submit(_worker_pid).result(timeout=10)
+        os.kill(pid, _signal.SIGTERM)
+
+        # Poll-submit until signal delivers; bug surfaces on first attempt.
+        deadline = time.time() + 5
+        last_exc = None
+        while time.time() < deadline:
+            try:
+                result = pool.submit(_identity, 'alive').result(timeout=5)
+                assert result == 'alive'
+                last_exc = None
+                break
+            except concurrent.futures.process.BrokenProcessPool as e:
+                last_exc = e
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                last_exc = e
+                time.sleep(0.1)
+        assert last_exc is None, (
+            f'Pool should remain usable after SIGTERM to an idle worker, '
+            f'but got: {type(last_exc).__name__}: {last_exc}')
+
+        for i in range(3):
+            assert pool.submit(_identity, i).result(timeout=5) == i
 
 
 # ---- Workspace resolution info log -------------------------------------
