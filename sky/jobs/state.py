@@ -3108,9 +3108,11 @@ async def set_recovered_async(job_id: int,
     await callback_func('RECOVERED')
 
 
-async def set_emergency_recovering_async(
-        job_id: int, task_id: int, reason: str,
-        callback_func: AsyncCallbackType) -> bool:
+async def set_emergency_recovering_async(job_id: int,
+                                         task_id: int,
+                                         reason: str,
+                                         callback_func: AsyncCallbackType,
+                                         emit_event: bool = True) -> bool:
     """Set the task to RECOVERING due to an unexpected controller error.
 
     Used when the controller hits an unexpected internal error and will
@@ -3124,9 +3126,19 @@ async def set_emergency_recovering_async(
     recovery must still count toward recovery_count when it eventually
     completes.
 
+    A PENDING task is deliberately left untouched: it never initialized
+    (set_starting_async has not run), so marking it RECOVERING would make
+    the retry treat it as a resume and skip initialization forever. The
+    caller relaunches it fresh instead.
+
+    emit_event controls whether the RECOVERING job event and the callback
+    are emitted. The caller passes emit_event=False when it has already
+    emitted the event for this emergency occurrence, so re-running the
+    bookkeeping (outer retry) does not append a duplicate event.
+
     Returns True if the task is now RECOVERING; False if it was left
-    untouched because it is CANCELLING or terminal (those paths own the task
-    and must complete normally).
+    untouched because it is PENDING, CANCELLING, or terminal (those paths
+    own the task and must complete normally).
     """
     current_time = time.time()
 
@@ -3148,9 +3160,13 @@ async def set_emergency_recovering_async(
                     # processing_statuses excludes CANCELLING and terminal
                     # statuses, and includes RECOVERING so that re-running
                     # this bookkeeping after a transient failure is a no-op
-                    # rather than an error.
+                    # rather than an error. PENDING is excluded on purpose:
+                    # an uninitialized task must be relaunched fresh, not
+                    # resumed as RECOVERING (see the docstring).
                     spot_table.c.status.in_([
-                        s.value for s in ManagedJobStatus.processing_statuses()
+                        s.value
+                        for s in ManagedJobStatus.processing_statuses()
+                        if s != ManagedJobStatus.PENDING
                     ]),
                     spot_table.c.end_at.is_(None),
                 )).
@@ -3178,16 +3194,24 @@ async def set_emergency_recovering_async(
 
     count = await _retry_session(_op)
     if count == 0:
-        # The task is CANCELLING or already terminal. Emit the event only
-        # for transitions that actually applied.
+        # The task is PENDING, CANCELLING, or already terminal. Emit the
+        # event only for transitions that actually applied.
         return False
-    await add_job_event_async(job_id,
-                              task_id,
-                              ManagedJobStatus.RECOVERING,
-                              reason,
-                              recovery_source=RecoverySource.EMERGENCY)
-    logger.info('=== Emergency recovering... ===')
-    await callback_func('RECOVERING')
+    if emit_event:
+        await add_job_event_async(job_id,
+                                  task_id,
+                                  ManagedJobStatus.RECOVERING,
+                                  reason,
+                                  recovery_source=RecoverySource.EMERGENCY)
+        logger.info('=== Emergency recovering... ===')
+        # Best-effort: a callback failure must not fail the bookkeeping
+        # round, or the outer retry would re-run this and (with emit_event
+        # still True) append a duplicate RECOVERING event.
+        try:
+            await callback_func('RECOVERING')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Emergency recovery callback failed '
+                           f'(continuing): {common_utils.format_exception(e)}')
     return True
 
 

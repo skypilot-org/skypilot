@@ -103,11 +103,15 @@ EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
 # the skylet autostop check (sky/skylet/events.py::AutostopEvent, via
 # managed_job_state.get_num_alive_jobs) does not consider the controller
 # idle while any such job exists. Nor does a backing-off job hold one of
-# the LAUNCHES_PER_WORKER launching slots: the slot is the in-memory
-# `starting` set, which scheduled_launch's finally releases when the error
-# escapes the launch. (The job's own cluster may be reaped by the
-# 10-minute autodown backstop during a long backoff; that is fine — the
-# retry always relaunches from scratch.)
+# the LAUNCHES_PER_WORKER launching slots (the in-memory `starting` set):
+# scheduled_launch's finally releases the slot only when the error escapes
+# from inside the launch context, so the emergency bookkeeping explicitly
+# discards the job from `starting` (JobController._release_launch_slot) to
+# cover the cases it does not — an error in pre/post-launch bookkeeping, or
+# a pool job (which never enters scheduled_launch's slot accounting). The
+# retry re-adds it when it actually relaunches. (The job's own cluster may
+# be reaped by the 10-minute autodown backstop during a long backoff; that
+# is fine — the retry always relaunches from scratch.)
 EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS = 60
 EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
 # If the previous emergency recovery attempt is older than this window, the
