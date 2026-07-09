@@ -1083,10 +1083,13 @@ class TestDownloadLogsForCancelledJob:
 
 
 class TestDownloadLogAndStreamLoggingAgentGate:
-    """download_log_and_stream skips pulling logs when a logging agent is set.
+    """download_log_and_stream skips the local copy only when logs are both
+    forwarded externally AND readable back.
 
-    When a logging agent is configured, job logs are forwarded to an external
-    store, so the controller must not download/persist a local copy.
+    The controller skips downloading a local copy only when a logging agent
+    forwards the logs AND a log reader is registered to stream them back. If the
+    store has no read-back path (no reader), it must keep the local copy so
+    sky jobs logs can still serve a finished job.
     """
 
     def _make_controller(self):
@@ -1098,41 +1101,39 @@ class TestDownloadLogAndStreamLoggingAgentGate:
                 controller, JobController))
         return controller
 
-    def test_skips_download_when_logging_agent_configured(self):
+    def _run(self, agent_configured, reader):
         controller = self._make_controller()
         handle = MagicMock()
-
         with patch('sky.jobs.controller.logs.is_logging_agent_configured',
-                   return_value=True), \
+                   return_value=agent_configured), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=reader), \
              patch('sky.jobs.controller.managed_job_state') as mock_state, \
              patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
              patch('sky.jobs.controller.controller_utils') as mock_cutils:
-
-            controller.download_log_and_stream(0, handle, None)
-
-            # No local copy persisted and no download performed.
-            mock_state.set_local_log_file.assert_not_called()
-            mock_runtime.download_logs.assert_not_called()
-            mock_cutils.download_and_stream_job_log.assert_not_called()
-
-    def test_downloads_when_no_logging_agent(self):
-        controller = self._make_controller()
-        handle = MagicMock()
-
-        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
-                   return_value=False), \
-             patch('sky.jobs.controller.managed_job_state') as mock_state, \
-             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
-             patch('sky.jobs.controller.controller_utils') as mock_cutils:
-
             mock_runtime.is_registered.return_value = False
             mock_cutils.download_and_stream_job_log.return_value = (
                 '/tmp/run.log')
-
             controller.download_log_and_stream(0, handle, None)
+            return mock_state, mock_runtime, mock_cutils
 
-            # Falls back to the normal controller download path.
-            mock_cutils.download_and_stream_job_log.assert_called_once()
+    def test_skips_download_when_agent_and_reader_configured(self):
+        # Logs are forwarded and readable back -> skip the local copy.
+        mock_state, mock_runtime, mock_cutils = self._run(agent_configured=True,
+                                                          reader=MagicMock())
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_downloads_when_agent_but_no_reader(self):
+        # Forwarded to a write-only store (no reader) -> keep the local copy so
+        # sky jobs logs still works for a finished job.
+        _, _, mock_cutils = self._run(agent_configured=True, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_no_logging_agent(self):
+        _, _, mock_cutils = self._run(agent_configured=False, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
 
 
 class TestJobGroupResumeDoesNotReissueStarting:
