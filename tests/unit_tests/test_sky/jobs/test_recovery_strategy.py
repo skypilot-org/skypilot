@@ -193,8 +193,12 @@ async def test_wait_for_parked_request_tolerates_transient_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_wait_for_parked_request_gives_up_on_persistent_poll_errors(
+async def test_wait_for_parked_request_raises_on_persistent_poll_errors(
         monkeypatch):
+    """Persistent poll failures must propagate, not fall back to a fresh
+    launch: the old (still parked) request may resume once the server
+    becomes reachable again, so treating "unreachable" the same as
+    "vanished" could double-launch on the same cluster (fix 5)."""
     executor = _make_bare_executor()
     executor._cancel_launch_request = mock.AsyncMock()
     api_status = mock.MagicMock(side_effect=RuntimeError('server down'))
@@ -202,10 +206,14 @@ async def test_wait_for_parked_request_gives_up_on_persistent_poll_errors(
     monkeypatch.setattr(recovery_strategy,
                         '_PARKED_POLL_INITIAL_BACKOFF_SECONDS', 0.01)
 
-    assert await executor._wait_for_parked_request('req-1') is None
+    with pytest.raises(RuntimeError, match='server down'):
+        await executor._wait_for_parked_request('req-1')
     assert (api_status.call_count ==
             recovery_strategy._PARKED_POLL_MAX_CONSECUTIVE_ERRORS)
-    executor._cancel_launch_request.assert_awaited_once_with('req-1')
+    # Cancelling is now the caller's responsibility (the generic exception
+    # handler in _launch, see fix 4), not _wait_for_parked_request's - it no
+    # longer reaches its own best-effort cancel/return-None tail.
+    executor._cancel_launch_request.assert_not_awaited()
 
 
 def _make_launch_executor():
@@ -364,6 +372,13 @@ async def test_launch_relaunches_when_parked_request_vanishes(monkeypatch):
         'req-123', executor._stream_futures[1])
     # No teardown happened on the park path.
     executor._cleanup_cluster.assert_not_called()
+    # Fix 1: the task was set PENDING while parked (see set_backoff_pending
+    # above), including on the vanish path, so it must be restored to
+    # STARTING/RECOVERING before the fresh launch attempt - even though this
+    # is a "first attempt" from retry_cnt's perspective (retry_cnt == 1,
+    # since a park does not consume a retry) and there is no
+    # reattach_request_id to gate on (the request vanished).
+    patches.set_restarting.assert_awaited_once_with(1, 0, False)
 
 
 @pytest.mark.asyncio
@@ -391,3 +406,181 @@ async def test_launch_cancel_while_parked_cancels_request(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await task
     executor._cancel_launch_request.assert_awaited_once_with('req-123')
+
+
+def test_start_stream_task_uses_context_preserving_executor(monkeypatch):
+    """The stream must run with a copy of the caller's contextvars context
+    (fix 2): loop.run_in_executor does not do this, unlike the
+    asyncio.to_thread it replaced, so without it the per-job log
+    redirection (which is contextvars-based) would be bypassed and logs
+    would leak into the shared controller log instead of the per-job log."""
+    executor = _make_bare_executor()
+
+    to_thread_with_executor = mock.MagicMock(return_value='the-future')
+    monkeypatch.setattr(recovery_strategy.context_utils,
+                        'to_thread_with_executor', to_thread_with_executor)
+    stream_and_get = mock.MagicMock(return_value='stream-result')
+    monkeypatch.setattr(recovery_strategy.sdk, 'stream_and_get', stream_and_get)
+
+    result = executor._start_stream_task('req-1')
+
+    # It must go through the context-preserving helper (with our dedicated
+    # bounded stream executor), not loop.run_in_executor / asyncio.to_thread.
+    assert result == 'the-future'
+    called_executor, called_fn = to_thread_with_executor.call_args.args
+    assert called_executor is recovery_strategy._LAUNCH_STREAM_EXECUTOR
+    # The submitted callable must invoke sdk.stream_and_get for this request
+    # with the rich-status relay enabled.
+    assert called_fn() == 'stream-result'
+    stream_and_get.assert_called_once_with('req-1', relay_rich_status=True)
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_replaces_dead_stream_when_request_still_live(
+        monkeypatch):
+    """Fix 3: if the carried stream already failed (e.g. a transient
+    transport error while parked) but the request itself is still live on
+    the server, start a fresh stream instead of trusting the stale error -
+    which would otherwise tear down an otherwise-healthy cluster."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+
+    async def fake_wait_for_parked_request(request_id):
+        # The carried stream dies while parked (e.g. the API server was
+        # briefly unreachable), even though the request itself resumed
+        # successfully.
+        executor._stream_futures[0].set_exception(
+            RuntimeError('stream transport dropped'))
+        return request_id
+
+    executor._wait_for_parked_request = mock.AsyncMock(
+        side_effect=fake_wait_for_parked_request)
+    executor._await_launch_request = mock.AsyncMock(side_effect=[
+        recovery_strategy._LaunchRequestParked('req-123', 'pending'),
+        None,
+    ])
+    api_status = mock.MagicMock(return_value=[_request_payload('RUNNING')])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+
+    result = await executor._launch(max_retry=1, raise_on_failure=True)
+
+    assert result == 123.45
+    # A replacement stream was started for the dead one; the original
+    # sky.launch was not repeated (this is a reattach, not a fresh launch).
+    assert patches.sdk_launch.call_count == 1
+    assert executor._start_stream_task.call_count == 2
+    assert executor._await_launch_request.await_args_list[1] == mock.call(
+        'req-123', executor._stream_futures[1])
+    executor._cleanup_cluster.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_launch_reattach_surfaces_terminal_request_outcome(monkeypatch):
+    """Fix 3: if the carried stream already failed and the request itself
+    is terminal, surface the request's real outcome (here, its real
+    failure) directly instead of waiting on a stream that will never
+    produce one - and don't bother starting a replacement stream."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+
+    async def fake_wait_for_parked_request(request_id):
+        executor._stream_futures[0].set_exception(
+            RuntimeError('stream transport dropped'))
+        return request_id
+
+    executor._wait_for_parked_request = mock.AsyncMock(
+        side_effect=fake_wait_for_parked_request)
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=recovery_strategy._LaunchRequestParked(
+            'req-123', 'pending'))
+    api_status = mock.MagicMock(
+        return_value=[_request_payload('FAILED', 'ran out of quota')])
+    monkeypatch.setattr(recovery_strategy.sdk, 'api_status', api_status)
+    sdk_get = mock.MagicMock(side_effect=ValueError('the real failure'))
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    with pytest.raises(exceptions.ManagedJobReachedMaxRetriesError):
+        await executor._launch(max_retry=1, raise_on_failure=True)
+
+    # The request's real (terminal) outcome was fetched directly - no
+    # replacement stream, and _await_launch_request was not called again,
+    # since the outcome was already decided.
+    sdk_get.assert_called_once_with('req-123')
+    assert executor._start_stream_task.call_count == 1
+    assert executor._await_launch_request.await_count == 1
+    # Unlike the parked/vanished paths, a genuine failure tears the
+    # partially-provisioned cluster down.
+    executor._cleanup_cluster.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_exception_before_reattach_cancels_parked_request(
+        monkeypatch):
+    """Fix 4: an exception raised after resuming from a park but before the
+    inner try/except takes ownership of the request (e.g. a
+    ManagedJobStatusError out of set_restarting_async) must not leak the
+    parked request - it is best-effort cancelled here - and the exception
+    must still propagate unchanged."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+
+    executor._wait_for_parked_request = mock.AsyncMock(return_value='req-123')
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=recovery_strategy._LaunchRequestParked(
+            'req-123', 'pending'))
+    patches.set_restarting.side_effect = exceptions.ManagedJobStatusError(
+        'unexpected task status')
+
+    with pytest.raises(exceptions.ManagedJobStatusError):
+        await executor._launch(max_retry=1, raise_on_failure=True)
+
+    executor._cancel_launch_request.assert_awaited_once_with('req-123')
+    # The inner try/except (which would submit a second sky.launch or
+    # reattach) never got to run again.
+    assert patches.sdk_launch.call_count == 1
+    assert executor._start_stream_task.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_launch_cancels_parked_request_when_poll_persistently_fails(
+        monkeypatch):
+    """Fix 5 + fix 4 together: when _wait_for_parked_request gives up
+    because the status poll is persistently failing, it raises (fix 5)
+    rather than falling back to a fresh launch attempt; _launch's generic
+    exception handler (fix 4) then best-effort cancels the still-parked
+    request and lets the error propagate."""
+    executor = _make_launch_executor()
+    patches = _patch_launch_environment(monkeypatch)
+    executor._cancel_launch_request = mock.AsyncMock()
+
+    executor._wait_for_parked_request = mock.AsyncMock(
+        side_effect=RuntimeError('server unreachable'))
+    executor._await_launch_request = mock.AsyncMock(
+        side_effect=recovery_strategy._LaunchRequestParked(
+            'req-123', 'pending'))
+
+    with pytest.raises(RuntimeError, match='server unreachable'):
+        await executor._launch(max_retry=1, raise_on_failure=True)
+
+    executor._cancel_launch_request.assert_awaited_once_with('req-123')
+    assert patches.sdk_launch.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_launch_request_tolerates_api_cancel_failure(monkeypatch):
+    """Fix 6: sdk.api_cancel failing (e.g. the server is unreachable) must
+    not raise - callers such as the asyncio.CancelledError handler in
+    _launch rely on this being best-effort, so that this unrelated failure
+    does not replace an in-flight cancellation."""
+    executor = _make_bare_executor()
+    monkeypatch.setattr(
+        recovery_strategy.sdk, 'api_cancel',
+        mock.MagicMock(side_effect=RuntimeError('server unreachable')))
+    sdk_get = mock.MagicMock()
+    monkeypatch.setattr(recovery_strategy.sdk, 'get', sdk_get)
+
+    # Must not raise.
+    await executor._cancel_launch_request('req-1')
+
+    sdk_get.assert_not_called()
