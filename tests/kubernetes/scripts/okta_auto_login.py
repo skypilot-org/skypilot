@@ -165,8 +165,9 @@ class OktaAutoLogin:
 
             WebDriverWait(self.driver, 60,
                           poll_frequency=0.25).until(_at_dashboard)
-            logger.info("⏱️  wait_for_dashboard: %.2fs poll_trace(t,href,cur)=%s",
-                        time.monotonic() - _t2, _trace)
+            logger.info(
+                "⏱️  wait_for_dashboard: %.2fs poll_trace(t,href,cur)=%s",
+                time.monotonic() - _t2, _trace)
             logger.info("✅ Successfully redirected to dashboard")
 
             # Step 4: Verify SkyPilot logo is present
@@ -182,7 +183,8 @@ class OktaAutoLogin:
                 res = self.driver.execute_script(
                     "return (performance.getEntriesByType('resource')||[])"
                     ".concat(performance.getEntriesByType('navigation')||[])"
-                    ".map(function(e){return [e.name, Math.round(e.duration) || 0];})")
+                    ".map(function(e){return [e.name, Math.round(e.duration) || 0];})"
+                )
                 res = sorted(res, key=lambda e: -e[1])[:8]
                 logger.info("⏱️  slowest requests (url, ms): %s", res)
             except Exception as exc:  # pylint: disable=broad-except
