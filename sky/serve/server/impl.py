@@ -324,6 +324,10 @@ def up(
             self_pod_ip_dbg = os.environ.get('POD_IP', '<unset>')
             logger.debug(f'Serve up() run_on_head: spawning controller '
                          f'subprocess locally on {self_pod_ip_dbg}')
+            # LocalProcessCommandRunner (used for consolidation-mode spawns)
+            # supplies a clean server env to the subprocess so per-request
+            # env pollution doesn't leak into the long-lived serve
+            # controller. See LocalProcessCommandRunner.run for details.
             backend.run_on_head(controller_handle, run_script)
 
         style = colorama.Style

@@ -47,6 +47,7 @@ import contextlib
 import os
 import pathlib
 import shutil
+import signal
 import sys
 import typing
 from typing import List, Optional, Set
@@ -157,7 +158,6 @@ def start_controller() -> None:
 
     This requires that the env file is already set up.
     """
-    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
     logs_dir = os.path.expanduser(
         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(logs_dir, exist_ok=True)
@@ -168,7 +168,15 @@ def start_controller() -> None:
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
-    run_cmd = (f'{activate_python_env_cmd}'
+    # Bake IS_SKYPILOT_JOB_CONTROLLER into the shell command rather than
+    # mutating os.environ. Setting os.environ here was harmless before
+    # PR #9731 (the daemon ran in a child process with its own isolated env),
+    # but after #9731 the daemon runs as a main-process thread — the mutation
+    # leaks permanently into the API server's os.environ and causes
+    # serve_utils.is_consolidation_mode() to return True for all serve
+    # requests, even when serve consolidation mode is not configured.
+    run_cmd = (f'export {constants.OVERRIDE_CONSOLIDATION_MODE}=true; '
+               f'{activate_python_env_cmd}'
                f'{run_controller_cmd}')
 
     logger.info(f'Running controller with command: {run_cmd}')
@@ -191,6 +199,33 @@ def get_alive_controllers() -> Optional[int]:
         if managed_job_utils.controller_process_alive(record, quiet=False):
             alive += 1
     return alive
+
+
+def kill_local_job_controllers(sig: int = signal.SIGTERM) -> int:
+    """SIGTERM all live controller PIDs recorded on this replica.
+
+    Returns:
+        The number of signals delivered.
+    """
+    records = get_controller_process_records()
+    if not records:
+        return 0
+    signaled = 0
+    for record in records:
+        if not managed_job_utils.controller_process_alive(record):
+            continue
+        try:
+            os.kill(record.pid, sig)
+            signaled += 1
+        except ProcessLookupError:
+            # Already gone between the alive-check and the kill — fine.
+            pass
+        except OSError as e:
+            logger.warning(f'Failed to signal controller pid={record.pid}: {e}')
+    if signaled:
+        logger.info(f'Sent {sig.name if hasattr(sig, "name") else sig} to '
+                    f'{signaled} job controller(s)')
+    return signaled
 
 
 def maybe_start_controllers(from_scheduler: bool = False) -> None:

@@ -27,7 +27,7 @@ import {
 import { UI_CONFIG } from '@/lib/config';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { formatYaml } from '@/lib/yamlUtils';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import {
   Table,
   TableHeader,
@@ -38,6 +38,10 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { buildFilterUrl } from '@/components/shared/FilterSystem';
+import { getPersistedPageSize, persistPageSize } from '@/lib/utils';
+
+const POOL_PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
+const POOL_PAGE_SIZE_STORAGE_KEY = 'skypilot-pool-page-size';
 
 function UsedByJobsCell({ usedBy }) {
   const MAX_DISPLAY = 2;
@@ -118,7 +122,11 @@ export default function PoolDetailPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice persisted in localStorage,
+  // falling back to the default of 10.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(POOL_PAGE_SIZE_STORAGE_KEY, POOL_PAGE_SIZE_OPTIONS, 10)
+  );
 
   // Filtering state
   const [showFailedWorkers, setShowFailedWorkers] = useState(false);
@@ -320,6 +328,8 @@ export default function PoolDetailPage() {
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(POOL_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1);
   };
 
@@ -551,11 +561,10 @@ export default function PoolDetailPage() {
                     </div>
 
                     {isPoolYamlExpanded && (
-                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                        <YamlHighlighter className="whitespace-pre-wrap">
-                          {formatYaml(poolData.pool_yaml)}
-                        </YamlHighlighter>
-                      </div>
+                      <YamlCodeBlock
+                        value={formatYaml(poolData.pool_yaml)}
+                        readOnly
+                      />
                     )}
                   </div>
                 )}

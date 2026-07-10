@@ -49,7 +49,7 @@ import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
@@ -712,14 +712,13 @@ function ActiveTab({
                           </div>
 
                           {isYamlExpanded && (
-                            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {formatYaml(
-                                  clusterData.task_yaml ||
-                                    clusterData.last_creation_yaml
-                                )}
-                              </YamlHighlighter>
-                            </div>
+                            <YamlCodeBlock
+                              value={formatYaml(
+                                clusterData.task_yaml ||
+                                  clusterData.last_creation_yaml
+                              )}
+                              readOnly
+                            />
                           )}
                         </div>
                       )}

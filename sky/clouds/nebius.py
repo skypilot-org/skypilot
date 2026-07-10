@@ -72,7 +72,8 @@ def _write_nebius_temp_credential_file(prefix: str, value: str) -> str:
     umask would otherwise lock the other user out.
     """
     uid = os.getuid() if hasattr(os, 'getuid') else 'default'
-    digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]
+    digest = hashlib.sha1(value.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()[:16]
     path = os.path.join(tempfile.gettempdir(), f'{prefix}{uid}-{digest}')
     expected = value + '\n'
     try:
