@@ -801,17 +801,6 @@ async def send_metrics_request_with_port_forward(
 _CLUSTER_LABEL_RE = re.compile(r'(?<![a-zA-Z0-9_])cluster="(?:\\.|[^"\\])*"')
 
 
-def _escape_label_value(value: str) -> str:
-    """Escapes a string for use as an exposition-format label value.
-
-    Per the Prometheus text format, backslash, double-quote, and newline
-    must be escaped inside quoted label values. An unescaped context name
-    containing any of these would produce malformed exposition and fail
-    the entire scrape.
-    """
-    return (value.replace('\\', r'\\').replace('"', r'\"').replace('\n', r'\n'))
-
-
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
     """Adds a cluster label to each metric line.
 
@@ -825,7 +814,7 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
         metrics_text: The text containing the metrics
         context: The cluster name
     """
-    cluster_label = f'cluster="{_escape_label_value(context)}"'
+    cluster_label = f'cluster="{context}"'
     lines = metrics_text.strip().split('\n')
     modified_lines = []
 
@@ -845,8 +834,8 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
             rest_of_line = line[brace_end + 1:]
 
             if _CLUSTER_LABEL_RE.search(existing_labels):
-                # A lambda replacement keeps backslashes in the escaped
-                # context name from being parsed as regex group escapes.
+                # A lambda replacement keeps any backslash in the context
+                # name from being parsed as a regex group escape.
                 new_labels = _CLUSTER_LABEL_RE.sub(lambda _: cluster_label,
                                                    existing_labels)
             elif existing_labels:

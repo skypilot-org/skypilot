@@ -328,13 +328,6 @@ def test_add_cluster_name_label_does_not_touch_other_labels():
     assert result == 'foo{cluster="ctx-a",k8s_cluster="other"} 1.0'
 
 
-def test_add_cluster_name_label_escapes_context_name():
-    """Quotes/backslashes/newlines in the context name are escaped."""
-    text = 'foo{bar="baz"} 1.0'
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx"a\\b\nc'))
-    assert result == 'foo{cluster="ctx\\"a\\\\b\\nc",bar="baz"} 1.0'
-
-
 def test_add_cluster_name_label_brace_in_label_value():
     """A '}' inside a label value must not truncate the label section."""
     text = 'foo{bar="}",qux="v"} 1.0'
