@@ -169,6 +169,40 @@ class TestResourcesSchema(unittest.TestCase):
                 jsonschema.validate(instance=config, schema=resources_schema)
 
 
+class TestRbacSchema(unittest.TestCase):
+    """Tests for rbac.restrict_config_to_admins in the config schema."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        # Enable strict validation so additionalProperties is enforced.
+        plugins._plugins_loaded = True
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
+        self.config_schema = schemas.get_config_schema()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    def test_restrict_config_to_admins_accepts_bool(self):
+        for value in (True, False):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': value
+                }},
+                schema=self.config_schema)
+
+    def test_restrict_config_to_admins_rejects_non_bool(self):
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': 'yes'
+                }},
+                schema=self.config_schema)
+
+
 class TestWorkspaceSchema(unittest.TestCase):
     """Tests for the workspace schema in schemas.py"""
 

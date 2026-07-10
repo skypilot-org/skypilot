@@ -420,6 +420,17 @@ class TestGetPodTerminationReason:
         result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
         assert 'Terminated unexpectedly' in result
 
+    def test_none_conditions_does_not_raise(self, monkeypatch):
+        # status.conditions is nullable in the Kubernetes API and is often
+        # None for pods in Failed/Unknown phase (e.g. after a node becomes
+        # unreachable). It must not raise TypeError.
+        monkeypatch.setattr(k8s_instance.global_user_state, 'add_cluster_event',
+                            lambda *a, **k: None)
+        pod = self._make_terminated_pod(reason=None, message=None)
+        pod.status.conditions = None
+        result = k8s_instance._get_pod_termination_reason(pod, 'cluster')
+        assert 'Terminated unexpectedly' in result
+
 
 def _make_event(reason, message):
     """Create a mock kubelet pod event."""

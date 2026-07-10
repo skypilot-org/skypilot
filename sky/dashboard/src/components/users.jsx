@@ -52,7 +52,10 @@ import {
   PlusIcon,
   MinusIcon,
   CopyIcon,
+  Users as UsersIcon,
 } from 'lucide-react';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { useSidebar } from '@/components/elements/sidebar';
@@ -2241,20 +2244,27 @@ function UsersTable({
     );
   }
 
-  if (!filteredAndSortedUsers || filteredAndSortedUsers.length === 0) {
+  if (
+    !filteredAndSortedUsers ||
+    filteredAndSortedUsers.length === 0 ||
+    isForceEmpty()
+  ) {
     return (
-      <div className="text-center py-12">
-        <p className="text-lg font-semibold text-gray-500">
-          {filters.length > 0
-            ? 'No users match your filters.'
-            : 'No users found.'}
-        </p>
-        <p className="text-sm text-gray-400 mt-1">
-          {filters.length > 0
-            ? 'Try adjusting your filter criteria.'
-            : 'There are currently no users to display.'}
-        </p>
-      </div>
+      <Card>
+        <EmptyState
+          icon={<UsersIcon size={20} strokeWidth={1.75} />}
+          title={
+            filters.length > 0
+              ? 'No users match your filters'
+              : 'No users found'
+          }
+          description={
+            filters.length > 0
+              ? 'Try adjusting your filters'
+              : 'Add a user to grant them access'
+          }
+        />
+      </Card>
     );
   }
 
@@ -3127,20 +3137,22 @@ function ServiceAccountTokensView({
   return (
     <>
       {/* Tokens Table */}
-      {filteredTokens.length === 0 ? (
-        <div className="text-center py-12">
-          <KeyRoundIcon className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            {searchQuery?.trim()
-              ? 'No tokens match your search'
-              : 'No service accounts'}
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {searchQuery?.trim()
-              ? 'Try adjusting your search terms.'
-              : 'No service accounts have been created yet.'}
-          </p>
-        </div>
+      {filteredTokens.length === 0 || isForceEmpty() ? (
+        <Card>
+          <EmptyState
+            icon={<KeyRoundIcon size={20} strokeWidth={1.75} />}
+            title={
+              searchQuery?.trim()
+                ? 'No tokens match your search'
+                : 'No service accounts'
+            }
+            description={
+              searchQuery?.trim()
+                ? 'Try a different search term'
+                : 'No service accounts have been created yet'
+            }
+          />
+        </Card>
       ) : (
         <>
           <div className="text-sm text-gray-500 mb-2">

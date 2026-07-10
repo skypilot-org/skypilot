@@ -500,6 +500,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 user_hashes=user_hashes,
                 statuses=statuses,
                 fields=fields,
+                submitted_after=request.submitted_after
+                if request.HasField('submitted_after') else None,
+                submitted_before=request.submitted_before
+                if request.HasField('submitted_before') else None,
             )
             jobs = job_queue['jobs']
             total = job_queue['total']

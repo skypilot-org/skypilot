@@ -2028,22 +2028,23 @@ def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 # substitute the real URL, others fall back to a generic phrase.
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
-     'Verify the image tag exists and registry credentials are configured.'),
+     'To fix: Verify the image tag exists and registry credentials are configured.'
+    ),
     (['OOMKilled'],
-     'The container ran out of memory. Increase the memory request with '
+     'The container ran out of memory. To fix: Increase the memory request with '
      '`resources.memory` in your task YAML; if `kubernetes.'
      'set_pod_resource_limits` is set, the memory limit scales with it.'),
     # 'ephemeral' must precede 'Evicted': an ephemeral-storage eviction reason
     # contains both, and the first match wins.
     (['ephemeral'],
      'The pod exceeded its ephemeral (local) storage limit and was evicted. '
-     'Increase `resources.ephemeral_storage` in your task YAML.'),
+     'To fix: Increase `resources.ephemeral_storage` in your task YAML.'),
     (['Evicted'],
-     'The pod was evicted by the node under resource pressure. Increase the '
+     'The pod was evicted by the node under resource pressure. To fix: Increase the '
      'relevant request (`resources.memory` or `resources.ephemeral_storage`) '
      'in your task YAML.'),
     (['Insufficient'],
-     'The cluster does not have enough free resources. View node '
+     'The cluster does not have enough free resources. To fix: View node '
      'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
 ]
 
@@ -4116,7 +4117,12 @@ def get_custom_config_k8s_contexts() -> List[str]:
 # corresponding spot label key and value.
 SPOT_LABEL_MAP = {
     kubernetes_enums.KubernetesAutoscalerType.GKE.value:
-        ('cloud.google.com/gke-spot', 'true')
+        ('cloud.google.com/gke-spot', 'true'),
+    # Karpenter satisfies a pod's capacity-type node requirement by choosing the
+    # capacity type, so a `karpenter.sh/capacity-type: spot` node selector routes
+    # the pod to a spot NodePool.
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER.value:
+        ('karpenter.sh/capacity-type', 'spot'),
 }
 
 
@@ -4157,10 +4163,11 @@ def get_spot_label(
                     key] == value:
                 return key, value
 
-    # Check if autoscaler is configured. Allow spot instances if autoscaler type
-    # is known to support spot instances.
+    # Check if autoscaler is configured. Allow spot instances if the autoscaler
+    # type is known to support them (i.e. has an entry in SPOT_LABEL_MAP).
     autoscaler_type = get_autoscaler_type(context=context)
-    if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
+    if (autoscaler_type is not None and
+            autoscaler_type.value in SPOT_LABEL_MAP):
         return SPOT_LABEL_MAP[autoscaler_type.value]
 
     return None, None
@@ -5085,7 +5092,8 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
         config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
-    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    hashed = hashlib.sha1(normalized.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()
     path = os.path.expanduser(
         f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
     )
