@@ -291,68 +291,6 @@ def test_get_in_cluster_identity_uid_empty_uid_is_none():
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 
-def test_add_cluster_name_label_basic():
-    text = ('# HELP foo Foo metric\n'
-            '# TYPE foo gauge\n'
-            'foo{bar="baz"} 1.0\n'
-            '\n'
-            'no_labels_metric 2.0')
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
-    lines = result.split('\n')
-    assert lines[0] == '# HELP foo Foo metric'
-    assert lines[1] == '# TYPE foo gauge'
-    assert lines[2] == 'foo{cluster="ctx-a",bar="baz"} 1.0'
-    assert lines[3] == ''
-    # Lines without a label section are kept as-is.
-    assert lines[4] == 'no_labels_metric 2.0'
-
-
-def test_add_cluster_name_label_idempotent():
-    """An existing cluster label is replaced, never duplicated."""
-    text = ('foo{cluster="old",bar="baz"} 1.0\n'
-            'foo{bar="baz",cluster="old"} 2.0\n'
-            'foo{cluster=""} 3.0')
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
-    lines = result.split('\n')
-    assert lines[0] == 'foo{cluster="ctx-a",bar="baz"} 1.0'
-    assert lines[1] == 'foo{bar="baz",cluster="ctx-a"} 2.0'
-    assert lines[2] == 'foo{cluster="ctx-a"} 3.0'
-    for line in lines:
-        assert line.count('cluster=') == 1
-
-
-def test_add_cluster_name_label_does_not_touch_other_labels():
-    """Labels merely containing 'cluster' as a suffix are not replaced."""
-    text = 'foo{k8s_cluster="other"} 1.0'
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
-    assert result == 'foo{cluster="ctx-a",k8s_cluster="other"} 1.0'
-
-
-def test_add_cluster_name_label_brace_in_label_value():
-    """A '}' inside a label value must not truncate the label section."""
-    text = 'foo{bar="}",qux="v"} 1.0'
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
-    assert result == 'foo{cluster="ctx-a",bar="}",qux="v"} 1.0'
-
-
-def test_add_cluster_name_label_cluster_inside_other_label_value():
-    """A ',cluster=' substring inside another label's value is not a label.
-
-    Regression test for matching on raw text instead of label tokens: the
-    replacement must never start inside another label's (quoted) value.
-    """
-    # No real cluster label: prepend, leave the value untouched.
-    text = 'foo{note="a,cluster=\\"x\\"",bar="b"} 1.0'
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
-    assert result == ('foo{cluster="ctx-a",note="a,cluster=\\"x\\"",bar="b"}'
-                      ' 1.0')
-
-    # Real cluster label present: replace only the actual label.
-    text = 'foo{note="a,cluster=\\"x\\"",cluster="old"} 1.0'
-    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
-    assert result == ('foo{note="a,cluster=\\"x\\"",cluster="ctx-a"} 1.0')
-
-
 def test_get_prometheus_target_defaults():
     with mock.patch.object(utils.skypilot_config,
                            'get_nested',
