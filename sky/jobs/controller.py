@@ -2584,4 +2584,17 @@ async def main(controller_uuid: str):
 
 
 if __name__ == '__main__':
-    asyncio.run(main(sys.argv[1]))
+    # This file is launched as `python -u -m sky.jobs.controller <uuid>`, so
+    # runpy executes this module a second time under the name `__main__`,
+    # in addition to the normal import as `sky.jobs.controller`. That means
+    # every class and module-level function defined above (JobController,
+    # etc.) exists as two distinct objects in this process: the `__main__`
+    # copy and the imported-module copy. If we called the local `main()`
+    # here, everything it constructs would resolve against the `__main__`
+    # copy, so `mock.patch('sky.jobs.controller.JobController...')`,
+    # `isinstance`, and `pickle` would silently operate on the wrong class.
+    # Delegate to the imported module instead, so the process has a single
+    # identity for these classes. The import must stay local to this
+    # block -- at module scope it would be a self-import of this very file.
+    from sky.jobs import controller as _controller
+    asyncio.run(_controller.main(sys.argv[1]))
