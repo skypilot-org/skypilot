@@ -1,6 +1,8 @@
 """Setup dependencies & services for instances."""
+import base64
 from concurrent import futures
 import functools
+import gzip
 import hashlib
 import json
 import os
@@ -25,6 +27,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
+from sky.utils import source_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -48,12 +51,88 @@ DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
                   'encoding="utf-8"))\';')
 
+_HOST_NETWORK_ENV_FILE = '/tmp/sky_host_network_ports.env'
+_HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
+
+
+@functools.lru_cache(maxsize=1)
+def _host_network_probe_b64() -> str:
+    # Cached, not module-level: instance_setup is imported on every `import
+    # sky`, but the probe payload is only needed when actually building a
+    # launch command, so the read/minify/gzip cost stays off the CLI path.
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'kubernetes', 'host_network_probe.py')
+    with open(path, 'r', encoding='utf-8') as f:
+        source = f.read()
+    minified = source_utils.minify_python_source(source)
+    # Sanity-check: minified source must still parse.
+    compile(minified, path, 'exec')
+    compressed = gzip.compress(minified.encode('utf-8'))
+    return base64.b64encode(compressed).decode('ascii')
+
+
+def _host_network_probe_cmd(mode: str) -> str:
+    """Bash snippet that probes Ray + sshd ports when running with hostNetwork.
+
+    Returns a runtime-gated snippet: a no-op shell branch unless
+    SKYPILOT_HOST_NETWORK=1 and SKYPILOT_RAY_PORTS_CONFIGMAP_NAME are
+    set in the pod env. Non-hostNetwork bootstraps see no change — env
+    vars stay unset and ``${VAR:-default}`` in the ray flags falls back
+    to the constants.
+
+    Also rebinds the pod's sshd to the probed SKYPILOT_SSHD_PORT. Under
+    hostNetwork the node's own sshd already owns host:22 so the pod's
+    sshd silently failed to bind in apt-ssh-setup; rewriting Port in
+    sshd_config and restarting picks up the probed port instead.
+
+    The probe is shipped gzip+base64-inline rather than invoked as a
+    module because the K8s template installs stable skypilot from PyPI
+    before ray_head_start_command runs (the dev wheel ships later), so
+    neither `python -m sky.provision.kubernetes.host_network_probe` nor
+    a site-packages file lookup is reliable at probe time. The b64 form
+    also keeps the payload on a single line, which is required to stay
+    inside the rendered YAML's block-scalar indentation. Gzip cuts the
+    payload by ~4x; the source on disk stays readable.
+    """
+    assert mode in ('head', 'worker'), mode
+    return (
+        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ] && '
+        '[ -n "${SKYPILOT_RAY_PORTS_CONFIGMAP_NAME:-}" ]; then '
+        f'echo \'{_host_network_probe_b64()}\' | base64 -d | gunzip > '
+        f'{_HOST_NETWORK_PROBE_TARGET}; '
+        f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
+        f'--mode {mode} '
+        f'--env-file {_HOST_NETWORK_ENV_FILE} '
+        '--configmap-name "$SKYPILOT_RAY_PORTS_CONFIGMAP_NAME" '
+        '--configmap-namespace '
+        '"$SKYPILOT_RAY_PORTS_CONFIGMAP_NAMESPACE" || exit 1; '
+        f'set -a; . {_HOST_NETWORK_ENV_FILE}; set +a; '
+        # Delete-then-append rather than sed-in-place: sshd_config files
+        # without an existing Port directive would otherwise keep the
+        # default 22 (where the K8s node's own sshd already listens).
+        'if [ -n "${SKYPILOT_SSHD_PORT:-}" ]; then '
+        'sudo sh -c "'
+        'sed -i -E \'/^[[:space:]]*#?[[:space:]]*Port[[:space:]]+/d\' '
+        '/etc/ssh/sshd_config && '
+        'echo Port ${SKYPILOT_SSHD_PORT} >> /etc/ssh/sshd_config && '
+        'service ssh restart"; '
+        'fi; '
+        'fi; ')
+
+
+# Stdlib only — deliberately doesn't import `sky` so the read still
+# works during the K8s bootstrap's brief stable→dev skypilot reinstall
+# window. Falls back to SKY_REMOTE_RAY_PORT (not legacy 6379) so the
+# health-check poll lands on something Ray could plausibly be on.
+_READ_RAY_PORT_PY = (
+    'import json, os; '
+    'd = os.path.expanduser(os.environ.get('
+    f'\'{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}\', \'~\')); '
+    'print(json.load(open(os.path.join(d, '
+    f'\'{constants.SKY_REMOTE_RAY_PORT_FILE}\')))[\'ray_port\'])')
 _RAY_PORT_COMMAND = (
-    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
-    '"from sky import sky_logging\n'
-    'with sky_logging.silent(): '
-    'from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
-    '2> /dev/null || echo 6379);'
+    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c "{_READ_RAY_PORT_PY}" '
+    f'2> /dev/null || echo {constants.SKY_REMOTE_RAY_PORT});'
     f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
     'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
 
@@ -64,8 +143,12 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
+# Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
+# the constants.RAY_STATUS literal — the probe picks a dynamic port.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    f'while `{constants.RAY_STATUS} | grep -q "No cluster status."`; do '
+    'while `RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    f'{constants.SKY_REMOTE_RAY_PORT}}} '
+    f'{constants.SKY_RAY_CMD} status | grep -q "No cluster status."`; do '
     'sleep 0.5; '
     'echo "Waiting ray cluster to be initialized"; '
     'done;')
@@ -291,16 +374,38 @@ def _ray_gpu_options(custom_resource: str) -> str:
     return f' --num-gpus={acc_count}'
 
 
+# Ray port flags shared by the head and worker start commands. The
+# ${VAR:-default} forms take the probed value when the hostNetwork probe
+# ran and the original constant otherwise; the ${VAR:+--flag=...} forms
+# vanish when unset, so non-hostNetwork bootstraps defer to Ray's own
+# defaults. Kept in one place so the head/worker flag sets can't drift.
+_SHARED_RAY_PORT_FLAGS = (
+    '--object-manager-port=${SKYPILOT_RAY_OBJECT_MANAGER_PORT:-8076} '
+    '${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
+    '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT} '
+    '${SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT:+'
+    '--dashboard-agent-listen-port='
+    '$SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT} '
+    '${SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT:+'
+    '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
+    '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
+    '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT}')
+
+
 def ray_head_start_command(custom_resource: Optional[str],
                            custom_ray_options: Optional[Dict[str, Any]]) -> str:
     """Returns the command to start Ray on the head node."""
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
         f'--disable-usage-stats '
-        f'--port={constants.SKY_REMOTE_RAY_PORT} '
-        f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+        f'--port=${{SKYPILOT_RAY_PORT:-{constants.SKY_REMOTE_RAY_PORT}}} '
+        f'--dashboard-port=${{SKYPILOT_RAY_DASHBOARD_PORT:-'
+        f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}}} '
         f'--min-worker-port 11002 '
-        f'--object-manager-port=8076 '
+        f'{_SHARED_RAY_PORT_FLAGS} '
+        # Head-only: workers don't run the Ray Client server.
+        '${SKYPILOT_RAY_CLIENT_SERVER_PORT:+'
+        '--ray-client-server-port=$SKYPILOT_RAY_CLIENT_SERVER_PORT} '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -312,7 +417,7 @@ def ray_head_start_command(custom_resource: Optional[str],
             ray_options += f' --{key}={value}'
 
     cmd = (
-        f'{constants.SKY_RAY_CMD} stop; '
+        _host_network_probe_cmd('head') + f'{constants.SKY_RAY_CMD} stop; '
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         # worker_maximum_startup_concurrency controls the maximum number of
         # workers that can be started concurrently. However, it also controls
@@ -338,10 +443,11 @@ def ray_worker_start_command(custom_resource: Optional[str],
                              custom_ray_options: Optional[Dict[str, Any]],
                              no_restart: bool) -> str:
     """Returns the command to start Ray on the worker node."""
-    # We need to use the ray port in the env variable, because the head node
-    # determines the port to be used for the worker node.
+    # SKYPILOT_RAY_PORT is the head's GCS port — exported as a constant
+    # by the K8s template's worker bootstrap, or as the probed value
+    # (read from the head's ConfigMap) by the hostNetwork worker probe.
     ray_options = ('--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
-                   '--object-manager-port=8076')
+                   f'{_SHARED_RAY_PORT_FLAGS}')
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -367,7 +473,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
             f'|| {{ {cmd} }}')
     else:
         cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
-    return cmd
+    return _host_network_probe_cmd('worker') + cmd
 
 
 @common.log_function_start_end
@@ -561,8 +667,8 @@ def start_skylet_on_head_node(
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
-    # We need to source bashrc for skylet to make sure the autostop event can
-    # access the path to the cloud CLIs.
+    # We need to source bashrc for skylet to make sure the idle-timer
+    # (stop/down) event handler can access the path to the cloud CLIs.
     set_usage_run_id_cmd = _set_usage_run_id_cmd()
     # Set the skypilot environment variables, including the usage type, debug
     # info, other options, and cluster identity / accelerator context for

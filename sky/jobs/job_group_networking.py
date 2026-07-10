@@ -55,17 +55,34 @@ def _is_kubernetes(
 
 def _get_k8s_namespace_from_handle(
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle') -> str:
-    """Get Kubernetes namespace from a resource handle.
+    """Resolve the Kubernetes namespace the handle's pods live in.
 
-    Returns:
-        Namespace string, defaults to 'default' if not available.
+    Reads ``provider.namespace`` from the cluster YAML (set at launch
+    time and workspace-invariant). Resolving via ``get_namespace`` here
+    would depend on the active workspace at query time, which is not
+    guaranteed to match the workspace the cluster was launched under.
+
+    Falls back to the kubeconfig context default for legacy clusters
+    whose YAML pre-dates ``provider.namespace``; returns ``'default'``
+    if both lookups fail.
     """
     if handle is None:
         return 'default'
 
-    # Try to get namespace from launched_resources
+    if handle.cluster_yaml:
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky import global_user_state
+            cluster_yaml_dict = global_user_state.get_cluster_yaml_dict(
+                handle.cluster_yaml)
+            namespace = cluster_yaml_dict.get('provider', {}).get('namespace')
+            if namespace:
+                return namespace
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read namespace from cluster YAML, '
+                         f'falling back: {e}')
+
     if handle.launched_resources and handle.launched_resources.region:
-        # In K8s, region is the context name
         try:
             # pylint: disable=import-outside-toplevel
             from sky.provision.kubernetes import utils as k8s_utils
@@ -75,7 +92,6 @@ def _get_k8s_namespace_from_handle(
             logger.debug(f'Failed to get K8s namespace from handle, '
                          f'falling back to default: {e}')
 
-    # Fallback to default namespace
     return 'default'
 
 

@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 50  # bundle credentials with launch response
+API_VERSION = 56  # resize field on LaunchBody
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -50,8 +50,34 @@ MIN_BATCH_API_VERSION = 49
 # only exists to fetch credentials for SSH config setup.
 MIN_LAUNCH_CREDENTIALS_API_VERSION = 50
 
+# Servers >= this version omit the bulky pickled `handle` from each replica
+# in serve/pool status responses, shipping pre-computed `infra` /
+# `resources_str` / `resources_str_full` strings instead. Older clients are
+# still served the full handle on the wire so existing SDK code that reads
+# `record['handle']` keeps working.
+MIN_LAZY_REPLICA_HANDLE_API_VERSION = 51
+
 # Minimum ReplicaInfo._VERSION that supports Sky Batch workers.
 MIN_BATCH_REPLICA_INFO_VERSION = 3
+
+# Minimum server API version that exposes /users/me/workspace and runs the
+# server-side launch-path resolver when the client does not specify an
+# active workspace. Older servers don't have the endpoint and fall back to
+# the literal 'default' workspace, so the client must skip features that
+# depend on per-user preferred workspace when talking to such servers.
+MIN_PREFERRED_WORKSPACE_API_VERSION = 53
+
+# Minimum server API version that supports filtering the managed jobs queue by
+# submission time (submitted_after / submitted_before, surfaced as the CLI
+# --since / --after / --before flags). Older servers silently ignore these
+# fields, so the client warns and shows all jobs.
+MIN_JOBS_SUBMITTED_AT_FILTER_API_VERSION = 54
+
+# Servers >= this version may report the WAITING request status (a request
+# parked off its worker while waiting for a retry/resume condition). Older
+# clients don't know the value and would crash parsing it, so the server
+# downgrades WAITING to RUNNING on the wire for clients below this version.
+MIN_WAITING_STATUS_API_VERSION = 55
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -131,6 +157,10 @@ REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 # then truncated. One backup is kept per daemon.
 # Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
 DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
+
+# Default retention for per-operation artifacts under ~/sky_logs on the API
+# server. Configurable via api_server.logs_retention_hours; negative disables.
+DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
 
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).

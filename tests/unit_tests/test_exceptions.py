@@ -59,6 +59,22 @@ def test_provision_prechecks_error():
     assert deserialized.stacktrace == 'test_stacktrace'
 
 
+def test_command_failure_exception():
+    """Test that exceptions can be serialized and deserialized."""
+    e = exceptions.CommandFailureException('test_command', 'test_failure',
+                                           'test_error_msg',
+                                           'test_detailed_reason')
+    setattr(e, 'stacktrace', 'test_stacktrace')
+    deserialized = _serialize_deserialize(e)
+    assert isinstance(deserialized, exceptions.CommandFailureException)
+    assert str(deserialized).startswith('Command test_command test_failure.')
+    assert deserialized.command == 'test_command'
+    assert deserialized.failure == 'test_failure'
+    assert deserialized.error_msg == 'test_error_msg'
+    assert deserialized.detailed_reason == 'test_detailed_reason'
+    assert deserialized.stacktrace == 'test_stacktrace'
+
+
 def test_command_error():
     """Test that exceptions can be serialized and deserialized."""
     e = exceptions.CommandError(1, 'test_command', 'test_error_msg',

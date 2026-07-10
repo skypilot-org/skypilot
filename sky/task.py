@@ -206,7 +206,11 @@ def _with_docker_login_config(
                            'in `image_id`. The login configs will be '
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
-        # Already checked in extract_docker_image
+        # If docker image comes from the 'docker' key in image_id dict,
+        # don't overwrite image_id, just attach login config.
+        if resources._docker_image is not None:  # pylint: disable=protected-access
+            return resources.copy(_docker_login_config=docker_login_config)
+        # Legacy path: image_id contains docker: prefix
         assert resources.image_id is not None and len(
             resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
@@ -297,8 +301,12 @@ def redact_task_yaml_dict(task_yaml: Dict[str, Any]) -> None:
             pass
         else:
             task_yaml['secrets'] = {
-                k: (None if k.startswith('secrets:') else '<redacted>')
-                for k in raw_secrets
+                # Managed secret refs (``secrets:`` prefix or null value) have
+                # no inline value to redact; keep them null so the YAML stays
+                # launchable. Inline secret values are redacted.
+                k: (None if
+                    (k.startswith('secrets:') or v is None) else '<redacted>')
+                for k, v in raw_secrets.items()
             }
     docker_config = task_yaml.get('resources', {}).get('_docker_login_config',
                                                        {})
@@ -710,24 +718,26 @@ class Task:
                         f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
 
-        raw_secrets_check = config.get('secrets')
-        if isinstance(raw_secrets_check, dict):
-            for k, v in raw_secrets_check.items():
-                if v is None and not k.startswith('secrets:'):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Secret variable {k!r} is None. Please set a '
-                            'value for it in task YAML or with --secret flag.'
-                            f' To set it to be empty, use an empty string '
-                            f'({k}: "" in task YAML or '
-                            f'--secret {k}="" in CLI).')
+        # Unlike envs, a null-valued secret in dict form (e.g. ``API_KEY:``
+        # with no value) is not an error: it is treated as a managed secret
+        # reference, resolved at launch time from a CLI ``--secret`` override
+        # or a managed secrets provider. It is turned into a ManagedSecretRef
+        # below.
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         env_vars = config.get('envs', {})
-        secrets_for_subst = config.get('secrets', {})
-        if isinstance(secrets_for_subst, list):
-            secrets_for_subst = {}  # Array form has no inline values
+        secrets_for_subst = config.get('secrets')
+        if secrets_for_subst is None or isinstance(secrets_for_subst, list):
+            # ``secrets:`` (null) or array form have no inline values.
+            secrets_for_subst = {}
+        else:
+            # Null-valued secrets are managed references with no inline value
+            # to substitute (their value is only known after resolution), so
+            # exclude them from variable substitution.
+            secrets_for_subst = {
+                k: v for k, v in secrets_for_subst.items() if v is not None
+            }
         env_and_secrets = env_vars.copy()
         env_and_secrets.update(secrets_for_subst)
         if config.get('file_mounts') is not None:
@@ -768,7 +778,11 @@ class Task:
                 managed_from_secrets.append(
                     ManagedSecretRef(name=name, scope_override=scope))
         elif isinstance(raw_secrets, dict):
-            # Dict form: split inline values vs secrets: prefix refs
+            # Dict form: split inline values vs managed refs. A managed ref is
+            # either an explicit ``secrets:``-prefixed key or any key with a
+            # null value (no inline value means the value is resolved at launch
+            # time from a CLI ``--secret`` override or a managed secrets
+            # provider).
             for key, value in raw_secrets.items():
                 if key.startswith('secrets:'):
                     if value is not None:
@@ -781,6 +795,11 @@ class Task:
                                 '\'secrets:\' prefix.')
                     ref_name = key[len('secrets:'):]
                     name, scope = _parse_secret_name(ref_name)
+                    managed_from_secrets.append(
+                        ManagedSecretRef(name=name, scope_override=scope))
+                elif value is None:
+                    # Bare ``KEY:`` with no value -> managed secret reference.
+                    name, scope = _parse_secret_name(key)
                     managed_from_secrets.append(
                         ManagedSecretRef(name=name, scope_override=scope))
                 else:
@@ -901,13 +920,36 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         # Handle the top-level config field
-        config_override = config.pop('config', None)
+        config_override = config.pop('config', None) or {}
+        # Lifecycle hooks live under `config.hooks:` but they are not a
+        # SkyPilot-config override — they are task lifecycle metadata.
+        # Pull them out of the override block and forward to Resources
+        # via the same path master's `resources.hooks:` used (kept for
+        # backward compat — see below).
+        config_hooks = config_override.pop('hooks', None)
 
-        # Store the final config override for use in resource setup
-        cluster_config_override = config_override
+        # Store the final config override for use in resource setup.
+        # Restore None semantics if the override block was hooks-only.
+        cluster_config_override = config_override or None
 
-        # Parse resources field.
-        resources_config = config.pop('resources', {})
+        # Parse resources field. Coerce `resources: null` / `resources:`
+        # (empty value) to {} so the assignment below doesn't fail.
+        resources_config = config.pop('resources', None) or {}
+        # `resources.hooks:` was an in-flight rename during PR1 review;
+        # it never landed in master. Reject the form explicitly so users
+        # write `config.hooks:` (the canonical placement) instead of
+        # discovering the rename via Resources-internal silent acceptance.
+        if 'hooks' in resources_config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Lifecycle hooks live under top-level `config.hooks:`, '
+                    'not `resources.hooks:`. Move the list to '
+                    '`config.hooks` at the top level of the task YAML.')
+        # Forward task.config.hooks into the resources block so the
+        # Resources constructor can pick it up via the same key the
+        # internal API uses.
+        if config_hooks is not None:
+            resources_config['hooks'] = config_hooks
         if cluster_config_override is not None:
             assert resources_config.get('_cluster_config_overrides') is None, (
                 'Cannot set _cluster_config_overrides in both resources and '
@@ -1781,6 +1823,34 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.HF:
+                    # Build the base URL without any embedded sub-path; the
+                    # canonical sub-path lives in ``_bucket_sub_path`` and is
+                    # appended via ``get_bucket_sub_path_prefix`` below
+                    # (mirroring the other store types). Stripping first
+                    # avoids doubling the sub-path when the source URL
+                    # already embeds it.
+                    if storage.source is not None and not isinstance(
+                            storage.source, list) and data_utils.is_hf_path(
+                                storage.source):
+                        if data_utils.is_hf_bucket_path(storage.source):
+                            bucket_id, _ = data_utils.split_hf_path(
+                                storage.source)
+                            blob_path = f'hf://buckets/{bucket_id}'
+                        else:
+                            repo_type, repo_id, revision, _ = (
+                                data_utils.split_hf_repo_path(storage.source))
+                            hf_id = (storage_lib.HuggingFaceStore.
+                                     hf_id_from_repo_parts(repo_type, repo_id))
+                            blob_path = f'hf://{hf_id}'
+                            if revision:
+                                blob_path = f'{blob_path}@{revision}'
+                    else:
+                        blob_path = f'hf://buckets/{storage.name}'
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
@@ -1922,6 +1992,21 @@ class Task:
             self.resources, redact_secrets=redact_secrets)
 
         add_if_not_none('resources', tmp_resource_config)
+
+        # Lifecycle hooks are stored on each Resources instance (the
+        # internal API replicates them across all resources), but their
+        # canonical YAML placement is the task-level ``config.hooks:``.
+        # Lift the list off any Resources that carries one and emit
+        # under ``config.hooks`` so round-trips through to_yaml/from_yaml
+        # don't trip the rejection that catches a misplaced
+        # ``resources.hooks`` in user YAML.
+        task_hooks: Optional[List[Dict[str, Any]]] = None
+        for r in self.resources:
+            if r.hooks:
+                task_hooks = [dict(h) for h in r.hooks]
+                break
+        if task_hooks:
+            config.setdefault('config', {})['hooks'] = task_hooks
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())

@@ -160,6 +160,21 @@ def _get_security_group_obj_by_name(project_id: str, sg_name: str) -> Any:
         return None
 
 
+def _is_already_exists_error(e: Any) -> bool:
+    """True iff the Nebius RequestError is an ALREADY_EXISTS conflict.
+
+    Prefers the structured gRPC status code; falls back to a string match
+    so the check still works if the SDK changes the error shape.
+    """
+    try:
+        status_code = nebius.status_code()
+        if status_code(e.status.code) == status_code.ALREADY_EXISTS:
+            return True
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return 'already_exists' in str(e).lower()
+
+
 def get_or_create_security_group(project_id: str, sg_name: str,
                                  network_id: str) -> str:
     """Returns the SG id, creating the SG (with no rules) if missing.
@@ -180,15 +195,21 @@ def get_or_create_security_group(project_id: str, sg_name: str,
                 ),
                 spec=nebius.vpc().SecurityGroupSpec(network_id=network_id))))
         return op.resource_id
-    except nebius.request_error():
-        # Race: someone created it between our get_by_name and create.
-        # Re-fetch and return.
-        sg = nebius.sync_call(
-            service.get_by_name(nebius.nebius_common().GetByNameRequest(
-                parent_id=project_id,
-                name=sg_name,
-            )))
-        return sg.metadata.id
+    except nebius.request_error() as e:
+        # Only an ALREADY_EXISTS conflict is safe to recover from: another
+        # concurrent bootstrap created the SG between our get_by_name and
+        # create. Any other create failure (bad network, quota, transient
+        # VPC error) must propagate so the real cause is surfaced, instead
+        # of being masked by a misleading NOT_FOUND from the re-fetch below.
+        if not _is_already_exists_error(e):
+            raise
+        # Re-fetch the SG the concurrent creator made. Use the wrapped
+        # lookup (returns None) so we never surface a confusing NOT_FOUND;
+        # if it is somehow already gone, re-raise the original create error.
+        existing = get_security_group_by_name(project_id, sg_name)
+        if existing is None:
+            raise
+        return existing
 
 
 def list_security_rules(sg_id: str) -> List[Any]:

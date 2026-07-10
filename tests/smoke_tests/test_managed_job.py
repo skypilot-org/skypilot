@@ -76,8 +76,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=360
-                if generic_cloud in ['azure', 'kubernetes', 'nebius'] else 120),
+                timeout=360 if generic_cloud
+                in ['azure', 'gcp', 'kubernetes', 'nebius'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -88,6 +88,24 @@ def test_managed_jobs_basic(generic_cloud: str):
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
             rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            # Filtering by --status keeps matching jobs and drops the rest:
+            # {name}-1 is CANCELLED, {name}-2 is RUNNING/SUCCEEDED. Use
+            # lowercase to exercise case-insensitive matching.
+            f's=$(sky jobs queue --status cancelled); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # Comma-separated values are also accepted.
+            f's=$(sky jobs queue --status running,succeeded); echo "$s"; '
+            f'echo "$s" | grep {name}-2 && ! echo "$s" | grep {name}-1',
+            # Time-range filtering: both jobs were just submitted, so --since
+            # keeps them, while an absolute upper bound in the distant past
+            # drops them.
+            f's=$(sky jobs queue --since 1h); echo "$s"; '
+            f'echo "$s" | grep {name}-1 && echo "$s" | grep {name}-2',
+            f's=$(sky jobs queue --before 2020-01-01); echo "$s"; '
+            f'! echo "$s" | grep {name}-1 && ! echo "$s" | grep {name}-2',
+            # --since and --after are mutually exclusive (rejected client-side).
+            's=$(sky jobs queue --since 1h --after 2020-01-01 2>&1) || true; '
+            'echo "$s"; echo "$s" | grep -i "mutually exclusive"',
         ],
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
@@ -97,6 +115,206 @@ def test_managed_jobs_basic(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+# Defining workspaces requires loading a server config, which means restarting
+# the API server -- not possible against a remote server or in the dependency
+# test (see test_workspaces.py for the same constraints).
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_managed_jobs_queue_workspace_column(generic_cloud: str):
+    """Regression test for the `sky jobs queue` WORKSPACE column.
+
+    `sky jobs queue` renders a WORKSPACE column whenever the listed jobs span
+    more than one workspace (see `format_job_table` in sky/jobs/utils.py). That
+    extra column shifts the position of the NAME column, which used to break the
+    status-wait helper's awk parsing (it matched the name in a fixed column).
+
+    Launch two managed jobs in two different workspaces to force the WORKSPACE
+    column to appear, assert it is actually present, and confirm the helper can
+    still find each job's status despite the shifted NAME column.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    ws1 = f'{name}-wsa'
+    ws2 = f'{name}-wsb'
+    # Define the two workspaces (and the low controller resources) via
+    # config_dict. This matters: config_dict is *overlaid* onto the existing
+    # server config by override_sky_config (which writes the merged result to
+    # SKYPILOT_GLOBAL_CONFIG), whereas pointing SKYPILOT_GLOBAL_CONFIG at a
+    # hand-written workspaces-only file would *replace* the server config on
+    # restart and drop settings the test env relies on (e.g. jobs controller
+    # consolidation). The SKY_API_RESTART below then loads the merged config.
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            ws1: {},
+            ws2: {},
+        },
+    }
+
+    # Broad status set: the job may already be RUNNING/SUCCEEDED by the time we
+    # poll. We only care that the helper *finds* the status, not which one.
+    job_statuses = [
+        sky.ManagedJobStatus.PENDING,
+        sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
+        sky.ManagedJobStatus.STARTING,
+        sky.ManagedJobStatus.RUNNING,
+        sky.ManagedJobStatus.SUCCEEDED,
+    ]
+    wait_timeout = 360 if generic_cloud in [
+        'azure', 'gcp', 'kubernetes', 'nebius'
+    ] else 120
+
+    def _launch(job_name: str, workspace: str) -> str:
+        return (f'sky jobs launch -n {job_name} --workspace {workspace} '
+                f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'examples/managed_job.yaml -y -d')
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-queue-workspace-column',
+        [
+            # Restart so the server picks up the merged config (existing server
+            # config + the two workspaces + low controller resources) that
+            # override_sky_config wrote to SKYPILOT_GLOBAL_CONFIG.
+            smoke_tests_utils.SKY_API_RESTART,
+            _launch(f'{name}-1', ws1),
+            _launch(f'{name}-2', ws2),
+            # With jobs in two workspaces, `sky jobs queue` must render the
+            # WORKSPACE column -- otherwise this test would not exercise the
+            # column-shift scenario, so fail loudly if it is missing.
+            's=$(sky jobs queue); echo "$s"; echo "$s" | grep -q WORKSPACE',
+            # The actual regression guard: the helper must find each job's
+            # status even though the WORKSPACE column shifted the NAME column.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-1',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+        ],
+        # Cancel each job in its own workspace (cancel is workspace-scoped),
+        # then restart onto the original server config to drop our workspaces.
+        teardown=
+        (f'sky jobs cancel -y -n {name}-1 --config active_workspace={ws1} || true; '
+         f'sky jobs cancel -y -n {name}-2 --config active_workspace={ws2} || true; '
+         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+         f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
+    """`sky jobs launch --num-jobs N` works without a pool.
+
+    Regression test for the lifted pool-only restriction on --num-jobs: with no
+    --pool, N independent managed jobs must be submitted, each on its own
+    cluster, with SKYPILOT_NUM_JOBS=N and a distinct SKYPILOT_JOB_RANK in
+    [0, N). It also checks the CLI output uses the non-pool variants (no
+    `--pool None` / `value=None` hints).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    num_jobs = 2
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    # The API server DB is shared across tests, so we can't assume the job IDs
+    # are 1..num_jobs. All num_jobs jobs share the same name (a known
+    # limitation), so we resolve their IDs by name from `sky jobs queue`.
+    ids_file = f'/tmp/num_jobs_no_pool_ids_{name}.txt'
+    job_config = textwrap.dedent("""\
+        run: |
+          echo "SKYPILOT_NUM_JOBS_VALUE=${SKYPILOT_NUM_JOBS}"
+          echo "SKYPILOT_JOB_RANK_VALUE=${SKYPILOT_JOB_RANK}"
+        """)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as job_yaml:
+        job_yaml.write(job_config)
+        job_yaml.flush()
+        # Launch num_jobs jobs without a pool and assert the output is the
+        # non-pool variant: no pool-only hints, and the multi-job notice.
+        launch_cmd = (
+            f's=$(sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {job_yaml.name} '
+            f'--num-jobs {num_jobs} -y -d); echo "$s"; '
+            # Non-pool multi-job notice is printed.
+            'echo "$s" | grep "Each job will be launched on its own cluster"; '
+            # No pool-specific hints leaked when there is no pool.
+            '! echo "$s" | grep -- "--pool None"; '
+            '! echo "$s" | grep "value=None"; '
+            '! echo "$s" | grep "in the pool"')
+        # Resolve the num_jobs job IDs by name. `sky jobs queue` renders a
+        # variable number of leading columns before NAME: the TASK column can be
+        # empty and a WORKSPACE column is added whenever the listed jobs span
+        # more than one workspace (always the case with --all), so NAME is not at
+        # a fixed column index. Match the name in any column and print the ID
+        # (always the first column).
+        # Use --all: on a shared server the default queue is truncated to the
+        # latest 50 jobs, so the just-launched jobs can fall outside the window
+        # and the name lookup finds 0.
+        capture_ids_cmd = (
+            's=$(sky jobs queue --all); echo "$s"; echo "$s" | '
+            'awk -v n=' + name +
+            ' \'{for (i=1; i<=NF; i++) if ($i==n) {print $1; break}}\' | '
+            f'sort -un > {ids_file}; cat {ids_file}; '
+            f'cnt=$(wc -l < {ids_file}); '
+            f'if [ "$cnt" -ne {num_jobs} ]; then '
+            f'  echo "Expected {num_jobs} jobs named {name}, found $cnt"; '
+            '  exit 1; fi')
+        # Wait for every job (by ID) to reach SUCCEEDED, failing fast on a bad
+        # status. Uses the controller log, like wait_until_job_status_by_id.
+        wait_all_cmd = (
+            f'start_time=$SECONDS; while read jid; do while true; do '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            '    echo "Timeout waiting for job $jid"; sky jobs queue; exit 1; fi; '
+            '  s=$(sky jobs logs --controller "$jid" --no-follow 2>&1); '
+            '  echo "$s"; '
+            '  if echo "$s" | grep -q "Job status: JobStatus.SUCCEEDED"; then '
+            '    break; fi; '
+            '  if echo "$s" | grep -qE "Job status: JobStatus.(FAILED|CANCELLED'
+            '|FAILED_SETUP|FAILED_CONTROLLER)"; then '
+            '    echo "Job $jid hit a bad status"; sky jobs queue; exit 1; fi; '
+            '  sleep 10; '
+            f'done; done < {ids_file}')
+        # Check each job logged SKYPILOT_NUM_JOBS=num_jobs, and that the set of
+        # SKYPILOT_JOB_RANK values is exactly {0, ..., num_jobs-1} (distinct).
+        check_envs_cmd = (
+            'ranks=""; while read jid; do '
+            '  s=$(sky jobs logs "$jid" --no-follow 2>&1); echo "$s"; '
+            f'  echo "$s" | grep "SKYPILOT_NUM_JOBS_VALUE={num_jobs}"; '
+            '  r=$(echo "$s" | sed -n '
+            '"s/.*SKYPILOT_JOB_RANK_VALUE=\\([0-9]*\\).*/\\1/p" | head -n1); '
+            '  ranks="$ranks $r"; '
+            f'done < {ids_file}; '
+            'sorted=$(echo $ranks | tr " " "\\n" | sort -un | tr "\\n" " " | '
+            'sed "s/ *$//"); echo "ranks: [$sorted]"; '
+            f'expected=$(seq 0 {num_jobs - 1} | tr "\\n" " " | sed "s/ *$//"); '
+            'if [ "$sorted" != "$expected" ]; then '
+            '  echo "Expected distinct ranks [$expected], got [$sorted]"; '
+            '  exit 1; fi; echo "Ranks are distinct and correct."')
+        test = smoke_tests_utils.Test(
+            'managed-jobs-num-jobs-without-pool',
+            [
+                launch_cmd,
+                capture_ids_cmd,
+                wait_all_cmd,
+                # Give the job logs a moment to be fully flushed.
+                'sleep 20',
+                check_envs_cmd,
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.managed_jobs
@@ -283,11 +501,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a non-numeric value is rejected by Click's
-            # built-in int parser. Negative ints (and 0) are valid
-            # synonyms for "all lines".
+            # --tail with a non-numeric value is rejected by the integer
+            # parser. Negative ints (and 0) are valid synonyms for "all
+            # lines".
             f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
-            f'grep "is not a valid integer"',
+            f'grep -iE "invalid.*(int|num|tail)|not a valid"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -576,20 +794,26 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    # Match pods by the `skypilot-cluster-name` annotation, which holds the
-    # full untruncated cluster name. Filtering by pod name alone is not
-    # reliable: when the user hash is long (e.g. 19 chars for service
-    # accounts), the cloud-cmd cluster's name (`<test>-cloud-cmd`) gets
-    # truncated past the 42-char K8s limit and the `-cloud-cmd` suffix
-    # disappears from the pod name — but the annotation always preserves
-    # it, so `grep -v -- "-cloud-cmd"` against the annotation column is
-    # reliable. Excluding cloud-cmd is critical: the kubectl command runs
-    # from inside the cloud-cmd pod via `sky exec`, so a stray match would
-    # self-kill the helper pod and fail the test with exit code 137.
+    # Match a short stable prefix of the test cluster name against the
+    # `skypilot-cluster-name` annotation column (which always holds the full
+    # untruncated cluster name). Two reasons:
+    #   1. The annotation always preserves the full name, so the
+    #      `-cloud-cmd` exclusion below is reliable even when the user hash
+    #      is long enough (e.g. 19 chars for service accounts) that
+    #      `<test>-cloud-cmd` gets truncated past the 42-char K8s limit and
+    #      the `-cloud-cmd` suffix disappears from the pod name.
+    #   2. A short prefix is robust against provisioning backends that
+    #      rewrite the cluster name with their own truncation rule, where
+    #      `name_on_cloud` (computed with the local truncation rule) is no
+    #      longer a prefix of the actual cluster name.
+    # Excluding cloud-cmd is critical: the kubectl command runs from inside
+    # the cloud-cmd pod via `sky exec`, so a stray match would self-kill the
+    # helper pod and fail the test with exit code 137.
+    stable_prefix = name_on_cloud[:15]
     _get_job_pods = (
         'kubectl get pods -l skypilot-cluster-name --no-headers -o custom-columns='
         '"NAME:.metadata.name,CLUSTER:.metadata.annotations.skypilot-cluster-name" | '
-        f'grep -- "{name_on_cloud}" | grep -v -- "-cloud-cmd" | '
+        f'grep -- "{stable_prefix}" | grep -v -- "-cloud-cmd" | '
         'awk \'{print $1}\' | sort')
     terminate_head_cmd = f'{_get_job_pods} | head -1 | xargs kubectl delete pod'
     terminate_worker_cmd = (
@@ -1144,6 +1368,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     region_validation_base_cmd = 'true'
     use_spot = ' --use-spot'
     output_check_cmd = None
+    output_storage_names = [output_storage_name]
 
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
@@ -1198,33 +1423,93 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_account_name=storage_account_name)
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{az_check_file_count} | grep 1')
-        non_persistent_bucket_removed_check_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
+        az_ls_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.AZURE, storage_name)
+        # Azure controller cleanup (worker VM teardown plus blob container
+        # deletion) regularly exceeds the universal `sleep 50` post-SUCCEEDED
+        # wait. Poll for up to 300s for the container to be removed.
         non_persistent_bucket_removed_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name,
-            f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
+            name, 'start_time=$SECONDS; '
+            'timeout_s=300; '
+            'while true; do '
+            '  if (( $SECONDS - start_time > timeout_s )); then '
+            '    echo "Timeout waiting for non-persistent bucket removal"; '
+            '    exit 1; '
+            '  fi; '
+            f'  if ! ({az_ls_cmd}) > /dev/null 2>&1; then '
+            '    echo "Bucket removed."; break; '
+            '  fi; '
+            '  echo "Bucket still present, retrying in 10s..."; '
+            '  sleep 10; '
+            'done')
         timeout *= 2
     elif generic_cloud in ('kubernetes', 'slurm'):
-        # With Kubernetes, we don't know which object storage provider is used.
-        # Check S3, GCS and Azure if bucket exists in any of them.
-        s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.S3, output_storage_name, 'output.txt')
-        s3_output_check_cmd = f'{s3_check_file_count} | grep 1'
-        gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
-        gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
-        # For Azure, we need to get the storage account name for the region
-        storage_account_name = test_mount_and_storage.TestStorageWithCredentials.get_az_storage_account_name(
-        )
-        az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.AZURE,
-            output_storage_name,
-            'output.txt',
-            storage_account_name=storage_account_name)
-        az_output_check_cmd = f'{az_check_file_count} | grep 1'
-        nebius_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.NEBIUS, output_storage_name, 'output.txt')
-        nebius_output_check_cmd = f'{nebius_check_file_count} | grep 1'
+        # The task's cloud does not determine the object store. Pin one output
+        # bucket to each object store so every store is exercised
+        # deterministically on each run, instead of depending on which enabled
+        # storage cloud the server picks as the default store.
+        pinned_stores = {
+            's3': storage_lib.StoreType.S3,
+            'gcs': storage_lib.StoreType.GCS,
+            'azure': storage_lib.StoreType.AZURE,
+            'nebius': storage_lib.StoreType.NEBIUS,
+        }
+        # A remote API server may have only a subset of storage clouds
+        # enabled (e.g. the shared GKE API server only enables AWS), and
+        # specifying a store whose cloud is disabled on the server fails the
+        # job at FAILED_PRECHECKS. Only pin stores whose cloud is enabled on
+        # the server.
+        if smoke_tests_utils.is_remote_server_test():
+            enabled_storage_cloud_names = {
+                str(cloud).lower()
+                for cloud in smoke_tests_utils.get_enabled_cloud_storages()
+            }
+            pinned_stores = {
+                store_str: store_type
+                for store_str, store_type in pinned_stores.items()
+                if store_type.to_cloud().lower() in enabled_storage_cloud_names
+            }
+            assert pinned_stores, ('No object store enabled on the API server: '
+                                   f'{enabled_storage_cloud_names}')
+        # For Azure, the bucket lands in the configured storage account when
+        # the API server shares the client config, or in the default per-user
+        # account (AzureBlobStore's default region) when a remote API server
+        # does not receive the client config. Check both.
+        az_account_names = []
+        if storage_lib.StoreType.AZURE in pinned_stores.values():
+            az_account_names.append(
+                test_mount_and_storage.TestStorageWithCredentials.
+                get_az_storage_account_name())
+            try:
+                default_az_account = (
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        'eastus'))
+                if default_az_account not in az_account_names:
+                    az_account_names.append(default_az_account)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        output_check_cmds = []
+        for store_str, store_type in pinned_stores.items():
+            bucket_name = f'{output_storage_name}-{store_str}'
+            if store_type == storage_lib.StoreType.AZURE:
+                az_checks = []
+                for account_name in az_account_names:
+                    try:
+                        check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+                            store_type,
+                            bucket_name,
+                            'output.txt',
+                            storage_account_name=account_name)
+                    except Exception:  # pylint: disable=broad-except
+                        # The account (and its key) may not exist yet.
+                        continue
+                    az_checks.append(f'{check_file_count} | grep 1')
+                assert az_checks, 'No Azure storage account available to check'
+                output_check_cmds.append(f'({" || ".join(az_checks)})')
+            else:
+                check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+                    store_type, bucket_name, 'output.txt')
+                output_check_cmds.append(f'{check_file_count} | grep 1')
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
@@ -1233,11 +1518,34 @@ def test_managed_jobs_storage(generic_cloud: str):
             'gcloud auth activate-service-account '
             '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
             '2> /dev/null || true')
+        all_output_checks = ' && '.join(output_check_cmds)
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, f'{cloud_dependencies_setup_cmd}; '
-            f'{try_activating_gcp_service_account}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd} || {nebius_output_check_cmd}; }}'
-        )
+            name, f'{try_activating_gcp_service_account}; '
+            f'{all_output_checks}',
+            setup_cmd=cloud_dependencies_setup_cmd)
+        # Replace the single output bucket in the YAML with one per store, and
+        # write output.txt to each. 'sky-output-bucket' is replaced with the
+        # unique output_storage_name below, same as for other clouds.
+        task_config = yaml_utils.safe_load(yaml_str)
+        task_config['file_mounts'].pop('/output_path')
+        write_output_cmd = 'echo "hello world!" > /output_path/output.txt'
+        assert write_output_cmd in task_config['run'], task_config['run']
+        write_output_cmds = []
+        for store_str in pinned_stores:
+            mount_path = f'/output_path_{store_str}'
+            task_config['file_mounts'][mount_path] = {
+                'name': f'sky-output-bucket-{store_str}',
+                'store': store_str,
+                'mode': 'MOUNT',
+            }
+            write_output_cmds.append(
+                f'echo "hello world!" > {mount_path}/output.txt')
+        task_config['run'] = task_config['run'].replace(
+            write_output_cmd, '\n'.join(write_output_cmds))
+        yaml_str = yaml_utils.dump_yaml_str(task_config)
+        output_storage_names = [
+            f'{output_storage_name}-{store_str}' for store_str in pinned_stores
+        ]
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.S3, storage_name)
@@ -1307,7 +1615,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 non_persistent_bucket_removed_check_cmd,
             ],
             (f'sky jobs cancel -y -n {name}; '
-             f'sky storage delete {output_storage_name} -y; '
+             f'sky storage delete {" ".join(output_storage_names)} -y; '
              f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} || true'),
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
@@ -2150,7 +2458,9 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
     def check_labels_in_queue():
         """Check that labels are present in the job queue."""
         # Get the job queue using SDK
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'labels'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         # Parse the queue response
@@ -2242,7 +2552,9 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
 
     def check_git_commit_in_queue():
         """Check that git_commit is present in the job queue metadata."""
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'metadata'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         if isinstance(queue_records, tuple):
@@ -2882,7 +3194,9 @@ def test_managed_job_node_names_single_node(generic_cloud: str):
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
-                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                jobs_list = sky.get(
+                    sky.jobs.queue_v2(refresh=False,
+                                      fields=['job_name', 'node_names']))[0]
                 job = [j for j in jobs_list if j['job_name'] == name][0]
                 node_names = job['node_names']
                 assert node_names, (f'node_names should not be empty, '
@@ -2914,7 +3228,9 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
                 # Give time for node_names to be populated after launch
                 time.sleep(10)
                 # Re-fetch to get updated node_names
-                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                jobs_list = sky.get(
+                    sky.jobs.queue_v2(refresh=False,
+                                      fields=['job_name', 'node_names']))[0]
                 job = [j for j in jobs_list if j['job_name'] == name][0]
                 node_names = job['node_names']
                 assert node_names, (f'node_names should not be empty, '

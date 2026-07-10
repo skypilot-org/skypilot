@@ -101,8 +101,14 @@ export async function getClusters({ clusterNames = null } = {}) {
       if (region_or_zone && region_or_zone.length > 25) {
         region_or_zone = truncateMiddle(region_or_zone, 25);
       }
+      // INIT is overloaded: a cluster in INIT is either actively launching or
+      // stuck in an abnormal/unhealthy state. The backend disambiguates via
+      // init_kind so we can render a distinct "UNHEALTHY" badge (and a detail-
+      // page banner) instead of a misleading "LAUNCHING".
+      const isUnhealthy =
+        cluster.status === 'INIT' && cluster.init_kind === 'unhealthy';
       return {
-        status: clusterStatusMap[cluster.status],
+        status: isUnhealthy ? 'UNHEALTHY' : clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
         user_hash: cluster.user_hash,
@@ -126,11 +132,15 @@ export async function getClusters({ clusterNames = null } = {}) {
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         statusTooltip:
-          cluster.status === 'INIT' ? cluster.launch_status_reason : null,
+          cluster.status === 'INIT' ? cluster.init_status_reason : null,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         labels: cluster.labels || {},
         node_names: cluster.node_names || null,
+        // Persisted external links from the cluster row (currently
+        // populated with cloud-provider instance console URLs at launch
+        // time). Shape: {label: url}.
+        links: cluster.links || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -166,6 +176,11 @@ export async function getClusterHistory(
     const requestBody = {
       days: days,
       dashboard_summary_response: true,
+      // Hide clusters that back managed jobs/services from the history view.
+      // These controller-launched clusters are already excluded from the
+      // active cluster list (sky.core.status), so excluding them here keeps
+      // the "Show history" view consistent.
+      exclude_managed_clusters: true,
     };
 
     // If a specific cluster hash is provided, include it in the request
@@ -253,6 +268,7 @@ export async function streamClusterJobLogs({
   onNewLog,
   workspace,
   signal,
+  tail = DEFAULT_TAIL_LINES,
 }) {
   try {
     await apiClient.stream(
@@ -261,7 +277,7 @@ export async function streamClusterJobLogs({
         follow: false,
         cluster_name: clusterName,
         job_id: jobId,
-        tail: DEFAULT_TAIL_LINES,
+        tail,
         override_skypilot_config: {
           active_workspace: workspace || 'default',
         },
@@ -556,20 +572,28 @@ export function useClusterData(options = {}) {
   // Serialize filters for stable dependency comparison
   const filtersKey = JSON.stringify(filters);
 
+  const { initialPage = 1, initialLimit = 10 } = options;
+
   const [data, setData] = useState([]);
   const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
+  const [page, setPage] = useState(initialPage);
+  const [limit, setLimit] = useState(initialLimit);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [hasNext, setHasNext] = useState(false);
   const [hasPrev, setHasPrev] = useState(false);
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
+  const isInitialMount = useRef(true);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change, but skip on initial mount
+  // so the page number read from the URL isn't overwritten.
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     setPage(1);
   }, [filtersKey]);
 

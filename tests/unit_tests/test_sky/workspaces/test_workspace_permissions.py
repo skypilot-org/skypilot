@@ -163,7 +163,7 @@ class TestWorkspacePermissions(unittest.TestCase):
             "Private workspace should resolve unique user name to ID")
 
     @mock.patch('sky.global_user_state.get_all_users')
-    @mock.patch('sky.workspaces.utils.logger')
+    @mock.patch('sky.users.resolver.logger')
     def test_private_workspace_logs_warning_for_unknown_user(
             self, mock_logger, mock_get_users):
         """Test that warning is logged for unknown users."""

@@ -336,32 +336,46 @@ def wait_for_message_in_pool_logs(pool_name: str,
         'exit 1')
 
 
-def wait_for_message_in_pool_logs(pool_name: str,
-                                  message: str,
-                                  timeout: int = 300,
-                                  time_between_checks: int = 10):
-    """Wait for a specific message to appear in pool logs.
+def check_worker_id_exists(pool_name: str,
+                           worker_id: int,
+                           timeout: int = 30,
+                           time_between_checks: int = 5):
+    """Check that a specific worker ID exists in the pool status.
 
     Args:
-        pool_name: Name of the pool to check logs for.
-        message: The message to search for in the logs (case-insensitive).
+        pool_name: The name of the pool.
+        worker_id: The worker ID (replica_id) to check for.
         timeout: Maximum time to wait in seconds.
         time_between_checks: Time to wait between checks in seconds.
     """
-    num_checks = timeout // time_between_checks
     return (
-        f'for i in {{1..{num_checks}}}; do '
-        f'logs=$(sky jobs pool logs --controller {pool_name} --no-follow 2>&1); '
-        'echo "$logs"; '
-        f'if echo "$logs" | grep -i "{message}"; then '
-        f'  echo "Found {message} in logs"; '
-        '  exit 0; '
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for worker {worker_id} to exist"; exit 1; '
         'fi; '
-        f'echo "Check $i/{num_checks}: {message} not found yet"; '
-        f'sleep {time_between_checks}; '
+        f's=$(sky jobs pool status {pool_name} -v 2>&1); '
+        'echo "$s"; '
+        # Extract worker IDs using awk: look for "Pool Workers" section,
+        # then extract numeric IDs from subsequent lines
+        'worker_ids=($(echo "$s" | awk \'/Pool Workers/{{flag=1; next}} flag && NF>0 {{print $2}}\' | grep -E \'^[0-9]+$\')); '
+        'found=0; '
+        'for id in "${worker_ids[@]}"; do '
+        f'  if [[ "$id" == "{worker_id}" ]]; then '
+        f'    echo "Worker {worker_id} found in pool status"; '
+        '    found=1; '
+        '    break; '
+        '  fi; '
         'done; '
-        f'echo "ERROR: {message} not found in logs after timeout"; '
-        'exit 1')
+        'if [[ $found -eq 1 ]]; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for worker {worker_id} to appear in pool status..."; '
+        f'sleep {time_between_checks}; '
+        'done')
 
 
 def basic_pool_conf(
@@ -1245,6 +1259,26 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def _parse_job_ids_snippet(source_var: str, ids_file: str) -> str:
+    """Shell snippet: extract launched job IDs into a comma list at ids_file.
+
+    ``sky jobs launch --num-jobs`` collapses contiguous IDs into ranges in its
+    "Jobs submitted with IDs:" line (e.g. ``2-11``), so widen the capture to
+    include ``-`` and expand any ``N-M`` range back into individual
+    comma-separated IDs (plain comma lists pass through unchanged). Downstream
+    ``awk -F,`` field access then works regardless of format. ``source_var`` is
+    the shell var holding the launch output (e.g. ``s`` for ``$s``).
+    """
+    # awk expands each field: an 'N-M' range becomes N,N+1,...,M; a bare id is
+    # kept as-is. Braces/`$i` are literal awk, not str formatting.
+    expand = (
+        r"""awk -F, '{o=""; for (i=1; i<=NF; i++) {n=split($i, a, "-"); """
+        r"""if (n==2) {for (j=a[1]; j<=a[2]; j++) o=o (o == "" ? "" : ",") j} """
+        r"""else o=o (o == "" ? "" : ",") $i} print o}'""")
+    return (f'echo "${source_var}" | grep "Jobs submitted with IDs:" | '
+            f'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | {expand} > {ids_file}')
+
+
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1267,8 +1301,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             launch_cmd = (
                 f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
                 f'--num-jobs {num_jobs} -d -y); echo "$s"; '
-                f'echo "$s" | grep "Jobs submitted with IDs:" | '
-                f'sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                f'{_parse_job_ids_snippet("s", ids_file)}; '
                 f'cat {ids_file}')
             id_expr = (lambda i: f"$(awk -F, '{{print ${i + 1}}}' {ids_file})")
             test = smoke_tests_utils.Test(
@@ -1350,12 +1383,20 @@ def test_pools_num_jobs_option(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Test parallel job launching with --num-jobs 3
-                    ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
-                     'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Jobs submitted with IDs: 2,3,4,5,6,7,8,9,10,11"; '
-                     'sleep 5').format(pool_name=pool_name,
-                                       job_yaml=job_yaml.name)
+                    # Test parallel job launching with --num-jobs 10. The IDs
+                    # are collapsed into a single N-M range (see
+                    # _parse_job_ids_snippet); assert the range spans exactly 10
+                    # jobs rather than hard-coding the start ID, which is not 2
+                    # on a shared/long-lived server DB.
+                    (
+                        's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                        'echo "$s"; '
+                        'echo; echo; echo "$s" | grep "Jobs submitted with IDs:" | '
+                        'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | '
+                        # Braces doubled: this string goes through str.format().
+                        'awk -F- \'{{c = $2 - $1 + 1}} END {{exit !(c == 10)}}\'; '
+                        'sleep 5').format(pool_name=pool_name,
+                                          job_yaml=job_yaml.name)
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -2420,10 +2461,12 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             launch_cmd = (
                 's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
-                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                '{parse}; '
                 'cat {ids_file}').format(pool_name=pool_name,
                                          job_yaml=job_yaml.name,
                                          NUM_JOBS=NUM_JOBS,
+                                         parse=_parse_job_ids_snippet(
+                                             's', ids_file),
                                          ids_file=ids_file)
             test_commands.append(launch_cmd)
 
@@ -2815,5 +2858,82 @@ def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
                 ],
                 timeout=timeout * 3,  # Autoscaling takes time
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
+    """Test that when scaling down, replicas with fewer jobs are selected first.
+
+    This test:
+    1. Creates a pool with 1 worker
+    2. Launches a job (no resources specified) that sleeps forever
+    3. Checks that the job is running
+    4. Ups the number of workers to 2
+    5. Launches a second job that sleeps forever
+    6. Waits for it to run
+    7. Cancels the first job
+    8. Scales the pool down to 1 worker
+    9. Waits for there to be 1 worker
+    10. Confirms that the worker that remains has id 2 (the one with the job)
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Create job configs with long-running sleep commands
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+
+    job_config = basic_job_conf(
+        job_name=job_name_1,  # Name will be overridden with -n flag
+        run_cmd='sleep infinity',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_scale_down_with_job_count_priority',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    # Launch first job (no resources specified)
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        job_name=job_name_1),
+                    wait_until_job_status(job_name_1, ['RUNNING'],
+                                          timeout=timeout),
+                    # Scale up to 2 workers
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=2),
+                    wait_until_num_workers(pool_name, 2, timeout=timeout),
+                    # Launch second job
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        job_name=job_name_2),
+                    wait_until_job_status(job_name_2, ['RUNNING'],
+                                          timeout=timeout),
+                    # Cancel the first job (so worker 1 has 0 jobs, worker 2 has 1 job)
+                    cancel_job(job_name_1),
+                    wait_until_job_status(
+                        job_name_1, ['CANCELLED'], bad_statuses=[], timeout=30),
+                    # Scale down to 1 worker
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=1),
+                    wait_until_num_workers(pool_name, 1, timeout=timeout),
+                    # Verify that worker 2 remains (the one with the job)
+                    check_worker_id_exists(pool_name, 2, timeout=timeout),
+                ],
+                timeout=timeout,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
             )
             smoke_tests_utils.run_one_test(test)

@@ -244,13 +244,18 @@ class TestControllerHttpRetry:
                 assert m.call_count == 1
 
     def test_post_retries_then_succeeds(self):
-        # First 2 calls raise, 3rd succeeds.
+        # First 2 calls raise, 3rd succeeds. The default attempt count is
+        # tightened to 1 (see lazy-handle PR), but the retry mechanism
+        # itself still needs end-to-end coverage — patch the constant up
+        # to 3 just for this test.
         side = [
             requests_exceptions.ConnectionError('refused'),
             requests_exceptions.ConnectionError('refused'),
             mock.Mock(status_code=200)
         ]
         with self._patch_record(None), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.post',
                         side_effect=side) as m:
@@ -310,6 +315,8 @@ class TestControllerHttpRetry:
         with mock.patch('sky.serve.serve_utils.serve_state.'
                         'get_service_from_name',
                         side_effect=records), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.get',
                         side_effect=capture_get):
@@ -396,7 +403,11 @@ class TestControllerHttpRetry:
             requests_exceptions.Timeout('connect timed out'),
             mock.Mock(status_code=200),
         ]
+        # Patch the attempt count up to 3 so the retry path is actually
+        # exercised; the production default is 1 (see lazy-handle PR).
         with self._patch_record(None), \
+             mock.patch('sky.serve.serve_utils._CONTROLLER_HTTP_RETRY_ATTEMPTS',
+                        3), \
              mock.patch('sky.serve.serve_utils.time.sleep'), \
              mock.patch('sky.serve.serve_utils.requests.get',
                         side_effect=side) as m:
@@ -460,6 +471,236 @@ class TestTerminateShuttingDownPurge:
                        ) as mock_purge:
             serve_utils.terminate_services(['svc'], purge=False, pool=True)
             mock_purge.assert_not_called()
+
+
+class TestPoolStatusBatchedQuery:
+    """`_get_service_status(pool=True)` must batch its per-replica job lookups
+    into a single grouped query. The previous per-replica fan-out scaled with
+    pool replica count and ran a full scan over the job_info table
+    each iteration.
+    """
+
+    def _replica(self, name, status):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+        info = mock.Mock()
+        # cluster_name is what _get_service_status reads when building the
+        # batched names list. Setting it as a real attribute prevents
+        # MagicMock from returning a separate Mock per access.
+        info.cluster_name = name
+        info.to_info_dict.return_value = {
+            'name': name,
+            'status': (status if isinstance(status, serve_state.ReplicaStatus)
+                       else serve_state.ReplicaStatus[status]),
+        }
+        return info
+
+    def _patch_environment(self, replicas, grouped_jobs, cluster_records=None):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        record = {
+            'name': 'pool-a',
+            'pool': True,
+            'version': 1,
+            'controller_port': 20001,
+        }
+        # Default: every replica's cluster row exists. Tests that want to
+        # simulate "dead" replicas can override by passing cluster_records
+        # with explicit None values.
+        if cluster_records is None:
+            cluster_records = {
+                r.cluster_name: {
+                    'launched_at': 0,
+                    'handle': None,
+                } for r in replicas
+            }
+        return (
+            mock.patch(
+                'sky.serve.serve_utils.serve_state.get_service_from_name',
+                return_value=record),
+            mock.patch('sky.serve.serve_utils.serve_state.get_replica_infos',
+                       return_value=replicas),
+            mock.patch('sky.serve.serve_utils._get_to_controller_with_retry',
+                       side_effect=requests_exceptions.RequestException()),
+            mock.patch('sky.serve.serve_utils.get_yaml_content',
+                       side_effect=Exception('skip yaml')),
+            mock.patch(
+                'sky.serve.serve_utils.managed_job_state.'
+                'get_nonterminal_job_ids_by_pool_grouped',
+                return_value=grouped_jobs),
+            mock.patch('sky.serve.serve_utils.managed_job_state.'
+                       'get_nonterminal_job_ids_by_pool'),
+            mock.patch(
+                'sky.serve.serve_utils.global_user_state.'
+                'get_clusters_from_names',
+                return_value=cluster_records),
+            serve_state,  # returned for callers to use as needed
+        )
+
+    def test_pool_status_uses_grouped_query_once(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica('replica-1', serve_state.ReplicaStatus.READY),
+            self._replica('replica-2', serve_state.ReplicaStatus.READY),
+            self._replica('replica-3', serve_state.ReplicaStatus.PROVISIONING),
+        ]
+        # job 10: batch coordinator (no cluster_name) — should appear on all
+        # READY replicas.
+        # jobs 20, 21: bound to replica-1 — must not leak to replica-2.
+        # job 30: bound to replica-2 — must not leak to replica-1.
+        grouped_jobs = {
+            None: [10],
+            'replica-1': [20, 21],
+            'replica-2': [30],
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, grouped_jobs)
+        with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+             grouped_patch as mock_grouped, legacy_patch as mock_legacy, \
+             clusters_patch:
+            record = serve_utils._get_service_status('pool-a', pool=True)
+
+        assert record is not None
+        # Exactly one DB round-trip — no N+1.
+        mock_grouped.assert_called_once_with('pool-a')
+        mock_legacy.assert_not_called()
+
+        used_by = {r['name']: r['used_by'] for r in record['replica_info']}
+        # READY workers see (pool-level coordinator jobs) + (their own slice).
+        # They must NOT see jobs bound to other replicas: that was a latent
+        # bug in master where every READY worker reported every nonterminal
+        # job in the pool.
+        assert used_by['replica-1'] == [10, 20, 21]
+        assert used_by['replica-2'] == [10, 30]
+        # Non-READY workers only see jobs assigned to them; replica-3 has none.
+        assert used_by['replica-3'] == []
+
+    def test_pool_status_non_ready_only_sees_own_jobs(self):
+        """A non-READY replica with assigned jobs sees only those, not the
+        rest of the pool."""
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica('replica-init',
+                          serve_state.ReplicaStatus.PROVISIONING),
+        ]
+        grouped_jobs = {
+            None: [1],
+            'replica-init': [2, 3],
+            'replica-other': [4],
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, grouped_jobs)
+        with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+             grouped_patch, legacy_patch, clusters_patch:
+            record = serve_utils._get_service_status('pool-a', pool=True)
+
+        assert record is not None
+        used_by = {r['name']: r['used_by'] for r in record['replica_info']}
+        assert used_by['replica-init'] == [2, 3]
+
+    def test_pool_status_uses_batched_cluster_lookups(self):
+        """The per-replica `get_cluster_from_name` call inside to_info_dict
+        used to dominate pool_status latency on pools with long failure
+        history. `_get_service_status` now pre-fetches all records in one
+        batched call and passes them through to to_info_dict.
+
+        There is no separate handle-fallback round-trip: handle is just a
+        column on the same cluster_table row, so when ``cluster_record`` is
+        None the handle is also None and we skip ``self.handle()`` entirely.
+        """
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica(f'r-{i}', serve_state.ReplicaStatus.READY)
+            for i in range(5)
+        ]
+        # First three "alive" (cluster row exists), last two "dead" (cluster
+        # row gone). The dead ones must not trigger any extra DB lookups.
+        cluster_records = {
+            'r-0': {
+                'launched_at': 1,
+                'handle': None
+            },
+            'r-1': {
+                'launched_at': 2,
+                'handle': None
+            },
+            'r-2': {
+                'launched_at': 3,
+                'handle': None
+            },
+            'r-3': None,
+            'r-4': None,
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, {None: []},
+                                      cluster_records=cluster_records)
+        # No mock for get_handles_from_cluster_names — the test fails if
+        # _get_service_status reintroduces a redundant call to it.
+        with mock.patch('sky.serve.serve_utils.global_user_state.'
+                        'get_handles_from_cluster_names') as mock_handles:
+            with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+                 grouped_patch, legacy_patch, \
+                 clusters_patch as mock_clusters:
+                record = serve_utils._get_service_status('pool-a', pool=True)
+
+        assert record is not None
+        # Batched cluster lookup happens exactly once and gets every name.
+        mock_clusters.assert_called_once()
+        passed_names = mock_clusters.call_args.args[0]
+        assert sorted(passed_names) == [f'r-{i}' for i in range(5)]
+        # Handle lookup must not be reintroduced: missing cluster_record
+        # implies missing handle, so the second batched call would be a
+        # guaranteed-empty waste.
+        mock_handles.assert_not_called()
+        # to_info_dict was called per replica with the pre-fetched record
+        # supplied, so it must not re-fetch on its own.
+        for replica_mock in replicas:
+            replica_mock.to_info_dict.assert_called_once()
+            kwargs = replica_mock.to_info_dict.call_args.kwargs
+            assert 'cluster_record' in kwargs
+
+    def test_pool_status_no_handles_lookup_call(self):
+        """All replicas alive: there should never be a fallback handle
+        batched query (deleted by design)."""
+        # pylint: disable=import-outside-toplevel
+        from sky.serve import serve_state
+
+        replicas = [
+            self._replica('r-0', serve_state.ReplicaStatus.READY),
+            self._replica('r-1', serve_state.ReplicaStatus.READY),
+        ]
+        cluster_records = {
+            'r-0': {
+                'launched_at': 1,
+                'handle': None
+            },
+            'r-1': {
+                'launched_at': 2,
+                'handle': None
+            },
+        }
+        (svc_patch, replica_patch, ctrl_patch, yaml_patch, grouped_patch,
+         legacy_patch, clusters_patch,
+         _) = self._patch_environment(replicas, {None: []},
+                                      cluster_records=cluster_records)
+        with mock.patch('sky.serve.serve_utils.global_user_state.'
+                        'get_handles_from_cluster_names') as mock_handles:
+            with svc_patch, replica_patch, ctrl_patch, yaml_patch, \
+                 grouped_patch, legacy_patch, clusters_patch:
+                serve_utils._get_service_status('pool-a', pool=True)
+
+        # The handle-fallback batched query was removed entirely.
+        mock_handles.assert_not_called()
 
 
 class TestTerminalStatuses:
@@ -560,6 +801,144 @@ class TestStreamReplicaLogsZeroByteFallback:
         captured = capsys.readouterr()
         assert 'MAIN-CONTENT' in captured.out
         assert 'SHOULD-NOT-APPEAR' not in captured.out
+
+
+class TestStartInFlight:
+    """`_start_in_flight` is the defense-in-depth dedup used by
+    `ha_recovery_for_consolidation_mode` to avoid firing a duplicate
+    recovery script while a previously-spawned _start is still in its
+    0-60s boot window (during which DB controller_pid may still be the
+    stale pre-recovery value).
+    """
+
+    def _make_proc(self, cmdline, status='running'):
+        """Helper: build a mock proc whose .info dict matches what
+        psutil.process_iter yields with the attrs list."""
+        proc = mock.Mock()
+        proc.info = {'cmdline': cmdline, 'status': status}
+        return proc
+
+    def test_returns_true_when_start_process_present(self):
+        proc = self._make_proc([
+            'python', '-m', 'sky.serve.service', '--service-name', 'pool-a',
+            '--job-id', '5'
+        ])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is True
+
+    def test_returns_false_when_no_matching_process(self):
+        proc = self._make_proc([
+            'python', '-m', 'sky.serve.service', '--service-name', 'other-pool'
+        ])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_returns_false_when_no_processes(self):
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_skips_zombie_processes(self):
+        """A zombie `_start` (crashed but not yet reaped by init) must NOT
+        block recovery — otherwise the pool would be stuck in a
+        permanent "recovery in flight" loop until something reaps the
+        zombie, which may never happen in pods without a proper init.
+        """
+        # pylint: disable=import-outside-toplevel
+        import psutil
+        zombie = self._make_proc(
+            ['python', '-m', 'sky.serve.service', '--service-name', 'pool-a'],
+            status=psutil.STATUS_ZOMBIE)
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[zombie]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_swallows_per_process_psutil_errors(self):
+        """If iterating one process raises NoSuchProcess / AccessDenied
+        (race with proc exit), the iteration must continue and check
+        the rest, not raise.
+        """
+        # pylint: disable=import-outside-toplevel
+        import psutil
+
+        # First proc raises on attribute access; second one is a legit match.
+        bad = mock.Mock()
+        type(bad).info = mock.PropertyMock(
+            side_effect=psutil.NoSuchProcess(99999))
+        good = self._make_proc(
+            ['python', '-m', 'sky.serve.service', '--service-name', 'pool-a'])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[bad, good]):
+            assert serve_utils._start_in_flight('pool-a') is True
+
+    def test_no_prefix_false_positive(self):
+        """Service name 'pool-a' must NOT match a process for 'pool-abc'.
+        The implementation does exact argv-list matching on the
+        `--service-name <value>` pair (not substring on a joined string),
+        so the prefix collision is rejected.
+        """
+        proc = self._make_proc(
+            ['python', '-m', 'sky.serve.service', '--service-name', 'pool-abc'])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+    def test_no_service_name_arg_returns_false(self):
+        """A `sky.serve.service` process with no `--service-name` flag
+        at all (defensive case, shouldn't happen in practice) must not
+        match — index() returning ValueError is caught."""
+        proc = self._make_proc([
+            'python', '-m', 'sky.serve.service', '--some-other-flag', 'whatever'
+        ])
+        with mock.patch('sky.serve.serve_utils.psutil.process_iter',
+                        return_value=[proc]):
+            assert serve_utils._start_in_flight('pool-a') is False
+
+
+class TestHaRecoverySkipsWhenStartInFlight:
+    """When the in-flight snapshot contains the service name,
+    `ha_recovery_for_consolidation_mode` must NOT invoke the recovery
+    script for that service this round. Otherwise the daemon piles up
+    multiple `_start` instances during the 0-60s controller boot window.
+    """
+
+    def test_skip_when_start_in_flight(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('POD_IP', '10.4.0.1')
+        with mock.patch(
+                'sky.serve.serve_utils.serve_state.get_glob_service_names',
+                return_value=['pool-a']), \
+             mock.patch(
+                 'sky.serve.serve_utils._get_service_status',
+                 return_value={'controller_pid': 1234,
+                               'controller_ip': '10.4.0.1',
+                               'status': 'READY'}), \
+             mock.patch(
+                 'sky.serve.serve_utils._controller_process_alive',
+                 return_value=False), \
+             mock.patch(
+                 'sky.serve.serve_utils.'
+                 '_snapshot_in_flight_start_service_names',
+                 return_value={'pool-a'}) as mock_snapshot, \
+             mock.patch(
+                 'sky.serve.serve_utils.serve_state.get_ha_recovery_script',
+                 return_value='dummy script') as mock_script, \
+             mock.patch(
+                 'sky.serve.serve_utils.command_runner.'
+                 'LocalProcessCommandRunner') as mock_runner_cls, \
+             mock.patch(
+                 'sky.serve.serve_utils.skylet_constants.'
+                 'HA_PERSISTENT_RECOVERY_LOG_PATH',
+                 str(tmp_path / 'recovery_log_{}.log')):
+            serve_utils.ha_recovery_for_consolidation_mode(pool=True)
+            # Snapshot is taken once per daemon iteration, not once per
+            # service, so it's exactly one call regardless of N services.
+            assert mock_snapshot.call_count == 1
+            # Script lookup AND runner.run must be skipped — we bailed
+            # before reaching either.
+            mock_script.assert_not_called()
+            mock_runner_cls.return_value.run.assert_not_called()
 
 
 class TestHaRecoveryDefensiveOnAliveCheckException:

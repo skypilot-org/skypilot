@@ -18,6 +18,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds.utils import gcp_utils
+from sky.clouds.utils import gpu_utils
 from sky.provision.gcp import constants
 from sky.provision.gcp import volume_utils
 from sky.utils import annotations
@@ -117,8 +118,13 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
-# For GPU-related package version, see sky/clouds/catalog/images/provisioners/cuda.sh
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
+# For GPU-related package version, see sky/catalog/images/provisioners/cuda.sh
+# Default GPU image: NVIDIA 580 open kernel module + CUDA 13. Supports Turing
+# and later only.
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204-cuda13'
+# Legacy GPU image: NVIDIA 535 proprietary driver + CUDA 12. Used for pre-Turing
+# GPUs (V100, P100, P4, M60) that the open kernel module does not support.
+_DEFAULT_GPU_CUDA12_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
 # Use COS image with GPU Direct support.
 # Need to contact GCP support to build our own image for GPUDirect-TCPX support.
@@ -509,6 +515,22 @@ class GCP(clouds.Cloud):
             start_index += 1
         assert False, 'Low disk tier should always be supported on GCP.'
 
+    @staticmethod
+    def _get_gpu_image_id(acc: str) -> str:
+        """Returns the default image tag for a (non-GPU-direct) GPU."""
+        if acc == 'K80':
+            # Though the image is called cu113, it actually has later
+            # versions of CUDA as noted below.
+            # CUDA driver version 470.57.02, CUDA Library 11.4
+            return _DEFAULT_GPU_K80_IMAGE_ID
+        if gpu_utils.is_legacy_driver_gpu(acc):
+            # Pre-Turing GPUs (V100, P100, P4, M60) are not supported by the
+            # open kernel module in the default image.
+            # CUDA driver version 535, CUDA Library 12.
+            return _DEFAULT_GPU_CUDA12_IMAGE_ID
+        # CUDA driver version 580 (open), CUDA Library 13.
+        return _DEFAULT_GPU_IMAGE_ID
+
     def make_deploy_resources_variables(
         self,
         resources: 'resources.Resources',
@@ -599,22 +621,15 @@ class GCP(clouds.Cloud):
                     # and reference GCP_GPU_DIRECT_IMAGE_ID
                     image_id = _DEFAULT_GPU_DIRECT_IMAGE_ID
                 else:
-                    if acc == 'K80':
-                        # Though the image is called cu113, it actually has later
-                        # versions of CUDA as noted below.
-                        # CUDA driver version 470.57.02, CUDA Library 11.4
-                        image_id = _DEFAULT_GPU_K80_IMAGE_ID
-                    else:
-                        # CUDA driver version 535.86.10, CUDA Library 12.2
-                        image_id = _DEFAULT_GPU_IMAGE_ID
+                    image_id = GCP._get_gpu_image_id(acc)
 
-        if (resources.image_id is not None and
-                resources.extract_docker_image() is None):
-            if None in resources.image_id:
-                image_id = resources.image_id[None]
+        cloud_image_id = resources.get_cloud_image_id()
+        if cloud_image_id is not None:
+            if None in cloud_image_id:
+                image_id = cloud_image_id[None]
             else:
-                assert region_name in resources.image_id, resources.image_id
-                image_id = resources.image_id[region_name]
+                assert region_name in cloud_image_id, cloud_image_id
+                image_id = cloud_image_id[region_name]
         if image_id.startswith('skypilot:'):
             image_id = catalog.get_image_id_from_tag(image_id, clouds='gcp')
 

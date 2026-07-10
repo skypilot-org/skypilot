@@ -1,12 +1,28 @@
-"""Autostop utilities."""
+"""Autostop utilities — and lifecycle-hooks storage (see naming note).
+
+Naming note: this module holds both legitimately-autostop state
+(``AutostopConfig``, idle-timer indicator, ``set_autostop`` /
+``get_autostop_config``, ``set_autostopping_started`` /
+``get_is_autostopping``) AND the generalized lifecycle-hooks
+list (``set_hooks`` / ``get_hooks`` plus the proto serializers
+``hooks_to_protobuf`` / ``hooks_from_protobuf``). The hook helpers
+live here because the hooks payload piggybacks on the existing
+``SetAutostop`` gRPC (see ``sky/schemas/proto/autostopv1.proto``)
+rather than having its own ``SetHooks`` RPC. When a follow-up PR
+splits out a dedicated ``SetHooks`` RPC, the hook helpers should
+move to a new ``hooks_lib.py`` module alongside ``hook_executor.py``;
+the autostop-specific helpers stay here. No external behavior
+changes by then — pure refactor, deferred to keep PR1 minimal.
+"""
 import enum
+import json
 import os
 import pickle
 import shlex
 import subprocess
 import time
 import typing
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -29,12 +45,13 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 _AUTOSTOP_CONFIG_KEY = 'autostop_config'
+_HOOKS_CONFIG_KEY = 'lifecycle_hooks'
 
 # This key-value is stored inside the 'configs' sqlite3 database, because both
 # user-issued commands (this module) and the Skylet process running the
-# AutostopEvent need to access that state.
+# StopEvent need to access that state.
 _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
-# AutostopEvent sets this to the boot time when the autostop of the cluster
+# StopEvent sets this to the boot time when the autostop of the cluster
 # starts. This is used for checking whether the cluster is in the process
 # of autostopping for the current machine.
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
@@ -138,14 +155,13 @@ class AutostopConfig:
         self.hook = hook
         # Use the constant if hook_timeout is not specified
         if hook_timeout is None:
-            hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+            hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
         self.hook_timeout = hook_timeout
 
     def __setstate__(self, state: dict):
         state.setdefault('down', False)
         state.setdefault('hook', None)
-        state.setdefault('hook_timeout',
-                         constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+        state.setdefault('hook_timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
         self.__dict__.update(state)
 
 
@@ -158,7 +174,7 @@ def get_autostop_config() -> AutostopConfig:
     if not hasattr(config, 'hook'):
         config.hook = None
     if not hasattr(config, 'hook_timeout'):
-        config.hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+        config.hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
     return config
 
 
@@ -175,15 +191,35 @@ def set_autostop(idle_minutes: int,
         backend: Backend name.
         wait_for: Condition for resetting idleness timer.
         down: Whether to tear down (autodown) instead of stop.
-        hook: Hook script to execute before autostop.
-        hook_timeout: Timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
+        hook: DEPRECATED single-hook string (pre-v7 wire). New callers
+            use set_hooks(...) with the full list. Kept so pre-v7
+            clients talking to a v7+ skylet still get their autostop
+            hook routed into the generalized hooks list.
+        hook_timeout: DEPRECATED timeout for the single hook.
     """
     boot_time = psutil.boot_time()
 
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
                                      down, hook, hook_timeout)
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+
+    # A pre-v7 client routes its hook via `hook` / `hook_timeout`;
+    # translate it into the generalized hooks list so hook_executor
+    # sees a single source of truth. Pre-v7 master had a single
+    # autostop hook that fired on idle-timer teardown regardless of
+    # autodown — route it to ``down`` for autodown and ``stop``
+    # otherwise so the new event taxonomy stays consistent.
+    # TODO(zpoint): drop the `hook` / `hook_timeout` parameters and
+    # this translation once SKYLET_LIB_VERSION's minimum supported
+    # client is ≥ 7.
+    if hook:
+        legacy_event = 'down' if down else 'stop'
+        set_hooks([{
+            'run': hook,
+            'events': [legacy_event],
+            'timeout': (hook_timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS),
+        }])
+
     logger.debug(
         f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
         f'wait_for {wait_for.value}, hook {"present" if hook else "none"}, '
@@ -225,6 +261,107 @@ def get_last_active_time() -> float:
     if result is not None:
         return float(result)
     return -1
+
+
+_EVENT_TO_PROTO: Dict[str, int] = {}
+_PROTO_TO_EVENT: Dict[int, str] = {}
+
+
+def _ensure_event_maps() -> None:
+    """Lazy-populate proto enum conversion maps.
+
+    Avoids importing generated proto at module import time (the
+    adaptor pattern already lazy-imports the bindings).
+    """
+    if _EVENT_TO_PROTO:
+        return
+    _EVENT_TO_PROTO.update({
+        'stop': autostopv1_pb2.EVENT_STOP,
+        'preemption': autostopv1_pb2.EVENT_PREEMPTION,
+        'down': autostopv1_pb2.EVENT_DOWN,
+    })
+    _PROTO_TO_EVENT.update({v: k for k, v in _EVENT_TO_PROTO.items()})
+
+
+def hooks_to_protobuf(hooks: List[Dict[str, Any]]):
+    """Convert a list of hook dicts into protobuf ``Hook`` messages.
+
+    Lives in this module because the hooks payload currently rides on
+    the ``SetAutostop`` gRPC; see the module docstring for the
+    planned move to a dedicated ``hooks_lib.py`` after a future PR
+    introduces a parallel ``SetHooks`` RPC.
+    """
+    _ensure_event_maps()
+    out = []
+    for h in hooks:
+        events = [_EVENT_TO_PROTO[e] for e in (h.get('events') or [])]
+        msg = autostopv1_pb2.Hook(run=h['run'])
+        # events field is typed as Iterable[Event] in the .pyi but accepts
+        # ints at runtime (Event is an int-backed enum).
+        msg.events.extend(events)  # type: ignore[arg-type]
+        msg.timeout = h.get('timeout', constants.DEFAULT_HOOK_TIMEOUT_SECONDS)
+        out.append(msg)
+    return out
+
+
+def hooks_from_protobuf(proto_hooks) -> List[Dict[str, Any]]:
+    """Convert protobuf ``Hook`` messages back into hook dicts.
+
+    Re-applies the ``events`` default on receive: proto3 ``repeated``
+    has no presence, so an empty ``events`` list is wire-equivalent to
+    "field omitted". Without the default, an empty list would silently
+    match no event and the hook would never fire.
+
+    Same "lives in autostop_lib for wire-compat reasons" caveat as
+    :func:`hooks_to_protobuf`; should move to ``hooks_lib.py`` when
+    the planned proto split lands.
+    """
+    _ensure_event_maps()
+    out: List[Dict[str, Any]] = []
+    for h in proto_hooks:
+        events = [_PROTO_TO_EVENT[e] for e in h.events if e in _PROTO_TO_EVENT]
+        if not events:
+            # Match Resources._normalize_hook_entry on the send side.
+            events = ['stop', 'preemption', 'down']
+        out.append({
+            'run': h.run,
+            'events': events,
+            'timeout': h.timeout or constants.DEFAULT_HOOK_TIMEOUT_SECONDS,
+        })
+    return out
+
+
+def set_hooks(hooks: Optional[List[Dict[str, Any]]]) -> None:
+    """Store the cluster's lifecycle-hooks list.
+
+    Called during launch via the ``SetAutostop`` gRPC (which carries
+    hooks for wire-compat reasons — see the proto + module docstring).
+    The list is read by ``hook_executor`` when any teardown event
+    fires. Belongs in ``hooks_lib.py`` once the planned split lands;
+    parked here for PR1 minimalism.
+    """
+    if hooks:
+        configs.set_config(_HOOKS_CONFIG_KEY, json.dumps(hooks))
+    else:
+        # Empty payload clears the key.
+        configs.set_config(_HOOKS_CONFIG_KEY, '')
+
+
+def get_hooks() -> List[Dict[str, Any]]:
+    """Load the stored lifecycle-hooks list, or [] if never set.
+
+    Counterpart to :func:`set_hooks`; see the module docstring for the
+    "lives in autostop_lib for wire-compat reasons, move to hooks_lib
+    in a follow-up" note.
+    """
+    raw = configs.get_config(_HOOKS_CONFIG_KEY)
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError) as e:
+        logger.warning(f'Could not decode stored hooks: {e}')
+        return []
 
 
 def set_last_active_time_to_now() -> None:
@@ -290,7 +427,7 @@ def execute_autostop_hook(hook: Optional[str],
     Args:
         hook: The hook script to execute, or None if no hook is set.
         hook_timeout: Timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
+            DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
 
     Returns:
         True if hook executed successfully (or no hook), False if hook failed.
@@ -299,7 +436,7 @@ def execute_autostop_hook(hook: Optional[str],
         return True
 
     if hook_timeout is None:
-        hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+        hook_timeout = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
 
     logger.info(f'Executing autostop hook (timeout: {hook_timeout}s)...')
     log_path = os.path.expanduser(constants.AUTOSTOP_HOOK_LOG_FILE)
@@ -352,9 +489,44 @@ class AutostopCodeGen:
                      wait_for: Optional[AutostopWaitFor],
                      down: bool = False,
                      hook: Optional[str] = None,
-                     hook_timeout: Optional[int] = None) -> str:
+                     hook_timeout: Optional[int] = None,
+                     hooks: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Render skylet-side autostop + hooks setup as a Python one-liner.
+
+        Dual-emits for mixed-version environments:
+          - skylet < 4 / 5: legacy signatures (no hook / waitless)
+          - skylet 5–6: single-hook form via `hook` / `hook_timeout`
+          - skylet ≥ 7: set_autostop + set_hooks(full list)
+        """
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
+        # Pre-v7 flattening: pre-v7 skylets fire their single ``hook``
+        # on idle-timer teardown. Match the new-event equivalent for
+        # this launch: ``down`` for autodown, ``stop`` for autostop.
+        flat_hook = hook
+        flat_timeout = hook_timeout
+        legacy_event = 'down' if down else 'stop'
+        if flat_hook is None and hooks:
+            for entry in hooks:
+                if legacy_event in (entry.get('events') or []):
+                    flat_hook = entry['run']
+                    flat_timeout = entry.get('timeout')
+                    break
+        # v7+ branch: forward ``hook`` / ``hook_timeout`` so the
+        # skylet's set_autostop routing bridges a pre-v7 client's
+        # legacy hook arg into the new hooks list (see
+        # autostop_lib.set_autostop ~line 200). Only emit
+        # ``set_hooks(...)`` when the caller explicitly passes a list:
+        # ``hooks=None`` means "leave stored alone" (no explicit
+        # opinion); an empty-list emit there would wipe the entry the
+        # bridge just stored — exactly the failure mode that surfaced
+        # as `TestBackwardCompatibility::
+        # test_client_server_compatibility_new_server` timing out
+        # waiting for AUTOSTOPPING.
+        if hooks is None:
+            set_hooks_line = ''
+        else:
+            set_hooks_line = f'\n autostop_lib.set_hooks({hooks!r})'
         code = [
             '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
             '\nif skylet_lib_version < 4: '
@@ -363,10 +535,15 @@ class AutostopCodeGen:
             '\nelif skylet_lib_version < 5: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down})'
+            '\nelif skylet_lib_version < 7: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down}, hook={flat_hook!r}, '
+            f'hook_timeout={flat_timeout})'
             '\nelse: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
-            f'hook_timeout={hook_timeout})',
+            f'hook_timeout={hook_timeout})'
+            f'{set_hooks_line}',
         ]
         return cls._build(code)
 

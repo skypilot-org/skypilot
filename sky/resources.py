@@ -2,6 +2,7 @@
 import collections
 import dataclasses
 import re
+import sys
 import textwrap
 import typing
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
@@ -25,6 +26,7 @@ from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import registry
@@ -70,8 +72,6 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
-    hook: Optional[str] = None
-    hook_timeout: Optional[int] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -82,10 +82,6 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
-        if self.hook is not None:
-            config['hook'] = self.hook
-        if self.hook_timeout is not None:
-            config['hook_timeout'] = self.hook_timeout
         return config
 
     @classmethod
@@ -117,13 +113,30 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
-            if 'hook' in config:
-                autostop_config.hook = config['hook']
-            if 'hook_timeout' in config:
-                autostop_config.hook_timeout = config['hook_timeout']
+            # `hook` / `hook_timeout` are consumed by Resources before this
+            # method is called and routed into the top-level `hooks` list.
             return autostop_config
 
         return None
+
+
+# Events supported by config.hooks[*].events (mirror of
+# sky.utils.schemas._HOOK_EVENTS).
+_HOOK_EVENTS = ('stop', 'preemption', 'down')
+
+
+def _normalize_hook_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply load-time defaults to a single hook entry."""
+    result: Dict[str, Any] = {'run': entry['run']}
+    events = entry.get('events')
+    if not events:
+        events = list(_HOOK_EVENTS)
+    result['events'] = list(events)
+    if 'timeout' in entry and entry['timeout'] is not None:
+        result['timeout'] = entry['timeout']
+    else:
+        result['timeout'] = constants.DEFAULT_HOOK_TIMEOUT_SECONDS
+    return result
 
 
 class Resources:
@@ -143,7 +156,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 32  # add ephemeral_storage.
+    _VERSION = 34  # add _docker_image from image_id dict 'docker' key.
 
     def __init__(
         self,
@@ -169,6 +182,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
+        hooks: Optional[List[Dict[str, Any]]] = None,
         priority: Optional[int] = None,
         priority_class: Optional[str] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
@@ -360,16 +374,42 @@ class Resources:
             self._ephemeral_storage = None
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
+        self._docker_image: Optional[str] = None
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
-            if None in image_id:
+            image_id = dict(image_id)
+            # 'docker' is a reserved key for specifying a Docker image
+            # alongside a cloud VM image.
+            if 'docker' in image_id:
+                docker_val = image_id.pop('docker').strip()
+                if docker_val.startswith('docker:'):
+                    docker_val = docker_val[len('docker:'):]
+                self._docker_image = docker_val
+            if not image_id:
+                self._image_id = None
+            elif None in image_id:
                 self._image_id = {self._region: image_id[None].strip()}
             else:
                 self._image_id = {
                     typing.cast(str, k).strip(): v.strip()
                     for k, v in image_id.items()
                 }
+            # Reject ambiguous specs: docker key + docker:-prefixed region
+            # values (e.g. {us-east-1: 'docker:img1', docker: 'img2'}).
+            if self._docker_image is not None and self._image_id is not None:
+                docker_prefixed = [
+                    f'{v} (region: {k})' for k, v in self._image_id.items()
+                    if v.startswith('docker:')
+                ]
+                if docker_prefixed:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'image_id has both a \'docker\' key and '
+                            'docker:-prefixed region values: '
+                            f'{", ".join(docker_prefixed)}. '
+                            'Please use only one mechanism to specify '
+                            'the Docker image.')
         else:
             self._image_id = image_id
         if isinstance(self._cloud, clouds.Kubernetes):
@@ -444,7 +484,8 @@ class Resources:
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
-        self._set_autostop_config(autostop)
+        self._hooks: Optional[List[Dict[str, Any]]] = None
+        self._set_autostop_config(autostop, extra_hooks=hooks)
         self._set_priority(priority)
         self._set_priority_class(priority_class)
         self._set_volumes(volumes)
@@ -519,11 +560,16 @@ class Resources:
             use_spot = '[Spot]'
 
         image_id = ''
+        image_parts = []
         if self.image_id is not None:
             if None in self.image_id:
-                image_id = f', image_id={self.image_id[None]}'
+                image_parts.append(f'{self.image_id[None]}')
             else:
-                image_id = f', image_id={self.image_id}'
+                image_parts.append(f'{self.image_id}')
+        if self._docker_image is not None:
+            image_parts.append(f'docker:{self._docker_image}')
+        if image_parts:
+            image_id = f', image_id={" | ".join(image_parts)}'
 
         disk_tier = ''
         if self.disk_tier is not None:
@@ -742,6 +788,16 @@ class Resources:
         autostop config.
         """
         return self._autostop_config
+
+    @property
+    def hooks(self) -> Optional[List[Dict[str, Any]]]:
+        """Lifecycle hooks set via `resources.hooks:`.
+
+        Each entry is a dict with keys `run`, `events`, `timeout` (all
+        filled with defaults at load time). Returns None when no hooks
+        were configured.
+        """
+        return self._hooks
 
     @property
     def priority(self) -> Optional[int]:
@@ -968,8 +1024,71 @@ class Resources:
     def _set_autostop_config(
         self,
         autostop: Union[bool, int, str, Dict[str, Any], None],
+        extra_hooks: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
+        """Set autostop config and hooks together.
+
+        The two are interleaved: master's legacy ``autostop.hook`` /
+        ``autostop.hook_timeout`` YAML fields are routed into the new
+        ``hooks`` list. We split the actual work into two helpers below
+        so each has a single responsibility.
+        """
+        # 1) Pop legacy autostop.hook fields and convert to a hooks entry.
+        legacy_hook_entry, autostop = self._extract_legacy_autostop_hook(
+            autostop)
+        # 2) Set the autostop config itself.
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+        # 3) Merge legacy + explicit hooks into self._hooks.
+        self._set_hooks(extra_hooks, legacy_hook_entry)
+
+    @staticmethod
+    def _extract_legacy_autostop_hook(
+        autostop: Union[bool, int, str, Dict[str, Any], None],
+    ) -> Tuple[Optional[Dict[str, Any]], Union[bool, int, str, Dict[str, Any],
+                                               None]]:
+        """Pop ``autostop.hook`` / ``autostop.hook_timeout`` and convert
+        to a normalized hook entry.
+
+        Returns (legacy_hook_entry_or_None, autostop_dict_without_legacy_keys).
+        Emits a stderr deprecation warning when the legacy form is used.
+
+        # TODO(zpoint): remove this autostop.hook routing after v0.15.0
+        # — aligned with the autostop.hook
+        # removal pinned at v0.15.0 in sky/utils/schemas.py:_AUTOSTOP_SCHEMA.
+        """
+        if not isinstance(autostop, dict):
+            return None, autostop
+        autostop = dict(autostop)  # avoid mutating caller
+        legacy_hook = autostop.pop('hook', None)
+        legacy_timeout = autostop.pop('hook_timeout', None)
+        if legacy_hook is None:
+            return None, autostop
+        sys.stderr.write(hooks_deprecation.AUTOSTOP_HOOK_YAML)
+        # Master's autostop.hook fired on idle-timer teardown for both
+        # autostop and autodown. In the new event taxonomy, route to
+        # ``down`` when autodown is set (outcome is teardown), else
+        # ``stop`` (outcome is pause).
+        legacy_event = 'down' if autostop.get('down') else 'stop'
+        legacy_hook_entry = _normalize_hook_entry({
+            'run': legacy_hook,
+            'events': [legacy_event],
+            'timeout': legacy_timeout,
+        })
+        return legacy_hook_entry, autostop
+
+    def _set_hooks(
+        self,
+        extra_hooks: Optional[List[Dict[str, Any]]],
+        legacy_hook_entry: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Normalize and merge explicit + legacy hook entries into _hooks."""
+        collected: List[Dict[str, Any]] = []
+        if extra_hooks:
+            for entry in extra_hooks:
+                collected.append(_normalize_hook_entry(entry))
+        if legacy_hook_entry is not None:
+            collected.append(legacy_hook_entry)
+        self._hooks = collected if collected else None
 
     def _set_priority(self, priority: Optional[int]) -> None:
         """Sets the priority for this resource configuration.
@@ -1388,6 +1507,8 @@ class Resources:
                 raise
 
     def extract_docker_image(self) -> Optional[str]:
+        if self._docker_image is not None:
+            return self._docker_image
         if self.image_id is None:
             return None
         # Handle dict image_id
@@ -1399,6 +1520,24 @@ class Resources:
                 if image_id.startswith('docker:'):
                     return image_id[len('docker:'):]
         return None
+
+    def get_cloud_image_id(self) -> Optional[Dict[Optional[str], str]]:
+        """Returns the cloud VM image_id, or None if only a docker image.
+
+        When both a cloud image and a docker image are specified (via the
+        'docker' key), returns just the cloud image portion. For the legacy
+        'image_id: docker:xxx' format, returns None since there is no
+        separate cloud image.
+        """
+        if self._image_id is None:
+            return None
+        # Filter out any docker:-prefixed entries (legacy format).
+        cloud_only = {
+            k: v
+            for k, v in self._image_id.items()
+            if not v.startswith('docker:')
+        }
+        return cloud_only if cloud_only else None
 
     def _try_validate_image_id(self) -> None:
         """Try to validate the image_id attribute.
@@ -1438,14 +1577,26 @@ class Resources:
                             f'(prefix with "docker:"), or '
                             f'(2) leave image_id empty to use the default')
 
-        if self._image_id is None:
+        if self._image_id is None and self._docker_image is None:
             return
 
-        if self.extract_docker_image() is not None:
-            # TODO(tian): validate the docker image exists / of reasonable size
+        if self._docker_image is not None:
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
                     self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+            if self._image_id is None:
+                return
+
+        if (self._image_id is not None and
+                self.extract_docker_image() is not None):
+            # Legacy docker: prefix in image_id (no separate _docker_image)
+            if self._docker_image is None:
+                if self.cloud is not None:
+                    self.cloud.check_features_are_supported(
+                        self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+                return
+
+        if self._image_id is None:
             return
 
         if self.cloud is None:
@@ -1993,6 +2144,7 @@ class Resources:
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
+            self._docker_image is None,
             self._ports is None,
             self._docker_login_config is None,
         ])
@@ -2114,7 +2266,19 @@ class Resources:
         if self.autostop_config is not None:
             current_autostop_config = self.autostop_config.to_yaml_config()
 
+        hooks_sentinel = object()
+        hooks_override = override.pop('hooks', hooks_sentinel)
+        hooks_value = self._hooks if hooks_override is hooks_sentinel else (
+            hooks_override)
+
         override_configs = dict(override_configs) if override_configs else None
+        # Reconstruct the 'docker' key in image_id so _docker_image is preserved
+        # across the copy, since self.image_id excludes the popped 'docker' key.
+        default_image_id = self.image_id
+        if self._docker_image is not None:
+            image_id_dict = dict(default_image_id) if default_image_id else {}
+            image_id_dict['docker'] = self._docker_image
+            default_image_id = image_id_dict
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -2133,7 +2297,7 @@ class Resources:
                                            self._ephemeral_storage),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
-            image_id=override.pop('image_id', self.image_id),
+            image_id=override.pop('image_id', default_image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             network_tier=override.pop('network_tier', self.network_tier),
             local_disk=override.pop('local_disk', self._local_disk),
@@ -2142,6 +2306,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            hooks=hooks_value,
             priority=override.pop('priority', self.priority),
             priority_class=override.pop('priority_class', self.priority_class),
             volumes=override.pop('volumes', self.volumes),
@@ -2186,7 +2351,7 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
-        elif self.image_id is not None:
+        if self.get_cloud_image_id() is not None:
             features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
@@ -2305,8 +2470,17 @@ class Resources:
         if ordered is not None and isinstance(ordered, list):
             for ordered_config in ordered:
                 Resources._apply_resource_config_aliases(ordered_config)
+        # `hooks` is task-scoped and lives at task.config.hooks. The
+        # task-YAML loader (sky/task.py::Task.from_yaml_config) routes
+        # it into resources_config['hooks'] so the existing
+        # `_from_yaml_config_single` path still wires it onto each
+        # Resources instance. The resources schema itself does not
+        # accept `hooks`, so pop it out before validation here.
+        hooks_passthrough = config.pop('hooks', None)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
+        if hooks_passthrough is not None:
+            config['hooks'] = hooks_passthrough
 
         def _override_resources(
                 base_resource_config: Dict[str, Any],
@@ -2473,6 +2647,7 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['hooks'] = config.pop('hooks', None)
         resources_fields['priority'] = config.pop('priority', None)
         resources_fields['priority_class'] = config.pop('priority_class', None)
         resources_fields['volumes'] = config.pop('volumes', None)
@@ -2534,7 +2709,12 @@ class Resources:
         add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('ephemeral_storage', self._ephemeral_storage)
-        add_if_not_none('image_id', self.image_id)
+        image_id_config = self.image_id
+        if self._docker_image is not None:
+            image_id_dict = dict(image_id_config) if image_id_config else {}
+            image_id_dict['docker'] = self._docker_image
+            image_id_config = image_id_dict
+        add_if_not_none('image_id', image_id_config)
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
         if self.network_tier is not None:
@@ -2560,6 +2740,12 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        # Note: ``_hooks`` is intentionally NOT emitted here. Lifecycle
+        # hooks live under the task-level ``config.hooks:`` key (their
+        # canonical placement); Task._to_yaml_config lifts ``_hooks``
+        # off the Resources and emits them there. Emitting under
+        # resources.hooks would trip the explicit rejection in
+        # Task.from_yaml_config on round-trip.
 
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
@@ -2753,6 +2939,37 @@ class Resources:
 
         if version < 32:
             self._ephemeral_storage = None
+
+        if version < 34:
+            self._docker_image = None
+
+        if version < 33:
+            # Route legacy AutostopConfig.hook / hook_timeout attrs into the
+            # new _hooks list, and scrub them from AutostopConfig.
+            # Autodown-aware: route to ``down`` for autodown clusters,
+            # ``stop`` otherwise, matching the new event semantics.
+            hooks = list(state.get('_hooks') or [])
+            autostop = state.get('_autostop_config')
+            legacy_hook = getattr(autostop, 'hook', None) if autostop else None
+            legacy_timeout = (getattr(autostop, 'hook_timeout', None)
+                              if autostop else None)
+            if legacy_hook is not None:
+                legacy_event = ('down'
+                                if getattr(autostop, 'down', False) else 'stop')
+                hooks.append(
+                    _normalize_hook_entry({
+                        'run': legacy_hook,
+                        'events': [legacy_event],
+                        'timeout': legacy_timeout,
+                    }))
+            if autostop is not None:
+                for attr in ('hook', 'hook_timeout'):
+                    if hasattr(autostop, attr):
+                        try:
+                            delattr(autostop, attr)
+                        except AttributeError:
+                            pass
+            state['_hooks'] = hooks or None
 
         self.__dict__.update(state)
 

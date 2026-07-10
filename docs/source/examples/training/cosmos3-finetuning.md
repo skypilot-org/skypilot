@@ -1,0 +1,1 @@
+../../generated-examples/cosmos3-finetuning.md

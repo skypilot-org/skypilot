@@ -188,7 +188,9 @@ def test_cli_status_in_api(num_requests):
     print(f"Testing {num_requests} CLI status in API requests")
 
     def cli_status():
-        job_request_id = managed_jobs.queue(refresh=False, skip_finished=True)
+        job_request_id = managed_jobs.queue_v2(refresh=False,
+                                               skip_finished=True,
+                                               fields=['job_id', 'status'])
         serve_request_id = serve_lib.status(service_names=None)
         status_request_id = sdk.status()
         try:

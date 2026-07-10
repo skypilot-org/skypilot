@@ -105,11 +105,16 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
                 az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             return None
+        # get_catalog_path() is now a pure path getter; create the
+        # parent dirs explicitly before writing.
+        os.makedirs(os.path.dirname(az_mapping_path), exist_ok=True)
+        os.makedirs(os.path.dirname(az_mapping_md5_path), exist_ok=True)
         az_mappings.to_csv(az_mapping_path, index=False)
         # Write md5 of the az_mapping file to a file so we can check it for
         # any changes when uploading to the controller
         with open(az_mapping_path, 'r', encoding='utf-8') as f:
-            az_mapping_hash = hashlib.md5(f.read().encode()).hexdigest()
+            az_mapping_hash = hashlib.md5(f.read().encode(),
+                                          usedforsecurity=False).hexdigest()
         with open(az_mapping_md5_path, 'w', encoding='utf-8') as f:
             f.write(az_mapping_hash)
     else:
@@ -143,7 +148,8 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
         user_identity_list = aws.AWS.get_active_user_identity()
         assert user_identity_list, user_identity_list
         user_identity = user_identity_list[0]
-        aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
+        aws_user_hash = hashlib.md5(user_identity.encode(),
+                                    usedforsecurity=False).hexdigest()[:8]
     except (exceptions.CloudUserIdentityError, ImportError):
         # If failed to get user identity, or import aws dependencies, we use the
         # latest mapping file or the default mapping file.

@@ -161,6 +161,8 @@ _AUTOSTOP_SCHEMA = {
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
                 },
+                # TODO(zpoint): remove after v0.15.0 — routed into
+                # top-level resources.hooks for backward compatibility.
                 'hook': {
                     'type': 'string',
                 },
@@ -171,6 +173,49 @@ _AUTOSTOP_SCHEMA = {
             },
         },
     ],
+}
+
+# Supported events in config.hooks[*].events.
+_HOOK_EVENTS = ['stop', 'preemption', 'down']
+
+_HOOKS_SCHEMA = {
+    'type': 'array',
+    # Bound the array so the SetAutostop request payload can't grow
+    # past gRPC's default max_receive_message_length (4 MB). 32 entries
+    # × 16 KiB per `run` plus event/timeout overhead leaves comfortable
+    # headroom.
+    'maxItems': 32,
+    'items': {
+        'type': 'object',
+        'required': ['run'],
+        'additionalProperties': False,
+        'properties': {
+            'run': {
+                'type': 'string',
+                'minLength': 1,
+                # 16 KiB cap. Matches typical shell-script size limits
+                # and keeps gRPC payloads tractable. Users with large
+                # bodies should put the script under workdir/ and call
+                # it from `run:` instead.
+                'maxLength': 16 * 1024,
+            },
+            # `events` is optional. When absent, Resources fills the
+            # default list (all three events) at load time.
+            'events': {
+                'type': 'array',
+                'minItems': 1,
+                'uniqueItems': True,
+                'items': {
+                    'type': 'string',
+                    'enum': _HOOK_EVENTS,
+                },
+            },
+            'timeout': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+        },
+    },
 }
 
 
@@ -767,6 +812,15 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            # Hugging Face stores only: extra ``hf-mount``
+                            # flags forwarded verbatim to the daemon. Each
+                            # element is one shell token.
+                            'hf_mount_args': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            },
                         },
                     },
                 },
@@ -862,6 +916,12 @@ def get_service_schema():
                         'timeout_seconds': {
                             'type': 'number',
                         },
+                        'endpoint_probe_interval_seconds': {
+                            'type': 'number',
+                        },
+                        'consecutive_failure_threshold_timeout': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -877,6 +937,16 @@ def get_service_schema():
                         },
                     }
                 }]
+            },
+            'load_balancer': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'stream_timeout_seconds': {
+                        'type': 'number',
+                    },
+                },
             },
             'pool': {
                 'type': 'object',
@@ -1050,6 +1120,28 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     return new_schema
 
 
+def _task_config_schema():
+    """Schema for task-YAML's `config:` block.
+
+    Hand-merged from the global config schema (filtered to overrideable
+    keys) plus the task-only `hooks` property. `hooks` is intentionally
+    NOT exposed in the global ``~/.sky/config.yaml`` schema — lifecycle
+    hooks are task-scoped (preserving the original ``resources.hooks:``
+    placement).
+    """
+    overrideable = _filter_schema(
+        get_config_schema(),
+        constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)['properties']
+    return {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            **overrideable,
+            'hooks': _HOOKS_SCHEMA,
+        },
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -1176,9 +1268,11 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
-            'config': _filter_schema(
-                get_config_schema(),
-                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            # Per-task config block. Hand-merged so we can add a
+            # task-only `hooks:` key that is intentionally NOT part of
+            # the global `~/.sky/config.yaml` schema (lifecycle hooks
+            # are task-scoped, not workspace/operator-scoped).
+            'config': _task_config_schema(),
             # volumes config is validated separately using get_volume_schema
             'volumes': {
                 'type': 'object',
@@ -1488,6 +1582,9 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+    'namespace': {
+        'type': 'string',
+    },
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -2218,6 +2315,9 @@ def get_config_schema():
             'requests_retention_hours': {
                 'type': 'integer',
             },
+            'logs_retention_hours': {
+                'type': 'integer',
+            },
             'cluster_event_retention_hours': {
                 'type': 'number',
             },
@@ -2241,7 +2341,29 @@ def get_config_schema():
         'properties': {
             'default_role': {
                 'type': 'string',
-                'case_insensitive_enum': ['admin', 'user']
+                'case_insensitive_enum': ['admin', 'user', 'viewer']
+            },
+            # When true, GET /workspaces/config is restricted to admins (the
+            # config payload includes admin-only secrets). Defaults to false.
+            'restrict_config_to_admins': {
+                'type': 'boolean',
+            },
+            # Per-role permission overrides. Schema is intentionally
+            # permissive (additionalProperties: True on
+            # `permissions`) because admin/user use `blocklist`
+            # entries while `viewer` uses `allowlist`; both shapes
+            # are `[{path, method}, ...]`.
+            'roles': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'object',
+                    'properties': {
+                        'permissions': {
+                            'type': 'object',
+                            'additionalProperties': True,
+                        },
+                    },
+                },
             },
         },
     }
@@ -2299,6 +2421,7 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
+                        **_REMOTE_IDENTITY_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -2312,6 +2435,8 @@ def get_config_schema():
                             'type': 'boolean'
                         },
                         **_CAPABILITIES_SCHEMA,
+                        'remote_identity':
+                            (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                     },
                     'additionalProperties': False,
                 },
@@ -2348,6 +2473,9 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
+                        },
+                        'namespace': {
+                            'type': 'string',
                         },
                         'kueue': {
                             'type': 'object',
@@ -2389,6 +2517,9 @@ def get_config_schema():
                                 'additionalProperties':
                                     _allow_additional_properties(),
                                 'properties': {
+                                    'namespace': {
+                                        'type': 'string',
+                                    },
                                     'kueue': {
                                         'type': 'object',
                                         'required': [],
@@ -2413,10 +2544,12 @@ def get_config_schema():
                                         },
                                     },
                                     **_extra_kubernetes_properties,
+                                    **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                                 },
                             },
                         },
                         **_extra_kubernetes_properties,
+                        **_REMOTE_IDENTITY_SCHEMA_KUBERNETES,
                     },
                     # On the server, plugins have registered
                     # their properties via
@@ -2547,6 +2680,32 @@ def get_config_schema():
         },
     }
 
+    dashboard_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'external_links': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['label', 'regex'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'label': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                        'regex': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
+                    },
+                },
+            },
+        },
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -2575,6 +2734,7 @@ def get_config_schema():
             'logs': logs_schema,
             'daemons': daemon_schema,
             'data': data_schema,
+            'dashboard': dashboard_schema,
             **cloud_configs,
             # For plugin-specific config.
             'plugins': {

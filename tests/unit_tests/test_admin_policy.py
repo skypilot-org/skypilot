@@ -696,9 +696,12 @@ def _policy_server(policy: str) -> Iterator[str]:
         env=env)
     start_time = time.time()
     server_ready = False
-    while time.time() - start_time < 5.0:
+    # 30s budget: cold-start of a uvicorn subprocess (interpreter + fastapi
+    # + sky imports) routinely exceeds the prior 5s on CI runners.
+    timeout_s = 30.0
+    while time.time() - start_time < timeout_s:
         try:
-            response = requests.get(f'http://localhost:{port}', timeout=0.1)
+            response = requests.get(f'http://localhost:{port}', timeout=0.5)
             if response.status_code == 200:
                 server_ready = True
                 break
@@ -710,7 +713,8 @@ def _policy_server(policy: str) -> Iterator[str]:
     if not server_ready:
         proc.terminate()
         raise RuntimeError(
-            f'Policy server on port {port} failed to start within 5 seconds')
+            f'Policy server on port {port} failed to start within '
+            f'{timeout_s:.0f} seconds')
     try:
         yield f'http://localhost:{port}'
     finally:

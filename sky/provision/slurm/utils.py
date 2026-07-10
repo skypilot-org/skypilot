@@ -1156,6 +1156,32 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
+# Accepted sbatch --time formats:
+#   m, m:s, h:m:s, d-h, d-h:m, d-h:m:s
+# See: https://slurm.schedmd.com/sbatch.html#OPT_time
+_TIME_FORMAT_RE = re.compile(
+    r'\d+|\d+:\d+|\d+:\d+:\d+|\d+-\d+|\d+-\d+:\d+|\d+-\d+:\d+:\d+')
+
+
+def validate_sbatch_time(value: str) -> None:
+    """Validate that a user-supplied sbatch --time value is well-formed.
+
+    Reject malformed values up front (at config-load / directive-build time)
+    rather than letting `sbatch` reject the directive at submit time, which
+    yields a less actionable error.
+
+    Raises:
+        ValueError: If the value does not match a Slurm-accepted time format.
+    """
+    # Use fullmatch (not match) so trailing whitespace or newlines are
+    # rejected — `$` would match before a final newline due to Python's
+    # MULTILINE default and let `'5\n'` slip through.
+    if not _TIME_FORMAT_RE.fullmatch(value):
+        raise ValueError(
+            f'Invalid slurm.sbatch_options.time {value!r}. '
+            'Accepted formats: m, m:s, h:m:s, d-h, d-h:m, d-h:m:s.')
+
+
 def srun_sshd_command(
     job_id: str,
     target_node: str,

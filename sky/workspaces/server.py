@@ -67,6 +67,35 @@ async def delete(request: fastapi.Request,
     )
 
 
+@router.post('/batch_add_users')
+async def batch_add_users(request: fastapi.Request,
+                          body: payloads.WorkspaceBatchAddUsersBody) -> None:
+    """Adds users to ``allowed_users`` of multiple private workspaces."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.WORKSPACES_BATCH_ADD_USERS,
+        request_body=body,
+        func=core.batch_add_users_to_workspaces,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@router.post('/batch_remove_users')
+async def batch_remove_users(
+        request: fastapi.Request,
+        body: payloads.WorkspaceBatchRemoveUsersBody) -> None:
+    """Removes users from ``allowed_users`` of multiple private workspaces."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.WORKSPACES_BATCH_REMOVE_USERS,
+        request_body=body,
+        func=core.batch_remove_users_from_workspaces,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
 @router.get('/config')
 async def get_config(request: fastapi.Request) -> None:
     """Gets the entire SkyPilot configuration."""

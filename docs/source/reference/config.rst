@@ -29,6 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
+    :ref:`logs_retention_hours <config-yaml-api-server-logs-retention-hours>`: 720
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 720
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
     :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
@@ -72,6 +73,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`namespace <config-yaml-kubernetes-namespace>`: my-namespace
     :ref:`allowed_nodes <config-yaml-kubernetes-allowed-nodes>`:
       names:
         - gpu-node-01
@@ -254,6 +256,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
+    :ref:`restrict_config_to_admins <config-yaml-rbac-restrict-config-to-admins>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -319,6 +322,24 @@ Example:
 
   api_server:
     requests_retention_hours: -1 # Disable requests GC
+
+.. _config-yaml-api-server-logs-retention-hours:
+
+``api_server.logs_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period in hours for the per-operation provision log directories under ``~/sky_logs/sky-*`` on the API server (optional). Set to a negative value to disable this GC.
+
+Each launch/exec/provision creates a ``~/sky_logs/sky-<timestamp>`` directory holding server-side copies of ``provision.log``, ``setup-*.log``, ``run.log``, etc. (and each upload a ``~/sky_logs/file_uploads/*.log`` file). The GC daemon removes entries older than this period, except directories holding the provision log of an existing cluster, which are kept for as long as the cluster exists. The launched resources (clusters/jobs) are unaffected.
+
+Default: ``720`` (30 days).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    logs_retention_hours: -1 # Disable sky_logs provision dir GC
 
 .. _config-yaml-api-server-cluster-event-retention-hours:
 
@@ -1611,6 +1632,41 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
 
+.. _config-yaml-kubernetes-namespace:
+
+``kubernetes.namespace``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Kubernetes namespace SkyPilot pods are launched into (optional).
+
+If unset, SkyPilot uses the namespace from the active kubeconfig context (or
+``default``), preserving the historical behavior. Setting this value lets you
+target a specific namespace without modifying your kubeconfig.
+
+.. code-block:: yaml
+
+  kubernetes:
+    namespace: my-namespace
+
+You can also set this per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        namespace: prod-workloads
+      dev-cluster:
+        namespace: dev-workloads
+
+When set, the namespace is used for both pod creation and resource discovery
+(e.g., listing pods to count used resources), so quotas and visibility line up
+with the chosen namespace.
+
+For per-workspace overrides — e.g. sharing a single cluster context across
+teams, with each team scoped to its own namespace — see
+:ref:`Workspaces <workspaces>`.
+
 .. _config-yaml-kubernetes-allowed-nodes:
 
 ``kubernetes.allowed_nodes``
@@ -2694,6 +2750,26 @@ If not specified, the default role is ``admin``.
 .. TODO(aylei): Refine this after unified authentication.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
+
+.. _config-yaml-rbac-restrict-config-to-admins:
+
+``rbac.restrict_config_to_admins``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restrict reading the API server config to admins (optional, default ``false``).
+
+The API server config (returned by ``GET /workspaces/config``) includes
+admin-only secrets such as cloud provider tokens. When this is set to ``true``,
+the ``user`` role is blocked from reading it (returns ``403``) and the dashboard
+hides the configuration page for non-admin users. Writing the config
+(``POST /workspaces/config``) is admin-only regardless of this setting.
+
+Defaults to ``false`` to preserve backward-compatible behavior.
+
+.. code-block:: yaml
+
+  rbac:
+    restrict_config_to_admins: true
 
 .. _config-yaml-db:
 

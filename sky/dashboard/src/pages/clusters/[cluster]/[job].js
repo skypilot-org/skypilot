@@ -22,6 +22,7 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import { normalizeUrl, useLogLinkExtractor } from '@/utils/externalLinks';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -128,6 +129,13 @@ export function JobDetailPage() {
     refreshTrigger: logsRefreshToken,
     onError: handleStreamError,
   });
+
+  // Scan streamed logs against built-in plus admin-configured URL patterns
+  // and surface matches in the Details card as an External Links row.
+  const { extractedLinks, scanLines } = useLogLinkExtractor();
+  useEffect(() => {
+    scanLines(displayLines);
+  }, [displayLines, scanLines]);
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
@@ -305,6 +313,33 @@ export function JobDetailPage() {
                         )}
                       </div>
                     </div>
+                    {Object.keys(extractedLinks).length > 0 && (
+                      <div className="col-span-2">
+                        <div className="text-gray-600 font-medium text-base">
+                          External Links
+                        </div>
+                        <div className="text-base mt-1">
+                          <div className="flex flex-wrap gap-4">
+                            {Object.entries(extractedLinks).map(
+                              ([label, url]) => {
+                                const normalizedUrl = normalizeUrl(url);
+                                return (
+                                  <a
+                                    key={label}
+                                    href={normalizedUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                                  >
+                                    {label}
+                                  </a>
+                                );
+                              }
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>

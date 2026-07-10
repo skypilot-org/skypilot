@@ -33,7 +33,6 @@ import zlib
 import aiofiles
 import anyio
 import fastapi
-from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import jwt as pyjwt
 import starlette.background
@@ -50,6 +49,7 @@ from sky import execution
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.data import storage_utils
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
@@ -61,6 +61,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
+from sky.server import clean_env as clean_env_module
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -84,10 +85,12 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
+from sky.users import rbac
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
@@ -280,8 +283,11 @@ def _extract_user_from_header(
     if not user_name:
         return None
 
+    # MD5 only derives a stable user id from the (non-secret) user name;
+    # not a security use.
     user_hash = hashlib.md5(
-        user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        user_name.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
     if proxy_config.enabled:
         return models.User(id=user_hash,
                            name=user_name,
@@ -473,6 +479,29 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 return _bearer_auth_401_response(
                     {'detail': 'Invalid token payload'})
 
+            # Look up the token row by its sha256 hash. This is what makes
+            # revocation (row deleted) and rotation (row's hash replaced)
+            # take effect at request time -- the JWT alone cannot be revoked.
+            # We match on hash rather than token_id because rotation updates
+            # the row's hash but keeps the original token_id, while the new
+            # JWT carries a freshly-generated token_id; only the hash is
+            # consistent between the live JWT and the live DB row.
+            incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
+            token_row = global_user_state.get_service_account_token_by_hash(
+                incoming_hash)
+            if token_row is None:
+                logger.warning(
+                    f'Service account token {token_id} not found in DB '
+                    '(revoked or rotated)')
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account token revoked or rotated'})
+
+            if (token_row['expires_at'] is not None and
+                    token_row['expires_at'] < int(time.time())):
+                logger.warning(f'Service account token {token_id} has expired')
+                return _bearer_auth_401_response(
+                    {'detail': 'Service account token has expired'})
+
             # Verify user still exists in database
             user_info = global_user_state.get_user(user_id)
             if user_info is None:
@@ -481,10 +510,12 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 return _bearer_auth_401_response(
                     {'detail': 'Service account user no longer exists'})
 
-            # Update last used timestamp for token tracking
+            # Update last used timestamp for token tracking. Use the
+            # DB row's token_id (not the JWT's): after rotation the JWT
+            # carries a different token_id than the DB row.
             try:
                 global_user_state.update_service_account_token_last_used(
-                    token_id)
+                    token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to update token last used time: {e}')
 
@@ -545,8 +576,13 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
-                permission.permission_service.add_user_if_not_exists(
-                    auth_user.id)
+                # Offload the blocking config reload + role seed to a worker
+                # thread so this async middleware doesn't block the event loop.
+                # The reload lets a runtime `rbac.default_role` change take
+                # effect for this new user without a restart (the main
+                # API-server process does not reload config per request).
+                await asyncio.to_thread(permission.seed_new_user_role,
+                                        auth_user.id)
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
@@ -660,6 +696,68 @@ async def cleanup_download_tmp():
                          f'{common_utils.format_exception(e)}')
 
 
+def _prune_sky_logs(cutoff: float) -> int:
+    """Remove ~/sky_logs artifacts older than cutoff; returns count removed.
+
+    Only sky-* dirs are swept, sparing the job/request log trees that share
+    ~/sky_logs (api_server/, jobs_controller/, managed_jobs/, <job_id>-*).
+    Dirs holding the provision log of an existing cluster are kept regardless
+    of age so /provision_logs keeps serving live clusters; once the cluster
+    is terminated its logs fall back to the age-based retention.
+    """
+    sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+    if not os.path.isdir(sky_logs_dir):
+        return 0
+    protected_dirs = {
+        os.path.basename(os.path.dirname(path))
+        for path in global_user_state.get_all_cluster_provision_log_paths()
+    }
+    removed = 0
+    for entry in os.scandir(sky_logs_dir):
+        if not entry.name.startswith('sky-') or entry.name in protected_dirs:
+            continue
+        try:
+            if (entry.is_dir(follow_symlinks=False) and
+                    entry.stat().st_mtime < cutoff):
+                shutil.rmtree(entry.path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            pass
+    # sky.client.common.FILE_UPLOAD_LOGS_DIR; not imported since the server
+    # should not depend on the client.
+    file_uploads_dir = os.path.join(sky_logs_dir, 'file_uploads')
+    if os.path.isdir(file_uploads_dir):
+        for entry in os.scandir(file_uploads_dir):
+            try:
+                if (entry.is_file(follow_symlinks=False) and
+                        entry.stat().st_mtime < cutoff):
+                    os.remove(entry.path)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+async def cleanup_sky_logs():
+    """Hourly GC of expired per-operation ~/sky_logs artifacts."""
+    while True:
+        try:
+            skypilot_config.reload_config()
+            retention_hours = skypilot_config.get_nested(
+                ('api_server', 'logs_retention_hours'),
+                server_constants.DEFAULT_LOGS_RETENTION_HOURS)
+            if retention_hours >= 0:
+                cutoff = time.time() - retention_hours * 3600
+                removed = await asyncio.to_thread(_prune_sky_logs, cutoff)
+                if removed:
+                    logger.info(f'Cleaned up {removed} ~/sky_logs artifact(s) '
+                                f'older than {retention_hours} hours')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_sky_logs: '
+                         f'{common_utils.format_exception(e)}')
+        await asyncio.sleep(3600)
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -716,26 +814,15 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     """FastAPI lifespan context manager."""
     del app  # unused
 
-    # Startup: Run background tasks
+    # Startup: Run background tasks. Delete any persisted daemon rows whose
+    # ids are no longer in INTERNAL_REQUEST_DAEMONS first (daemon renamed /
+    # removed in code), then submit each current daemon.
+    await requests_lib.delete_orphan_internal_daemons_async(
+        daemons.INTERNAL_REQUEST_DAEMONS)
     for event in daemons.INTERNAL_REQUEST_DAEMONS:
         if event.should_skip():
             continue
-        try:
-            await executor.schedule_request_async(
-                request_id=event.id,
-                request_name=event.name,
-                request_body=payloads.RequestBody(),
-                func=event.run_event,
-                schedule_type=requests_lib.ScheduleType.SHORT,
-                is_skypilot_system=True,
-                # Request deamon should be retried if the process pool is
-                # broken.
-                retryable=True,
-            )
-        except exceptions.RequestAlreadyExistsError:
-            # Lifespan will be executed in each uvicorn worker process, we
-            # can safely ignore the error if the task is already scheduled.
-            logger.debug(f'Request {event.id} already exists.')
+        await executor.schedule_internal_daemon_async(event)
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
@@ -1808,7 +1895,8 @@ async def stop(request: fastapi.Request,
 @app.post('/status')
 async def status(
     request: fastapi.Request,
-    status_body: payloads.StatusBody = payloads.StatusBody()
+    status_body: payloads.StatusBody = fastapi.Depends(
+        role_filter.force_viewer_status_body),
 ) -> None:
     """Gets cluster statuses."""
     if state.get_block_requests():
@@ -1850,7 +1938,7 @@ async def down(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_DOWN,
         request_body=down_body,
-        func=core.down,
+        func=core.user_initiated_down,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=down_body.cluster_name,
         auth_user=request.state.auth_user,
@@ -2131,20 +2219,23 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     )
 
 
-@app.post('/autostop_logs')
-async def autostop_logs(
-    request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,
+@app.post('/hook_logs')
+async def hook_logs(
+    request: fastapi.Request, hook_logs_body: payloads.HookLogsBody,
     background_tasks: fastapi.BackgroundTasks
 ) -> fastapi.responses.StreamingResponse:
-    """Tails the autostop hook logs of a cluster."""
+    """Tails lifecycle-hook logs of a cluster.
+
+    If ``event`` is None, auto-selects whichever hook event has fired.
+    """
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
-        request_body=autostop_logs_body,
-        func=core.tail_autostop_logs,
+        request_name=request_names.RequestName.CLUSTER_HOOK_LOGS,
+        request_body=hook_logs_body,
+        func=core.tail_hook_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
-        request_cluster_name=autostop_logs_body.cluster_name,
+        request_cluster_name=hook_logs_body.cluster_name,
         auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
@@ -2257,7 +2348,7 @@ async def get_expanded_request_id(request_id: str) -> str:
 
 
 # === API server related APIs ===
-@app.get('/api/get', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/api/get')
 async def api_get(request_id: str) -> payloads.RequestPayload:
     """Gets a request with a given request ID prefix."""
     # Validate request_id prefix matches a single request.
@@ -2560,10 +2651,7 @@ async def api_status(
     if request_ids is None:
         statuses = None
         if not all_status:
-            statuses = [
-                requests_lib.RequestStatus.PENDING,
-                requests_lib.RequestStatus.RUNNING,
-            ]
+            statuses = requests_lib.RequestStatus.active_statuses()
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
@@ -2589,7 +2677,29 @@ async def api_status(
         return encoded_request_tasks
 
 
-@app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
+@app.get('/dashboard_config')
+async def dashboard_config() -> Dict[str, Any]:
+    """Returns admin-configured dashboard settings consumed by the UI.
+
+    Currently exposes the optional `external_links` allowlist that the dashboard
+    matches against streamed logs to render labeled external links on cluster
+    and job detail pages.
+    """
+    external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
+                                                [])
+    sanitized: List[Dict[str, str]] = []
+    if isinstance(external_links, list):
+        for entry in external_links:
+            if not isinstance(entry, dict):
+                continue
+            label = entry.get('label')
+            regex = entry.get('regex')
+            if isinstance(label, str) and isinstance(regex, str):
+                sanitized.append({'label': label, 'regex': regex})
+    return {'external_links': sanitized}
+
+
+@app.get('/api/plugins')
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
     plugin_infos = []
@@ -2688,6 +2798,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         latest_version=latest_version,
         # Whether telemetry/usage collection is enabled
         telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
+        # Whether GET /workspaces/config is restricted to admins (so the
+        # dashboard can hide the config UI for non-admins when enabled)
+        restrict_config_to_admins=rbac.restrict_config_to_admins(),
     )
 
 
@@ -2771,8 +2884,12 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
 
     handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
+    # Under hostNetwork the pod's sshd binds a probed port (not 22,
+    # which is owned by the K8s node's own sshd). head_ssh_port flows
+    # from InstanceInfo.ssh_port through cached_external_ssh_ports.
+    head_ssh_port = handle.head_ssh_port or 22
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
-        port_forward=[(None, 22)])
+        port_forward=[(None, head_ssh_port)])
     # Under uvloop, `asyncio.create_subprocess_exec` goes through libuv's
     # `uv_spawn`, which on Linux always uses fork().
     # The forked child runs `PyOS_AfterFork_Child` which tears down inherited
@@ -3314,6 +3431,16 @@ async def serve_dashboard(request: fastapi.Request, full_path: str):
             return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
+    # Build assets under _next/ are content-hashed static files; a missing
+    # one must 404 instead of falling through to the index.html SPA shell
+    # below. Returning HTML (200) for a missing .js/.css lets a CDN cache the
+    # shell under the asset URL, which then fails the browser's strict MIME
+    # check and blanks the dashboard until the cache entry expires.
+    if safe_full_path.startswith('_next/'):
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Not found',
+                                    headers={'Cache-Control': 'no-store'})
+
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
@@ -3439,10 +3566,13 @@ if __name__ == '__main__':
     # to check for existing controller clusters. Placed after user hash restore
     # to avoid accidentally using the wrong server hash.
     managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
-    # Pre-load plugin RBAC rules before initializing permission service.
-    # This ensures plugin RBAC rules are available when policies are created.
-    logger.info('Pre-loading plugin RBAC rules')
+    # Pre-load plugin RBAC rules + viewer allowlist before initializing
+    # the permission service. The permission service reads both during
+    # _maybe_initialize_policies (blocklist seeded into Casbin; viewer
+    # allowlist built into an in-memory structure).
+    logger.info('Pre-loading plugin RBAC rules + viewer allowlist')
     plugins.load_plugin_rbac_rules()
+    plugins.load_plugin_viewer_allowlist()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
@@ -3478,6 +3608,13 @@ if __name__ == '__main__':
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
             global_tasks.append(background.create_task(metrics_server.serve()))
+            # Reap per-pid prometheus multiproc files left behind by
+            # workers that crashed (SIGKILL, OOM, hard crash) and never
+            # called mark_process_dead. Without this, MultiProcessCollector
+            # keeps serving the dead pid's last live-gauge value on every
+            # /metrics scrape.
+            global_tasks.append(
+                background.create_task(metrics.multiproc_reaper_daemon()))
         global_tasks.append(
             background.create_task(requests_lib.requests_gc_daemon()))
         global_tasks.append(
@@ -3491,7 +3628,28 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
+
+        # managed-job-status-refresh runs as a thread inside this
+        # supervisor process so the leader role and the controller
+        # subprocesses it spawns share a single OS lifecycle.  Routing
+        # this daemon through the executor task queue (as other daemons
+        # do) lets it drift between replicas while the controllers stay
+        # behind, which causes cross-replica controller orphans.  See
+        # sky/jobs/managed_job_refresh_thread.py for details.
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import managed_job_refresh_thread
+        managed_job_refresh_thread.start_managed_job_refresh_daemon()
+
+        # Snapshot a clean copy of os.environ BEFORE spawning workers and
+        # before any per-request env mutation can happen. Used when
+        # spawning consolidation-mode controllers so they don't inherit
+        # the client request's env vars (e.g. SKYPILOT_API_SERVER_ENDPOINT).
+        # The same snapshot is forwarded to workers via initargs (see
+        # executor.start) and to coroutine-path requests running in this
+        # same process.
+        clean_env_module.capture_clean_server_env()
 
         queue_server, workers = executor.start(config)
 

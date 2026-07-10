@@ -566,11 +566,11 @@ Install the necessary dependencies for Azure.
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-      uv pip install --prerelease allow azure-cli
+      uv pip install --prerelease allow "azure-cli<2.87.0"
       uv pip install "skypilot[azure]"
       # From nightly build
       # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-      uv pip install --prerelease allow azure-cli
+      uv pip install --prerelease allow "azure-cli<2.87.0"
       uv pip install "skypilot-nightly[azure]"
 
   .. tab-item:: uv tool
@@ -612,7 +612,10 @@ Hint: run ``az account subscription list`` to get a list of subscription IDs und
 CoreWeave
 ~~~~~~~~~
 
-`CoreWeave <https://www.coreweave.com/>`__ integrates with SkyPilot through the :ref:`Kubernetes <kubernetes-installation>` integration. To set up:
+`CoreWeave <https://www.coreweave.com/>`__ integrates with SkyPilot through the :ref:`Kubernetes <kubernetes-installation>` and :ref:`Slurm <slurm-installation>` integrations.
+
+Kubernetes (CKS)
+^^^^^^^^^^^^^^^^
 
 1. Install the necessary dependencies for CoreWeave.
 
@@ -658,6 +661,69 @@ CoreWeave
 .. tip::
 
   CoreWeave also offers InfiniBand networking for high-performance distributed training. You can enable InfiniBand support by adding ``network_tier: best`` to your SkyPilot task configuration.
+
+Slurm (SUNK)
+^^^^^^^^^^^^
+
+`SUNK <https://docs.coreweave.com/products/sunk>`__ is CoreWeave's managed Slurm offering. To set up SkyPilot on a SUNK cluster:
+
+1. Install SkyPilot with the Slurm plugin.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[slurm]"
+      # From nightly build
+      uv pip install "skypilot-nightly[slurm]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[slurm]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[slurm]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[slurm]"
+      # From nightly build
+      pip install "skypilot-nightly[slurm]"
+      # From source
+      pip install -e ".[slurm]"
+
+2. Create the SkyPilot Slurm SSH configuration file and add your SUNK login node:
+
+.. code-block:: shell
+
+  mkdir -p ~/.slurm
+
+.. code-block:: text
+  :caption: ``~/.slurm/config``
+
+  Host <CLUSTER-NAME>
+      HostName <LOGIN-NODE-IP>
+      User <USERNAME>
+      IdentityFile ~/.ssh/id_ed25519
+
+- ``<CLUSTER-NAME>``: A name for your cluster, for example ``my-sunk-cluster``.
+- ``<LOGIN-NODE-IP>``: Your login node's external IP address. To find it, run ``kubectl get svc slurm-login -n tenant-slurm``.
+- ``<USERNAME>``: Your Slurm username.
+
+For more details, see the `SkyPilot on SUNK tutorial <https://docs.coreweave.com/products/sunk/tutorials/skypilot-on-sunk>`__ and :ref:`SkyPilot on Slurm <slurm-overview>`.
 
 .. _coreweave-caios-installation:
 
@@ -906,6 +972,36 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
     region_configs:
       default:
         compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+
+OCI also offers `Object Storage <https://www.oracle.com/cloud/storage/object-storage/>`__, which supports both a native API and an `S3-compatible API <https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm>`__.
+SkyPilot can download/upload data to OCI buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up OCI Object Storage, first create a `Customer Secret Key <https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/managingcredentials.htm#create-secret-key>`_ from the OCI console.
+
+SkyPilot uses separate configuration files for OCI Object Storage to avoid conflicts with your AWS credentials. Run the following command to configure your OCI Object Storage credentials:
+
+.. code-block:: shell
+
+  AWS_SHARED_CREDENTIALS_FILE=~/.oci/s3.credentials aws configure --profile oci
+
+When prompted, enter your OCI Object Storage credentials:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]:
+  Default output format [None]: json
+
+Next, configure the endpoint URL for OCI Object Storage. Replace ``<namespace>`` and ``<region>`` with your tenancy's object storage namespace and region:
+
+.. code-block:: shell
+
+  AWS_CONFIG_FILE=~/.oci/s3.config aws configure set endpoint_url \
+    https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com --profile oci
+  AWS_CONFIG_FILE=~/.oci/s3.config aws configure set region <region> --profile oci
+
+.. note::
+
+  When the S3-compatible credential files (``~/.oci/s3.credentials`` and ``~/.oci/s3.config``) are present, SkyPilot will use the S3-compatible API for ``oci://`` storage, and the native OCI API key (``~/.oci/config``) is **not** required for storage operations. Without the S3-compatible credential files, SkyPilot falls back to the native OCI SDK path.
 
 Lambda Cloud |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1639,6 +1735,67 @@ You can verify your credentials are set up correctly by running:
 .. code-block:: shell
 
   sky check vastdata
+
+.. _huggingface-installation:
+
+Hugging Face
+~~~~~~~~~~~~
+
+SkyPilot can use the `Hugging Face Hub <https://huggingface.co/docs/huggingface_hub>`__ as a storage backend. `Hugging Face Buckets <https://huggingface.co/docs/huggingface_hub/guides/buckets>`__ are supported for both read and write (``hf://buckets/<namespace>/<bucket_name>``), and Hub repos, datasets, and spaces are supported as read-only sources (``hf://<owner>/<model>``, ``hf://datasets/...``, ``hf://spaces/...``).
+
+Install the necessary dependencies for Hugging Face:
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[huggingface]"
+      # From nightly build
+      uv pip install "skypilot-nightly[huggingface]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[huggingface]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[huggingface]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[huggingface]"
+      # From nightly build
+      pip install "skypilot-nightly[huggingface]"
+      # From source
+      pip install -e ".[huggingface]"
+
+Authenticate with the Hugging Face Hub, either by logging in with the ``hf`` CLI or by setting the ``HF_TOKEN`` environment variable:
+
+.. code-block:: shell
+
+  # Option 1: log in interactively (writes ~/.cache/huggingface/token)
+  hf auth login
+
+  # Option 2: set a token directly (see https://huggingface.co/settings/tokens)
+  export HF_TOKEN=<your-token>
+
+You can verify your credentials are set up correctly by running:
+
+.. code-block:: shell
+
+  sky check huggingface
 
 
 Prime Intellect |community-badge|

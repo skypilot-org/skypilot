@@ -57,11 +57,12 @@ import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
+import { normalizeUrl, useLogLinkExtractor } from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
@@ -603,6 +604,23 @@ function JobDetails() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {/* Slot for plugins to add extra log filters beside the
+                        node picker. jobId/taskId mirror the jobs.detail.logs
+                        context exactly (the per-task object's id for
+                        multi-task jobs) so a plugin can key shared state on
+                        the same identity as the log pane below. */}
+                    <PluginSlot
+                      name="jobs.detail.logfilters"
+                      context={{
+                        jobId: (isMultiTask
+                          ? allTasks[selectedTaskIndex]
+                          : detailJobData
+                        )?.id,
+                        taskId: isMultiTask ? selectedTaskIndex : null,
+                        isController: false,
+                        refreshTrigger: refreshLogsFlag,
+                      }}
+                    />
                     {!logsSlotHasPlugin && (
                       <span className="text-xs text-gray-500">
                         (Logs are not streaming; click refresh to fetch the
@@ -921,15 +939,6 @@ function ControllerLogsSection({
     </div>
   );
 }
-// URL patterns for extracting links from logs
-// Each pattern has a name (used as link label) and a regex to match entire tokens
-// Patterns use ^ and $ anchors for exact token matching
-const URL_PATTERNS = {
-  // Matches W&B SaaS (wandb.ai) and Dedicated Cloud tenants (<tenant>.wandb.io).
-  'W&B Run':
-    /^https:\/\/(?:wandb\.ai|[^/]+\.wandb\.io)\/[^/]+\/[^/]+\/runs\/[^/]+$/,
-};
-
 function JobDetailsContent({
   jobData,
   allTasks = [],
@@ -1151,50 +1160,17 @@ function JobDetailsContent({
     }
   }, [logs, onNodesExtracted]);
 
-  // Persist extracted links across tab changes using a ref
-  const extractedLinksRef = useRef({});
+  // External-link extraction from log lines. Matches accumulate inside
+  // the hook so they survive tab switches and re-renders. `scanLines` is
+  // a stable callback: besides feeding it from the OSS streamer below,
+  // it is handed to a plugin that owns the logs slot — the OSS streamer
+  // does not run in that case, so the plugin forwards its own lines.
+  const { extractedLinks: logExtractedLinks, scanLines } =
+    useLogLinkExtractor();
 
-  // Extract URLs from logs using whitelisted patterns
-  // Processes line-by-line with tokenization for exact word-level matching
-  // Updates are accumulated in a ref so they persist when switching tabs
-  const logExtractedLinks = useMemo(() => {
-    // Start with previously found links
-    const extractedLinks = { ...extractedLinksRef.current };
-    const foundPatterns = new Set(Object.keys(extractedLinks));
-
-    // Process line by line to avoid creating one large string
-    for (const line of logs) {
-      // Skip if we've found all patterns
-      if (foundPatterns.size === Object.keys(URL_PATTERNS).length) {
-        break;
-      }
-
-      // Split line into tokens by whitespace and common delimiters
-      // This handles cases like: "URL: https://..." or "(https://...)"
-      const tokens = line.split(/[\s"'<>()[\]{},;]+/);
-
-      for (const token of tokens) {
-        // Clean up trailing punctuation that might be attached
-        const cleanToken = token.replace(/[.,:;!?]+$/, '');
-        if (!cleanToken) continue;
-
-        // Check each pattern against the clean token
-        for (const [linkName, pattern] of Object.entries(URL_PATTERNS)) {
-          if (foundPatterns.has(linkName)) continue;
-
-          if (pattern.test(cleanToken)) {
-            extractedLinks[linkName] = cleanToken;
-            foundPatterns.add(linkName);
-            break;
-          }
-        }
-      }
-    }
-
-    // Persist to ref so links survive tab switches
-    extractedLinksRef.current = extractedLinks;
-    return extractedLinks;
-  }, [logs]);
+  useEffect(() => {
+    scanLines(logs);
+  }, [logs, scanLines]);
 
   // Notify parent when links are extracted (for cross-component sharing)
   useEffect(() => {
@@ -1276,6 +1252,16 @@ function JobDetailsContent({
           selectedNode,
           isController: false,
           onNodesExtracted,
+          // The OSS streamer that feeds External Links extraction does
+          // not run when a plugin owns this slot. The plugin should
+          // forward its visible log lines (raw buffer string or array of
+          // lines) through this callback so extraction keeps working.
+          onLogLines: scanLines,
+          // Forward the refresh-button signal so a plugin owning this slot
+          // can re-fetch on refresh (the OSS streamer it replaces consumes
+          // the same flag). Without this the refresh button is a no-op for
+          // plugin-owned log panels.
+          refreshTrigger: refreshFlag,
         }}
         fallback={defaultLogsContent}
       />
@@ -1315,6 +1301,8 @@ function JobDetailsContent({
           status: jobData.status,
           isPreStart,
           isController: true,
+          // Forward the refresh-button signal (see jobs.detail.logs slot).
+          refreshTrigger: refreshFlag,
         }}
         fallback={defaultControllerLogsContent}
       />
@@ -1402,6 +1390,16 @@ function JobDetailsContent({
             ? formatFullTimestamp(jobData.submitted_at)
             : 'N/A'}
         </div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Duration</div>
+        <div className="text-base mt-1">
+          {formatDuration(jobData.job_duration)}
+        </div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Recoveries</div>
+        <div className="text-base mt-1">{jobData.recoveries || 0}</div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">
@@ -1561,12 +1559,7 @@ function JobDetailsContent({
           {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
             <div className="flex flex-wrap gap-4">
               {Object.entries(combinedLinks).map(([label, url]) => {
-                // Normalize URL - add https:// if no protocol specified
-                const normalizedUrl =
-                  url.startsWith('http://') || url.startsWith('https://')
-                    ? url
-                    : `https://${url}`;
-
+                const normalizedUrl = normalizeUrl(url);
                 return (
                   <a
                     key={label}
@@ -1586,7 +1579,11 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Queue Details section - right column */}
+      {/* Details section - surfaces the reason behind the current status
+          (e.g. why a job is still PENDING). A plugin may take over this slot
+          to render richer queue-specific details (e.g. Kueue); otherwise the
+          OSS fallback shows the plain details string so the reason is visible
+          here in the job details view, not just in the event table. */}
       {jobData.details && (
         <PluginSlot
           name="jobs.detail.queue_details"
@@ -1597,6 +1594,14 @@ function JobDetailsContent({
             jobData: jobData,
             title: 'Queue Details',
           }}
+          fallback={
+            <div>
+              <div className="text-gray-600 font-medium text-base">Details</div>
+              <div className="text-base mt-1 whitespace-pre-wrap break-words">
+                {jobData.details}
+              </div>
+            </div>
+          }
         />
       )}
 
@@ -1672,7 +1677,7 @@ function JobDetailsContent({
                 </div>
 
                 {isYamlExpanded && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                  <div>
                     {(() => {
                       const yamlDocs = formatJobYaml(jobData.dag_yaml);
                       // Build JobGroup header with name and execution
@@ -1696,9 +1701,10 @@ function JobDetailsContent({
                       } else if (yamlDocs.length === 1) {
                         // Single document - show directly
                         return (
-                          <YamlHighlighter className="whitespace-pre-wrap">
-                            {jobGroupHeader + yamlDocs[0].content}
-                          </YamlHighlighter>
+                          <YamlCodeBlock
+                            value={jobGroupHeader + yamlDocs[0].content}
+                            readOnly
+                          />
                         );
                       } else {
                         // Multiple documents - show toggle and content
@@ -1722,12 +1728,15 @@ function JobDetailsContent({
 
                             {showFullYaml ? (
                               // Show full YAML with JobGroup header
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {jobGroupHeader +
+                              <YamlCodeBlock
+                                value={
+                                  jobGroupHeader +
                                   yamlDocs
                                     .map((doc) => doc.content)
-                                    .join('\n---\n')}
-                              </YamlHighlighter>
+                                    .join('\n---\n')
+                                }
+                                readOnly
+                              />
                             ) : (
                               // Show per-job YAMLs
                               yamlDocs.map((doc, index) => (
@@ -1752,9 +1761,10 @@ function JobDetailsContent({
                                   </button>
                                   {expandedYamlDocs[index] && (
                                     <div className="mt-3 ml-6">
-                                      <YamlHighlighter className="whitespace-pre-wrap">
-                                        {doc.content}
-                                      </YamlHighlighter>
+                                      <YamlCodeBlock
+                                        value={doc.content}
+                                        readOnly
+                                      />
                                     </div>
                                   )}
                                 </div>
