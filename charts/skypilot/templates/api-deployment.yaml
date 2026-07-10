@@ -775,7 +775,21 @@ spec:
       {{- end }}
 
       volumes:
-      {{- if .Values.storage.enabled }}
+      {{- if .Values.storage.existingClaim }}
+      # Attach a pre-existing, out-of-band PVC as the state volume. Takes
+      # precedence over the chart-provisioned PVC (pvc.yaml skips provisioning
+      # when existingClaim is set).
+      - name: state-volume
+        persistentVolumeClaim:
+          claimName: {{ .Values.storage.existingClaim }}
+      {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+      # RollingUpdate with persistent storage: use a separate emptyDir for
+      # ~/.sky to avoid running SQLite on NFS. Only specific subdirectories
+      # like api_server/clients are persisted to the claim.
+      - name: sky-ephemeral
+        emptyDir: {}
+      {{- end }}
+      {{- else if .Values.storage.enabled }}
       - name: state-volume
         persistentVolumeClaim:
           claimName: {{ $fullName }}-state
