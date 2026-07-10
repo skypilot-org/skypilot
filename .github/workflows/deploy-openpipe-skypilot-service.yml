@@ -6,6 +6,7 @@ on:
       - master
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -16,6 +17,73 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for source checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Give all push-triggered workflows time to register before polling.
+          sleep 30
+          deadline=$((SECONDS + 1800))
+          while (( SECONDS < deadline )); do
+            runs_json="$(
+              gh run list \
+                --repo "${GITHUB_REPOSITORY}" \
+                --commit "${GITHUB_SHA}" \
+                --limit 100 \
+                --json databaseId,workflowName,status,conclusion,url
+            )"
+            result="$(
+              RUNS_JSON="${runs_json}" CURRENT_RUN_ID="${GITHUB_RUN_ID}" \
+                python3 - <<'PY'
+          import json
+          import os
+
+          current_run_id = int(os.environ['CURRENT_RUN_ID'])
+          runs = [
+              run for run in json.loads(os.environ['RUNS_JSON'])
+              if run['databaseId'] != current_run_id
+          ]
+          if not runs:
+              print('waiting:no source checks registered')
+          elif any(run['status'] != 'completed' for run in runs):
+              pending = sorted({
+                  run['workflowName'] for run in runs
+                  if run['status'] != 'completed'
+              })
+              print(f'waiting:{", ".join(pending)}')
+          else:
+              failed = [
+                  run for run in runs
+                  if run['conclusion'] not in ('success', 'skipped', 'neutral')
+              ]
+              if failed:
+                  print('failed:' + ', '.join(
+                      f'{run["workflowName"]}={run["conclusion"]} '
+                      f'({run["url"]})' for run in failed))
+              else:
+                  print(f'success:{len(runs)} source workflow run(s) passed')
+          PY
+            )"
+            case "${result}" in
+              success:*)
+                echo "${result#success:}"
+                break
+                ;;
+              failed:*)
+                echo "${result#failed:}" >&2
+                exit 1
+                ;;
+              waiting:*)
+                echo "Waiting for ${result#waiting:}"
+                sleep 15
+                ;;
+            esac
+          done
+          if (( SECONDS >= deadline )); then
+            echo "Timed out waiting for source checks." >&2
+            exit 1
+          fi
+
       - name: Check dispatch app credentials
         id: app-credentials
         env:
