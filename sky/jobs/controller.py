@@ -21,6 +21,7 @@ import sky
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -275,7 +276,24 @@ class JobController:
         We do not stream the logs from the cluster directly, as the
         download and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
+
+        When a logging agent forwards the job's logs to an external store AND a
+        log reader is registered to stream them back, that external store is the
+        durable copy, so we skip pulling the logs back to the controller
+        entirely; ``sky jobs logs`` streams them on demand (from the cluster
+        while it is alive, then from the external store once it is gone). If the
+        logs are forwarded but there is no reader to read them back (e.g. a
+        write-only logging store), we still keep the local copy so ``sky jobs
+        logs`` can serve a finished job's logs.
         """
+        if (logs.is_logging_agent_configured() and
+                logs.get_log_reader() is not None):
+            logger.info(
+                f'Logging agent and log reader are configured for job '
+                f'{self._job_id}; logs are forwarded to the external store and '
+                'read back on demand. Skipping downloading and streaming the '
+                'logs to the controller.')
+            return
         if handle is None:
             logger.info(f'Cluster for job {self._job_id} is not found. '
                         'Skipping downloading and streaming the logs.')

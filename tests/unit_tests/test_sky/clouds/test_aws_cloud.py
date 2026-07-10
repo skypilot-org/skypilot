@@ -341,6 +341,7 @@ class TestEfaHelpers:
     def test_is_efa_instance_type(self):
         # True for EFA families
         assert aws_mod._is_efa_instance_type('g6.12xlarge') is True
+        assert aws_mod._is_efa_instance_type('g7e.12xlarge') is True
         assert aws_mod._is_efa_instance_type('p5.48xlarge') is True
         assert aws_mod._is_efa_instance_type('p6-b200.24xlarge') is True
         # False for non-EFA families

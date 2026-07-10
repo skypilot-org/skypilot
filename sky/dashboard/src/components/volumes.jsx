@@ -19,7 +19,11 @@ import {
   TableCell,
   EmptyTableState,
 } from '@/components/ui/table';
-import { isForceEmpty } from '@/lib/utils';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
@@ -47,6 +51,9 @@ import cachePreloader from '@/lib/cache-preloader';
 import { trackVolumeAction } from '@/lib/analytics';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
+
+const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 
 export function Volumes() {
   const router = useRouter();
@@ -471,7 +478,15 @@ function VolumesTable({
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice persisted in localStorage,
+  // falling back to the default of 10.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(
+      VOLUMES_PAGE_SIZE_STORAGE_KEY,
+      VOLUMES_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -570,6 +585,8 @@ function VolumesTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(VOLUMES_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 

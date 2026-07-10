@@ -158,8 +158,9 @@ def get_skypilot_config_lock_path() -> str:
 
 # Distributed lock id guarding config-file reads/writes.
 # A Postgres advisory lock if PG is available, falling back to a file
-# lock locally). All config-file writers/readers MUST use this same id
-#  so they stay mutually exclusive.
+# lock locally). All config-file writers/readers MUST use this same id.
+# Writers take it exclusively; pure reads (reloads) take it shared, so reads
+# don't serialize against each other but still block against a mid-write writer.
 SKYPILOT_CONFIG_LOCK_ID = 'skypilot-config-file'
 
 # Bounded wait for `safe_reload_config` (a read): long enough to ride out a
@@ -178,12 +179,21 @@ _CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS = 20
 _CONFIG_LOCK_POLL_INTERVAL_SECONDS = 0.1
 
 
-def get_skypilot_config_lock(timeout: Optional[float] = None):
+def get_skypilot_config_lock(timeout: Optional[float] = None,
+                             shared_lock: bool = False):
     """Return the distributed lock guarding the config file.
 
     ``timeout=None`` waits indefinitely (matches the historical file-lock
     behavior); callers that must not block forever pass a timeout and handle
     ``locks.LockTimeout``.
+
+    ``shared_lock=True`` acquires a *shared* (read) advisory lock instead of the
+    default *exclusive* (write) lock. Concurrent shared holders don't block each
+    other, but a shared holder still blocks against an exclusive writer (and
+    vice versa) for torn-read safety. Use it for pure config *reads* (reloads);
+    read-modify-write callers MUST keep the exclusive lock. Only the Postgres
+    backend distinguishes the two modes — the filelock fallback is always
+    exclusive (acceptable at local/low concurrency).
     """
     # Lazy import: sky.utils.locks -> global_user_state -> skypilot_config, so a
     # top-level import here would be circular. Imported at call time (after all
@@ -191,7 +201,8 @@ def get_skypilot_config_lock(timeout: Optional[float] = None):
     from sky.utils import locks  # pylint: disable=import-outside-toplevel
     return locks.get_lock(SKYPILOT_CONFIG_LOCK_ID,
                           timeout,
-                          poll_interval=_CONFIG_LOCK_POLL_INTERVAL_SECONDS)
+                          poll_interval=_CONFIG_LOCK_POLL_INTERVAL_SECONDS,
+                          shared_lock=shared_lock)
 
 
 def _get_config_context() -> ConfigContext:
@@ -638,12 +649,20 @@ def safe_reload_config() -> None:
     lock timeout we log and proceed with the currently loaded config rather than
     block the caller indefinitely behind a wedged lock holder (the historical
     ``timeout=None`` could hang every reloader across replicas forever).
+
+    Uses a *shared* lock so concurrent reloads (this is a hot path: every
+    sync-handler config refresh, login-time role seed, per-replica reconcile)
+    don't serialize against each other; a writer's exclusive lock still blocks
+    reloads mid-write for torn-read safety. Safe against concurrent reloads
+    within a single process because `reload_config` swaps the new config in
+    atomically (no transient empty-config window).
     """
     # Lazy import to avoid the sky.utils.locks -> global_user_state ->
     # skypilot_config import cycle (see get_skypilot_config_lock).
     from sky.utils import locks  # pylint: disable=import-outside-toplevel
     try:
-        with get_skypilot_config_lock(_CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS):
+        with get_skypilot_config_lock(_CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS,
+                                      shared_lock=True):
             reload_config()
     except locks.LockTimeout:
         logger.warning(
@@ -717,10 +736,9 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
 
 
 def _reload_config_from_internal_file(internal_config_path: str) -> None:
-    # Reset the global variables, to avoid using stale values.
-    _set_loaded_config(config_utils.Config())
-    _set_loaded_config_path(None)
-
+    # Build the new config fully, then swap it in at the end (see
+    # `_reload_config_as_server` for why we don't blank up front). A missing
+    # file raises with the previously-loaded config left intact.
     config_path = os.path.expanduser(internal_config_path)
     if not os.path.exists(config_path):
         with ux_utils.print_exception_no_traceback():
@@ -748,10 +766,12 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
 
 
 def _reload_config_as_server() -> None:
-    # Reset the global variables, to avoid using stale values.
-    _set_loaded_config(config_utils.Config())
-    _set_loaded_config_path(None)
-
+    # Build the new config fully, then swap it in with a single
+    # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
+    # `get_nested` reads without the config lock (hot path), so a transient
+    # empty config would be observable by a concurrent reader and e.g. make
+    # `rbac.get_default_role()` fall back to admin. On any exception below the
+    # previously-loaded config is left in place (stale is safer than empty).
     server_config_path = _resolve_server_config_path()
     server_config = _get_config_from_path(server_config_path)
     # Get the db url from the env var. _get_config_from_path should have moved
@@ -785,10 +805,8 @@ def _reload_config_as_server() -> None:
 
 
 def _reload_config_as_client() -> None:
-    # Reset the global variables, to avoid using stale values.
-    _set_loaded_config(config_utils.Config())
-    _set_loaded_config_path(None)
-
+    # Build the new config fully, then swap it in at the end (see
+    # `_reload_config_as_server` for why we don't blank up front).
     overrides: List[config_utils.Config] = []
     user_config_path = resolve_user_config_path()
     user_config = _get_config_from_path(user_config_path)

@@ -576,8 +576,13 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
-                permission.permission_service.add_user_if_not_exists(
-                    auth_user.id)
+                # Offload the blocking config reload + role seed to a worker
+                # thread so this async middleware doesn't block the event loop.
+                # The reload lets a runtime `rbac.default_role` change take
+                # effect for this new user without a restart (the main
+                # API-server process does not reload config per request).
+                await asyncio.to_thread(permission.seed_new_user_role,
+                                        auth_user.id)
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:

@@ -14,6 +14,7 @@ import sqlalchemy_adapter
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import common
@@ -659,3 +660,19 @@ def _policy_lock() -> Generator[None, None, None]:
 
 # Singleton instance of PermissionService for other modules to use.
 permission_service = PermissionService()
+
+
+def seed_new_user_role(user_id: str) -> None:
+    """Reload config, then assign the default role to a new user.
+
+    Refreshes the in-memory config first so a runtime change to
+    `rbac.default_role` is honored without a server restart: the main API-server
+    process (auth middlewares, sync handlers) bypasses the executor's
+    per-request config reload. `add_user_if_not_exists` is a no-op if the user
+    already has a role.
+
+    Blocking (config file/DB read + policy lock). Async callers MUST offload it
+    via `asyncio.to_thread` so it does not block the event loop.
+    """
+    skypilot_config.safe_reload_config()
+    permission_service.add_user_if_not_exists(user_id)

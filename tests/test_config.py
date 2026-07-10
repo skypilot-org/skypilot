@@ -166,6 +166,100 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _check_empty_config()
 
 
+def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
+    """A reload must never expose a transient empty config.
+
+    `reload_config` builds the new config fully and swaps it in with a single
+    assignment. A concurrent reader that hits `get_nested` while a reload is in
+    flight must observe the previously-loaded value, never the fallback. This
+    guards against the old blank-then-repopulate behavior, which let a reader
+    (e.g. `rbac.get_default_role()`) fall back to admin mid-reload.
+    """
+    config_file = tmp_path / 'config.yaml'
+    config_file.write_text('rbac:\n  default_role: user\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_file)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'does_not_exist')
+    _reload_config()
+    assert skypilot_config.get_nested(('rbac', 'default_role'),
+                                      'admin') == 'user'
+
+    # Spy on the file read that happens in the middle of a reload; while it runs,
+    # the not-yet-swapped config must still return the old value. With the old
+    # pre-blanking this observed 'admin' (the fallback); with the atomic swap it
+    # stays 'user'.
+    observed = []
+    real_get_config_from_path = skypilot_config._get_config_from_path
+
+    def spy_get_config_from_path(path):
+        observed.append(
+            skypilot_config.get_nested(('rbac', 'default_role'), 'admin'))
+        return real_get_config_from_path(path)
+
+    monkeypatch.setattr(skypilot_config, '_get_config_from_path',
+                        spy_get_config_from_path)
+    # Call reload_config directly (not `_reload_config`, which resets the loaded
+    # config first) so the previously-loaded config is what a mid-reload reader
+    # would see.
+    skypilot_config.reload_config()
+
+    assert observed, 'reload did not read the config file'
+    assert all(value == 'user' for value in observed), (
+        f'config was empty mid-reload (would fall back to admin): {observed}')
+
+
+class _DummyLock:
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_safe_reload_config_uses_shared_lock(monkeypatch) -> None:
+    """`safe_reload_config` (a pure read) must take the lock in SHARED mode so
+    concurrent reloads don't serialize. Reverting `shared_lock=True` fails this.
+    """
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+
+    skypilot_config.safe_reload_config()
+
+    assert captured.get('shared_lock') is True
+
+
+def test_get_skypilot_config_lock_defaults_to_exclusive(monkeypatch) -> None:
+    """Writers (the default) must take the lock EXCLUSIVELY."""
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+
+    skypilot_config.get_skypilot_config_lock()
+
+    assert captured.get('shared_lock') is False
+
+
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:

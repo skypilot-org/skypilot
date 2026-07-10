@@ -28,7 +28,8 @@ def test_get_skypilot_config_lock_uses_distributed_lock():
     get_lock.assert_called_once_with(
         skypilot_config.SKYPILOT_CONFIG_LOCK_ID,
         42,
-        poll_interval=skypilot_config._CONFIG_LOCK_POLL_INTERVAL_SECONDS)  # pylint: disable=protected-access
+        poll_interval=skypilot_config._CONFIG_LOCK_POLL_INTERVAL_SECONDS,  # pylint: disable=protected-access
+        shared_lock=False)
     assert skypilot_config.SKYPILOT_CONFIG_LOCK_ID == 'skypilot-config-file'
 
 
@@ -38,9 +39,11 @@ def test_safe_reload_config_holds_the_config_lock():
             mock.patch.object(skypilot_config, 'reload_config') as reload_config:
         skypilot_config.safe_reload_config()
     # The reload must happen inside the (distributed) config lock, with a
-    # bounded wait (not the historical infinite timeout).
+    # bounded wait (not the historical infinite timeout), and as a SHARED read
+    # so concurrent reloads don't serialize.
     get_lock.assert_called_once_with(
-        skypilot_config._CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS)  # pylint: disable=protected-access
+        skypilot_config._CONFIG_RELOAD_LOCK_TIMEOUT_SECONDS,  # pylint: disable=protected-access
+        shared_lock=True)
     reload_config.assert_called_once()
 
 

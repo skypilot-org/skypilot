@@ -358,9 +358,11 @@ spec:
           subPath: .sky
         {{- end }}
         {{- if .Values.storage.enabled }}
+        {{- if ne .Values.apiService.persistSSHConfig false }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        {{- end }}
         # Mount the entire sky_logs folder because the request
         # logs have been moved out of this directory
         - name: state-volume
