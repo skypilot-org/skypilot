@@ -508,6 +508,12 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "services" ]
       verbs: [ "*" ]
+    # Required for cross-cluster Job Group service discovery: the jobs
+    # controller manages selectorless mirror Services with manual Endpoints
+    # so tasks in one cluster can resolve tasks in another.
+    - apiGroups: [ "" ]
+      resources: [ "endpoints" ]
+      verbs: [ "get", "list", "create", "patch", "update", "delete" ]
     # Required for managing SSH keys
     - apiGroups: [ "" ]
       resources: [ "secrets" ]

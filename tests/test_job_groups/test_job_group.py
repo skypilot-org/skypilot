@@ -639,6 +639,520 @@ class TestJobGroupNetworking:
             'Script should still use sudo commands (to be aliased when root)')
 
 
+def _make_k8s_handle(context: str,
+                     cluster_name_on_cloud: str = 'cluster',
+                     num_nodes: int = 1):
+    """Build a fake handle that `_is_kubernetes`/`_get_context_from_handle`
+    accept: a real `clouds.Kubernetes()` cloud plus `region` as the
+    kubeconfig context (matching the real Resources contract)."""
+    handle = mock.MagicMock()
+    handle.launched_resources = mock.MagicMock()
+    handle.launched_resources.cloud = clouds.Kubernetes()
+    handle.launched_resources.region = context
+    # cluster_yaml=None routes namespace resolution through the kubeconfig
+    # fallback (get_kube_config_context_namespace), which tests patch.
+    handle.cluster_yaml = None
+    handle.cluster_name_on_cloud = cluster_name_on_cloud
+    handle.stable_internal_external_ips = [
+        (f'10.0.0.{i}', f'1.2.3.{i}') for i in range(num_nodes)
+    ]
+    return handle
+
+
+def _make_non_k8s_handle():
+    handle = mock.MagicMock()
+    handle.launched_resources = mock.MagicMock()
+    handle.launched_resources.cloud = clouds.AWS()
+    handle.launched_resources.region = 'us-east-1'
+    return handle
+
+
+def _make_task(name: str):
+    task = mock.MagicMock(spec=task_lib.Task)
+    task.name = name
+    return task
+
+
+def _make_pod(name: str,
+              pod_ip: Optional[str] = '10.0.0.1',
+              hostname: Optional[str] = None,
+              deletion_timestamp: Optional[str] = None):
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod.metadata.deletion_timestamp = deletion_timestamp
+    pod.status.pod_ip = pod_ip
+    pod.spec.hostname = hostname
+    return pod
+
+
+class TestCrossContextMirrors:
+    """Tests for cross-context JobGroup DNS mirror machinery."""
+
+    # -- Multi-context detection -----------------------------------------
+
+    def test_group_spans_multiple_contexts_true_for_distinct_contexts(self):
+        from sky.jobs import job_group_networking
+
+        handle_a = _make_k8s_handle('ctx-a')
+        handle_b = _make_k8s_handle('ctx-b')
+
+        with mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace',
+                return_value='default'):
+            result = job_group_networking.group_spans_multiple_contexts(
+                [(_make_task('task-a'), handle_a),
+                 (_make_task('task-b'), handle_b)],
+                job_id=1)
+
+        assert result is True
+
+    def test_group_spans_multiple_contexts_false_for_same_context(self):
+        from sky.jobs import job_group_networking
+
+        handle_a = _make_k8s_handle('ctx-a', cluster_name_on_cloud='task-a')
+        handle_b = _make_k8s_handle('ctx-a', cluster_name_on_cloud='task-b')
+
+        with mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace',
+                return_value='default'):
+            result = job_group_networking.group_spans_multiple_contexts(
+                [(_make_task('task-a'), handle_a),
+                 (_make_task('task-b'), handle_b)],
+                job_id=1)
+
+        assert result is False
+
+    def test_group_spans_multiple_contexts_false_for_non_kubernetes(self):
+        from sky.jobs import job_group_networking
+
+        result = job_group_networking.group_spans_multiple_contexts(
+            [(_make_task('task-a'), _make_non_k8s_handle()),
+             (_make_task('task-b'), _make_non_k8s_handle())],
+            job_id=1)
+
+        assert result is False
+
+    # -- _mirror_specs ------------------------------------------------------
+
+    def test_mirror_specs_v1_peer_single_head_only_entry(self):
+        from sky.jobs import job_group_networking
+
+        peer = job_group_networking._TaskNetworkInfo(
+            task_name='trainer',
+            cluster_name_on_cloud='trainer-cluster',
+            context='ctx-b',
+            namespace='ns-b',
+            num_nodes=2,
+            is_v1=True)
+
+        specs = job_group_networking._mirror_specs(peer, {
+            0: '10.0.0.1',
+            1: '10.0.0.2',
+        })
+
+        # V1 mirrors expose node 0 only, with the 'hostname' field the
+        # runtime-supplied mapping string expects.
+        assert specs == [('trainer-cluster', [{
+            'ip': '10.0.0.1',
+            'hostname': 'node-0',
+        }])]
+
+    def test_mirror_specs_v1_peer_missing_pod_ip_yields_empty_addresses(self):
+        from sky.jobs import job_group_networking
+
+        peer = job_group_networking._TaskNetworkInfo(
+            task_name='trainer',
+            cluster_name_on_cloud='trainer-cluster',
+            context='ctx-b',
+            namespace='ns-b',
+            num_nodes=1,
+            is_v1=True)
+
+        specs = job_group_networking._mirror_specs(peer, {})
+
+        assert specs == [('trainer-cluster', [])]
+
+    def test_mirror_specs_classic_peer_multi_node_names(self):
+        from sky.jobs import job_group_networking
+
+        peer = job_group_networking._TaskNetworkInfo(
+            task_name='trainer',
+            cluster_name_on_cloud='trainer-cluster',
+            context='ctx-b',
+            namespace='ns-b',
+            num_nodes=3,
+            is_v1=False)
+
+        specs = job_group_networking._mirror_specs(peer, {
+            0: '10.0.0.1',
+            1: '10.0.0.2',
+            2: '10.0.0.3',
+        })
+
+        names = [name for name, _ in specs]
+        assert names == [
+            'trainer-cluster-head',
+            'trainer-cluster-worker1',
+            'trainer-cluster-worker2',
+        ]
+        # Classic mirrors don't need the 'hostname' field.
+        for _, addresses in specs:
+            for address in addresses:
+                assert 'hostname' not in address
+
+    def test_mirror_specs_classic_peer_missing_pod_ip_yields_empty_addresses(
+            self):
+        from sky.jobs import job_group_networking
+
+        peer = job_group_networking._TaskNetworkInfo(
+            task_name='trainer',
+            cluster_name_on_cloud='trainer-cluster',
+            context='ctx-b',
+            namespace='ns-b',
+            num_nodes=2,
+            is_v1=False)
+
+        specs = job_group_networking._mirror_specs(peer, {0: '10.0.0.1'})
+
+        assert specs == [
+            ('trainer-cluster-head', [{
+                'ip': '10.0.0.1'
+            }]),
+            ('trainer-cluster-worker1', []),
+        ]
+
+    # -- _list_peer_pod_ips ---------------------------------------------
+
+    def test_list_peer_pod_ips_uses_first_selector_when_it_matches(self):
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_pod.return_value.items = [
+                _make_pod('cluster-a-head', '10.0.0.1'),
+                _make_pod('cluster-a-worker1', '10.0.0.2'),
+            ]
+
+            result = job_group_networking._list_peer_pod_ips(
+                'ctx-a', 'ns-a', 'cluster-a')
+
+        assert result == {0: '10.0.0.1', 1: '10.0.0.2'}
+        core_api.list_namespaced_pod.assert_called_once()
+        _, kwargs = core_api.list_namespaced_pod.call_args
+        assert kwargs['label_selector'] == 'skypilot-cluster-name=cluster-a'
+
+    def test_list_peer_pod_ips_falls_back_to_job_name_selector(self):
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            core_api = mock_k8s.core_api.return_value
+            empty = mock.MagicMock()
+            empty.items = []
+            matched = mock.MagicMock()
+            matched.items = [_make_pod('cluster-a-head', '10.0.0.1')]
+            core_api.list_namespaced_pod.side_effect = [empty, matched]
+
+            result = job_group_networking._list_peer_pod_ips(
+                'ctx-a', 'ns-a', 'cluster-a')
+
+        assert result == {0: '10.0.0.1'}
+        assert core_api.list_namespaced_pod.call_count == 2
+        _, second_kwargs = core_api.list_namespaced_pod.call_args_list[1]
+        assert (second_kwargs['label_selector'] ==
+                'skypilot-managed-job-name=cluster-a')
+
+    def test_list_peer_pod_ips_parses_node_index_from_hostname(self):
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_pod.return_value.items = [
+                _make_pod('some-runtime-managed-pod-name',
+                          '10.0.0.5',
+                          hostname='node-0'),
+            ]
+
+            result = job_group_networking._list_peer_pod_ips(
+                'ctx-a', 'ns-a', 'trainer')
+
+        assert result == {0: '10.0.0.5'}
+
+    def test_list_peer_pod_ips_skips_terminating_and_ipless_pods(self):
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_pod.return_value.items = [
+                _make_pod('cluster-a-head',
+                          '10.0.0.1',
+                          deletion_timestamp='2024-01-01T00:00:00Z'),
+                _make_pod('cluster-a-worker1', pod_ip=None),
+                _make_pod('cluster-a-worker2', '10.0.0.3'),
+            ]
+
+            result = job_group_networking._list_peer_pod_ips(
+                'ctx-a', 'ns-a', 'cluster-a')
+
+        assert result == {2: '10.0.0.3'}
+
+    # -- _apply_mirrors_in_cluster ----------------------------------------
+
+    def test_apply_mirrors_creates_service_and_endpoints(self):
+        from kubernetes.client.rest import ApiException
+
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            mock_k8s.api_exception.return_value = ApiException
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_service.return_value.items = []
+            core_api.read_namespaced_endpoints.side_effect = ApiException(
+                status=404)
+
+            job_group_networking._apply_mirrors_in_cluster(
+                'ctx-a', 'ns-a', 'my-group', 42,
+                {'peer-head': [{
+                    'ip': '10.0.0.1'
+                }]}, True)
+
+        core_api.create_namespaced_service.assert_called_once()
+        args, _ = core_api.create_namespaced_service.call_args
+        assert args[0] == 'ns-a'
+        assert args[1]['metadata']['name'] == 'peer-head'
+        core_api.create_namespaced_endpoints.assert_called_once()
+        endpoints_args, _ = core_api.create_namespaced_endpoints.call_args
+        assert endpoints_args[1]['subsets'] == [{
+            'addresses': [{
+                'ip': '10.0.0.1'
+            }]
+        }]
+
+    def test_apply_mirrors_tolerates_409_on_create_service(self):
+        from kubernetes.client.rest import ApiException
+
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            mock_k8s.api_exception.return_value = ApiException
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_service.return_value.items = []
+            core_api.create_namespaced_service.side_effect = ApiException(
+                status=409)
+            core_api.read_namespaced_endpoints.side_effect = ApiException(
+                status=404)
+
+            # Should not raise despite the service already existing.
+            job_group_networking._apply_mirrors_in_cluster(
+                'ctx-a', 'ns-a', 'my-group', 42,
+                {'peer-head': [{
+                    'ip': '10.0.0.1'
+                }]}, True)
+
+        core_api.create_namespaced_endpoints.assert_called_once()
+
+    def test_apply_mirrors_raises_on_non_409_service_error(self):
+        from kubernetes.client.rest import ApiException
+
+        from sky.jobs import job_group_networking
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            mock_k8s.api_exception.return_value = ApiException
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_service.return_value.items = []
+            core_api.create_namespaced_service.side_effect = ApiException(
+                status=403)
+
+            with pytest.raises(ApiException):
+                job_group_networking._apply_mirrors_in_cluster(
+                    'ctx-a', 'ns-a', 'my-group', 42,
+                    {'peer-head': [{
+                        'ip': '10.0.0.1'
+                    }]}, True)
+
+    def test_apply_mirrors_endpoints_not_replaced_when_unchanged(self):
+        from kubernetes.client.rest import ApiException
+
+        from sky.jobs import job_group_networking
+
+        existing = mock.MagicMock()
+        subset = mock.MagicMock()
+        address = mock.MagicMock()
+        address.ip = '10.0.0.1'
+        address.hostname = None
+        subset.addresses = [address]
+        existing.subsets = [subset]
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            mock_k8s.api_exception.return_value = ApiException
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_service.return_value.items = []
+            core_api.create_namespaced_service.side_effect = ApiException(
+                status=409)
+            core_api.read_namespaced_endpoints.return_value = existing
+
+            job_group_networking._apply_mirrors_in_cluster(
+                'ctx-a', 'ns-a', 'my-group', 42,
+                {'peer-head': [{
+                    'ip': '10.0.0.1'
+                }]}, True)
+
+        core_api.replace_namespaced_endpoints.assert_not_called()
+        core_api.create_namespaced_endpoints.assert_not_called()
+
+    def test_apply_mirrors_endpoints_replaced_when_ip_changes(self):
+        from kubernetes.client.rest import ApiException
+
+        from sky.jobs import job_group_networking
+
+        existing = mock.MagicMock()
+        subset = mock.MagicMock()
+        address = mock.MagicMock()
+        address.ip = '10.0.0.1'
+        address.hostname = None
+        subset.addresses = [address]
+        existing.subsets = [subset]
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            mock_k8s.api_exception.return_value = ApiException
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_service.return_value.items = []
+            core_api.create_namespaced_service.side_effect = ApiException(
+                status=409)
+            core_api.read_namespaced_endpoints.return_value = existing
+
+            job_group_networking._apply_mirrors_in_cluster(
+                'ctx-a', 'ns-a', 'my-group', 42,
+                {'peer-head': [{
+                    'ip': '10.0.0.2'
+                }]}, True)
+
+        core_api.replace_namespaced_endpoints.assert_called_once()
+
+    def test_apply_mirrors_gc_deletes_stale_job_id_mirrors_only(self):
+        from kubernetes.client.rest import ApiException
+
+        from sky.jobs import job_group_networking
+
+        def make_svc(name, job_id):
+            svc = mock.MagicMock()
+            svc.metadata.name = name
+            svc.metadata.labels = {
+                job_group_networking._MIRROR_LABEL_JOB_ID: job_id
+            }
+            return svc
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            mock_k8s.api_exception.return_value = ApiException
+            core_api = mock_k8s.core_api.return_value
+            core_api.list_namespaced_service.return_value.items = [
+                make_svc('stale-head', '99'),  # different job -> GC'd
+                make_svc('current-head', '42'),  # same job -> left alone
+            ]
+            core_api.read_namespaced_endpoints.side_effect = ApiException(
+                status=404)
+
+            job_group_networking._apply_mirrors_in_cluster(
+                'ctx-a', 'ns-a', 'my-group', 42, {}, True)
+
+        core_api.delete_namespaced_service.assert_called_once_with(
+            'stale-head', 'ns-a', _request_timeout=10)
+        core_api.delete_namespaced_endpoints.assert_called_once_with(
+            'stale-head', 'ns-a', _request_timeout=10)
+
+    # -- Consumer-aware classic mappings ----------------------------------
+
+    def test_consumer_aware_mappings_cross_context_peer_uses_consumer_ns(self):
+        from sky.jobs import job_group_networking
+
+        handle_a = _make_k8s_handle('ctx-a', cluster_name_on_cloud='task-a-c')
+        handle_b = _make_k8s_handle('ctx-b', cluster_name_on_cloud='task-b-c')
+        task_a = _make_task('task-a')
+        task_b = _make_task('task-b')
+
+        namespaces = {'ctx-a': 'ns-a-real', 'ctx-b': 'ns-b-real'}
+        with mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace',
+                side_effect=lambda ctx: namespaces[ctx]):
+            mappings = job_group_networking._generate_k8s_dns_mappings(
+                'my-group', [(task_a, handle_a), (task_b, handle_b)],
+                consumer_context='ctx-b',
+                consumer_namespace='ns-b-consumer')
+
+        peer_a_dns = [
+            dns for dns, hostname in mappings if hostname.startswith('task-a')
+        ]
+        peer_b_dns = [
+            dns for dns, hostname in mappings if hostname.startswith('task-b')
+        ]
+        # task-a is in a DIFFERENT context than the consumer (ctx-b): its
+        # mirror lives in the consumer's own namespace.
+        assert peer_a_dns == ['task-a-c-head.ns-b-consumer.svc.cluster.local']
+        # task-b is in the SAME context as the consumer: keeps its own
+        # (real, looked-up) namespace, unaffected by consumer_namespace.
+        assert peer_b_dns == ['task-b-c-head.ns-b-real.svc.cluster.local']
+
+    def test_consumer_aware_mappings_no_kwargs_uses_peer_namespace(self):
+        """Regression guard: omitting the kwargs preserves today's behavior."""
+        from sky.jobs import job_group_networking
+
+        handle_a = _make_k8s_handle('ctx-a', cluster_name_on_cloud='task-a-c')
+        handle_b = _make_k8s_handle('ctx-b', cluster_name_on_cloud='task-b-c')
+        task_a = _make_task('task-a')
+        task_b = _make_task('task-b')
+
+        namespaces = {'ctx-a': 'ns-a-real', 'ctx-b': 'ns-b-real'}
+        with mock.patch(
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace',
+                side_effect=lambda ctx: namespaces[ctx]):
+            mappings = job_group_networking._generate_k8s_dns_mappings(
+                'my-group', [(task_a, handle_a), (task_b, handle_b)])
+
+        dns_names = sorted(dns for dns, _ in mappings)
+        assert dns_names == [
+            'task-a-c-head.ns-a-real.svc.cluster.local',
+            'task-b-c-head.ns-b-real.svc.cluster.local',
+        ]
+
+    # -- Updater-script trailing-dot hardening -----------------------------
+
+    def test_updater_script_dns_lookup_uses_trailing_dot(self):
+        from sky.jobs import job_group_networking
+
+        dns_mappings = [('trainer-head.ns.svc.cluster.local',
+                         'trainer-0.my-group')]
+        script = job_group_networking.generate_k8s_dns_updater_script(
+            dns_mappings, 'my-group')
+
+        # The K8s-DNS lookup queries the absolute name (trailing dot) so
+        # search-path/ndots expansion can't hand back a wildcard match.
+        assert 'getent hosts "$k8s_dns."' in script
+        # The simple-name /etc/hosts lookup must NOT get a trailing dot: it
+        # needs to keep resolving via the 'files' backend.
+        assert 'getent hosts "$simple_name"' in script
+        assert 'getent hosts "$simple_name."' not in script
+
+    # -- setup_cross_context_mirrors single-context gate --------------------
+
+    @pytest.mark.asyncio
+    async def test_setup_cross_context_mirrors_single_context_is_noop(self):
+        from sky.jobs import job_group_networking
+
+        handle_a = _make_k8s_handle('ctx-a', cluster_name_on_cloud='task-a')
+        handle_b = _make_k8s_handle('ctx-a', cluster_name_on_cloud='task-b')
+
+        with mock.patch.object(job_group_networking, 'kubernetes') as mock_k8s:
+            result = await job_group_networking.setup_cross_context_mirrors(
+                'my-group', 1, [(_make_task('task-a'), handle_a),
+                                (_make_task('task-b'), handle_b)])
+
+        assert result is True
+        mock_k8s.core_api.assert_not_called()
+
+
 class TestOptimizerSelectBestInfra:
     """Tests for Optimizer._select_best_infra logic.
 

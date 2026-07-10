@@ -304,6 +304,117 @@ class TestOptimizeJobGroup:
             mock_same_infra.assert_called_once()
 
 
+class TestOptimizeJobGroupExplicitPins:
+    """Tests for optimize_job_group's explicit-pins fast path.
+
+    When every task in a JobGroup pins an explicit (cloud, region) and the
+    pins are not all identical, optimize_job_group should skip the
+    common-infra search entirely and route straight to
+    `_optimize_independent` (with an informational, not a "no common
+    infrastructure", log message).
+    """
+
+    def _make_pinned_task(self, name: str, cloud_str: str, region: str):
+        cloud = MagicMock(spec=clouds.Cloud)
+        cloud.__str__ = MagicMock(return_value=cloud_str)
+        resource = MagicMock(spec=resources_lib.Resources)
+        resource.cloud = cloud
+        resource.region = region
+        task = MagicMock(spec=task_lib.Task)
+        task.name = name
+        task.resources = [resource]
+        return task
+
+    def _make_unpinned_task(self, name: str):
+        resource = MagicMock(spec=resources_lib.Resources)
+        resource.cloud = None
+        resource.region = None
+        task = MagicMock(spec=task_lib.Task)
+        task.name = name
+        task.resources = [resource]
+        return task
+
+    def _make_dag(self, tasks, name='test-job-group'):
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.is_job_group = MagicMock(return_value=True)
+        dag.name = name
+        dag.tasks = tasks
+        return dag
+
+    def test_different_pins_routes_to_optimize_independent(self):
+        """All tasks pinned to different (cloud, region) -> independent."""
+        task1 = self._make_pinned_task('task-1', 'Kubernetes', 'ctx-a')
+        task2 = self._make_pinned_task('task-2', 'Kubernetes', 'ctx-b')
+        dag = self._make_dag([task1, task2])
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent, \
+             patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_independent.return_value = dag
+
+            result = optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+
+            mock_independent.assert_called_once()
+            mock_same_infra.assert_not_called()
+            assert result == dag
+
+    def test_different_pins_logs_info_not_common_infra_warning(self):
+        """The differing-pins fast path logs an INFO note, not a warning."""
+        task1 = self._make_pinned_task('task-1', 'AWS', 'us-east-1')
+        task2 = self._make_pinned_task('task-2', 'GCP', 'us-central1')
+        dag = self._make_dag([task1, task2])
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent, \
+             patch.object(optimizer, 'logger') as mock_logger:
+            mock_independent.return_value = dag
+
+            optimizer.Optimizer.optimize_job_group(dag, quiet=False)
+
+            info_messages = ' '.join(
+                call.args[0] for call in mock_logger.info.call_args_list)
+            assert 'pin different' in info_messages
+            assert 'No common infrastructure' not in info_messages
+            mock_logger.warning.assert_not_called()
+
+    def test_same_pins_uses_same_infra_path(self):
+        """All tasks pinned to the SAME (cloud, region) -> same-infra path."""
+        task1 = self._make_pinned_task('task-1', 'AWS', 'us-east-1')
+        task2 = self._make_pinned_task('task-2', 'AWS', 'us-east-1')
+        dag = self._make_dag([task1, task2])
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra, \
+             patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent:
+            mock_same_infra.return_value = dag
+
+            result = optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+
+            mock_same_infra.assert_called_once()
+            mock_independent.assert_not_called()
+            assert result == dag
+
+    def test_partially_pinned_uses_same_infra_path(self):
+        """A partially-pinned group falls back to the same-infra search."""
+        task1 = self._make_pinned_task('task-1', 'AWS', 'us-east-1')
+        task2 = self._make_unpinned_task('task-2')
+        dag = self._make_dag([task1, task2])
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra, \
+             patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent:
+            mock_same_infra.return_value = dag
+
+            result = optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+
+            mock_same_infra.assert_called_once()
+            mock_independent.assert_not_called()
+            assert result == dag
+
+
 class TestOptimizeIndependent:
     """Tests for _optimize_independent method."""
 

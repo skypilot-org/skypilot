@@ -9,7 +9,7 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -1241,3 +1241,285 @@ class TestUserJobStatusClassification:
 
         failure_type = mock_set_failed.call_args.kwargs['failure_type']
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
+
+
+class TestJobGroupCrossContextMirrorWiring:
+    """Tests for cross-context DNS mirror wiring in the JobGroup controller.
+
+    These extend the mocking style used by `TestJobGroupResumeDoesNotReissue
+    Starting` (patch `sky.jobs.controller.job_group_networking` and drive the
+    real controller methods) to cover the plumbing added for cross-context
+    JobGroups: mirrors are set up in Phase 3 and from `on_recovery`, the
+    periodic reconcile task is started/cancelled around Phase 4, and mirrors
+    are cleaned up from `ControllerManager._cleanup`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_on_recovery_sets_up_mirrors_before_networking(self):
+        """`on_recovery` must mirror cross-context DNS before the normal
+        JobGroup networking re-setup, so a recovered peer's new IP is
+        visible to every other member cluster as soon as /etc/hosts is
+        refreshed."""
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 7
+        controller._monitor_one_task = AsyncMock(return_value=True)
+
+        task = MagicMock()
+        task.name = 'task-a'
+        all_tasks_handles = [(task, MagicMock())]
+
+        call_order: List[str] = []
+        captured: Dict[str, Any] = {}
+
+        async def fake_monitor_task(**kwargs):
+            # Capture the on_recovery closure instead of driving the full
+            # recovery-strategy machinery; it's exercised directly below.
+            captured['on_recovery'] = kwargs['on_recovery']
+            return None  # Falls through to _monitor_one_task.
+
+        executor = MagicMock()
+        executor.monitor_task = fake_monitor_task
+
+        with patch('sky.jobs.controller.job_group_networking') as net, \
+             patch('sky.jobs.controller.global_user_state') as gus, \
+             patch('sky.jobs.controller.managed_job_utils') as utils:
+            net.setup_cross_context_mirrors = AsyncMock(
+                side_effect=lambda *a, **k: call_order.append('mirrors'))
+            net.setup_job_group_networking = AsyncMock(
+                side_effect=lambda *a, **k: call_order.append('networking'))
+            utils.generate_managed_job_cluster_name.return_value = 'task-a-7'
+            gus.get_handle_from_cluster_name = MagicMock(
+                return_value=MagicMock())
+
+            await JobController._monitor_job_group_task(
+                controller,
+                task_id=0,
+                task=task,
+                cluster_name='task-a-7',
+                executor=executor,
+                job_group_name='my-group',
+                all_tasks_handles=all_tasks_handles,
+            )
+
+            await captured['on_recovery']()
+
+        assert call_order == ['mirrors', 'networking']
+        net.setup_cross_context_mirrors.assert_awaited_once()
+        net.setup_job_group_networking.assert_awaited_once()
+        mirrors_args = net.setup_cross_context_mirrors.call_args.args
+        assert mirrors_args[0] == 'my-group'
+        assert mirrors_args[1] == 7
+
+    def _make_run_job_group_controller(self, job_id: int = 1):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = job_id
+        controller._pool = None
+        return controller
+
+    async def _run_job_group_with_mocks(self, controller, dag, net):
+        """Drive `_run_job_group` for a single fresh-launch task, with every
+        collaborator mocked away except the cross-context mirror wiring
+        under test."""
+        executor = MagicMock()
+        executor.launch = AsyncMock()
+        controller._prepare_job_group_task_for_launch = AsyncMock(
+            return_value=('cluster-a', executor))
+        controller._cleanup_job_group_clusters = AsyncMock()
+        controller._monitor_job_group_task = AsyncMock(return_value=True)
+
+        handle = MagicMock()
+
+        with patch('sky.jobs.controller.job_group_networking', net), \
+             patch('sky.jobs.controller.managed_job_runtime') as runtime, \
+             patch('sky.jobs.controller.managed_job_state') as state, \
+             patch('sky.jobs.controller.managed_job_utils') as utils, \
+             patch('sky.jobs.controller.global_user_state') as gus:
+            runtime.is_registered.return_value = False
+            state.get_job_status_with_task_id_async = AsyncMock(
+                return_value=None)  # None -> fresh launch for every task.
+            state.set_started_async = AsyncMock()
+            utils.event_callback_func = MagicMock(return_value=None)
+            gus.get_handle_from_cluster_name = MagicMock(return_value=handle)
+
+            return await JobController._run_job_group(controller)
+
+    @pytest.mark.asyncio
+    async def test_phase3_sets_up_cross_context_mirrors(self):
+        controller = self._make_run_job_group_controller(job_id=3)
+        task = MagicMock()
+        task.name = 'task-a'
+        task.envs = {}
+        dag = MagicMock()
+        dag.name = 'my-group'
+        dag.tasks = [task]
+        dag.primary_tasks = []
+        controller._dag = dag
+
+        with patch('sky.jobs.controller.job_group_networking') as net:
+            net.dns_addresses_for_task = MagicMock(return_value=None)
+            net.setup_cross_context_mirrors = AsyncMock(return_value=True)
+            net.setup_job_group_networking = AsyncMock(return_value=True)
+            net.group_spans_multiple_contexts = MagicMock(return_value=False)
+
+            result = await self._run_job_group_with_mocks(controller, dag, net)
+
+        assert result is True
+        net.setup_cross_context_mirrors.assert_awaited_once()
+        call_args = net.setup_cross_context_mirrors.call_args.args
+        assert call_args[0] == 'my-group'
+        assert call_args[1] == 3
+
+    @pytest.mark.asyncio
+    async def test_reconcile_task_started_and_cancelled_when_multi_context(
+            self):
+        """When `group_spans_multiple_contexts` is True, the periodic mirror
+        reconcile task must be created at Phase 3 and cancelled once
+        monitoring completes (via the try/finally around Phase 4)."""
+        controller = self._make_run_job_group_controller(job_id=5)
+        task = MagicMock()
+        task.name = 'task-a'
+        task.envs = {}
+        dag = MagicMock()
+        dag.name = 'my-group'
+        dag.tasks = [task]
+        dag.primary_tasks = []
+        controller._dag = dag
+
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def fake_reconcile(job_group_name, all_tasks_handles):
+            started.set()
+            try:
+                # Block until the controller cancels us in its `finally`.
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        controller._reconcile_job_group_mirrors = fake_reconcile
+
+        with patch('sky.jobs.controller.job_group_networking') as net:
+            net.dns_addresses_for_task = MagicMock(return_value=None)
+            net.setup_cross_context_mirrors = AsyncMock(return_value=True)
+            net.setup_job_group_networking = AsyncMock(return_value=True)
+            net.group_spans_multiple_contexts = MagicMock(return_value=True)
+
+            result = await self._run_job_group_with_mocks(controller, dag, net)
+
+        assert result is True
+        assert started.is_set(), 'reconcile task should have been started'
+        assert cancelled.is_set(), (
+            'reconcile task should have been cancelled once Phase 4 '
+            'monitoring completed')
+
+    @pytest.mark.asyncio
+    async def test_reconcile_task_not_started_for_single_context(self):
+        controller = self._make_run_job_group_controller(job_id=6)
+        task = MagicMock()
+        task.name = 'task-a'
+        task.envs = {}
+        dag = MagicMock()
+        dag.name = 'my-group'
+        dag.tasks = [task]
+        dag.primary_tasks = []
+        controller._dag = dag
+
+        reconcile_called = False
+
+        async def fake_reconcile(job_group_name, all_tasks_handles):
+            nonlocal reconcile_called
+            reconcile_called = True
+
+        controller._reconcile_job_group_mirrors = fake_reconcile
+
+        with patch('sky.jobs.controller.job_group_networking') as net:
+            net.dns_addresses_for_task = MagicMock(return_value=None)
+            net.setup_cross_context_mirrors = AsyncMock(return_value=True)
+            net.setup_job_group_networking = AsyncMock(return_value=True)
+            net.group_spans_multiple_contexts = MagicMock(return_value=False)
+
+            await self._run_job_group_with_mocks(controller, dag, net)
+
+        assert not reconcile_called
+
+
+class TestJobGroupMirrorCleanup:
+    """Tests for cross-context DNS mirror cleanup in
+    `ControllerManager._cleanup`."""
+
+    @pytest.fixture
+    def cleanup_patches(self):
+        """Patch all `_cleanup()` dependencies other than the JobGroup
+        mirror-cleanup block under test (mirrors `TestTaskCleanup.
+        cleanup_patches`)."""
+        patches = {
+            'ha_recovery': patch(
+                'sky.jobs.state.remove_ha_recovery_script_async',
+                new_callable=AsyncMock),
+            'terminate': patch('sky.jobs.utils.terminate_cluster'),
+            'gen_name': patch(
+                'sky.jobs.utils.generate_managed_job_cluster_name',
+                return_value='test-cluster'),
+            'status': patch('sky.core.status', return_value=[]),
+            'backend': patch('sky.backends.cloud_vm_ray_backend.'
+                             'CloudVmRayBackend'),
+            'get_handle': patch(
+                'sky.jobs.controller.global_user_state.'
+                'get_handle_from_cluster_name',
+                return_value=None),
+            'cleanup_mirrors': patch(
+                'sky.jobs.controller.job_group_networking.'
+                'cleanup_cross_context_mirrors',
+                new_callable=AsyncMock),
+        }
+        mocks = {}
+        for name, p in patches.items():
+            mocks[name] = p.start()
+        yield mocks
+        for p in patches.values():
+            p.stop()
+
+    def _make_task(self, name='test-task'):
+        task = MagicMock()
+        task.name = name
+        task.file_mounts = None
+        task.storage_mounts = {}
+        return task
+
+    @pytest.mark.asyncio
+    async def test_cleanup_awaits_cleanup_cross_context_mirrors_for_job_group(
+            self, cleanup_patches):
+        task1 = self._make_task('trainer')
+        task2 = self._make_task('evaluator')
+        dag = MagicMock()
+        dag.is_job_group.return_value = True
+        dag.name = 'my-group'
+        dag.tasks = [task1, task2]
+
+        from sky.jobs.controller import ControllerManager
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=1)
+
+        cleanup_patches['cleanup_mirrors'].assert_awaited_once()
+        call_args = cleanup_patches['cleanup_mirrors'].call_args.args
+        assert call_args[0] == 'my-group'
+        assert call_args[1] == 1
+        tasks_handles = call_args[2]
+        assert [t.name for t, _ in tasks_handles] == ['trainer', 'evaluator']
+
+    @pytest.mark.asyncio
+    async def test_cleanup_skips_mirror_cleanup_for_non_job_group(
+            self, cleanup_patches):
+        task = self._make_task('solo-task')
+        dag = MagicMock()
+        dag.is_job_group.return_value = False
+        dag.tasks = [task]
+
+        from sky.jobs.controller import ControllerManager
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=2)
+
+        cleanup_patches['cleanup_mirrors'].assert_not_awaited()

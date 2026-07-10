@@ -164,6 +164,75 @@ Example usage in a task:
     curl http://trainer-0.${SKYPILOT_JOBGROUP_NAME}:8000/status
 
 
+Cross-cluster job groups
+------------------------
+
+Some workloads need to split tasks across different Kubernetes clusters, for example
+when heterogeneous accelerators (e.g., an RL actor/learner split) live in separate
+clusters. SkyPilot supports this by letting each task pin its own Kubernetes context:
+
+.. code-block:: yaml
+
+    name: rl-cross-cluster
+    execution: parallel
+    ---
+    name: actor
+    resources:
+      infra: k8s/context-a
+      accelerators: L4:1
+    run: |
+      curl http://learner-0.${SKYPILOT_JOBGROUP_NAME}:8000/status
+    ---
+    name: learner
+    resources:
+      infra: k8s/context-b
+      accelerators: H100:1
+    run: |
+      curl http://actor-0.${SKYPILOT_JOBGROUP_NAME}:8000/status
+
+Tasks reach each other using the same ``{task_name}-{node_index}.{job_group_name}``
+hostnames described above, regardless of which cluster they land on.
+
+.. note::
+
+    Explicitly pinning each task's cluster is the current mechanism for
+    spanning clusters. Automatic placement — a plain ``infra: k8s`` Job Group
+    spreading across clusters only when no single cluster can satisfy all
+    tasks — is planned; the networking described here already supports tasks
+    landing on different clusters however they got there.
+
+How it works
+~~~~~~~~~~~~
+
+When a Job Group's tasks span more than one Kubernetes context, the jobs controller
+mirrors each task's service DNS records into every other member cluster and keeps
+those records pointed at the task's live pod IPs as pods are recreated or recovered.
+From a task's perspective, hostname resolution is identical to the single-cluster
+case above.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+Cross-cluster job groups require pod-to-pod network routability between the member
+clusters:
+
+- The clusters' pod networks must be routable to each other (e.g., a shared or
+  peered VPC, a flat network, or a cluster mesh) with non-overlapping pod CIDRs.
+- **GKE**: add a VPC firewall rule that allows traffic from the peer cluster's pod
+  IP range.
+- **EKS with the VPC CNI**: by default, cross-VPC pod traffic is SNATed to the
+  source node's IP, so security groups must allow the peer cluster's pod and node
+  CIDRs.
+- The SkyPilot API server's Kubernetes service account needs ``create``, ``patch``,
+  and ``delete`` permissions on ``services`` and ``endpoints`` in the SkyPilot
+  namespace of every member cluster (see :ref:`k8s-permissions`). Write access to
+  ``endpoints`` is a security-sensitive permission (it lets the holder redirect
+  traffic for any selectorless Service in the namespace) and should be scoped
+  accordingly.
+- All member clusters must use the same cluster DNS domain (``cluster.local``) and
+  IPv4 pod IPs.
+
+
 Viewing logs
 ------------
 
@@ -357,8 +426,10 @@ Here is a minimal example:
 Current limitations
 -------------------
 
-- **Co-location**: All tasks in a Job Group run on the same infrastructure
-  (same Kubernetes cluster or cloud zone).
+- **Infrastructure**: By default, all tasks in a Job Group run on the same
+  infrastructure (same Kubernetes cluster or cloud zone). Kubernetes tasks may
+  pin different clusters via ``infra: k8s/<context>`` — see
+  `Cross-cluster job groups`_.
 
 - **Networking**: Service discovery (hostname-based communication between tasks)
   currently only works on Kubernetes. On other clouds, tasks can run in parallel

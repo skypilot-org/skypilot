@@ -743,6 +743,26 @@ def launch(
                     f'communicate with each other using hostnames.'
                     f'{colorama.Style.RESET_ALL}')
 
+        # Warn if the job group's tasks span multiple Kubernetes contexts:
+        # cross-cluster service discovery requires pod-to-pod network
+        # routability between the member clusters.
+        contexts = set()
+        for task_ in dag.tasks:
+            if task_.best_resources is None:
+                continue
+            best_cloud = task_.best_resources.cloud
+            if (best_cloud is not None and
+                    str(best_cloud).lower() == 'kubernetes' and
+                    task_.best_resources.region is not None):
+                contexts.add(task_.best_resources.region)
+        if len(contexts) > 1:
+            logger.info(
+                f'{colorama.Fore.CYAN}Job group "{dag.name}" spans multiple '
+                f'Kubernetes clusters: {sorted(contexts)}. Cross-cluster '
+                'service discovery requires pod-to-pod network routability '
+                'between the clusters (e.g. shared/peered VPC with '
+                f'non-overlapping pod CIDRs).{colorama.Style.RESET_ALL}')
+
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
     # before sending the config to the jobs controller.
