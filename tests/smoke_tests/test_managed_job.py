@@ -3539,12 +3539,9 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
     The mutation needs direct access to the managed-jobs DB, so the test
     only runs where that access exists: local API server (both
     consolidation mode, via the local DB, and non-consolidation, via ssh to
-    the jobs controller). Remote-server configurations are skipped.
+    the jobs controller). Remote-server configurations are skipped by the
+    no_remote_server marker (at collection time), so no runtime check here.
     """
-    if smoke_tests_utils.is_remote_server_test():
-        pytest.skip('Requires direct access to the managed-jobs DB '
-                    '(local API server only).')
-
     name = smoke_tests_utils.get_cluster_name()
     consolidation = smoke_tests_utils.server_side_is_consolidation_mode()
 
