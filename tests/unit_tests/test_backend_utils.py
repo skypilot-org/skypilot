@@ -235,8 +235,7 @@ def test_aws_template_applies_labels_to_volume_tags() -> None:
 def test_kubernetes_template_applies_kueue_priority_class_label() -> None:
     """Pods must carry the Kueue priority-class label when both a local queue
     and a priority class are set, so Kueue orders/preempts by the named
-    WorkloadPriorityClass (the skypilot-priority-class annotation alone is
-    not read by Kueue)."""
+    WorkloadPriorityClass."""
     template_path = pathlib.Path('sky/templates/kubernetes-ray.yml.j2')
     template = template_path.read_text(encoding='utf-8')
 
