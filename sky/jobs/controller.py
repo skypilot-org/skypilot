@@ -343,6 +343,10 @@ class JobController:
         bounds it so the controller can still proceed to set the terminal
         state and clean up. On timeout the underlying worker thread may still
         be running, but it is detached from the controller's progress here.
+
+        Never raises: any failure is logged and swallowed, so callers on the
+        terminal-transition paths (e.g. the FAILED path in _monitor_one_task)
+        can't be knocked into FAILED_CONTROLLER by a log download error.
         """
         try:
             await asyncio.wait_for(asyncio.to_thread(
@@ -354,6 +358,11 @@ class JobController:
                 f'Timed out after {timeout}s downloading logs for job '
                 f'{self._job_id} (task {task_id}); continuing. The backing '
                 'pod/node may be unhealthy or stuck terminating.')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to download logs for job {self._job_id} '
+                f'(task {task_id}): {common_utils.format_exception(e)}',
+                exc_info=True)
 
     async def _cleanup_cluster(self, cluster_name: Optional[str]) -> None:
         if cluster_name is None:
