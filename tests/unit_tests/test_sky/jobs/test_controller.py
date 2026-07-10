@@ -811,8 +811,12 @@ class TestJobGroupChildCancelAndDrain:
         dag.primary_tasks = primary_tasks or []
         job_controller._dag = dag
 
-        async def fake_prepare(task, task_id, job_group_name, other_job_names):
-            del task, job_group_name, other_job_names  # unused
+        async def fake_prepare(task,
+                               task_id,
+                               job_group_name,
+                               other_job_names,
+                               set_starting=True):
+            del task, job_group_name, other_job_names, set_starting  # unused
             return (f'cluster-{task_id}', MagicMock())
 
         job_controller._prepare_job_group_task_for_launch = fake_prepare
