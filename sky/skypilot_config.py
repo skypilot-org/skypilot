@@ -1013,6 +1013,33 @@ def register_config_update_hook(fn: Callable[[], None]) -> None:
         _CONFIG_UPDATE_HOOKS.append(fn)
 
 
+# Validators invoked at the start of `update_api_server_config_no_lock`,
+# before the new config is persisted. Each validator receives the currently
+# persisted config and the incoming config, and may reject the save by
+# raising. Server-side integrations use this to enforce invariants and block
+# invalid or conflicting config changes before they take effect. Registered at
+# server startup during single-threaded plugin loading, so no lock is needed.
+_CONFIG_SAVE_VALIDATORS: List[Callable[
+    [config_utils.Config, config_utils.Config], None]] = []
+
+
+def register_config_save_validator(
+        fn: Callable[[config_utils.Config, config_utils.Config], None]) -> None:
+    """Register a validator invoked before the API server config is saved.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. Each validator is called as ``fn(current, incoming)``
+    before the incoming config is persisted, where ``current`` is the
+    currently persisted config and ``incoming`` is the config about to be
+    saved. A validator vetoes the save by raising; unlike
+    `register_config_update_hook`, exceptions are NOT caught -- they propagate
+    to the caller so the save is aborted. Validators must not mutate the
+    config.
+    """
+    if fn not in _CONFIG_SAVE_VALIDATORS:
+        _CONFIG_SAVE_VALIDATORS.append(fn)
+
+
 def _get_effective_k8s_config_value(
         cloud: str,
         property_keys: List[Tuple[str, ...]],
@@ -1221,6 +1248,16 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
     if not is_running_pytest() and os.environ.get(
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
+
+    # Run registered validators before persisting the config, so a validator
+    # can veto the save by raising; exceptions propagate to abort the update.
+    # Validators must not mutate the config, so hand them a deep copy of the
+    # incoming config (to_dict() already returns a fresh copy for `current`).
+    if _CONFIG_SAVE_VALIDATORS:
+        current = to_dict()
+        incoming = copy.deepcopy(config)
+        for validator in list(_CONFIG_SAVE_VALIDATORS):
+            validator(current, incoming)
 
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:

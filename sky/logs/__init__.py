@@ -18,6 +18,7 @@ __all__ = [
     'get_log_reader',
     'register_log_reader',
     'get_logging_agent',
+    'is_logging_agent_configured',
     'register_logging_agent_provider',
 ]
 
@@ -56,3 +57,13 @@ def get_logging_agent() -> Optional[LoggingAgent]:
             skypilot_config.get_nested(('logs', 'aws'), {}))
     raise exceptions.InvalidSkyPilotConfigError(
         f'Invalid logging store: {store}')
+
+
+def is_logging_agent_configured() -> bool:
+    """Returns whether a logging agent is configured.
+
+    When True, job logs are forwarded to an external store, so callers can
+    stream them on demand and fall back to the registered ``LogReader`` instead
+    of persisting a local copy.
+    """
+    return get_logging_agent() is not None

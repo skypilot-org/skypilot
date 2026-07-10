@@ -137,6 +137,20 @@ export function JobDetailPage() {
     scanLines(displayLines);
   }, [displayLines, scanLines]);
 
+  // Merge server-computed links (extracted from the full log, authoritative)
+  // with client-extracted links (DB first), so a link surfaces even if the
+  // user never streamed the line it appeared on.
+  const combinedExternalLinks = useMemo(() => {
+    const jobRecord = clusterJobData?.find((j) => j.id == job);
+    const combined = { ...(jobRecord?.links || {}) };
+    for (const [label, url] of Object.entries(extractedLinks)) {
+      if (!(label in combined)) {
+        combined[label] = url;
+      }
+    }
+    return combined;
+  }, [clusterJobData, job, extractedLinks]);
+
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
   };
@@ -313,14 +327,14 @@ export function JobDetailPage() {
                         )}
                       </div>
                     </div>
-                    {Object.keys(extractedLinks).length > 0 && (
+                    {Object.keys(combinedExternalLinks).length > 0 && (
                       <div className="col-span-2">
                         <div className="text-gray-600 font-medium text-base">
                           External Links
                         </div>
                         <div className="text-base mt-1">
                           <div className="flex flex-wrap gap-4">
-                            {Object.entries(extractedLinks).map(
+                            {Object.entries(combinedExternalLinks).map(
                               ([label, url]) => {
                                 const normalizedUrl = normalizeUrl(url);
                                 return (
