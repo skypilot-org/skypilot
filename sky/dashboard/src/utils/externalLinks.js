@@ -226,6 +226,14 @@ export const resolveTemplateLinks = (externalLinks, context) => {
     const url = entry.url.replace(
       TEMPLATE_VARIABLE_PATTERN,
       (_match, variable) => {
+        // Only allowlisted variables may be read from the context.
+        // Without this, a variable like ${toString} would resolve to an
+        // Object.prototype method instead of undefined and serialize
+        // function source into the URL.
+        if (!TEMPLATE_LINK_VARIABLES.includes(variable)) {
+          allResolved = false;
+          return '';
+        }
         const value = ctx[variable];
         if (value === undefined || value === null || value === '') {
           allResolved = false;

@@ -178,6 +178,21 @@ describe('resolveTemplateLinks', () => {
     );
     expect(links).toEqual({ 'Job page': 'https://exp.internal/jobs/7' });
   });
+
+  it('skips non-allowlisted variables, including Object.prototype names', () => {
+    // ${toString} must not resolve to Object.prototype.toString; the entry
+    // is skipped like any other unresolvable variable. Server-side config
+    // validation rejects these, but the client must not trust the config.
+    const links = resolveTemplateLinks(
+      [
+        { label: 'Proto', url: 'https://x.internal/${toString}' },
+        { label: 'Ctor', url: 'https://x.internal/${constructor}' },
+        { label: 'Ok', url: 'https://x.internal/${cluster_name}' },
+      ],
+      { cluster_name: 'my-cluster' }
+    );
+    expect(links).toEqual({ Ok: 'https://x.internal/my-cluster' });
+  });
 });
 
 describe('useTemplateLinks', () => {
