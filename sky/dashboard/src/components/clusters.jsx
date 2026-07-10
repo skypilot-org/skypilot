@@ -607,7 +607,7 @@ export function Clusters() {
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search
           box. Refresh/last-updated sit on the right of the same row. */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedToggle
             ariaLabel="Filter clusters by activity"
