@@ -1195,7 +1195,7 @@ available_node_types:
                 set +e
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
-                  echo "Error: core package installation failed." >> /tmp/apt-update.log
+                  echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
                   dump_apt_log
                   exit 1
                 fi;
@@ -1302,7 +1302,11 @@ available_node_types:
                     echo "WARNING: patch not installed after 60s; proceeding."
                     break
                   fi
-                  echo "Waiting for patch package to be installed..."
+                  # Throttle the notice to ~once every 5s (loop runs at 10Hz) so a
+                  # slow install doesn't flood the pod log 10x/second.
+                  if [ $((_patch_wait % 50)) -eq 1 ]; then
+                    echo "Waiting for patch package to be installed..."
+                  fi
                 done
                 # Apply Ray patches for progress bar fix
                 # python_path is seeded by conda_installation_commands
