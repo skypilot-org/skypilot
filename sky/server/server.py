@@ -2681,9 +2681,10 @@ async def api_status(
 async def dashboard_config() -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
-    Currently exposes the optional `external_links` allowlist that the dashboard
-    matches against streamed logs to render labeled external links on cluster
-    and job detail pages.
+    Currently exposes the optional `external_links` entries: `regex` entries
+    that the dashboard matches against streamed logs, and `url` template
+    entries that the dashboard resolves against cluster/job metadata to render
+    labeled external links on cluster and job detail pages.
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
@@ -2693,9 +2694,15 @@ async def dashboard_config() -> Dict[str, Any]:
             if not isinstance(entry, dict):
                 continue
             label = entry.get('label')
+            if not isinstance(label, str):
+                continue
             regex = entry.get('regex')
-            if isinstance(label, str) and isinstance(regex, str):
+            if isinstance(regex, str):
                 sanitized.append({'label': label, 'regex': regex})
+                continue
+            url = entry.get('url')
+            if isinstance(url, str):
+                sanitized.append({'label': label, 'url': url})
     return {'external_links': sanitized}
 
 

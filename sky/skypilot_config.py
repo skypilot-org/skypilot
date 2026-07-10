@@ -604,9 +604,27 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
     _validate_dashboard_external_links(config, config_source)
 
 
+# Variables that may appear as ${var} inside a dashboard.external_links url
+# template. Substitution happens client-side in the dashboard; keep in sync
+# with TEMPLATE_LINK_VARIABLES in
+# sky/dashboard/src/utils/externalLinks.js.
+DASHBOARD_LINK_TEMPLATE_VARIABLES = frozenset({
+    'cluster_name',
+    'job_id',
+    'job_name',
+    'user',
+    'workspace',
+})
+_TEMPLATE_VARIABLE_PATTERN = re.compile(r'\$\{([^}]*)\}')
+
+
 def _validate_dashboard_external_links(config: Dict[str, Any],
                                        config_source: str) -> None:
-    """Ensures every dashboard.external_links regex is compilable."""
+    """Ensures every dashboard.external_links entry is well-formed.
+
+    `regex` entries must compile; `url` entries may only reference known
+    template variables.
+    """
     dashboard = config.get('dashboard') if isinstance(config, dict) else None
     if not isinstance(dashboard, dict):
         return
@@ -617,15 +635,26 @@ def _validate_dashboard_external_links(config: Dict[str, Any],
         if not isinstance(entry, dict):
             continue
         regex = entry.get('regex')
-        if not isinstance(regex, str):
-            continue
-        try:
-            re.compile(regex)
-        except re.error as e:
-            raise ValueError(
-                f'Invalid config YAML from ({config_source}). '
-                f'dashboard.external_links[{idx}].regex is not a valid regex: '
-                f'{regex!r} ({e}).') from e
+        if isinstance(regex, str):
+            try:
+                re.compile(regex)
+            except re.error as e:
+                raise ValueError(
+                    f'Invalid config YAML from ({config_source}). '
+                    f'dashboard.external_links[{idx}].regex is not a valid '
+                    f'regex: {regex!r} ({e}).') from e
+        url = entry.get('url')
+        if isinstance(url, str):
+            for match in _TEMPLATE_VARIABLE_PATTERN.finditer(url):
+                variable = match.group(1)
+                if variable not in DASHBOARD_LINK_TEMPLATE_VARIABLES:
+                    allowed = ', '.join(
+                        sorted(DASHBOARD_LINK_TEMPLATE_VARIABLES))
+                    raise ValueError(
+                        f'Invalid config YAML from ({config_source}). '
+                        f'dashboard.external_links[{idx}].url references an '
+                        f'unknown template variable '
+                        f'${{{variable}}}. Allowed variables: {allowed}.')
 
 
 def overlay_skypilot_config(

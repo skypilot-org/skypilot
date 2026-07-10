@@ -62,7 +62,11 @@ import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { normalizeUrl, useLogLinkExtractor } from '@/utils/externalLinks';
+import {
+  normalizeUrl,
+  useLogLinkExtractor,
+  useTemplateLinks,
+} from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
@@ -1179,11 +1183,34 @@ function JobDetailsContent({
     }
   }, [logExtractedLinks, onLinksExtracted]);
 
-  // Combine database links with log-extracted links
+  // Admin-configured url templates (dashboard.external_links entries with a
+  // `url` field) resolved against this managed job's metadata. The backing
+  // cluster name is the job's current cluster (present while running or
+  // after the last recovery).
+  const templateLinkContext = useMemo(
+    () => ({
+      cluster_name: jobData?.current_cluster_name,
+      job_id: jobData?.id,
+      job_name: jobData?.name,
+      user: jobData?.user,
+      workspace: jobData?.workspace,
+    }),
+    [
+      jobData?.current_cluster_name,
+      jobData?.id,
+      jobData?.name,
+      jobData?.user,
+      jobData?.workspace,
+    ]
+  );
+  const templateLinks = useTemplateLinks(templateLinkContext);
+
+  // Combine template links, database links, and log-extracted links.
   // Use logExtractedLinksFromParent if provided (for info tab), otherwise use local extraction
   const combinedLinks = useMemo(() => {
-    // Start with database links (they take priority if there's a conflict)
-    const combined = { ...(links || {}) };
+    // Template links are the base; database links take priority if there's
+    // a conflict.
+    const combined = { ...templateLinks, ...(links || {}) };
     // Use parent-provided links (for info tab) or locally extracted links (for logs tab)
     const extractedToUse = logExtractedLinksFromParent || logExtractedLinks;
     // Add log-extracted links (only if not already present)
@@ -1193,7 +1220,7 @@ function JobDetailsContent({
       }
     }
     return combined;
-  }, [links, logExtractedLinks, logExtractedLinksFromParent]);
+  }, [templateLinks, links, logExtractedLinks, logExtractedLinksFromParent]);
 
   // Auto-scroll to bottom when logs change or tab changes
   useEffect(() => {

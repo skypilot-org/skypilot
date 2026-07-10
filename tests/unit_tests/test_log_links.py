@@ -141,6 +141,18 @@ class TestCompileAdminPatterns:
             }, 'str'])
         assert not log_links.compile_admin_patterns(None)
 
+    def test_skips_url_template_entries(self):
+        # `url` entries are resolved by the dashboard from cluster/job
+        # metadata; the log scanner must ignore them.
+        compiled = log_links.compile_admin_patterns([{
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        }, {
+            'label': 'Good',
+            'regex': r'^https://good\.com/.+$'
+        }])
+        assert set(compiled) == {'Good'}
+
 
 class TestGetPatterns:
     """Combining built-in and admin patterns from config."""
