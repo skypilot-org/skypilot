@@ -68,10 +68,11 @@ import {
 } from '@/components/ui/select';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon, InfoIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { evaluateCondition } from '@/components/shared/FilterSystem';
+import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { getCurrentUserInfo } from '@/data/connectors/client';
 import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 
@@ -172,7 +173,8 @@ const formatDuration = (durationSeconds) => {
   return result.trim() || '0s';
 };
 
-// Clusters are shared infra: default to All Clusters and remember the user's last My/All choice in localStorage.
+// Default to the signed-in user's own clusters (matching the jobs page) and
+// remember the user's last My/All choice in localStorage.
 const OWNER_SCOPE_MINE = 'mine';
 const OWNER_SCOPE_ALL = 'all';
 const OWNER_SCOPE_STORAGE_KEY = 'skypilot-dashboard-clusters-owner-scope';
@@ -229,8 +231,8 @@ export function Clusters() {
     ) {
       return owner;
     }
-    // Fall back to the user's last choice, then to All Clusters.
-    return readStoredOwnerScope() ?? OWNER_SCOPE_ALL;
+    // Fall back to the user's last choice, then to My Clusters.
+    return readStoredOwnerScope() ?? OWNER_SCOPE_MINE;
   };
 
   const [showHistory, setShowHistory] = useState(getInitialShowHistory);
@@ -238,6 +240,9 @@ export function Clusters() {
   const [userScope, setUserScope] = useState(getInitialUserScope);
   const [currentUser, setCurrentUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
+  // Whether the current scope has any rows; gates the "Showing your
+  // clusters only" hint so it never overlaps the empty-state CTA.
+  const [scopedHasRows, setScopedHasRows] = useState(false);
   const isMobile = useMobile();
 
   useEffect(() => {
@@ -604,68 +609,57 @@ export function Clusters() {
           box. Refresh/last-updated sit on the right of the same row. */}
       <div className="flex items-center justify-between mb-1">
         <div className="flex flex-wrap items-center gap-2">
-          <div
-            role="tablist"
-            aria-label="Filter clusters by activity"
-            className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-          >
-            <button
-              role="tab"
-              aria-selected={!showHistory}
-              onClick={() => selectHistoryTab(false)}
-              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                !showHistory
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Active
-            </button>
-            <button
-              role="tab"
-              aria-selected={showHistory}
-              onClick={() => selectHistoryTab(true)}
-              className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                showHistory
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              All
-            </button>
-          </div>
+          <SegmentedToggle
+            ariaLabel="Filter clusters by activity"
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'all', label: 'All' },
+            ]}
+            value={showHistory ? 'all' : 'active'}
+            onChange={(value) => selectHistoryTab(value === 'all')}
+          />
           {currentUser && (
-            <div
-              role="tablist"
-              aria-label="Filter clusters by owner"
-              className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-            >
-              <button
-                role="tab"
-                aria-selected={isMine}
-                onClick={() => selectScope(OWNER_SCOPE_MINE)}
-                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                  isMine
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                My Clusters
-              </button>
-              <button
-                role="tab"
-                aria-selected={isEveryone}
-                onClick={() => selectScope(OWNER_SCOPE_ALL)}
-                className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                  isEveryone
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                All Clusters
-              </button>
-            </div>
+            <SegmentedToggle
+              ariaLabel="Filter clusters by owner"
+              options={[
+                { value: OWNER_SCOPE_MINE, label: 'My Clusters' },
+                { value: OWNER_SCOPE_ALL, label: 'All Clusters' },
+              ]}
+              value={
+                isMine ? OWNER_SCOPE_MINE : isEveryone ? OWNER_SCOPE_ALL : null
+              }
+              onChange={selectScope}
+            />
           )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {/* Scope hint: when the table is filtered to the current user's
+              clusters, remind them and offer a one-click path to All
+              Clusters (mirrors the Managed Jobs page). Suppressed in the
+              empty state (the empty-state CTA already says this) and when
+              an explicit User filter has overridden the toggle. */}
+          {userScope === OWNER_SCOPE_MINE &&
+            currentUser &&
+            !explicitUserFilter &&
+            scopedHasRows && (
+              <div
+                className="inline-flex items-center gap-2 rounded-full border border-sky-200/70 bg-sky-50 pl-2 pr-2.5 py-0.5 text-xs shrink-0"
+                role="status"
+                aria-live="polite"
+              >
+                <InfoIcon className="h-3 w-3 text-sky-600 shrink-0" />
+                <span className="text-gray-700">
+                  Showing your clusters only.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectScope(OWNER_SCOPE_ALL)}
+                  className="font-medium text-sky-700 transition-colors hover:text-sky-800 hover:underline"
+                >
+                  View all clusters
+                </button>
+              </div>
+            )}
           {showHistory && (
             <Select
               value={historyDays.toString()}
@@ -686,8 +680,6 @@ export function Clusters() {
               </SelectContent>
             </Select>
           )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
@@ -716,6 +708,7 @@ export function Clusters() {
         userScope={userScope}
         currentUser={currentUser}
         onViewAllClusters={() => selectScope(OWNER_SCOPE_ALL)}
+        onRowsPresenceChange={setScopedHasRows}
         showHistory={showHistory}
         historyDays={historyDays}
         onOpenSSHModal={(cluster) => {
@@ -754,6 +747,7 @@ export function ClusterTable({
   userScope,
   currentUser,
   onViewAllClusters,
+  onRowsPresenceChange,
   showHistory,
   historyDays,
   onOpenSSHModal,
@@ -986,6 +980,11 @@ export function ClusterTable({
   const scopedEmpty = isServerPagination
     ? total === 0
     : sortedData.length === 0;
+  // Report whether the current scope has rows so the parent can gate the
+  // "Showing your clusters only" hint (hidden while loading or empty).
+  useEffect(() => {
+    onRowsPresenceChange?.(!scopedEmpty && !hookLoading);
+  }, [scopedEmpty, hookLoading, onRowsPresenceChange]);
   useEffect(() => {
     let cancelled = false;
     const scopedToMine =
