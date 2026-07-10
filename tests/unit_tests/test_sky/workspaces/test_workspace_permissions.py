@@ -180,7 +180,9 @@ class TestWorkspacePermissions(unittest.TestCase):
 
         # Should log warning for unknown user
         mock_logger.warning.assert_called_once_with(
-            "User 'UnknownUser' not found in all users")
+            "allowed_users entry 'UnknownUser' does not match any existing "
+            'user record; skipping for now. Access will be granted '
+            'automatically once this user logs in.')
 
     @mock.patch('sky.global_user_state.get_all_users')
     def test_private_workspace_preserves_order(self, mock_get_users):

@@ -1,5 +1,6 @@
 """Unit tests for the users server endpoints."""
 
+import contextlib
 import hashlib
 from unittest import mock
 
@@ -122,6 +123,67 @@ def mock_request():
     request = mock.MagicMock(spec=fastapi.Request)
     request.state = mock.MagicMock()
     return request
+
+
+class TestDefaultRoleFreshness:
+    """Main-process sync handlers must reload config before resolving
+    `rbac.default_role`, so an admin's runtime change to the default role takes
+    effect without an API-server restart.
+
+    Each test seeds a stale in-memory default ('user') and makes a reload pick up
+    the fresh value ('viewer'). Reverting the handler's `safe_reload_config()`
+    call makes the assertion see the stale 'user' and fail.
+    """
+
+    def _patch_common(self, monkeypatch, state):
+
+        def fake_reload():
+            state['role'] = 'viewer'
+
+        monkeypatch.setattr(server.skypilot_config, 'safe_reload_config',
+                            fake_reload)
+        monkeypatch.setattr(server.rbac, 'get_default_role',
+                            lambda: state['role'])
+        monkeypatch.setattr(server.rbac, 'get_supported_roles',
+                            lambda: ['admin', 'user', 'viewer'])
+        monkeypatch.setattr(server.global_user_state, 'get_user_by_name',
+                            lambda name: None)
+        monkeypatch.setattr(server.global_user_state, 'add_or_update_user',
+                            lambda user, **kwargs: True)
+        monkeypatch.setattr(server.server_common.crypt_ctx, 'hash',
+                            lambda pw: 'hashed')
+        monkeypatch.setattr(server, '_user_lock',
+                            lambda user_id: contextlib.nullcontext())
+
+    def test_user_create_reloads_before_resolving_default_role(
+            self, monkeypatch):
+        state = {'role': 'user'}
+        self._patch_common(monkeypatch, state)
+        captured = {}
+        monkeypatch.setattr(server.permission.permission_service, 'update_role',
+                            lambda user_id, role: captured.update(role=role))
+
+        server.user_create(
+            payloads.UserCreateBody(username='alice', password='pw'))
+
+        assert captured['role'] == 'viewer'
+
+    def test_user_import_reloads_before_resolving_default_role(
+            self, monkeypatch):
+        state = {'role': 'user'}
+        self._patch_common(monkeypatch, state)
+        # Password is plain text -> handler hashes it (identify returns None).
+        monkeypatch.setattr(server.server_common.crypt_ctx, 'identify',
+                            lambda pw: None)
+        captured = []
+        monkeypatch.setattr(server.permission.permission_service, 'update_role',
+                            lambda user_id, role: captured.append(role))
+
+        # CSV row leaves role empty -> falls back to the default role.
+        csv_content = 'username,password,role\nalice,pw,\n'
+        server.user_import(payloads.UserImportBody(csv_content=csv_content))
+
+        assert captured == ['viewer']
 
 
 class TestUsersEndpoints:

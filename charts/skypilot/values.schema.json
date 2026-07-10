@@ -152,6 +152,9 @@
                 "nodeSelector": {
                     "type": "object"
                 },
+                "persistSSHConfig": {
+                    "type": "boolean"
+                },
                 "preDeployHook": {
                     "type": "string"
                 },
@@ -838,6 +841,9 @@
                 },
                 "enabled": {
                     "type": "boolean"
+                },
+                "existingClaim": {
+                    "type": "string"
                 },
                 "selector": {
                     "type": "object"

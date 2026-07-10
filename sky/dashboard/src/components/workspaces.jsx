@@ -21,7 +21,10 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CircularProgress } from '@mui/material';
 import yaml from 'js-yaml';
@@ -892,13 +895,14 @@ export function Workspaces() {
       </div>
 
       {/* Workspaces Table */}
-      {workspaceDetails.length === 0 && !isInitialLoad ? (
-        <div className="text-center py-10">
-          <p className="text-lg text-gray-600">No workspaces found.</p>
-          <p className="text-sm text-gray-500 mt-2">
-            Create a cluster to see its workspace here.
-          </p>
-        </div>
+      {(workspaceDetails.length === 0 || isForceEmpty()) && !isInitialLoad ? (
+        <Card>
+          <EmptyState
+            icon={<BookDocIcon className="w-5 h-5" />}
+            title="No workspaces found"
+            description="Create a workspace to organize your clusters and jobs"
+          />
+        </Card>
       ) : (
         <Card>
           <div className="overflow-x-auto rounded-lg">
@@ -1059,14 +1063,12 @@ export function Workspaces() {
                     );
                   })
                 ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-6 text-gray-500"
-                    >
-                      No workspaces found
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableState
+                    colSpan={5}
+                    icon={<BookDocIcon className="w-5 h-5" />}
+                    title="No workspaces found"
+                    description="Create a workspace to organize your clusters and jobs"
+                  />
                 )}
               </TableBody>
             </Table>

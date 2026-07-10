@@ -19,7 +19,9 @@ import pytest
 from sky.jobs import state as managed_job_state
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
+from sky.skylet import job_lib
 from sky.utils import common
+from sky.utils import status_lib
 
 
 class TestNormalJobRecovery:
@@ -1080,6 +1082,60 @@ class TestDownloadLogsForCancelledJob:
                 1, mock_handle_1, None)
 
 
+class TestDownloadLogAndStreamLoggingAgentGate:
+    """download_log_and_stream skips the local copy only when logs are both
+    forwarded externally AND readable back.
+
+    The controller skips downloading a local copy only when a logging agent
+    forwards the logs AND a log reader is registered to stream them back. If the
+    store has no read-back path (no reader), it must keep the local copy so
+    sky jobs logs can still serve a finished job.
+    """
+
+    def _make_controller(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = (
+            JobController.download_log_and_stream.__get__(
+                controller, JobController))
+        return controller
+
+    def _run(self, agent_configured, reader):
+        controller = self._make_controller()
+        handle = MagicMock()
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=agent_configured), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=reader), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            mock_cutils.download_and_stream_job_log.return_value = (
+                '/tmp/run.log')
+            controller.download_log_and_stream(0, handle, None)
+            return mock_state, mock_runtime, mock_cutils
+
+    def test_skips_download_when_agent_and_reader_configured(self):
+        # Logs are forwarded and readable back -> skip the local copy.
+        mock_state, mock_runtime, mock_cutils = self._run(agent_configured=True,
+                                                          reader=MagicMock())
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_downloads_when_agent_but_no_reader(self):
+        # Forwarded to a write-only store (no reader) -> keep the local copy so
+        # sky jobs logs still works for a finished job.
+        _, _, mock_cutils = self._run(agent_configured=True, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_no_logging_agent(self):
+        _, _, mock_cutils = self._run(agent_configured=False, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+
 class TestJobGroupResumeDoesNotReissueStarting:
     """Regression: a resumed JobGroup task must not be re-issued STARTING.
 
@@ -1146,3 +1202,96 @@ class TestJobGroupResumeDoesNotReissueStarting:
                                                     task,
                                                     set_starting=True)
         set_starting_async.assert_awaited_once()
+
+
+class TestUserJobStatusClassification:
+    """Tests for how a terminal *user-job* status (on the worker cluster) is
+    classified into a ManagedJobStatus by the controller monitoring loop.
+
+    Regression coverage for SKY-5941: a user job that ends in
+    JobStatus.FAILED_DRIVER (e.g. the user workload OOM'd and the Ray driver
+    crashed) must be classified as ManagedJobStatus.FAILED, NOT
+    FAILED_CONTROLLER -- the controller is healthy, the user workload failed.
+    """
+
+    def _make_controller(self):
+        """Build a JobController without running __init__ (which needs a DB)."""
+        controller = JobController.__new__(JobController)
+        controller._job_id = 1
+        controller._pool = None
+        controller._backend = MagicMock()
+        # Methods exercised on the FAILED path; stub them out.
+        controller.download_log_and_stream = MagicMock()
+        controller._get_cluster_job_exit_codes = AsyncMock(return_value=[])
+        controller._cleanup_cluster = AsyncMock()
+        return controller
+
+    async def _run_until_terminal(self, controller, worker_job_status):
+        """Drive _monitor_one_task through one iteration for a terminal
+        worker-cluster job status with the cluster UP, returning the
+        set_failed_async mock so the caller can assert the classification."""
+        mock_task = MagicMock()
+        mock_task.name = 'test-task'
+        mock_task.num_nodes = 1
+
+        # No retries: deterministic OOM-style failures should not be retried.
+        executor = MagicMock()
+        executor.should_restart_on_failure.return_value = False
+        executor.max_restarts_on_errors = 0
+
+        handle = MagicMock()
+
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.async_check_network_connection',
+                   new=AsyncMock()), \
+             patch('sky.jobs.utils.get_job_status',
+                   new=AsyncMock(return_value=(worker_job_status, None))), \
+             patch('sky.jobs.utils.try_to_get_job_end_time',
+                   return_value=12345.0), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   return_value=(status_lib.ClusterStatus.UP, handle)), \
+             patch('sky.jobs.state.set_failed_async',
+                   new=AsyncMock()) as mock_set_failed:
+
+            succeeded = await controller._monitor_one_task(
+                task_id=0,
+                task=mock_task,
+                cluster_name='test-cluster',
+                executor=executor,
+                callback_func=MagicMock(),
+            )
+
+        # A failed user job means the task did not succeed and is not retried.
+        assert succeeded is False
+        executor.should_restart_on_failure.assert_called_once()
+        mock_set_failed.assert_called_once()
+        return mock_set_failed
+
+    @pytest.mark.asyncio
+    async def test_failed_driver_maps_to_failed_not_controller(self):
+        """FAILED_DRIVER (user-job OOM / Ray driver crash) -> FAILED."""
+
+        controller = self._make_controller()
+        mock_set_failed = await self._run_until_terminal(
+            controller, job_lib.JobStatus.FAILED_DRIVER)
+
+        failure_type = mock_set_failed.call_args.kwargs['failure_type']
+        assert failure_type == managed_job_state.ManagedJobStatus.FAILED, (
+            'FAILED_DRIVER must be classified as FAILED, not '
+            f'FAILED_CONTROLLER; got {failure_type}')
+        assert (failure_type !=
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+        # The failure is clearly surfaced to the user via failure_reason.
+        failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
+        assert 'job driver on the remote cluster failed' in failure_reason
+
+    @pytest.mark.asyncio
+    async def test_plain_failed_user_job_maps_to_failed(self):
+        """A normal user-code FAILED still maps to FAILED (sanity check)."""
+
+        controller = self._make_controller()
+        mock_set_failed = await self._run_until_terminal(
+            controller, job_lib.JobStatus.FAILED)
+
+        failure_type = mock_set_failed.call_args.kwargs['failure_type']
+        assert failure_type == managed_job_state.ManagedJobStatus.FAILED

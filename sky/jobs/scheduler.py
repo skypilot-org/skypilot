@@ -235,21 +235,46 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
     Will also add the job_id, dag_yaml_path, and env_file_path to the
     controllers list of processes.
     """
-    # In consolidation mode, during rolling update, two API servers may be
-    # running. If we are on the new API server, and we haven't finished the
-    # recovery process, we should avoid starting new controllers. The old API
-    # server/consolidated jobs controller could run update_managed_jobs_statuses
-    # and if there are jobs running on the new API server, the old one will not
-    # see the corresponding processes and may mark them as FAILED_CONTROLLER.
-    if from_scheduler and managed_job_utils.is_consolidation_mode(
-    ) and os.path.exists(
-            os.path.expanduser(
-                constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE)):
-        # This could happen during an API server rolling update, or during
-        # normal running while managed-job-status-refresh-daemon is running. In
-        # either case, the controllers should be already started or will be
-        # started by the recovery process.
-        logger.info('Recovery is still in progress, skipping controller start.')
+    if from_scheduler and managed_job_utils.is_consolidation_mode():
+        # In consolidation mode the controller pool is owned exclusively by the
+        # leader-elected managed-job refresh daemon (see
+        # sky/jobs/managed_job_refresh_thread.py). Never start controllers from
+        # a request: the request path runs on whichever replica handled the
+        # request, whose controller PIDs the leader cannot see (its liveness
+        # check is a local psutil lookup), and controller startup would inherit
+        # per-request state into a long-lived process tree.
+        #
+        # This is safe for launch latency: submit_jobs has already moved the job
+        # to WAITING, and a controller from the leader's warm pool claims it
+        # within ~10s (controller.py::monitor_loop). The pool itself is started
+        # by ha_recovery_for_consolidation_mode at leader election.
+        #
+        # Caveat: a controller that dies mid-life is now only replaced on the
+        # daemon's ManagedJobEvent tick (~300s), where previously the next
+        # in-request start would have replaced it immediately. This only delays
+        # a job when the pool is fully drained -- with a typical pool size the
+        # surviving controllers keep claiming WAITING jobs on their ~10s poll.
+        #
+        # NOTE: `from_scheduler` is only ever True from submit_jobs(), which is
+        # only reached from this module's __main__, which is only spawned by
+        # sky/templates/jobs-controller.yaml.j2. In particular it is never
+        # reached from the controller process itself -- where
+        # is_consolidation_mode() returns True unconditionally because
+        # start_controller() exports OVERRIDE_CONSOLIDATION_MODE. See
+        # tests/unit_tests/test_sky/jobs/test_consolidation_mode_gate.py.
+        #
+        # Corollary: in the transitional misconfiguration where
+        # jobs.controller.consolidation_mode is flipped to true but the API
+        # server has not been restarted (already warned about, see
+        # controller_utils.is_jobs_consolidation_mode), a jobs-controller VM may
+        # read itself as consolidated and skip the in-request start. Jobs still
+        # run -- the VM's skylet ManagedJobEvent tops the pool up -- just with
+        # that event's cadence of added latency.
+        #
+        # Logged at info (not debug) so that a misdetection is greppable in
+        # ~/sky_logs/managed_jobs/submit-job-*.log rather than a silent stall.
+        logger.info('Consolidation mode: controller startup is owned by the '
+                    'managed-job refresh daemon; skipping in-request start.')
         return
     try:
         with filelock.FileLock(JOB_CONTROLLER_PID_LOCK, blocking=False):
