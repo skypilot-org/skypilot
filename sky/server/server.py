@@ -2711,16 +2711,17 @@ async def dashboard_config() -> Dict[str, Any]:
             regex = entry.get('regex')
             if isinstance(label, str) and isinstance(regex, str):
                 sanitized.append({'label': label, 'regex': regex})
-    config: Dict[str, Any] = {'external_links': sanitized}
+    dashboard_settings: Dict[str, Any] = {'external_links': sanitized}
     try:
         # May probe each uncached context once (blocking k8s API calls);
         # keep it off the event loop. Failures must not break the rest of
         # the dashboard config.
-        config['local_contexts'] = await asyncio.to_thread(_get_local_contexts)
+        dashboard_settings['local_contexts'] = await asyncio.to_thread(
+            _get_local_contexts)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning('Failed to determine local Kubernetes contexts for '
                        f'the dashboard: {common_utils.format_exception(e)}')
-    return config
+    return dashboard_settings
 
 
 @app.get('/api/plugins')

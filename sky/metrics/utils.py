@@ -794,13 +794,11 @@ async def send_metrics_request_with_port_forward(
             stop_svc_port_forward(port_forward_process)
 
 
-# Matches one `name="value"` label token in the label section of an
-# exposition-format metric line. Label values may contain escaped
-# characters (\", \\, \n). Iterating tokens left-to-right (instead of
-# searching for `cluster=` directly) guarantees a match never starts
-# inside another label's value.
-_LABEL_TOKEN_RE = re.compile(
-    r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*"((?:\\.|[^"\\])*)"')
+# Matches a real `cluster="..."` label token in a label section. In the
+# exposition format a double quote inside a label value must be escaped
+# (\"), so the raw substring `cluster="` can only start an actual label;
+# the lookbehind keeps labels like `k8s_cluster` from matching.
+_CLUSTER_LABEL_RE = re.compile(r'(?<![a-zA-Z0-9_])cluster="(?:\\.|[^"\\])*"')
 
 
 def _escape_label_value(value: str) -> str:
@@ -814,44 +812,8 @@ def _escape_label_value(value: str) -> str:
     return (value.replace('\\', r'\\').replace('"', r'\"').replace('\n', r'\n'))
 
 
-def _stamp_cluster_label_on_line(line: str, cluster_value: str) -> str:
-    """Ensures one metric line carries exactly one cluster label.
-
-    Non-metric lines (comments, blanks, lines without a label section)
-    are returned unchanged. `cluster_value` must already be escaped for
-    the exposition format (see _escape_label_value).
-    """
-    if line.startswith('#') or not line.strip():
-        return line
-    # Use rfind for the closing brace: label values may legitimately
-    # contain '}' (the sample value/timestamp after the label section
-    # cannot).
-    brace_start = line.find('{')
-    brace_end = line.rfind('}')
-    if brace_start == -1 or brace_end <= brace_start:
-        return line
-    metric_name = line[:brace_start]
-    existing_labels = line[brace_start + 1:brace_end]
-    rest_of_line = line[brace_end + 1:]
-
-    if not existing_labels:
-        new_labels = f'cluster="{cluster_value}"'
-    else:
-        has_cluster = any(
-            m.group(1) == 'cluster'
-            for m in _LABEL_TOKEN_RE.finditer(existing_labels))
-        if has_cluster:
-            new_labels = _LABEL_TOKEN_RE.sub(
-                lambda m: (f'cluster="{cluster_value}"'
-                           if m.group(1) == 'cluster' else m.group(0)),
-                existing_labels)
-        else:
-            new_labels = f'cluster="{cluster_value}",{existing_labels}'
-    return f'{metric_name}{{{new_labels}}}{rest_of_line}'
-
-
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
-    """Ensures each metric line carries exactly one cluster label.
+    """Adds a cluster label to each metric line.
 
     Idempotent: if a series already carries a `cluster` label (e.g. a
     stamped copy that got re-federated), the label is replaced instead of
@@ -863,10 +825,42 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
         metrics_text: The text containing the metrics
         context: The cluster name
     """
-    cluster_value = _escape_label_value(context)
-    return '\n'.join(
-        _stamp_cluster_label_on_line(line, cluster_value)
-        for line in metrics_text.strip().split('\n'))
+    cluster_label = f'cluster="{_escape_label_value(context)}"'
+    lines = metrics_text.strip().split('\n')
+    modified_lines = []
+
+    for line in lines:
+        # keep comment lines and empty lines as-is
+        if line.startswith('#') or not line.strip():
+            modified_lines.append(line)
+            continue
+        # if line is a metric line with labels, add cluster label. rfind
+        # for the closing brace: label values may legitimately contain '}'
+        # (the sample value/timestamp after the label section cannot).
+        brace_start = line.find('{')
+        brace_end = line.rfind('}')
+        if brace_start != -1 and brace_end > brace_start:
+            metric_name = line[:brace_start]
+            existing_labels = line[brace_start + 1:brace_end]
+            rest_of_line = line[brace_end + 1:]
+
+            if _CLUSTER_LABEL_RE.search(existing_labels):
+                # A lambda replacement keeps backslashes in the escaped
+                # context name from being parsed as regex group escapes.
+                new_labels = _CLUSTER_LABEL_RE.sub(lambda _: cluster_label,
+                                                   existing_labels)
+            elif existing_labels:
+                new_labels = f'{cluster_label},{existing_labels}'
+            else:
+                new_labels = cluster_label
+
+            modified_line = f'{metric_name}{{{new_labels}}}{rest_of_line}'
+            modified_lines.append(modified_line)
+        else:
+            # keep other lines as-is
+            modified_lines.append(line)
+
+    return '\n'.join(modified_lines)
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
