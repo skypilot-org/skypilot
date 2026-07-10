@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sky import exceptions
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller
+from sky.jobs import fencing
 from sky.jobs import scheduler
 from sky.jobs import state
 
@@ -580,6 +581,63 @@ class TestEmergencyRetryLoop:
         h.set_cancelled.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_ownership_loss_is_never_retried_in_place(self, monkeypatch):
+        # A JobOwnershipLostError escaping the job body must re-raise out of
+        # run() untouched: retrying in place would keep driving (cleanup +
+        # relaunch) a job that now belongs to another claimant, and failing
+        # it would write FAILED_CONTROLLER over the new claimant's job.
+        # run_job_loop turns the raise into the stand-down disposition.
+        h = _RetryLoopHarness(monkeypatch, [exceptions.JobOwnershipLostError(1)])
+
+        with pytest.raises(exceptions.JobOwnershipLostError):
+            await h.jc.run()
+
+        # The emergency machinery never engaged, and nothing was failed.
+        assert h.jc._run_one_task.call_count == 1
+        h.get_budget.assert_not_awaited()
+        h.jc._update_failed_task_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ownership_loss_during_bookkeeping_escapes(self, monkeypatch):
+        # A fenced write inside the emergency bookkeeping detecting the loss
+        # must escape run() -- not be treated as a transient bookkeeping
+        # failure (which would retry the bookkeeping for several rounds and
+        # then fail the job as FAILED_CONTROLLER).
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom')])
+        h.set_emergency.side_effect = exceptions.JobOwnershipLostError(1)
+
+        with pytest.raises(exceptions.JobOwnershipLostError):
+            await h.jc.run()
+
+        # No bookkeeping retry rounds: the loss escaped the first round.
+        h.set_emergency.assert_awaited_once()
+        h.jc._update_failed_task_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bookkeeping_gated_on_ownership(self, monkeypatch):
+        # The bookkeeping opens with an ownership pre-check: it spends the
+        # job's retry budget, rewrites its status, and tears its cluster
+        # down -- none of which a controller that already lost its claim
+        # may do. The second body effect keeps the loop finite if the gate
+        # is ever removed (the failure then reads as "no raise", not a
+        # hang).
+        h = _RetryLoopHarness(monkeypatch, [RuntimeError('boom'), True])
+        h.jc._fence = fencing.FencingToken(job_id=1, claim_id='claim-a')
+        raise_if_lost = AsyncMock(
+            side_effect=exceptions.JobOwnershipLostError(1))
+        monkeypatch.setattr(
+            'sky.jobs.controller.managed_job_state.raise_if_fence_lost_async',
+            raise_if_lost)
+
+        with pytest.raises(exceptions.JobOwnershipLostError):
+            await h.jc.run()
+
+        raise_if_lost.assert_awaited()
+        h.record_attempt.assert_not_awaited()
+        h.set_emergency.assert_not_awaited()
+        h.jc._cleanup_cluster.assert_not_awaited()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize('error,expected_status', [
         (exceptions.ProvisionPrechecksError(reasons=[ValueError('bad')]),
          state.ManagedJobStatus.FAILED_PRECHECKS),
@@ -796,7 +854,8 @@ class TestEmergencyRetryLoop:
 
         normalize_calls = {'n': 0}
 
-        async def _normalize(job_id):
+        async def _normalize(job_id, fence=None):
+            del fence
             normalize_calls['n'] += 1
             if normalize_calls['n'] == 1:
                 raise ConnectionError('db blip after recording the attempt')

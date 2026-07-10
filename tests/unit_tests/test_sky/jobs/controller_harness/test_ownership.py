@@ -371,3 +371,94 @@ async def test_sync_batch_writers_fenced(jobs_db, controller_harness):
     token2 = fencing.FencingToken(job_id=job_id, claim_id=token.claim_id)
     managed_job_state.set_winding_down(job_id, 0, fence=token2)
     assert token2.lost
+
+
+@pytest.mark.asyncio
+async def test_emergency_recovery_writers_fenced(jobs_db, controller_harness):
+    """The emergency-recovery bookkeeping writers are fenced like every
+    other claim-scoped writer: a stale claimant cannot mark the new
+    claimant's task RECOVERING, inflate its retry budget, or flip its
+    schedule state out of LAUNCHING."""
+    harness = controller_harness
+    job_id = harness.submit_job(name='emergency-fence')
+    token = await _claim(harness, job_id)
+    await managed_job_state.set_starting_async(job_id,
+                                               0,
+                                               'sky-run-ts',
+                                               time.time(),
+                                               '-', {},
+                                               _noop_callback,
+                                               fence=token)
+    await managed_job_state.set_started_async(job_id,
+                                              0,
+                                              time.time(),
+                                              _noop_callback,
+                                              fence=token)
+
+    # Reset + re-claim by another controller: the old token is fenced out.
+    managed_job_state.reset_job_for_recovery(job_id)
+    new_token = await _claim(harness, job_id, pid=2000)
+
+    with pytest.raises(exceptions.JobOwnershipLostError):
+        await managed_job_state.set_emergency_recovering_async(
+            job_id,
+            0,
+            reason='stale emergency',
+            callback_func=_noop_callback,
+            fence=token)
+    assert token.lost
+    # The new claimant's task status is untouched.
+    assert (managed_job_state.get_job_status_with_task_id(
+        job_id, 0) == ManagedJobStatus.RUNNING)
+
+    stale = fencing.FencingToken(job_id=job_id, claim_id=token.claim_id)
+    with pytest.raises(exceptions.JobOwnershipLostError):
+        await managed_job_state.record_emergency_recovery_attempt_async(
+            job_id, 1, time.time(), fence=stale)
+    count, last_at = (
+        await managed_job_state.get_emergency_recovery_budget_async(job_id))
+    assert (count, last_at) == (0, None)
+
+    stale = fencing.FencingToken(job_id=job_id, claim_id=token.claim_id)
+    with pytest.raises(exceptions.JobOwnershipLostError):
+        await (managed_job_state.
+               normalize_schedule_state_for_emergency_retry_async(job_id,
+                                                                  fence=stale))
+    # The re-claim's LAUNCHING state was not flipped by the stale writer.
+    _, _, schedule_state = _read_ownership_row(jobs_db, job_id)
+    assert schedule_state == ManagedJobScheduleState.LAUNCHING.value
+
+    # The current claimant's writes land.
+    applied = await managed_job_state.set_emergency_recovering_async(
+        job_id,
+        0,
+        reason='real emergency',
+        callback_func=_noop_callback,
+        fence=new_token)
+    assert applied
+    assert (managed_job_state.get_job_status_with_task_id(
+        job_id, 0) == ManagedJobStatus.RECOVERING)
+    await managed_job_state.record_emergency_recovery_attempt_async(
+        job_id, 1, time.time(), fence=new_token)
+    count, _ = (
+        await managed_job_state.get_emergency_recovery_budget_async(job_id))
+    assert count == 1
+    await (managed_job_state.
+           normalize_schedule_state_for_emergency_retry_async(
+               job_id, fence=new_token))
+    _, _, schedule_state = _read_ownership_row(jobs_db, job_id)
+    assert schedule_state == ManagedJobScheduleState.ALIVE.value
+    assert not new_token.lost
+
+    # Claim-held 0-row keeps tolerant semantics: a PENDING task is left
+    # untouched (returns False) without raising or marking the token lost.
+    pending_job = harness.submit_job(name='emergency-fence-pending')
+    pending_token = await _claim(harness, pending_job, pid=3000)
+    applied = await managed_job_state.set_emergency_recovering_async(
+        pending_job,
+        0,
+        reason='pending task',
+        callback_func=_noop_callback,
+        fence=pending_token)
+    assert not applied
+    assert not pending_token.lost

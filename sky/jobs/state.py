@@ -3416,11 +3416,13 @@ async def set_recovered_async(job_id: int,
     await callback_func('RECOVERED')
 
 
-async def set_emergency_recovering_async(job_id: int,
-                                         task_id: int,
-                                         reason: str,
-                                         callback_func: AsyncCallbackType,
-                                         emit_event: bool = True) -> bool:
+async def set_emergency_recovering_async(
+        job_id: int,
+        task_id: int,
+        reason: str,
+        callback_func: AsyncCallbackType,
+        emit_event: bool = True,
+        fence: Optional[fencing.FencingToken] = None) -> bool:
     """Set the task to RECOVERING due to an unexpected controller error.
 
     Used when the controller hits an unexpected internal error and will
@@ -3460,48 +3462,56 @@ async def set_emergency_recovering_async(job_id: int,
             ]),
             spot_table.c.last_recovered_at >= 0,
         )
+        conditions = [
+            spot_table.c.spot_job_id == job_id,
+            spot_table.c.task_id == task_id,
+            # processing_statuses excludes CANCELLING and terminal
+            # statuses, and includes RECOVERING so that re-running
+            # this bookkeeping after a transient failure is a no-op
+            # rather than an error. PENDING is excluded on purpose:
+            # an uninitialized task must be relaunched fresh, not
+            # resumed as RECOVERING (see the docstring).
+            spot_table.c.status.in_([
+                s.value
+                for s in ManagedJobStatus.processing_statuses()
+                if s != ManagedJobStatus.PENDING
+            ]),
+            spot_table.c.end_at.is_(None),
+        ]
+        if fence is not None:
+            conditions.append(_spot_fence_condition(fence))
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                    # processing_statuses excludes CANCELLING and terminal
-                    # statuses, and includes RECOVERING so that re-running
-                    # this bookkeeping after a transient failure is a no-op
-                    # rather than an error. PENDING is excluded on purpose:
-                    # an uninitialized task must be relaunched fresh, not
-                    # resumed as RECOVERING (see the docstring).
-                    spot_table.c.status.in_([
-                        s.value
-                        for s in ManagedJobStatus.processing_statuses()
-                        if s != ManagedJobStatus.PENDING
-                    ]),
-                    spot_table.c.end_at.is_(None),
-                )).
-            values({
-                spot_table.c.status: ManagedJobStatus.RECOVERING.value,
-                # An emergency grants no failure credit, but must not erase
-                # existing credit either: set FALSE only when no episode is
-                # already open. A re-run of this bookkeeping, or an emergency
-                # hitting a task mid-preemption-recovery, leaves the existing
-                # credit so that recovery still counts on completion.
-                spot_table.c.recovering_from_failure: sqlalchemy.case(
-                    (spot_table.c.recovering_from_failure.isnot(None),
-                     spot_table.c.recovering_from_failure),
-                    else_=False),
-                spot_table.c.job_duration: sqlalchemy.case(
-                    (should_accumulate_duration, spot_table.c.job_duration +
-                     current_time - spot_table.c.last_recovered_at),
-                    else_=spot_table.c.job_duration),
-                spot_table.c.last_recovered_at: sqlalchemy.case(
-                    (spot_table.c.last_recovered_at < 0, current_time),
-                    else_=spot_table.c.last_recovered_at),
-            }))
+                sqlalchemy.and_(*conditions)).values({
+                    spot_table.c.status: ManagedJobStatus.RECOVERING.value,
+                    # An emergency grants no failure credit, but must not
+                    # erase existing credit either: set FALSE only when no
+                    # episode is already open. A re-run of this bookkeeping,
+                    # or an emergency hitting a task mid-preemption-recovery,
+                    # leaves the existing credit so that recovery still
+                    # counts on completion.
+                    spot_table.c.recovering_from_failure: sqlalchemy.case(
+                        (spot_table.c.recovering_from_failure.isnot(None),
+                         spot_table.c.recovering_from_failure),
+                        else_=False),
+                    spot_table.c.job_duration: sqlalchemy.case(
+                        (should_accumulate_duration,
+                         spot_table.c.job_duration + current_time -
+                         spot_table.c.last_recovered_at),
+                        else_=spot_table.c.job_duration),
+                    spot_table.c.last_recovered_at: sqlalchemy.case(
+                        (spot_table.c.last_recovered_at < 0, current_time),
+                        else_=spot_table.c.last_recovered_at),
+                }))
         await session.commit()
         return result.rowcount
 
     count = await _retry_session(_op)
     if count == 0:
+        if fence is not None:
+            # Raises on a verified ownership loss; if the claim is held,
+            # fall through to the pre-existing tolerant path below.
+            await raise_if_fence_lost_async(fence)
         # The task is PENDING, CANCELLING, or already terminal. Emit the
         # event only for transitions that actually applied.
         return False
@@ -3541,29 +3551,40 @@ async def get_emergency_recovery_budget_async(
 
 
 @db_retries.retry_async
-async def record_emergency_recovery_attempt_async(job_id: int,
-                                                  attempt_count: int,
-                                                  attempt_time: float) -> None:
+async def record_emergency_recovery_attempt_async(
+        job_id: int,
+        attempt_count: int,
+        attempt_time: float,
+        fence: Optional[fencing.FencingToken] = None) -> None:
     """Record an emergency recovery attempt.
 
     Writes absolute values rather than incrementing, so that re-running the
     emergency bookkeeping after a transient failure cannot double-spend the
     retry budget.
     """
+    conditions = [job_info_table.c.spot_job_id == job_id]
+    if fence is not None:
+        conditions.append(_job_info_fence_condition(fence))
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        await session.execute(
+        result = await session.execute(
             sqlalchemy.update(job_info_table).where(
-                job_info_table.c.spot_job_id == job_id).values({
+                sqlalchemy.and_(*conditions)).values({
                     job_info_table.c.emergency_recovery_count: attempt_count,
                     job_info_table.c.last_emergency_recovery_at: attempt_time,
                 }))
         await session.commit()
+        count = result.rowcount
+    if fence is not None and count == 0:
+        # A stale claimant must not spend (or inflate) the current
+        # claimant's retry budget.
+        await raise_if_fence_lost_async(fence)
 
 
 @db_retries.retry_async
 async def normalize_schedule_state_for_emergency_retry_async(
-        job_id: int) -> None:
+        job_id: int,
+        fence: Optional[fencing.FencingToken] = None) -> None:
     """Reset launch-adjacent schedule states to ALIVE for an emergency retry.
 
     If the unexpected error escaped mid-launch (or while waiting or backing
@@ -3576,22 +3597,32 @@ async def normalize_schedule_state_for_emergency_retry_async(
     retry's scheduled_launch re-enters LAUNCHING cleanly when it actually
     launches.
     """
+    conditions = [
+        job_info_table.c.spot_job_id == job_id,
+        job_info_table.c.schedule_state.in_([
+            ManagedJobScheduleState.LAUNCHING.value,
+            ManagedJobScheduleState.ALIVE_WAITING.value,
+            ManagedJobScheduleState.ALIVE_BACKOFF.value,
+        ]),
+    ]
+    if fence is not None:
+        conditions.append(_job_info_fence_condition(fence))
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
-        await session.execute(
+        result = await session.execute(
             sqlalchemy.update(job_info_table).where(
-                sqlalchemy.and_(
-                    job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state.in_([
-                        ManagedJobScheduleState.LAUNCHING.value,
-                        ManagedJobScheduleState.ALIVE_WAITING.value,
-                        ManagedJobScheduleState.ALIVE_BACKOFF.value,
-                    ]),
-                )).values({
+                sqlalchemy.and_(*conditions)).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.ALIVE.value,
                 }))
         await session.commit()
+        count = result.rowcount
+    if fence is not None and count == 0:
+        # 0 rows is normal when the job is not in a launch-adjacent state;
+        # verify it is not an ownership loss before treating it as benign
+        # (a stale claimant must not flip the new claimant's LAUNCHING
+        # back to ALIVE, nor keep retrying after losing the claim).
+        await raise_if_fence_lost_async(fence)
 
 
 def set_winding_down(job_id: int,

@@ -2240,8 +2240,10 @@ class JobController:
         recovery). Returns a failure note (appended to the failure_reason)
         to fail the job (FAILED_CONTROLLER) instead.
 
-        Raises only asyncio.CancelledError (user cancellation must reach
-        run()'s cancel handling).
+        Raises asyncio.CancelledError (user cancellation must reach run()'s
+        cancel handling) and exceptions.JobOwnershipLostError (an ownership
+        loss must reach run_job_loop's stand-down disposition — it is never
+        retried in place and never converted into a failure note).
         """
         # Per escaped error, reset the memoized episode state: the attempt
         # number is computed once and reused across the outer-retry rounds
@@ -2254,6 +2256,13 @@ class JobController:
             try:
                 return await self._attempt_emergency_recovery(error)
             except asyncio.CancelledError:  # pylint: disable=try-except-raise
+                raise
+            except exceptions.JobOwnershipLostError:  # pylint: disable=try-except-raise
+                # A fenced write inside the bookkeeping found the claim
+                # gone. Not a transient bookkeeping failure: another round
+                # would keep acting on the new claimant's job, and the
+                # give-up path would fail it. Escapes run()'s handler to
+                # the stand-down disposition.
                 raise
             except Exception as bookkeeping_error:  # pylint: disable=broad-except
                 logger.warning(
@@ -2328,6 +2337,15 @@ class JobController:
 
         May raise on DB errors (handled by the caller's retry layer).
         """
+        # Ownership gate: the bookkeeping below spends the job's retry
+        # budget, rewrites its status, and tears down its cluster -- none
+        # of which a controller that lost its claim may do. The fenced
+        # writes below (and _cleanup_cluster's own re-read) backstop the
+        # window between this check and each action.
+        if self._fence is not None:
+            self._fence.detection = 'preaction'
+            await managed_job_state.raise_if_fence_lost_async(self._fence)
+
         # 1. Spend one unit of the retry budget. The attempt number is
         # computed once per escaped error (memoized on self) and reused
         # across the outer-retry rounds: re-reading the budget each round
@@ -2355,7 +2373,7 @@ class JobController:
             self._emergency_attempt = attempt
         attempt = self._emergency_attempt
         await managed_job_state.record_emergency_recovery_attempt_async(
-            self._job_id, attempt, now)
+            self._job_id, attempt, now, fence=self._fence)
 
         # 2. Determine the latest task and its status. Use the latest task
         # (it is the only one that can be mid-flight in a chain DAG; for job
@@ -2396,7 +2414,8 @@ class JobController:
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]),
-                emit_event=emit_event)
+                emit_event=emit_event,
+                fence=self._fence)
             if applied and emit_event:
                 self._emergency_event_emitted = True
             if not applied:
@@ -2432,6 +2451,10 @@ class JobController:
                     task_id, cluster_name)
                 try:
                     await self._cleanup_cluster(cluster_name)
+                except exceptions.JobOwnershipLostError:  # pylint: disable=try-except-raise
+                    # Not best-effort: the claim is gone and the cluster
+                    # may be the new claimant's relaunch. Stand down.
+                    raise
                 except Exception as cleanup_error:  # pylint: disable=broad-except
                     logger.warning(
                         'Best-effort cluster teardown before the emergency '
@@ -2444,7 +2467,8 @@ class JobController:
         # accounting nor blocks lower-priority jobs' scheduling during the
         # backoff. The retry re-enters LAUNCHING cleanly when it launches.
         await (managed_job_state.
-               normalize_schedule_state_for_emergency_retry_async(self._job_id))
+               normalize_schedule_state_for_emergency_retry_async(
+                   self._job_id, fence=self._fence))
 
         # The retry must start from a freshly loaded DAG: the failed attempt
         # may have left the in-memory task objects mutated (see _load_dag).
