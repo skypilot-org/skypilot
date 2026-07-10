@@ -486,7 +486,7 @@ available_node_types:
             requiredDuringSchedulingIgnoredDuringExecution:
               - labelSelector:
                   matchLabels:
-                    skypilot-cluster: {{cluster_name_on_cloud}}
+                    skypilot-cluster-name: {{cluster_name_on_cloud}}
                 topologyKey: topology.kubernetes.io/zone
             {% endif %}
           {% endif %}
