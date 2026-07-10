@@ -607,7 +607,7 @@ export function Clusters() {
       {/* Toggles live on their own row (mirrors the Managed Jobs layout) so
           they read consistently across pages and stay clear of the search
           box. Refresh/last-updated sit on the right of the same row. */}
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedToggle
             ariaLabel="Filter clusters by activity"
@@ -631,8 +631,6 @@ export function Clusters() {
               onChange={selectScope}
             />
           )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
           {/* Scope hint: when the table is filtered to the current user's
               clusters, remind them and offer a one-click path to All
               Clusters (mirrors the Managed Jobs page). Suppressed in the
@@ -660,6 +658,8 @@ export function Clusters() {
                 </button>
               </div>
             )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
           {showHistory && (
             <Select
               value={historyDays.toString()}
