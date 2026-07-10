@@ -741,6 +741,7 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     # monotonic() so durations are immune to wall-clock adjustments.
     try:
+        # Start port forward.
         pf_start = time.monotonic()
         port_forward_process, local_port = await asyncio.to_thread(
             start_svc_port_forward, context, namespace, service, service_port)
@@ -748,15 +749,18 @@ async def send_metrics_request_with_port_forward(
         record_federation_phase(context, route, 'port_forward',
                                 stats.port_forward_seconds)
 
+        # Build endpoint URL
         endpoint = f'http://localhost:{local_port}{endpoint_path}'
-        # httpx sends `Accept-Encoding: gzip, deflate` by default and
-        # transparently decompresses, so a Prometheus that compresses
-        # /federate (any version >= 2.0) is already gzipped on the wire;
-        # stats captures content-encoding + wire vs. decompressed size so
+
+        # Make HTTP request. httpx sends `Accept-Encoding: gzip, deflate` by
+        # default and transparently decompresses, so a Prometheus that
+        # compresses /federate (any version >= 2.0) is already gzipped on the
+        # wire; stats captures content-encoding + wire vs. decompressed size so
         # this is observable rather than assumed.
         federate_start = time.monotonic()
         async with httpx.AsyncClient(timeout=timeout) as client:
             if match_patterns:
+                # For federate endpoint, add match[] parameters
                 params = [('match[]', pattern) for pattern in match_patterns]
                 response = await client.get(endpoint, params=params)
             else:
@@ -764,23 +768,23 @@ async def send_metrics_request_with_port_forward(
 
             response.raise_for_status()
             text = response.text
-            # response.content is the decompressed body (already
-            # materialized for a non-streamed request, no await);
-            # num_bytes_downloaded is the raw on-wire (compressed) count.
+            # response.content is the decompressed body (already materialized
+            # for a non-streamed request, no await); num_bytes_downloaded is
+            # the raw on-wire (compressed) count.
             stats.body_bytes = len(response.content)
             stats.wire_bytes = response.num_bytes_downloaded
             stats.content_encoding = response.headers.get(
                 'content-encoding', 'identity')
-            # Assign federate_seconds LAST so that (federate_seconds is
-            # not None) structurally implies the byte fields are set —
-            # summary() relies on this. The body is already materialized
-            # above, so measuring the duration here does not lose any
-            # transfer time.
+            # Assign federate_seconds LAST so that (federate_seconds is not
+            # None) structurally implies the byte fields are set — summary()
+            # relies on this. The body is already materialized above, so
+            # measuring the duration here does not lose any transfer time.
             stats.federate_seconds = time.monotonic() - federate_start
             record_federation_phase(context, route, 'federate',
                                     stats.federate_seconds)
             record_federation_payload(context, route, stats.body_bytes)
             return text
+
     finally:
         # Clean up port forward synchronously to guarantee cleanup
         # even if the task is cancelled by asyncio.wait_for().
@@ -901,10 +905,24 @@ async def get_metrics_for_context(context: str,
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    return await _federate_metrics_for_context(context,
-                                               GPU_METRICS_MATCH_PATTERNS,
-                                               route='gpu-metrics',
-                                               stats=stats)
+    match_patterns = GPU_METRICS_MATCH_PATTERNS
+    prometheus_namespace, prometheus_service, prometheus_port = (
+        _get_prometheus_target())
+
+    metrics_text = await send_metrics_request_with_port_forward(
+        context=context,
+        namespace=prometheus_namespace,
+        service=prometheus_service,
+        service_port=prometheus_port,
+        endpoint_path='/federate',
+        match_patterns=match_patterns,
+        route='gpu-metrics',
+        stats=stats)
+
+    # add cluster name as a label to each metric line
+    metrics_text = await add_cluster_name_label(metrics_text, context)
+
+    return metrics_text
 
 
 # Series federated from each context's Prometheus by /endpoints-metrics: the
@@ -937,22 +955,7 @@ async def get_endpoint_metrics_for_context(
     Raises:
         Exception: If metrics collection fails for any reason
     """
-    return await _federate_metrics_for_context(context,
-                                               ENDPOINT_METRICS_MATCH_PATTERNS,
-                                               route='endpoints-metrics',
-                                               stats=stats)
-
-
-async def _federate_metrics_for_context(
-        context: str,
-        match_patterns: List[str],
-        route: str,
-        stats: Optional[FederationStats] = None) -> str:
-    """Federates and stamps the given series from one context's Prometheus.
-
-    Shared by /gpu-metrics and /endpoints-metrics; the routes only pass
-    remote contexts (see split_local_remote_contexts).
-    """
+    match_patterns = ENDPOINT_METRICS_MATCH_PATTERNS
     prometheus_namespace, prometheus_service, prometheus_port = (
         _get_prometheus_target())
 
@@ -963,7 +966,10 @@ async def _federate_metrics_for_context(
         service_port=prometheus_port,
         endpoint_path='/federate',
         match_patterns=match_patterns,
-        route=route,
+        route='endpoints-metrics',
         stats=stats)
 
-    return await add_cluster_name_label(metrics_text, context)
+    # add cluster name as a label to each metric line
+    metrics_text = await add_cluster_name_label(metrics_text, context)
+
+    return metrics_text
