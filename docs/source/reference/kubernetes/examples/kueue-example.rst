@@ -331,6 +331,30 @@ The config above allows the API server to submit jobs using the local queue.
    :width: 80%
    :align: center
 
+Set job priorities
+------------------
+
+Kueue orders and preempts workloads by their `WorkloadPriorityClass
+<https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/>`_. With a
+local queue configured, the ``--priority`` flag on ``sky launch`` and
+``sky jobs launch`` (or the ``priority_class`` field in a task's resources)
+sets the priority class for the pods:
+
+.. code-block:: bash
+
+    sky launch --priority high-priority task.yaml
+
+The pods are labeled with ``kueue.x-k8s.io/priority-class`` set to the given
+name. The priority class must already exist in the cluster, e.g.:
+
+.. code-block:: yaml
+
+    apiVersion: kueue.x-k8s.io/v1beta1
+    kind: WorkloadPriorityClass
+    metadata:
+      name: high-priority
+    value: 1000
+
 Further reading
 ---------------
 

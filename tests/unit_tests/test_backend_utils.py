@@ -232,6 +232,25 @@ def test_aws_template_applies_labels_to_volume_tags() -> None:
     assert expected_block in template
 
 
+def test_kubernetes_template_applies_kueue_priority_class_label() -> None:
+    """Pods must carry the Kueue priority-class label when both a local queue
+    and a priority class are set, so Kueue orders/preempts by the named
+    WorkloadPriorityClass (the skypilot-priority-class annotation alone is
+    not read by Kueue)."""
+    template_path = pathlib.Path('sky/templates/kubernetes-ray.yml.j2')
+    template = template_path.read_text(encoding='utf-8')
+
+    expected_block = """            {% if k8s_kueue_local_queue_name %}
+            kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
+            kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
+            {% if priority_class is not none %}
+            kueue.x-k8s.io/priority-class: {{priority_class}}
+            {% endif %}
+            {% endif %}"""
+
+    assert expected_block in template
+
+
 def test_get_clusters_launch_refresh(monkeypatch):
     # verifies that `get_clusters` works when one cluster is launching
     # and other is not.
