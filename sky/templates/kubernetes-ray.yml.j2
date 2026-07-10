@@ -964,8 +964,11 @@ available_node_types:
                 pkg_present() {
                   case "$1" in
                     netcat)         command -v nc          >/dev/null 2>&1 ;;
-                    openssh-server) command -v sshd        >/dev/null 2>&1 ;;
-                    pciutils)       command -v lspci       >/dev/null 2>&1 ;;
+                    # sshd/lspci live in /usr/sbin|/sbin, which a non-root user's
+                    # PATH often omits -- fall back to absolute paths so an
+                    # already-present tool isn't needlessly (re)installed.
+                    openssh-server) command -v sshd  >/dev/null 2>&1 || [ -x /usr/sbin/sshd ]  || [ -x /sbin/sshd ]  ;;
+                    pciutils)       command -v lspci >/dev/null 2>&1 || [ -x /usr/sbin/lspci ] || [ -x /sbin/lspci ] ;;
                     fuse)           command -v fusermount  >/dev/null 2>&1 ;;
                     fuse3)          command -v fusermount3 >/dev/null 2>&1 ;;
                     *)              command -v "$1"        >/dev/null 2>&1 ;;
@@ -996,8 +999,8 @@ available_node_types:
                         esac ;;
                       openssh-server)
                         case "$PKG_MGR" in
-                          apk) out="$out openssh" ;;
-                          *)   out="$out openssh-server" ;;
+                          apk|zypper) out="$out openssh" ;;
+                          *)          out="$out openssh-server" ;;
                         esac ;;
                       *) out="$out $g" ;;
                     esac
@@ -1290,10 +1293,10 @@ available_node_types:
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
                 # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
-                # Wait for `patch` to be installed before applying ray patches.
-                # patch is best-effort (an image may ship none and have no usable
-                # repo), so bound the wait: proceed after 60s and let the patch
-                # step below fail loudly rather than hang this step forever.
+                # Wait (bounded) for the best-effort `patch` install to land
+                # before applying the Ray patches. An image may ship no `patch`
+                # and have no usable repo, so proceed after 60s rather than hang
+                # this step forever; the apply below is best-effort (see there).
                 _patch_wait=0
                 until command -v patch >/dev/null 2>&1; do
                   sleep 0.1
@@ -1308,10 +1311,15 @@ available_node_types:
                     echo "Waiting for patch package to be installed..."
                   fi
                 done
-                # Apply Ray patches for progress bar fix
+                # Apply Ray patches (quality-of-life fixes: progress bar, log
+                # streaming). Best-effort: ray_patches.patch() already falls back
+                # to the Python `patch` library when the system `patch` binary is
+                # absent, but on a fully offline/minimal image that too can be
+                # unavailable. Warn and continue rather than abort the launch --
+                # the cluster comes up and runs without these patches.
                 # python_path is seeded by conda_installation_commands
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || echo "WARNING: could not apply Ray patches (patch tooling unavailable); continuing without them.";
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
