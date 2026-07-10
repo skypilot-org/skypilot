@@ -15,14 +15,13 @@ ManagedJobScheduleState = managed_job_state.ManagedJobScheduleState
 
 
 @pytest.mark.asyncio
-async def test_claim_reset_reclaim(jobs_db, controller_harness):
+async def test_claim_reset_reclaim(controller_harness):
     """The claim transaction and the recovery reset, at the DB level.
 
     No controller loops run here: the test calls get_waiting_job_async (the
     controller's claim step) and reset_job_for_recovery (the HA-recovery
     reset) directly to pin their semantics.
     """
-    del jobs_db
     harness = controller_harness
     job_id = harness.submit_job(name='claim-test')
 
@@ -55,9 +54,8 @@ async def test_claim_reset_reclaim(jobs_db, controller_harness):
 
 
 @pytest.mark.asyncio
-async def test_job_runs_to_success(jobs_db, fake_cloud, controller_harness):
+async def test_job_runs_to_success(fake_cloud, controller_harness):
     """Full lifecycle: claim -> launch -> RUNNING -> SUCCEEDED -> DONE."""
-    del jobs_db
     harness = controller_harness
     job_id = harness.submit_job(name='success-test')
     cluster_name = harness.cluster_name_for(job_id, 'success-test')
@@ -89,10 +87,8 @@ async def test_job_runs_to_success(jobs_db, fake_cloud, controller_harness):
 
 
 @pytest.mark.asyncio
-async def test_job_recovers_from_preemption(jobs_db, fake_cloud,
-                                            controller_harness):
+async def test_job_recovers_from_preemption(fake_cloud, controller_harness):
     """Preemption drives RECOVERING and a relaunch, then completes."""
-    del jobs_db
     harness = controller_harness
     job_id = harness.submit_job(name='recovery-test')
     cluster_name = harness.cluster_name_for(job_id, 'recovery-test')
@@ -122,9 +118,8 @@ async def test_job_recovers_from_preemption(jobs_db, fake_cloud,
 
 
 @pytest.mark.asyncio
-async def test_launch_failure_retries(jobs_db, fake_cloud, controller_harness):
+async def test_launch_failure_retries(fake_cloud, controller_harness):
     """A failed sky.launch goes through backoff and retries to success."""
-    del jobs_db
     harness = controller_harness
     job_id = harness.submit_job(name='retry-test')
     cluster_name = harness.cluster_name_for(job_id, 'retry-test')
@@ -149,9 +144,8 @@ async def test_launch_failure_retries(jobs_db, fake_cloud, controller_harness):
 
 
 @pytest.mark.asyncio
-async def test_job_failure_is_recorded(jobs_db, fake_cloud, controller_harness):
+async def test_job_failure_is_recorded(fake_cloud, controller_harness):
     """A user-code failure ends the job FAILED with the cluster cleaned up."""
-    del jobs_db
     harness = controller_harness
     job_id = harness.submit_job(name='failure-test')
     cluster_name = harness.cluster_name_for(job_id, 'failure-test')
