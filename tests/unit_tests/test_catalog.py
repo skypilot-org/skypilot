@@ -677,3 +677,88 @@ def test_slurm_get_hourly_cost_end_to_end(mock_nested):
     # Accelerator-only pricing: partition A100=5.00, cpu/memory ignored
     expected = 4 * 5.00
     assert cost == pytest.approx(expected)
+
+
+def _efa_catalog_df():
+    """Tiny AWS-catalog-like frame exercising the EFA sizing helpers."""
+    return pd.DataFrame([
+        # H100 appears on two instances; the full node (p5.48xlarge) exposes
+        # more EFA interfaces than the fractional-node p5.4xlarge.
+        {
+            'InstanceType': 'p5.4xlarge',
+            'AcceleratorName': 'H100',
+            'MaximumEfaInterfaces': 4.0
+        },
+        {
+            'InstanceType': 'p5.48xlarge',
+            'AcceleratorName': 'H100',
+            'MaximumEfaInterfaces': 32.0
+        },
+        # A100 present but no EFA advertised (NaN) -> not EFA-selectable.
+        {
+            'InstanceType': 'p4d.24xlarge',
+            'AcceleratorName': 'A100',
+            'MaximumEfaInterfaces': np.nan
+        },
+    ])
+
+
+def test_get_efa_interface_count_impl():
+    df = _efa_catalog_df()
+    # Known instance -> its int EFA count (float in catalog -> int out).
+    assert catalog_common.get_efa_interface_count_impl(df, 'p5.48xlarge') == 32
+    # NaN EFA value -> None (degrade silently).
+    assert catalog_common.get_efa_interface_count_impl(df,
+                                                       'p4d.24xlarge') is None
+    # Unknown instance -> None.
+    assert catalog_common.get_efa_interface_count_impl(df,
+                                                       'nope.xlarge') is None
+
+
+def test_get_efa_interface_count_impl_missing_column():
+    # An older/hosted catalog without the column -> None, not a KeyError.
+    df = _efa_catalog_df().drop(columns=['MaximumEfaInterfaces'])
+    assert catalog_common.get_efa_interface_count_impl(df,
+                                                       'p5.48xlarge') is None
+
+
+def test_get_efa_instance_type_for_accelerator_impl_picks_full_node():
+    df = _efa_catalog_df()
+    # Among H100 instances, the one with the most EFA (the full node) wins.
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df, 'H100') == 'p5.48xlarge'
+
+
+def test_get_efa_instance_type_for_accelerator_impl_case_insensitive_fullmatch(
+):
+    df = _efa_catalog_df()
+    # Match is case-insensitive ...
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df, 'h100') == 'p5.48xlarge'
+    # ... but a full match, not a prefix/substring.
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df, 'H10') is None
+
+
+def test_get_efa_instance_type_for_accelerator_impl_none_cases():
+    df = _efa_catalog_df()
+    # Accelerator present but only NaN EFA -> nothing selectable -> None.
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df, 'A100') is None
+    # Accelerator absent -> None.
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df, 'V100') is None
+    # Missing column -> None.
+    df2 = df.drop(columns=['MaximumEfaInterfaces'])
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df2, 'H100') is None
+
+
+def test_get_efa_instance_type_for_accelerator_impl_duplicate_index_safe():
+    # Catalog merges can leave duplicate index labels; sort_values().iloc[0]
+    # must still select the max-EFA row, where .loc[.idxmax()] could return
+    # multiple rows / raise.
+    df = _efa_catalog_df()
+    df.index = [0, 0, 0]
+    assert catalog_common.get_efa_instance_type_for_accelerator_impl(
+        df, 'H100') == 'p5.48xlarge'

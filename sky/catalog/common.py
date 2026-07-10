@@ -702,7 +702,7 @@ def get_efa_instance_type_for_accelerator_impl(
     """The EFA-capable instance type for an accelerator (its full GPU node).
 
     Picks the instance with the most EFA interfaces among those exposing the
-    accelerator -- i.e. the full node (e.g. H100 -> p5.48xlarge, not p5.4xlarge).
+    accelerator -- the full node (e.g. H100 -> p5.48xlarge, not p5.4xlarge).
     Returns its full GPU count and EFA count via the per-instance accessors.
     Returns None when the catalog has no ``MaximumEfaInterfaces`` column
     (older/hosted catalog) or no EFA-capable instance exposes the accelerator.
@@ -712,13 +712,15 @@ def get_efa_instance_type_for_accelerator_impl(
     """
     if 'MaximumEfaInterfaces' not in df.columns:
         return None
-    acc = df['AcceleratorName'].astype(str)
-    matches = df[acc.str.fullmatch(acc_name, case=False, na=False) &
-                 df['MaximumEfaInterfaces'].notna()]
+    matches = df[
+        df['AcceleratorName'].str.fullmatch(acc_name, case=False, na=False) &
+        df['MaximumEfaInterfaces'].notna()]
     if matches.empty:
         return None
-    row = matches.loc[matches['MaximumEfaInterfaces'].idxmax()]
-    return row['InstanceType']
+    # sort_values().iloc[0] rather than .loc[.idxmax()] so a DataFrame with
+    # duplicate index labels (possible after catalog merges) can't mis-select.
+    matches = matches.sort_values(by='MaximumEfaInterfaces', ascending=False)
+    return matches['InstanceType'].iloc[0]
 
 
 def get_instance_type_for_accelerator_impl(

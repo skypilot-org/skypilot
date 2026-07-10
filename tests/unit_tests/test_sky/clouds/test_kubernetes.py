@@ -4223,12 +4223,21 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
         # Scale-from-zero: only a non-GPU AWS system node is up.
         return [self._node(self._AWS_SYSTEM_NODE_LABELS, {'cpu': '2'})]
 
-    def _detect(self, nodes, acc_count, acc_type, derived_efa=None, tier=None):
+    def _detect(self,
+                nodes,
+                acc_count,
+                acc_type,
+                derived_efa=None,
+                tier=None,
+                autoscaler='karpenter'):
+        # autoscaler defaults to a configured value: the scale-from-zero EFA
+        # fallback only fires on a cluster that can actually scale up a GPU
+        # node. Pass autoscaler=None to model a static cluster.
         tier = tier if tier is not None else resources_utils.NetworkTier.BEST
         with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=nodes), \
              patch('sky.skypilot_config.get_effective_region_config',
-                   return_value=None), \
+                   return_value=autoscaler), \
              patch.object(kubernetes.Kubernetes,
                           '_derive_efa_count_from_catalog',
                           return_value=derived_efa):
@@ -4249,6 +4258,19 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
             net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
         self.assertIsNotNone(meta)
         self.assertEqual(meta['efa_count'], 32)
+
+    def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
+        # A static cluster (no autoscaler) with no GPU node can never schedule
+        # the pod, so the fallback must NOT request EFA even if a count is
+        # derivable -- otherwise the pod pends to provision_timeout.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 autoscaler=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
 
     def test_cold_aws_node_no_derivable_count_falls_through(self):
         # Catalog can't size it (e.g. column absent) -> no EFA metadata,

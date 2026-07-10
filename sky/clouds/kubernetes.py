@@ -1540,6 +1540,7 @@ class Kubernetes(clouds.Cloud):
         or the accelerator can't be resolved). Generic and autoscaler-agnostic.
         """
         # Local import: keeps the AWS-specific catalog off non-AWS import paths.
+        # pylint: disable-next=import-outside-toplevel
         from sky.catalog import aws_catalog
         try:
             instance_type = aws_catalog.get_efa_instance_type_for_accelerator(
@@ -1553,7 +1554,9 @@ class Kubernetes(clouds.Cloud):
                 instance_type, clouds='aws')
             if not accelerators:
                 return None
-            node_gpu_count = int(next(iter(accelerators.values())))
+            # No int() cast: keep the catalog's native numeric type so a
+            # fractional GPU count (if ever present) isn't truncated.
+            node_gpu_count = next(iter(accelerators.values()))
             if node_gpu_count <= 0:
                 return None
             calculated_efa = math.floor(acc_count / node_gpu_count *
@@ -1732,6 +1735,17 @@ class Kubernetes(clouds.Cloud):
             # If we can't reach the cluster, assume no high perf networking
             pass
 
+        # Autoscaler configured for this context (karpenter/generic/gke), or
+        # None on a static cluster. Both cold-start fallbacks below require it:
+        # on a cluster that can't scale up a GPU node, deriving a count would
+        # request a fabric for a pod that can never be scheduled -- it would
+        # just pend to provision_timeout.
+        autoscaler_type = skypilot_config.get_effective_region_config(
+            cloud=cls._REPR.lower(),
+            region=context,
+            keys=('autoscaler',),
+            default_value=None)
+
         # AWS EFA scale-from-zero fallback: the node scan above can only read an
         # EFA count off an already-running GPU+EFA node. On a cold cluster
         # (Karpenter / cluster-autoscaler at min=0) it finds none, so derive the
@@ -1739,26 +1753,23 @@ class Kubernetes(clouds.Cloud):
         # otherwise network_tier: best omits the EFA request and NCCL silently
         # falls back to TCP. Mirrors the GKE machine-type fallback below. Gated
         # on having seen an AWS node (any EKS node carries the cloud-provider
-        # labels, even a system node), so this never fires on non-AWS clusters.
-        # Degrades to today's behavior (no EFA metadata) whenever the catalog
-        # can't answer -- e.g. a hosted catalog predating the
-        # MaximumEfaInterfaces column, or an accelerator/instance it can't
-        # resolve -- rather than reporting an EFA fabric it can't size.
-        if saw_aws_efa_node and acc_type is not None and acc_count:
-            efa_count = cls._derive_efa_count_from_catalog(acc_type, acc_count)
-            if efa_count is not None:
+        # labels, even a system node) and on an autoscaler being configured, so
+        # it never fires on non-AWS or static clusters. Degrades to today's
+        # behavior (no EFA metadata) whenever the catalog can't answer -- e.g. a
+        # hosted catalog predating the MaximumEfaInterfaces column, or an
+        # accelerator/instance it can't resolve -- rather than reporting an EFA
+        # fabric it can't size.
+        if (saw_aws_efa_node and autoscaler_type is not None and
+                acc_type is not None and acc_count):
+            derived_efa = cls._derive_efa_count_from_catalog(
+                acc_type, acc_count)
+            if derived_efa is not None:
                 return (KubernetesHighPerformanceNetworkType.AWS_EFA, {
-                    'efa_count': efa_count
+                    'efa_count': derived_efa
                 })
 
-        # If we cannot determine the network type based on nodes
-        # Check if the cluster has any node pools with autoscaling enabled
-        # with machine types that support high perf networking for GKE.
-        autoscaler_type = skypilot_config.get_effective_region_config(
-            cloud=cls._REPR.lower(),
-            region=context,
-            keys=('autoscaler',),
-            default_value=None)
+        # GKE machine-type cold-start fallback: check autoscaling node pools for
+        # high-perf-networking machine types.
         if (autoscaler_type !=
                 kubernetes_enums.KubernetesAutoscalerType.GKE.value):
             return KubernetesHighPerformanceNetworkType.NONE, None
