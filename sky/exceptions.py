@@ -257,6 +257,22 @@ class ManagedJobStatusError(Exception):
     pass
 
 
+class JobOwnershipLostError(Exception):
+    """Raised when a controller's claim on a managed job is no longer current.
+
+    A fenced state write or pre-action ownership check found that the job's
+    claim_id no longer matches the claim this controller holds: the job was
+    reset (e.g. by HA recovery) and possibly re-claimed by another
+    controller. The holder must stand down gracefully -- no further state
+    writes for the job, and no teardown of resources a new claimant may be
+    using.
+    """
+
+    def __init__(self, job_id: int):
+        super().__init__(f'Ownership of managed job {job_id} was lost')
+        self.job_id = job_id
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass

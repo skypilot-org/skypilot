@@ -1098,6 +1098,7 @@ class TestJobGroupResumeDoesNotReissueStarting:
     def _make_controller(self):
         controller = MagicMock(spec=JobController)
         controller._job_id = 1
+        controller._fence = None
         controller._dag = MagicMock()
         task = MagicMock()
         task.name = 'job-a'
@@ -1164,6 +1165,7 @@ class TestUserJobStatusClassification:
         """Build a JobController without running __init__ (which needs a DB)."""
         controller = JobController.__new__(JobController)
         controller._job_id = 1
+        controller._fence = None
         controller._pool = None
         controller._backend = MagicMock()
         # Methods exercised on the FAILED path; stub them out.

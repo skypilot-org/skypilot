@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.client import sdk
+from sky.jobs import fencing
 from sky.jobs import file_content_utils
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
@@ -139,6 +140,11 @@ class StrategyExecutor:
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
         self.file_mounts_blob_id = file_mounts_blob_id
+        # Ownership fence for this job's claim. Assigned post-construction
+        # by make() rather than via __init__ so externally-registered
+        # strategy subclasses with today's constructor signature keep
+        # working.
+        self._fence: Optional[fencing.FencingToken] = None
 
     def set_strategy_config(self, config: dict) -> None:
         """Handle strategy-specific config from the job_recovery dict.
@@ -220,6 +226,7 @@ class StrategyExecutor:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         file_mounts_blob_id: Optional[str] = None,
+        fence: Optional[fencing.FencingToken] = None,
     ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
@@ -279,6 +286,7 @@ class StrategyExecutor:
                                          starting_signal, recover_on_exit_codes,
                                          file_mounts_blob_id)
         executor.set_strategy_config(strategy_config)
+        executor._fence = fence  # pylint: disable=protected-access
         return executor
 
     async def launch(self) -> float:
@@ -303,8 +311,20 @@ class StrategyExecutor:
         When recover() is called the cluster should be in STOPPED status (i.e.
         partially down).
 
+        Template: the ownership pre-check runs here, before any strategy's
+        recovery teardown, so every strategy (including the default
+        EagerFailoverStrategyExecutor, whose first act is _cleanup_cluster)
+        is covered. Strategies implement _recover_impl().
+
         Returns: The timestamp job started.
         """
+        if self._fence is not None:
+            await state.raise_if_fence_lost_async(self._fence,
+                                                  detection='preaction')
+        return await self._recover_impl()
+
+    async def _recover_impl(self) -> float:
+        """Strategy-specific recovery; see recover()."""
         raise NotImplementedError
 
     async def _try_cancel_jobs(self):
@@ -456,6 +476,13 @@ class StrategyExecutor:
     def _cleanup_cluster(self) -> None:
         if self.cluster_name is None:
             return
+        if self._fence is not None:
+            # Fresh ownership re-read, not just a fence.lost check: the
+            # claim may have been lost during a multi-minute sdk.launch
+            # whose failure routes here before any fenced write would have
+            # noticed. A loser must never terminate what may now be the new
+            # claimant's cluster.
+            state.raise_if_fence_lost(self._fence, detection='preaction')
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
@@ -550,6 +577,15 @@ class StrategyExecutor:
         if recovery:
             self._refresh_priority_from_persisted_dag()
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
+        # Ownership pre-check: the chokepoint shared by initial, recovery,
+        # and JobGroup launches. Not redundant with the fenced writes below
+        # for pools and JobGroups, which bypass scheduled_launch's fenced
+        # write -- for pools, the first fenced write
+        # (set_job_id_on_pool_cluster_async) only lands after work was
+        # already submitted to the worker.
+        if self._fence is not None:
+            await state.raise_if_fence_lost_async(self._fence,
+                                                  detection='preaction')
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
@@ -560,14 +596,17 @@ class StrategyExecutor:
                         self.starting,
                         self.starting_lock,
                         self.starting_signal,
+                        fence=self._fence,
                 ):
                     # The job state may have been PENDING during backoff -
                     # update to STARTING or RECOVERING.
                     # On the first attempt (when retry_cnt is 1), we should
                     # already be in STARTING or RECOVERING.
                     if retry_cnt > 1:
-                        await state.set_restarting_async(
-                            self.job_id, self.task_id, recovery)
+                        await state.set_restarting_async(self.job_id,
+                                                         self.task_id,
+                                                         recovery,
+                                                         fence=self._fence)
                     try:
                         usage_lib.messages.usage.set_internal()
                         if self.pool is None:
@@ -695,7 +734,9 @@ class StrategyExecutor:
                                 self.cluster_name, self.job_id)
                             self.job_id_on_pool_cluster = job_id_on_pool_cluster
                             await state.set_job_id_on_pool_cluster_async(
-                                self.job_id, job_id_on_pool_cluster)
+                                self.job_id,
+                                job_id_on_pool_cluster,
+                                fence=self._fence)
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
@@ -740,6 +781,12 @@ class StrategyExecutor:
                             return None
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
+                    except exceptions.JobOwnershipLostError:
+                        # Never treat ownership loss as a launch failure:
+                        # the handler below would retry and, on this path's
+                        # fall-through, run _cleanup_cluster against what
+                        # may now be the new claimant's cluster.
+                        raise
                     except Exception as e:  # pylint: disable=broad-except
                         # A pod OOM during cluster/runtime setup is
                         # deterministic (e.g. the requested memory is too
@@ -848,7 +895,9 @@ class StrategyExecutor:
 
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
-                await state.set_backoff_pending_async(self.job_id, self.task_id)
+                await state.set_backoff_pending_async(self.job_id,
+                                                      self.task_id,
+                                                      fence=self._fence)
                 # Calculate the backoff time and sleep.
                 gap_seconds = (backoff.current_backoff()
                                if self.pool is None else 1)
@@ -962,7 +1011,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
             self._launched_resources = None
         return job_submitted_at
 
-    async def recover(self) -> float:
+    async def _recover_impl(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
         # 2. Tear down the cluster, if the step 1 failed to launch the cluster.
@@ -1040,7 +1089,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
                                                   -> R1Z1 (success)
     """
 
-    async def recover(self) -> float:
+    async def _recover_impl(self) -> float:
         # 1. Terminate the current cluster
         # 2. Launch again by explicitly blocking the previously launched region
         # (this will failover through the entire search space except the

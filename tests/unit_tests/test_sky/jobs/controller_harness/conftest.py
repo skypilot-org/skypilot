@@ -29,10 +29,12 @@ from sky.backends import cloud_vm_ray_backend
 from sky.client import sdk
 from sky.jobs import constants as jobs_constants
 from sky.jobs import controller as controller_module
+from sky.jobs import file_content_utils
 from sky.jobs import recovery_strategy
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.utils import controller_utils
+from sky.utils import dag_utils
 
 
 @pytest.fixture
@@ -214,9 +216,25 @@ async def make_controller_harness(fake_cloud, tmp_path, monkeypatch):
     # event loop a fresh one so it can never be bound to a previous loop.
     monkeypatch.setattr(controller_module, '_background_tasks_lock',
                         asyncio.Lock())
-    # The DAG cache is keyed by job_id, which restarts from 1 in every test's
-    # fresh DB -- a stale entry would hand a job another test's DAG.
-    controller_module._get_dag.cache_clear()  # pylint: disable=protected-access
+
+    # Re-parse the DAG on every _get_dag call instead of using the global
+    # lru_cache. Two reasons: (a) the cache is keyed by job_id, which
+    # restarts from 1 in each test's fresh DB, so a stale entry would hand a
+    # job another test's DAG; (b) StrategyExecutor.make() mutates the
+    # returned task's resources (pops job_recovery), so a shared cached DAG
+    # breaks multi-controller tests where a second in-process controller
+    # would re-make() an already-mutated task. In production each controller
+    # is its own process with its own cache, so an uncached per-call parse
+    # is the faithful single-process stand-in.
+    def _uncached_get_dag(job_id):
+        content = file_content_utils.get_job_dag_content(job_id)
+        if content is None:
+            raise RuntimeError(f'No DAG content for job {job_id}')
+        dag = dag_utils.load_dag_from_yaml_str(content)
+        assert dag.name is not None, dag
+        return dag
+
+    monkeypatch.setattr(controller_module, '_get_dag', _uncached_get_dag)
 
     harnesses = []
 
@@ -239,7 +257,6 @@ async def make_controller_harness(fake_cloud, tmp_path, monkeypatch):
         # run_job_loop tasks are module-global, so they are drained once,
         # after every harness has cancelled its own jobs.
         await harness_module.drain_background_tasks()
-        controller_module._get_dag.cache_clear()  # pylint: disable=protected-access
 
 
 @pytest_asyncio.fixture
