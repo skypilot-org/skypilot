@@ -298,10 +298,17 @@ export function Clusters() {
         if (userScope !== OWNER_SCOPE_ALL) {
           setUserScope(OWNER_SCOPE_ALL);
         }
-      } else if (isOwnerScope(owner) && userScope !== owner) {
-        // Go through selectScope so a deep-linked ?owner=... choice is also
-        // persisted to localStorage like a manual toggle.
-        selectScope(owner);
+      } else if (isOwnerScope(owner)) {
+        if (userScope !== owner) {
+          // Go through selectScope so a deep-linked ?owner=... choice is also
+          // persisted to localStorage like a manual toggle.
+          selectScope(owner);
+        } else if (readStoredOwnerScope() !== owner) {
+          // On a fresh load the initial state is already seeded from the URL,
+          // so the branch above never runs; still persist the deep-linked
+          // choice like a manual toggle.
+          window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, owner);
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
