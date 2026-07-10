@@ -1038,6 +1038,38 @@ def launch_cloud_cmd_on_landed_context(name: str) -> str:
         f'kubernetes/$(cat {k8s_landed_context_file(name)})', name)
 
 
+def resolve_cloud_cmd_k8s_context_cmd(test_cluster_name: str) -> str:
+    """Resolve+persist the context the cloud-cmd helper landed on, so a later
+    ``sky launch`` can be pinned to the same context (the inverse of
+    :func:`launch_cloud_cmd_on_landed_context`, which pins the helper to an
+    existing target). Use when a test mutates cluster state *via the helper*
+    (e.g. ``kubectl create`` a pod) and then launches a real cluster that must
+    land on that same context to interact with it.
+
+    No-op when the API server is local: there is no cloud-cmd helper
+    (see :func:`launch_cluster_for_cloud_cmd`) and only one context exists, so
+    the subsequent launch is already co-located.
+    """
+    if server_common.is_api_server_local() and not is_remote_server_test():
+        return 'true'
+    return resolve_k8s_context_cmd(test_cluster_name +
+                                   _CLOUD_CMD_CLUSTER_NAME_SUFFIX)
+
+
+def cloud_cmd_landed_k8s_infra(test_cluster_name: str) -> str:
+    """``--infra`` value that pins a ``sky launch`` to the cloud-cmd helper's
+    landed context on a remote/multi-context server (paired with
+    :func:`resolve_cloud_cmd_k8s_context_cmd`), or plain ``kubernetes`` locally
+    (single context, no helper).
+    """
+    if server_common.is_api_server_local() and not is_remote_server_test():
+        return 'kubernetes'
+    return (
+        'kubernetes/$(cat '
+        f'{k8s_landed_context_file(test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX)})'
+    )
+
+
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
                              cmd: str,
                              envs: Set[str] = None,

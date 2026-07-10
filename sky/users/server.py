@@ -283,6 +283,10 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
                                     detail=f'Invalid role: {role}')
 
     if not role:
+        # Main-process handler: refresh config so a runtime `rbac.default_role`
+        # change is honored without a server restart (executor requests reload
+        # per request, sync handlers like this one do not).
+        skypilot_config.safe_reload_config()
         role = rbac.get_default_role()
 
     # Create user
@@ -568,6 +572,10 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
             status_code=400,
             detail=f'Missing required columns: {", ".join(missing_headers)}')
 
+    # Main-process handler: refresh config once (not per row) so rows that fall
+    # back to `rbac.default_role` honor a runtime change without a restart.
+    skypilot_config.safe_reload_config()
+
     # Parse user data
     users_to_create = []
     parse_errors = []
@@ -666,6 +674,9 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 def user_export() -> Dict[str, Any]:
     """Export all users as CSV content."""
     try:
+        # Main-process handler: refresh config once so the roleless-user display
+        # fallback below reflects a runtime `rbac.default_role` change.
+        skypilot_config.safe_reload_config()
         # Get all users
         user_list = global_user_state.get_all_users()
 
@@ -821,11 +832,12 @@ def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add service account to permission system with default role
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.permission import permission_service
-        permission_service.add_user_if_not_exists(service_account_user_id)
+        # Add the service account to the permission system with the default
+        # role. This handler runs in the main API-server process (no per-request
+        # config reload), so seed via the helper that refreshes config first —
+        # an admin's runtime `rbac.default_role` change then applies without a
+        # server restart.
+        permission.seed_new_user_role(service_account_user_id)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days

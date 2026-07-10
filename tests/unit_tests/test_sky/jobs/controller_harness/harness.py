@@ -62,10 +62,10 @@ async def drain_background_tasks(timeout: float = 10) -> None:
     and given a bounded second wait so a wedged cleanup cannot hang the test
     session.
     """
-    background = [
+    background = {
         task for task in controller_module._background_tasks  # pylint: disable=protected-access
         if not task.done()
-    ]
+    }
     if not background:
         return
     _, pending = await asyncio.wait(background, timeout=timeout)

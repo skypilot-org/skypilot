@@ -157,6 +157,12 @@ apiService:
   # Optional secret that contains SSH keys for the API server to use, all the entries in the secret will be mounted to ~/.ssh/ directory in the API server.
   # @schema type: [string, null]
   sshKeySecret: null
+  # Whether to persist the API server's ~/.ssh directory on the storage volume.
+  # Only takes effect when storage.enabled is true. When set to false, ~/.ssh is
+  # kept on ephemeral pod storage even if storage is enabled, so SSH keys are
+  # not preserved across pod restarts.
+  # @schema type: [boolean]
+  persistSSHConfig: true
   # Metrics configuration for the API server.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-metrics-setup.html for more details.
   metrics:

@@ -3,8 +3,6 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-import filelock
-
 from sky import check as sky_check
 from sky import exceptions
 from sky import global_user_state
@@ -122,12 +120,17 @@ def _update_workspaces_config(
     Returns:
         The updated workspaces configuration.
     """
-    lock_path = skypilot_config.get_skypilot_config_lock_path()
+    # Distributed config lock: serializes config read-modify-write across worker
+    # processes.
     try:
-        with filelock.FileLock(lock_path,
-                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
-            # Read the current config inside the lock to ensure we have
-            # the latest state
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            # Reload from the backing store INSIDE the lock. to_dict() returns
+            # this process's in-memory config, which is stale w.r.t. writes
+            # committed by others; without this reload the read-modify-
+            # write below is computed from a stale snapshot.
+            skypilot_config.reload_config()
+            # Read the current (freshly reloaded) config inside the lock.
             current_config = skypilot_config.to_dict()
             current_workspaces = current_config.get('workspaces', {}).copy()
 
@@ -141,13 +144,12 @@ def _update_workspaces_config(
             skypilot_config.update_api_server_config_no_lock(current_config)
 
             return current_workspaces
-    except filelock.Timeout as e:
+    except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to update workspace configuration due to a timeout '
-            f'when trying to acquire the lock at {lock_path}. This may '
+            'Failed to update workspace configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again or manually remove the lock '
-            f'file if you believe it is stale.') from e
+            'configuration. Please try again.') from e
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -704,11 +706,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     resource_checker.check_no_active_resources_for_workspaces(
         workspaces_to_check)
 
-    # Use file locking to prevent race conditions
-    lock_path = skypilot_config.get_skypilot_config_lock_path()
     try:
-        with filelock.FileLock(lock_path,
-                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
@@ -724,13 +724,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     elif operation == 'delete':
                         permission_service.remove_workspace_policy(
                             workspace_name)
-    except filelock.Timeout as e:
+    except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to update configuration due to a timeout '
-            f'when trying to acquire the lock at {lock_path}. This may '
+            'Failed to update configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again or manually remove the lock '
-            f'file if you believe it is stale.') from e
+            'configuration. Please try again.') from e
 
     # Validate the configuration by running sky check
     try:
@@ -959,11 +958,11 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # config lock.
     current_config = skypilot_config.to_dict()
     current_workspaces = current_config.get('workspaces', {})
-    # Map workspace -> (new_config, new_resolved_user_ids). We pre-resolve
-    # the post-removal user_id set during validation so the modifier doesn't
-    # have to call get_workspace_users (which would hit get_all_users) again
-    # under the file lock.
-    validated_changes: Dict[str, Tuple[Dict[str, Any], List[str]]] = {}
+    # Workspaces whose removal passed validation. The actual strip + write is
+    # (re)done INSIDE the config lock in the modifier from the fresh config, not
+    # from this pre-lock snapshot, so concurrent per-user removals across
+    # workers/replicas can't clobber each other via a stale read-modify-write.
+    validated_changes: Set[str] = set()
 
     # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
     # Otherwise each per-workspace _validate_workspace_config_changes call
@@ -1007,12 +1006,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                                                          new_ws_config,
                                                          resources=resources,
                                                          resolver=resolver)
-            # Pre-resolve the post-removal user_id set ONCE here, using the
-            # shared resolver, so update_workspace_policy in the modifier
-            # (under the config file lock) doesn't have to do another
-            # get_all_users() round-trip.
-            new_resolved = resolver.resolve_workspace_users(new_ws_config)
-            validated_changes[workspace_name] = (new_ws_config, new_resolved)
+            validated_changes.add(workspace_name)
         except ValueError as e:
             failed.append({
                 'workspace_name': workspace_name,
@@ -1032,8 +1026,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     permission_service = permission.permission_service
 
     def modifier(workspaces: Dict[str, Any]) -> None:
-        for workspace_name, (new_ws_config,
-                             new_resolved) in validated_changes.items():
+        for workspace_name in validated_changes:
             try:
                 # Defensive re-check: the workspace might have been deleted
                 # between validation and acquiring the file lock.
@@ -1043,14 +1036,31 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                         'error': f'Workspace {workspace_name!r} does not exist',
                     })
                     continue
+                # Read-modify-write INSIDE the lock from the fresh config, not
+                # from the pre-lock snapshot above. Otherwise concurrent
+                # removals of different users from the same workspace (e.g.
+                # several deprovisions in parallel, across workers/replicas)
+                # each strip their own user from a stale snapshot and the last
+                # writer's full-replace resurrects the users the others removed.
+                ws_config = workspaces[workspace_name]
+                allowed = list(ws_config.get('allowed_users', []))
+                new_allowed = [
+                    entry for entry in allowed if entry not in entries_to_strip
+                ]
+                if new_allowed == allowed:
+                    # Already removed by a concurrent op; nothing to do.
+                    succeeded.append(workspace_name)
+                    continue
+                new_ws_config = dict(ws_config)
+                new_ws_config['allowed_users'] = new_allowed
                 workspaces[workspace_name] = new_ws_config
-                # Update casbin policy inside the file lock so the config
-                # file and the policy table can't drift out of sync if the
-                # process crashes between the two updates. Use the
-                # pre-resolved user_id list (computed during validation)
-                # so we don't re-call get_workspace_users -> get_all_users.
+                # Update casbin policy inside the file lock so the config file
+                # and the policy table can't drift out of sync. Resolve from the
+                # fresh config; the resolver's user maps are already built so
+                # this doesn't re-hit get_all_users.
                 permission_service.update_workspace_policy(
-                    workspace_name, new_resolved)
+                    workspace_name,
+                    resolver.resolve_workspace_users(new_ws_config))
                 succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(

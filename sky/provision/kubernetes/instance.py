@@ -2354,7 +2354,7 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
 
     # Check pod status conditions for high level overview.
     # No need to sort, as each condition.type will only appear once.
-    for condition in pod.status.conditions:
+    for condition in (pod.status.conditions or []):
         reason = condition.reason or 'Unknown reason'
         message = condition.message or ''
 
