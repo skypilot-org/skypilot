@@ -3,8 +3,6 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-import filelock
-
 from sky import check as sky_check
 from sky import exceptions
 from sky import global_user_state
@@ -49,6 +47,9 @@ class WorkspaceConfigComparison:
         allowed_users_new: New allowed users list
         removed_users: Users removed from allowed_users
         added_users: Users added to allowed_users
+        additive_allowed_contexts: True if the only non-user-access change is an
+            additive kubernetes.allowed_contexts change (old contexts remain a
+            subset of the new contexts)
     """
     only_user_access_changes: bool
     private_changed: bool
@@ -59,6 +60,7 @@ class WorkspaceConfigComparison:
     allowed_users_new: List[str]
     removed_users: List[str]
     added_users: List[str]
+    additive_allowed_contexts: bool = False
 
 
 # =========================
@@ -118,12 +120,17 @@ def _update_workspaces_config(
     Returns:
         The updated workspaces configuration.
     """
-    lock_path = skypilot_config.get_skypilot_config_lock_path()
+    # Distributed config lock: serializes config read-modify-write across worker
+    # processes.
     try:
-        with filelock.FileLock(lock_path,
-                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
-            # Read the current config inside the lock to ensure we have
-            # the latest state
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+            # Reload from the backing store INSIDE the lock. to_dict() returns
+            # this process's in-memory config, which is stale w.r.t. writes
+            # committed by others; without this reload the read-modify-
+            # write below is computed from a stale snapshot.
+            skypilot_config.reload_config()
+            # Read the current (freshly reloaded) config inside the lock.
             current_config = skypilot_config.to_dict()
             current_workspaces = current_config.get('workspaces', {}).copy()
 
@@ -137,13 +144,12 @@ def _update_workspaces_config(
             skypilot_config.update_api_server_config_no_lock(current_config)
 
             return current_workspaces
-    except filelock.Timeout as e:
+    except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to update workspace configuration due to a timeout '
-            f'when trying to acquire the lock at {lock_path}. This may '
+            'Failed to update workspace configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again or manually remove the lock '
-            f'file if you believe it is stale.') from e
+            'configuration. Please try again.') from e
 
 
 def _validate_workspace_config(workspace_name: str,
@@ -161,6 +167,49 @@ def _validate_workspace_config(workspace_name: str,
         # more user-friendly and b) it will not be caught by the try-except by
         # the caller the may cause confusion.
         raise ValueError(str(e)) from e
+
+
+def _extract_k8s_allowed_contexts(
+        config: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
+    """Split out kubernetes.allowed_contexts from a workspace config.
+
+    Returns a tuple of (config_without_that_field, allowed_contexts_value). The
+    value is None when the field is absent. The input config is not mutated.
+    """
+    # The kubernetes block may be missing or explicitly null (e.g. a bare
+    # `kubernetes:` in YAML), so guard against non-dict values.
+    kubernetes_config = config.get('kubernetes')
+    if (not isinstance(kubernetes_config, dict) or
+            'allowed_contexts' not in kubernetes_config):
+        return config, None
+    remaining = dict(config)
+    remaining['kubernetes'] = {
+        k: v for k, v in kubernetes_config.items() if k != 'allowed_contexts'
+    }
+    return remaining, kubernetes_config['allowed_contexts']
+
+
+def _is_additive_contexts(current_allowed_contexts: Any,
+                          new_allowed_contexts: Any) -> bool:
+    """Return True if allowed_contexts only grew (no existing context dropped).
+
+    Additive cases:
+    - list -> list where the old contexts are a subset of the new contexts.
+    - list -> 'all' (broadening to every kubeconfig context).
+
+    Everything else (no change, 'all' -> list, absent/None on either side,
+    removals, or reorders that drop a context) is not additive.
+    """
+    if current_allowed_contexts == new_allowed_contexts:
+        return False
+    # list -> 'all' is broadening.
+    if new_allowed_contexts == 'all':
+        return isinstance(current_allowed_contexts, list)
+    # list -> list must keep old as a subset of new.
+    if (isinstance(current_allowed_contexts, list) and
+            isinstance(new_allowed_contexts, list)):
+        return set(current_allowed_contexts).issubset(set(new_allowed_contexts))
+    return False
 
 
 def _compare_workspace_configs(
@@ -222,6 +271,18 @@ def _compare_workspace_configs(
 
     only_user_access_changes = current_without_access == new_without_access
 
+    # Extract kubernetes.allowed_contexts once, getting back both the remaining
+    # config and the value. Same pattern as above: if the remaining configs are
+    # equal, then allowed_contexts is the ONLY non-user-access change (fails
+    # fast on namespace, context_configs, other clouds, etc.).
+    current_without_contexts, current_allowed_contexts = (
+        _extract_k8s_allowed_contexts(current_without_access))
+    new_without_contexts, new_allowed_contexts = (
+        _extract_k8s_allowed_contexts(new_without_access))
+    additive_allowed_contexts = (
+        current_without_contexts == new_without_contexts and
+        _is_additive_contexts(current_allowed_contexts, new_allowed_contexts))
+
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,
         private_changed=private_changed,
@@ -231,7 +292,8 @@ def _compare_workspace_configs(
         allowed_users_old=allowed_users_old,
         allowed_users_new=allowed_users_new,
         removed_users=removed_users,
-        added_users=added_users)
+        added_users=added_users,
+        additive_allowed_contexts=additive_allowed_contexts)
 
 
 def _validate_workspace_config_changes_with_lock(
@@ -269,13 +331,18 @@ def _validate_workspace_config_changes(
     """Validate workspace configuration changes based on active resources.
 
     This function implements the logic:
-    - If only allowed_users or private changed:
+    - If only allowed_users or private changed, or the only non-user-access
+      change is an additive kubernetes.allowed_contexts change:
       - If private changed from true to false: allow it
       - If private changed from false to true: check that all active resources
         belong to allowed_users
       - If private didn't change: check that removed users don't have active
         resources
     - Otherwise: check that workspace has no active resources
+
+    Additive kubernetes.allowed_contexts changes (old contexts remain a subset
+    of the new contexts) are safe because every existing context stays allowed,
+    so running clusters and jobs keep resolving to a still-allowed context.
 
     Args:
         workspace_name: The name of the workspace.
@@ -297,8 +364,16 @@ def _validate_workspace_config_changes(
                                                    new_config,
                                                    resolver=resolver)
 
-    if config_comparison.only_user_access_changes:
-        # Only user access settings changed
+    if (config_comparison.only_user_access_changes or
+            config_comparison.additive_allowed_contexts):
+        # Only user access settings changed, and/or allowed_contexts grew
+        # additively. Both are safe for active resources; still run the
+        # user-access validation below (a no-op when only contexts changed).
+        if config_comparison.additive_allowed_contexts:
+            logger.info(
+                f'Workspace {workspace_name!r} only adds Kubernetes '
+                'allowed_contexts; existing contexts remain allowed. Skipping '
+                'the active-resource check for this change.')
         if config_comparison.private_changed:
             if (config_comparison.private_old and
                     not config_comparison.private_new):
@@ -631,11 +706,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     resource_checker.check_no_active_resources_for_workspaces(
         workspaces_to_check)
 
-    # Use file locking to prevent race conditions
-    lock_path = skypilot_config.get_skypilot_config_lock_path()
     try:
-        with filelock.FileLock(lock_path,
-                               _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
+        with skypilot_config.get_skypilot_config_lock(
+                _WORKSPACE_CONFIG_LOCK_TIMEOUT_SECONDS):
             # Convert to config_utils.Config and save
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
@@ -651,13 +724,12 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     elif operation == 'delete':
                         permission_service.remove_workspace_policy(
                             workspace_name)
-    except filelock.Timeout as e:
+    except locks.LockTimeout as e:
         raise RuntimeError(
-            f'Failed to update configuration due to a timeout '
-            f'when trying to acquire the lock at {lock_path}. This may '
+            'Failed to update configuration due to a timeout '
+            'when trying to acquire the config lock. This may '
             'indicate another SkyPilot process is currently updating the '
-            'configuration. Please try again or manually remove the lock '
-            f'file if you believe it is stale.') from e
+            'configuration. Please try again.') from e
 
     # Validate the configuration by running sky check
     try:
@@ -886,11 +958,11 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     # config lock.
     current_config = skypilot_config.to_dict()
     current_workspaces = current_config.get('workspaces', {})
-    # Map workspace -> (new_config, new_resolved_user_ids). We pre-resolve
-    # the post-removal user_id set during validation so the modifier doesn't
-    # have to call get_workspace_users (which would hit get_all_users) again
-    # under the file lock.
-    validated_changes: Dict[str, Tuple[Dict[str, Any], List[str]]] = {}
+    # Workspaces whose removal passed validation. The actual strip + write is
+    # (re)done INSIDE the config lock in the modifier from the fresh config, not
+    # from this pre-lock snapshot, so concurrent per-user removals across
+    # workers/replicas can't clobber each other via a stale read-modify-write.
+    validated_changes: Set[str] = set()
 
     # Pre-fetch active resources for the WHOLE batch of workspaces ONCE.
     # Otherwise each per-workspace _validate_workspace_config_changes call
@@ -934,12 +1006,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                                                          new_ws_config,
                                                          resources=resources,
                                                          resolver=resolver)
-            # Pre-resolve the post-removal user_id set ONCE here, using the
-            # shared resolver, so update_workspace_policy in the modifier
-            # (under the config file lock) doesn't have to do another
-            # get_all_users() round-trip.
-            new_resolved = resolver.resolve_workspace_users(new_ws_config)
-            validated_changes[workspace_name] = (new_ws_config, new_resolved)
+            validated_changes.add(workspace_name)
         except ValueError as e:
             failed.append({
                 'workspace_name': workspace_name,
@@ -959,8 +1026,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
     permission_service = permission.permission_service
 
     def modifier(workspaces: Dict[str, Any]) -> None:
-        for workspace_name, (new_ws_config,
-                             new_resolved) in validated_changes.items():
+        for workspace_name in validated_changes:
             try:
                 # Defensive re-check: the workspace might have been deleted
                 # between validation and acquiring the file lock.
@@ -970,14 +1036,31 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                         'error': f'Workspace {workspace_name!r} does not exist',
                     })
                     continue
+                # Read-modify-write INSIDE the lock from the fresh config, not
+                # from the pre-lock snapshot above. Otherwise concurrent
+                # removals of different users from the same workspace (e.g.
+                # several deprovisions in parallel, across workers/replicas)
+                # each strip their own user from a stale snapshot and the last
+                # writer's full-replace resurrects the users the others removed.
+                ws_config = workspaces[workspace_name]
+                allowed = list(ws_config.get('allowed_users', []))
+                new_allowed = [
+                    entry for entry in allowed if entry not in entries_to_strip
+                ]
+                if new_allowed == allowed:
+                    # Already removed by a concurrent op; nothing to do.
+                    succeeded.append(workspace_name)
+                    continue
+                new_ws_config = dict(ws_config)
+                new_ws_config['allowed_users'] = new_allowed
                 workspaces[workspace_name] = new_ws_config
-                # Update casbin policy inside the file lock so the config
-                # file and the policy table can't drift out of sync if the
-                # process crashes between the two updates. Use the
-                # pre-resolved user_id list (computed during validation)
-                # so we don't re-call get_workspace_users -> get_all_users.
+                # Update casbin policy inside the file lock so the config file
+                # and the policy table can't drift out of sync. Resolve from the
+                # fresh config; the resolver's user maps are already built so
+                # this doesn't re-hit get_all_users.
                 permission_service.update_workspace_policy(
-                    workspace_name, new_resolved)
+                    workspace_name,
+                    resolver.resolve_workspace_users(new_ws_config))
                 succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(

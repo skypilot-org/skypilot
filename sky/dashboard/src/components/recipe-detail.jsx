@@ -38,7 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import { showToast } from '@/data/connectors/toast';
 
 import {
@@ -664,10 +664,8 @@ export function RecipeDetail() {
                 )}
               </button>
             </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto mt-2">
-              <YamlHighlighter className="whitespace-pre-wrap">
-                {template.content}
-              </YamlHighlighter>
+            <div className="mt-2">
+              <YamlCodeBlock value={template.content} readOnly />
             </div>
           </div>
         </div>

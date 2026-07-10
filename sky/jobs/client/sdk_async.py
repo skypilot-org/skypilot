@@ -1,12 +1,13 @@
 """Async SDK functions for managed jobs."""
 import asyncio
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from sky import backends
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk_async
+from sky.jobs import constants as managed_job_constants
 from sky.jobs.client import sdk
 from sky.schemas.api import responses
 from sky.skylet import constants
@@ -53,7 +54,8 @@ async def queue_v2(
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
+    fields: Optional[
+        Sequence[str]] = managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
