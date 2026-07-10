@@ -244,7 +244,7 @@ def test_kubernetes_template_applies_kueue_priority_class_label() -> None:
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% if priority_class is not none %}
-            kueue.x-k8s.io/priority-class: {{priority_class}}
+            kueue.x-k8s.io/priority-class: {{priority_class|tojson}}
             {% endif %}
             {% endif %}"""
 
