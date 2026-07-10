@@ -358,12 +358,16 @@ storage:
   #   'jobs.bucket' in the SkyPilot config to use cloud storage for file mounts.
   enabled: true
   # Use a pre-existing PersistentVolumeClaim as the state volume instead of
-  # letting the chart provision one. When set, the chart mounts this claim as
-  # the state volume and does NOT create its own PVC (the storageClassName /
-  # size / accessMode / selector fields below are ignored — the claim is
-  # provisioned out-of-band). Useful for attaching storage created separately
-  # (e.g. a pre-provisioned RWX PVC). Takes precedence over the provisioned PVC;
-  # leave empty to have the chart provision one from the fields below.
+  # letting the chart provision one. Setting this activates persistent storage
+  # exactly like storage.enabled=true (same mounts, same RollingUpdate handling)
+  # but backs the state volume with this claim and does NOT create the
+  # chart-managed PVC. The provisioning fields below (storageClassName / size /
+  # accessMode / selector / volumeName) are ignored — the claim is provisioned
+  # out-of-band, so its access mode is the PV's responsibility (the chart does
+  # not validate it). Useful for attaching storage created separately, e.g. a
+  # pre-provisioned RWX PVC. Takes precedence over the chart-provisioned PVC;
+  # leave empty to provision one from the fields below (subject to
+  # storage.enabled).
   existingClaim: ""
   # Storage class name - leave empty to use cluster default
   # For RWX storage with RollingUpdate, use a storage class that supports ReadWriteMany access mode:
