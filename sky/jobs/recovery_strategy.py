@@ -319,8 +319,8 @@ class StrategyExecutor:
         Returns: The timestamp job started.
         """
         if self._fence is not None:
-            self._fence.detection = 'preaction'
-            await state.raise_if_fence_lost_async(self._fence)
+            await state.raise_if_fence_lost_async(self._fence,
+                                                  detection='preaction')
         return await self._recover_impl()
 
     async def _recover_impl(self) -> float:
@@ -482,8 +482,7 @@ class StrategyExecutor:
             # whose failure routes here before any fenced write would have
             # noticed. A loser must never terminate what may now be the new
             # claimant's cluster.
-            self._fence.detection = 'preaction'
-            state.raise_if_fence_lost(self._fence)
+            state.raise_if_fence_lost(self._fence, detection='preaction')
         if self.pool is None:
             managed_job_utils.terminate_cluster(self.cluster_name)
 
@@ -585,8 +584,8 @@ class StrategyExecutor:
         # (set_job_id_on_pool_cluster_async) only lands after work was
         # already submitted to the worker.
         if self._fence is not None:
-            self._fence.detection = 'preaction'
-            await state.raise_if_fence_lost_async(self._fence)
+            await state.raise_if_fence_lost_async(self._fence,
+                                                  detection='preaction')
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:

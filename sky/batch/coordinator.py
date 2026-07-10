@@ -819,14 +819,15 @@ class BatchCoordinator:
             # claim read -- the coordinator runs entirely in threads, so
             # nothing else probes its claim. Raising here propagates out to
             # run_job_loop's stand-down.
-            for error in errors:
+            # Snapshot: worker threads append concurrently.
+            for error in list(errors):
                 if isinstance(error, exceptions.JobOwnershipLostError):
                     raise error
             if self._fence_lost():
                 raise exceptions.JobOwnershipLostError(self._managed_job_id)
             if self._fence is not None:
-                self._fence.detection = 'tick'
-                managed_job_state.raise_if_fence_lost(self._fence)
+                managed_job_state.raise_if_fence_lost(self._fence,
+                                                      detection='tick')
 
             if self.completed_count >= len(self.batches):
                 break

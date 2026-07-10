@@ -233,6 +233,8 @@ async def test_fenced_write_raises_on_lost_claim(jobs_db, controller_harness):
                                                   _noop_callback,
                                                   fence=token)
     assert token.lost
+    # The label reflects how THIS loss was found, set at loss time.
+    assert token.detection == 'fence'
     # The write did not land.
     assert (managed_job_state.get_job_status_with_task_id(
         job_id, 0) == ManagedJobStatus.STARTING)
@@ -313,7 +315,8 @@ async def test_fenced_zero_row_with_claim_held_keeps_behavior(
 
 @pytest.mark.asyncio
 async def test_job_done_skips_on_lost_claim(jobs_db, controller_harness):
-    """scheduler_set_done* has skip semantics: log + mark lost, no raise."""
+    """scheduler_set_done_async has skip semantics: log + mark lost, no
+    raise."""
     del jobs_db
     harness = controller_harness
     job_id = harness.submit_job(name='done-skip')
@@ -324,14 +327,6 @@ async def test_job_done_skips_on_lost_claim(jobs_db, controller_harness):
                                                      idempotent=True,
                                                      fence=token)
     assert token.lost
-    assert (managed_job_state.get_job_schedule_state(job_id) ==
-            ManagedJobScheduleState.WAITING)
-
-    token_sync = fencing.FencingToken(job_id=job_id, claim_id=token.claim_id)
-    managed_job_state.scheduler_set_done(job_id,
-                                         idempotent=False,
-                                         fence=token_sync)
-    assert token_sync.lost
     assert (managed_job_state.get_job_schedule_state(job_id) ==
             ManagedJobScheduleState.WAITING)
 
@@ -440,12 +435,11 @@ async def test_emergency_recovery_writers_fenced(jobs_db, controller_harness):
         job_id, 0) == ManagedJobStatus.RECOVERING)
     await managed_job_state.record_emergency_recovery_attempt_async(
         job_id, 1, time.time(), fence=new_token)
-    count, _ = (
-        await managed_job_state.get_emergency_recovery_budget_async(job_id))
+    count, _ = (await
+                managed_job_state.get_emergency_recovery_budget_async(job_id))
     assert count == 1
-    await (managed_job_state.
-           normalize_schedule_state_for_emergency_retry_async(
-               job_id, fence=new_token))
+    await (managed_job_state.normalize_schedule_state_for_emergency_retry_async(
+        job_id, fence=new_token))
     _, _, schedule_state = _read_ownership_row(jobs_db, job_id)
     assert schedule_state == ManagedJobScheduleState.ALIVE.value
     assert not new_token.lost

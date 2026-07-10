@@ -587,7 +587,8 @@ class TestEmergencyRetryLoop:
         # relaunch) a job that now belongs to another claimant, and failing
         # it would write FAILED_CONTROLLER over the new claimant's job.
         # run_job_loop turns the raise into the stand-down disposition.
-        h = _RetryLoopHarness(monkeypatch, [exceptions.JobOwnershipLostError(1)])
+        h = _RetryLoopHarness(monkeypatch,
+                              [exceptions.JobOwnershipLostError(1)])
 
         with pytest.raises(exceptions.JobOwnershipLostError):
             await h.jc.run()

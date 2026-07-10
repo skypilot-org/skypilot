@@ -35,6 +35,10 @@ class FencingToken:
     # 'fence' (a fenced state write found 0 rows), 'preaction' (a
     # launch/recovery ownership pre-check), 'tick' (the idle-monitor
     # periodic check), or 'collision' (the controller saw its own job back
-    # in WAITING). The detecting site sets this before flagging `lost`;
-    # 'fence' is the default for write sites.
+    # in WAITING). Written only at the confirmed-loss moment -- by
+    # state._fence_lost (called from raise_if_fence_lost{,_async}) or the
+    # collision trigger, immediately before `lost` is set -- never on a
+    # passing probe. Meaningful only once `lost` is True; the default value
+    # is just the dataclass initializer, not a claim about how a loss (if
+    # any) was detected.
     detection: str = 'fence'

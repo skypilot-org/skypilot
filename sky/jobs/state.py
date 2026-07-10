@@ -147,12 +147,16 @@ job_info_table = sqlalchemy.Table(
                       sqlalchemy.Float,
                       server_default=None),
     # Identity of the current claim on this job: a fresh UUID stamped by
-    # get_waiting_job_async when a controller claims the job, cleared by
-    # every path that resets the job for re-claiming. Unlike the
-    # controller_pid pair (liveness evidence), claim_id identifies the claim
-    # instance itself -- a re-claim by the same process gets a new claim_id.
-    # Internal-only: deliberately not exposed via the jobs-queue dict, API
-    # responses, or protos.
+    # get_waiting_job_async when a controller claims the job; fenced writers
+    # require it to still match. Unlike the controller_pid pair (liveness
+    # evidence), claim_id identifies the claim instance itself -- a re-claim
+    # by the same process gets a new claim_id. INVARIANT: every path that
+    # makes a job re-claimable (reset to WAITING) must clear claim_id in the
+    # same statement -- reset_job_for_recovery, reset_jobs_for_recovery, and
+    # scheduler_set_waiting all do. A reset that leaves a stale claim_id
+    # lets the old holder keep passing the fence, silently disabling loss
+    # detection and stand-down for that job. Internal-only: deliberately not
+    # exposed via the jobs-queue dict, API responses, or protos.
     sqlalchemy.Column('claim_id', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('dag_yaml_path', sqlalchemy.Text),
     sqlalchemy.Column('env_file_path', sqlalchemy.Text),
@@ -382,18 +386,19 @@ def _batch_state_fence_condition(
             _job_info_fence_condition(fence)))
 
 
-def _fence_lost(
-        fence: fencing.FencingToken,
-        observed_claim_id: Optional[str]) -> exceptions.JobOwnershipLostError:
+def _fence_lost(fence: fencing.FencingToken, observed_claim_id: Optional[str],
+                detection: str) -> exceptions.JobOwnershipLostError:
     """Mark the token lost and build the error to raise."""
     fence.lost = True
+    fence.detection = detection
     logger.error(f'Ownership lost for job {fence.job_id}: claim '
                  f'{fence.claim_id} is no longer current '
                  f'(observed: {observed_claim_id}).')
     return exceptions.JobOwnershipLostError(fence.job_id)
 
 
-async def raise_if_fence_lost_async(fence: fencing.FencingToken) -> None:
+async def raise_if_fence_lost_async(fence: fencing.FencingToken,
+                                    detection: str = 'fence') -> None:
     """Raise JobOwnershipLostError iff the claim no longer matches.
 
     Used by the write sites' 0-row verification, and standalone as a
@@ -404,6 +409,10 @@ async def raise_if_fence_lost_async(fence: fencing.FencingToken) -> None:
     transaction pins its snapshot at its first read, so verifying inside the
     transaction that observed the 0-row write could still see the old claim
     and misclassify an ownership loss as a precondition failure.
+
+    detection labels how the loss was found ('fence' for the write sites'
+    0-row verification; pre-action/tick callers pass their mode) and is
+    recorded on the token only at the confirmed-loss moment.
     """
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -413,14 +422,19 @@ async def raise_if_fence_lost_async(fence: fencing.FencingToken) -> None:
         row = result.fetchone()
     observed = row[0] if row is not None else None
     if row is None or observed != fence.claim_id:
-        raise _fence_lost(fence, observed)
+        raise _fence_lost(fence, observed, detection)
 
 
-def raise_if_fence_lost(fence: fencing.FencingToken) -> None:
+def raise_if_fence_lost(fence: fencing.FencingToken,
+                        detection: str = 'fence') -> None:
     """Sync variant of raise_if_fence_lost_async.
 
     For the batch-coordinator writers (worker threads) and sync pre-action
     checks running in to_thread (cluster teardown).
+
+    detection labels how the loss was found ('fence' for the write sites'
+    0-row verification; pre-action/tick callers pass their mode) and is
+    recorded on the token only at the confirmed-loss moment.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -429,7 +443,7 @@ def raise_if_fence_lost(fence: fencing.FencingToken) -> None:
                 job_info_table.c.spot_job_id == fence.job_id)).fetchone()
     observed = row[0] if row is not None else None
     if row is None or observed != fence.claim_id:
-        raise _fence_lost(fence, observed)
+        raise _fence_lost(fence, observed, detection)
 
 
 async def get_waiting_job_ids_async(job_ids: List[int]) -> List[int]:
@@ -2706,9 +2720,7 @@ async def scheduler_set_alive_async(job_id: int,
                                        fence=fence)
 
 
-def scheduler_set_done(job_id: int,
-                       idempotent: bool = False,
-                       fence: Optional[fencing.FencingToken] = None) -> None:
+def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
@@ -2717,23 +2729,12 @@ def scheduler_set_done(job_id: int,
             job_info_table.c.schedule_state !=
             ManagedJobScheduleState.DONE.value,
         ]
-        if fence is not None:
-            conditions.append(_job_info_fence_condition(fence))
         updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(*conditions)).update({
                 job_info_table.c.schedule_state:
                     ManagedJobScheduleState.DONE.value
             })
         session.commit()
-    if updated_count == 0 and fence is not None:
-        # Skip semantics: a stale claimant must not retire the new claim's
-        # job, but the loser is already on its way out -- log, don't raise.
-        try:
-            raise_if_fence_lost(fence)
-        except exceptions.JobOwnershipLostError:
-            logger.error(f'Skipping job_done for job {job_id}: '
-                         'ownership lost.')
-            return
     if not idempotent:
         assert updated_count == 1, (job_id, updated_count)
 
@@ -3044,8 +3045,10 @@ async def get_waiting_job_async(
         ]
         if exclude_job_ids:
             # Bounded by the number of jobs running on this controller.
+            # Sorted for deterministic SQL text (stable statement caching/
+            # logs).
             conditions.append(
-                job_info_table.c.spot_job_id.not_in(exclude_job_ids))
+                job_info_table.c.spot_job_id.not_in(sorted(exclude_job_ids)))
         select_query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
@@ -3395,15 +3398,15 @@ async def set_recovered_async(job_id: int,
         if fence is not None:
             conditions.append(_spot_fence_condition(fence))
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(*conditions)).values({
-                    spot_table.c.status: ManagedJobStatus.RUNNING.value,
-                    spot_table.c.last_recovered_at: recovered_time,
-                    spot_table.c.recovery_count: count_expr,
-                    # Close the episode: this task has left RECOVERING, so a
-                    # future recovery must open a fresh episode.
-                    spot_table.c.recovering_from_failure: None,
-                }))
+            sqlalchemy.update(spot_table).where(sqlalchemy.and_(*conditions)).
+            values({
+                spot_table.c.status: ManagedJobStatus.RUNNING.value,
+                spot_table.c.last_recovered_at: recovered_time,
+                spot_table.c.recovery_count: count_expr,
+                # Close the episode: this task has left RECOVERING, so a
+                # future recovery must open a fresh episode.
+                spot_table.c.recovering_from_failure: None,
+            }))
         return result.rowcount
 
     await _retry_task_status_update(job_id,
@@ -3481,28 +3484,27 @@ async def set_emergency_recovering_async(
         if fence is not None:
             conditions.append(_spot_fence_condition(fence))
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(*conditions)).values({
-                    spot_table.c.status: ManagedJobStatus.RECOVERING.value,
-                    # An emergency grants no failure credit, but must not
-                    # erase existing credit either: set FALSE only when no
-                    # episode is already open. A re-run of this bookkeeping,
-                    # or an emergency hitting a task mid-preemption-recovery,
-                    # leaves the existing credit so that recovery still
-                    # counts on completion.
-                    spot_table.c.recovering_from_failure: sqlalchemy.case(
-                        (spot_table.c.recovering_from_failure.isnot(None),
-                         spot_table.c.recovering_from_failure),
-                        else_=False),
-                    spot_table.c.job_duration: sqlalchemy.case(
-                        (should_accumulate_duration,
-                         spot_table.c.job_duration + current_time -
-                         spot_table.c.last_recovered_at),
-                        else_=spot_table.c.job_duration),
-                    spot_table.c.last_recovered_at: sqlalchemy.case(
-                        (spot_table.c.last_recovered_at < 0, current_time),
-                        else_=spot_table.c.last_recovered_at),
-                }))
+            sqlalchemy.update(spot_table).where(sqlalchemy.and_(*conditions)).
+            values({
+                spot_table.c.status: ManagedJobStatus.RECOVERING.value,
+                # An emergency grants no failure credit, but must not
+                # erase existing credit either: set FALSE only when no
+                # episode is already open. A re-run of this bookkeeping,
+                # or an emergency hitting a task mid-preemption-recovery,
+                # leaves the existing credit so that recovery still
+                # counts on completion.
+                spot_table.c.recovering_from_failure: sqlalchemy.case(
+                    (spot_table.c.recovering_from_failure.isnot(None),
+                     spot_table.c.recovering_from_failure),
+                    else_=False),
+                spot_table.c.job_duration: sqlalchemy.case(
+                    (should_accumulate_duration, spot_table.c.job_duration +
+                     current_time - spot_table.c.last_recovered_at),
+                    else_=spot_table.c.job_duration),
+                spot_table.c.last_recovered_at: sqlalchemy.case(
+                    (spot_table.c.last_recovered_at < 0, current_time),
+                    else_=spot_table.c.last_recovered_at),
+            }))
         await session.commit()
         return result.rowcount
 
@@ -3583,8 +3585,7 @@ async def record_emergency_recovery_attempt_async(
 
 @db_retries.retry_async
 async def normalize_schedule_state_for_emergency_retry_async(
-        job_id: int,
-        fence: Optional[fencing.FencingToken] = None) -> None:
+        job_id: int, fence: Optional[fencing.FencingToken] = None) -> None:
     """Reset launch-adjacent schedule states to ALIVE for an emergency retry.
 
     If the unexpected error escaped mid-launch (or while waiting or backing
@@ -3686,14 +3687,14 @@ async def set_succeeded_async(job_id: int,
         if fence is not None:
             conditions.append(_spot_fence_condition(fence))
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(*conditions)).values({
-                    spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
-                    spot_table.c.end_at: end_time,
-                    # Close any open recovery episode on reaching a terminal
-                    # state.
-                    spot_table.c.recovering_from_failure: None,
-                }))
+            sqlalchemy.update(spot_table).where(sqlalchemy.and_(*conditions)).
+            values({
+                spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,
+                spot_table.c.end_at: end_time,
+                # Close any open recovery episode on reaching a terminal
+                # state.
+                spot_table.c.recovering_from_failure: None,
+            }))
         return result.rowcount
 
     await _retry_task_status_update(job_id,
@@ -3874,14 +3875,14 @@ async def set_cancelled_async(job_id: int,
         if fence is not None:
             conditions.append(_spot_fence_condition(fence))
         result = await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(*conditions)).values({
-                    spot_table.c.status: ManagedJobStatus.CANCELLED.value,
-                    spot_table.c.end_at: time.time(),
-                    # Close any open recovery episode on reaching a terminal
-                    # state.
-                    spot_table.c.recovering_from_failure: None,
-                }))
+            sqlalchemy.update(spot_table).where(sqlalchemy.and_(*conditions)).
+            values({
+                spot_table.c.status: ManagedJobStatus.CANCELLED.value,
+                spot_table.c.end_at: time.time(),
+                # Close any open recovery episode on reaching a terminal
+                # state.
+                spot_table.c.recovering_from_failure: None,
+            }))
         count = result.rowcount
         await session.commit()
         if count == 0 and fence is not None:

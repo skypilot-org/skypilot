@@ -368,8 +368,8 @@ class JobController:
         # stand-down. The success/cancel paths already run a fenced write
         # first, so this is a no-op for them.
         if self._fence is not None:
-            self._fence.detection = 'preaction'
-            await managed_job_state.raise_if_fence_lost_async(self._fence)
+            await managed_job_state.raise_if_fence_lost_async(
+                self._fence, detection='preaction')
         if self._pool is None:
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
@@ -864,9 +864,8 @@ class JobController:
             if self._fence is not None:
                 tick_count += 1
                 if tick_count % OWNERSHIP_CHECK_EVERY_N_TICKS == 0:
-                    self._fence.detection = 'tick'
                     await managed_job_state.raise_if_fence_lost_async(
-                        self._fence)
+                        self._fence, detection='tick')
 
             # Get job status (skip on first iteration if forcing recovery)
             job_status = None
@@ -2343,8 +2342,8 @@ class JobController:
         # writes below (and _cleanup_cluster's own re-read) backstop the
         # window between this check and each action.
         if self._fence is not None:
-            self._fence.detection = 'preaction'
-            await managed_job_state.raise_if_fence_lost_async(self._fence)
+            await managed_job_state.raise_if_fence_lost_async(
+                self._fence, detection='preaction')
 
         # 1. Spend one unit of the retry budget. The attempt number is
         # computed once per escaped error (memoized on self) and reused
@@ -3171,6 +3170,14 @@ class ControllerManager:
     # Bounds for the unclaimed-cluster termination: terminate_cluster owns a
     # minutes-long internal retry loop, so stand-down drives single-attempt
     # calls in its own short loop, re-checking for a new claim in between.
+    #
+    # Terminating here forecloses cluster reuse: the cluster name is
+    # deterministic and shared across claims, so a future claimant would
+    # otherwise recover into this cluster instead of relaunching. We
+    # deliberately trade that relaunch cost for leak prevention -- an
+    # unclaimed job's cluster has no other janitor. The per-attempt
+    # ownership re-read narrows, but cannot fully close, the window where
+    # a claim lands between the check and terminate_cluster.
     _STAND_DOWN_TERMINATE_ATTEMPTS = 3
     _STAND_DOWN_TERMINATE_GAP_SECONDS = 5
 
@@ -3219,7 +3226,8 @@ class ControllerManager:
                 return
             try:
                 await asyncio.to_thread(managed_job_utils.terminate_cluster,
-                                        cluster_name, 1)
+                                        cluster_name,
+                                        max_retry=1)
                 logger.info(f'Stand-down for job {job_id}: terminated '
                             f'{cluster_name}.')
                 return
