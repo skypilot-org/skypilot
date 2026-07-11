@@ -247,6 +247,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'GET'
     },
     {
+        'path': '/kubernetes/allowed_nodes',
+        'method': 'GET'
+    },
+    {
         'path': '/list_accelerators',
         'method': 'POST'
     },

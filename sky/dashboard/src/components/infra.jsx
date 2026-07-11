@@ -88,6 +88,10 @@ import {
   NonCapitalizedTooltip,
   LastUpdatedTimestamp,
 } from '@/components/utils';
+import {
+  AllowedNodesHint,
+  AllowedNodesRowBadge,
+} from '@/components/AllowedNodesHint';
 import { Card } from '@/components/ui/card';
 import {
   Select,
@@ -507,9 +511,15 @@ export function InfrastructureSection({
                             {!hasGpuData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                {totalGpus}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                  {totalGpus}
+                                </span>
+                                <AllowedNodesRowBadge
+                                  id={rowId}
+                                  kind={rowKind}
+                                />
+                              </div>
                             )}
                           </td>
                           <td className="p-3 text-right">
@@ -757,6 +767,7 @@ export function ContextDetails({
         name="infra.contextDetail.statusPanel"
         context={{ contextName, isSlurm }}
       />
+      <AllowedNodesHint contextName={contextName} isSlurm={isSlurm} />
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
