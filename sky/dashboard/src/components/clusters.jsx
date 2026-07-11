@@ -182,12 +182,30 @@ const OWNER_SCOPE_STORAGE_KEY = 'skypilot-dashboard-clusters-owner-scope';
 const isOwnerScope = (value) =>
   value === OWNER_SCOPE_MINE || value === OWNER_SCOPE_ALL;
 
+// localStorage access is wrapped in try-catch: it can throw when storage
+// is restricted (blocked site data, sandboxed iframes), and scope
+// persistence is not worth crashing the page over.
 const readStoredOwnerScope = () => {
   if (typeof window === 'undefined') {
     return null;
   }
-  const stored = window.localStorage.getItem(OWNER_SCOPE_STORAGE_KEY);
-  return isOwnerScope(stored) ? stored : null;
+  try {
+    const stored = window.localStorage.getItem(OWNER_SCOPE_STORAGE_KEY);
+    return isOwnerScope(stored) ? stored : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writeStoredOwnerScope = (scope) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, scope);
+  } catch (e) {
+    // Ignore: the scope still applies for this session via state/URL.
+  }
 };
 
 export function Clusters() {
@@ -321,7 +339,7 @@ export function Clusters() {
           // On a fresh load the initial state is already seeded from the URL,
           // so the branch above never runs; still persist the deep-linked
           // choice like a manual toggle.
-          window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, owner);
+          writeStoredOwnerScope(owner);
         }
       }
     }
@@ -510,9 +528,7 @@ export function Clusters() {
 
   const selectScope = (scope) => {
     setUserScope(scope);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(OWNER_SCOPE_STORAGE_KEY, scope);
-    }
+    writeStoredOwnerScope(scope);
     const query = { ...router.query };
     query.owner = scope;
     router.replace(
