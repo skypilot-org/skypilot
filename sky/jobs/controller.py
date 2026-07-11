@@ -1103,9 +1103,16 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await asyncio.to_thread(self.download_log_and_stream,
-                                            task_id, handle,
-                                            job_id_on_pool_cluster)
+                    try:
+                        await asyncio.to_thread(self.download_log_and_stream,
+                                                task_id, handle,
+                                                job_id_on_pool_cluster)
+                    except Exception as e:  # pylint: disable=broad-except
+                        # We don't want to crash here, so just log and continue.
+                        logger.warning(
+                            f'Failed to download and stream logs: '
+                            f'{common_utils.format_exception(e)}',
+                            exc_info=True)
 
                     failure_reason = (
                         'To see the details, run: '
