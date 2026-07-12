@@ -1321,10 +1321,11 @@ available_node_types:
                 # the cluster comes up and runs without these patches.
                 # python_path is seeded by conda_installation_commands
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  # Fall back to `which python3` if python_path is missing OR empty
+                  # Fall back to `command -v python3` (POSIX builtin, no external
+                  # `which` dependency) if python_path is missing OR empty
                   # ([ -s ]: a bare $(cat) of an empty file would render `... -c`
                   # with no interpreter and abort under set -e).
-                  _py_bin=$([ -s ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path ] && cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path 2>/dev/null || which python3);
+                  _py_bin=$([ -s ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path ] && cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path 2>/dev/null || command -v python3);
                   {{sky_unset_pythonpath_and_set_cwd}} $_py_bin -c "from sky.skylet.ray_patches import patch; patch()" || echo "WARNING: could not apply Ray patches (patch tooling unavailable); continuing without them.";
                 }
                 touch /tmp/ray_skypilot_installation_complete
@@ -1350,8 +1351,11 @@ available_node_types:
                   # /dev/tcp (the pod entrypoint is /bin/bash) rather than `nc -z`:
                   # RHEL/UBI ship nmap-ncat, whose `nc` has no `-z` flag, so the old
                   # probe spun forever there with no diagnostic. /dev/tcp is
-                  # nc-dialect-independent and needs no netcat at all.
-                  until timeout 1 bash -c ": < /dev/tcp/${SKYPILOT_RAY_HEAD_IP}/${SKYPILOT_RAY_PORT}" 2>/dev/null; do
+                  # nc-dialect-independent and needs no netcat at all. Fall back to
+                  # `nc -w 1` (portable, no `-z`) for the rare bash compiled with
+                  # --disable-net-redirections, where /dev/tcp is unavailable.
+                  until timeout 1 bash -c ": < /dev/tcp/${SKYPILOT_RAY_HEAD_IP}/${SKYPILOT_RAY_PORT}" 2>/dev/null \
+                        || nc -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT} < /dev/null 2>/dev/null; do
                     sleep 0.1
                   done
 {% endif %}
