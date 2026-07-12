@@ -450,7 +450,8 @@ SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
     # MaxSessions/MaxStartups config is applied on the next sshd start; a failed
     # live reload must not abort the launch.
     '(systemctl reload sshd 2>/dev/null || service ssh reload 2>/dev/null || '
-    'service sshd reload 2>/dev/null || true); '
+    'service sshd reload 2>/dev/null || '
+    'kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true); '
     '\'')
 
 # Internal: Env var indicating the system is running with a remote API server.

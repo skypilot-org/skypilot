@@ -1247,6 +1247,7 @@ available_node_types:
                   || $(prefix_cmd) service sshd restart 2>/dev/null \
                   || $(prefix_cmd) systemctl restart ssh 2>/dev/null \
                   || $(prefix_cmd) systemctl restart sshd 2>/dev/null \
+                  || $(prefix_cmd) kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null \
                   || $(prefix_cmd) sshd 2>/dev/null \
                   || $(prefix_cmd) /usr/sbin/sshd 2>/dev/null \
                   || $(prefix_cmd) /sbin/sshd 2>/dev/null \
