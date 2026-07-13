@@ -3980,6 +3980,84 @@ class TestInjectDockerCacheVolume(unittest.TestCase):
 
         assert pod['spec']['securityContext']['fsGroup'] == 2000
 
+    # ---- BuildKit: cache-volume filesystem guard ----
+
+    def test_buildkit_pvc_adds_fs_check_init_container(self):
+        """BuildKit PVC path adds a guard init container that rejects a
+        network-filesystem cache_volume (rootless BuildKit can't chown its
+        layer store there)."""
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+
+        init_ctrs = pod['spec']['initContainers']
+        guard = next(c for c in init_ctrs
+                     if c['name'] == utils._BUILDKIT_CACHE_FS_CHECK_CONTAINER)
+        # Guard inspects the same subPath the daemon will use.
+        guard_vm = guard['volumeMounts'][0]
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        assert guard_vm['subPath'] == bk_ctr['volumeMounts'][0]['subPath']
+        assert guard_vm['mountPath'] == utils._BUILDKIT_CACHE_FS_CHECK_MOUNT
+        assert guard['securityContext']['runAsUser'] == 1000
+        # Script fails on network filesystems, passes otherwise.
+        script = guard['args'][0]
+        assert 'nfs' in script and 'cifs' in script
+        assert 'exit 1' in script
+
+    def test_buildkit_pvc_pins_overlayfs_snapshotter(self):
+        """BuildKit PVC path pins the overlayfs snapshotter so buildkitd never
+        silently degrades to the native snapshotter."""
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        assert '--oci-worker-snapshotter=overlayfs' in bk_ctr['args']
+
+    def test_buildkit_pvc_preserves_existing_snapshotter(self):
+        """A user-provided snapshotter flag is not overridden."""
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        bk_ctr['args'] = ['--oci-worker-snapshotter=fuse-overlayfs']
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+        snapshotter_args = [
+            a for a in bk_ctr['args']
+            if a.startswith('--oci-worker-snapshotter')
+        ]
+        assert snapshotter_args == ['--oci-worker-snapshotter=fuse-overlayfs']
+
+    def test_buildkit_no_pvc_no_fs_check(self):
+        """emptyDir (no PVC) needs no guard — it is always local."""
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name=None,
+                                         context='ctx',
+                                         namespace='ns')
+        assert 'initContainers' not in pod['spec']
+
+    def test_dind_pvc_no_fs_check(self):
+        """DinD does not use the rootless BuildKit layer store, so no guard."""
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
+        assert 'initContainers' not in pod['spec']
+
     # ---- subPath hashing ----
 
     def test_subpath_varies_by_pod_name(self):

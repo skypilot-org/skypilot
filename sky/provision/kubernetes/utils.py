@@ -3665,6 +3665,33 @@ _BUILDKITD_CONTAINER_NAME = 'buildkitd'
 _DIND_CACHE_SUBPATH_PREFIX = 'var_lib_docker'
 _BUILDKIT_CACHE_SUBPATH_PREFIX = 'buildkit_cache'
 
+# Rootless BuildKit reproduces image-layer ownership by chowning files to the
+# daemon's user-namespace ids while materializing each layer. Network
+# filesystems (NFS/CIFS/SMB) do not honor that chown, so every build step past
+# the base image fails deep into the build with an opaque
+# "lchown ... operation not permitted". A block-backed volume (ext4/xfs) is
+# required for the cache_volume. This init container detects the backing
+# filesystem before the daemon starts and fails fast with an actionable message
+# instead of the cryptic error mid-build.
+_BUILDKIT_CACHE_FS_CHECK_CONTAINER = 'buildkit-cache-fs-check'
+_BUILDKIT_CACHE_FS_CHECK_MOUNT = '/cache'
+_BUILDKIT_CACHE_FS_CHECK_SCRIPT = (
+    'set -eu\n'
+    'fstype=$(stat -f -c %T ' + _BUILDKIT_CACHE_FS_CHECK_MOUNT +
+    ' 2>/dev/null || echo unknown)\n'
+    'case "$fstype" in\n'
+    'nfs|nfs4|cifs|smb2|smb3|smbfs|fuseblk|fuse|fuse.*)\n'
+    'echo "enable_docker: the BuildKit cache_volume is backed by a network '
+    'filesystem ($fstype), but rootless BuildKit requires block/local storage '
+    'to host its layer store; image builds fail with lchown '
+    'operation-not-permitted. Use a block-backed StorageClass (ext4/xfs) for '
+    'the cache_volume, or omit cache_volume to use an ephemeral local cache." '
+    '1>&2\n'
+    'exit 1\n'
+    ';;\n'
+    'esac\n'
+    'echo "BuildKit cache_volume filesystem ($fstype) is supported"\n')
+
 
 class DockerMode(str, enum.Enum):
     """Modes for the ``enable_docker`` config."""
@@ -3818,6 +3845,44 @@ def inject_docker_cache_volume(
                     'name': vol_name,
                     'mountPath': cache_mount,
                     'subPath': sub_path,
+                })
+                if mode == DockerMode.BUILD:
+                    # Pin the snapshotter to overlayfs so buildkitd always takes
+                    # the fast kernel-overlay path on a supported (block/local)
+                    # cache volume and never silently degrades to the slower
+                    # `native` full-copy snapshotter (which buildkit auto-selects
+                    # whenever its overlay-support probe fails, e.g. on a volume
+                    # mounted nosuid/nodev). Unsupported network-filesystem
+                    # cache volumes are rejected up front by the fs-check init
+                    # container below.
+                    args = ctr.setdefault('args', [])
+                    if not any(
+                            str(a).startswith('--oci-worker-snapshotter')
+                            for a in args):
+                        args.append('--oci-worker-snapshotter=overlayfs')
+
+        if mode == DockerMode.BUILD:
+            # Fail fast if the cache_volume is on a network filesystem that
+            # rootless BuildKit cannot use as a layer store (see
+            # _BUILDKIT_CACHE_FS_CHECK_SCRIPT).
+            init_ctrs = pod_spec['spec'].setdefault('initContainers', [])
+            if not any(
+                    c.get('name') == _BUILDKIT_CACHE_FS_CHECK_CONTAINER
+                    for c in init_ctrs):
+                init_ctrs.append({
+                    'name': _BUILDKIT_CACHE_FS_CHECK_CONTAINER,
+                    'image': defaults.image,
+                    'command': ['/bin/sh', '-c'],
+                    'args': [_BUILDKIT_CACHE_FS_CHECK_SCRIPT],
+                    'securityContext': {
+                        'runAsUser': 1000,
+                        'runAsGroup': 1000,
+                    },
+                    'volumeMounts': [{
+                        'name': vol_name,
+                        'mountPath': _BUILDKIT_CACHE_FS_CHECK_MOUNT,
+                        'subPath': sub_path,
+                    }],
                 })
     else:
         # No PVC: add an emptyDir so the builder doesn't write to the
