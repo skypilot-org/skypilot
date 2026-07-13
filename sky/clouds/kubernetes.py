@@ -1530,38 +1530,20 @@ class Kubernetes(clouds.Cloud):
                                        acc_count: int) -> Optional[int]:
         """EFA interfaces to request for ``acc_type:acc_count``, or None.
 
-        Resolves the requested accelerator to its full-node EFA instance type
-        (e.g. H100 -> p5.48xlarge), reads that instance's GPU and EFA counts
-        from the catalog, and scales EFA to the requested GPU count with the
-        same proportional rule the live-node scan uses -- so a partial request
-        (e.g. H100:4 on an 8-GPU node) still gets proportional EFA. Returns
-        None -- so the caller leaves EFA unset, i.e. today's behavior --
-        whenever the catalog can't answer (no MaximumEfaInterfaces column yet,
-        or the accelerator can't be resolved). Generic and autoscaler-agnostic.
+        Delegates to the AWS instance-type catalog, which sizes from the lowest
+        EFA-per-accelerator ratio among the variants that can host the request
+        -- so the count is satisfiable on whatever variant a cold cluster's
+        autoscaler provisions and never strands GPUs. Returns None -- leaving
+        EFA unset, i.e. today's behavior -- whenever the catalog can't answer
+        (no MaximumEfaInterfaces column yet, or no hosting-capable variant).
+        Generic and autoscaler-agnostic.
         """
         # Local import: keeps the AWS-specific catalog off non-AWS import paths.
         # pylint: disable-next=import-outside-toplevel
         from sky.catalog import aws_catalog
         try:
-            instance_type = aws_catalog.get_efa_instance_type_for_accelerator(
-                acc_type)
-            if instance_type is None:
-                return None
-            node_efa_count = aws_catalog.get_efa_interface_count(instance_type)
-            if not node_efa_count:  # None or 0 -> can't size an EFA fabric
-                return None
-            accelerators = catalog.get_accelerators_from_instance_type(
-                instance_type, clouds='aws')
-            if not accelerators:
-                return None
-            # No int() cast: keep the catalog's native numeric type so a
-            # fractional GPU count (if ever present) isn't truncated.
-            node_gpu_count = next(iter(accelerators.values()))
-            if node_gpu_count <= 0:
-                return None
-            calculated_efa = math.floor(acc_count / node_gpu_count *
-                                        node_efa_count)
-            return max(1, min(calculated_efa, node_efa_count))
+            return aws_catalog.get_efa_count_for_accelerator(
+                acc_type, acc_count)
         except (ValueError, KeyError, ImportError):
             # Any catalog miss/parse issue -> degrade to no EFA (today's path).
             return None

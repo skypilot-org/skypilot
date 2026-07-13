@@ -295,25 +295,18 @@ def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
         _get_df(), instance_type)
 
 
-def get_efa_interface_count(instance_type: str) -> Optional[int]:
-    """Max EFA network interfaces for an AWS instance type, or None.
+def get_efa_count_for_accelerator(
+        acc_name: str, acc_count: Union[int, float]) -> Optional[int]:
+    """EFA interfaces to request for ``acc_count`` of ``acc_name``, or None.
 
-    None when the catalog lacks the ``MaximumEfaInterfaces`` column (e.g. a
-    hosted catalog predating it), the instance type is missing, or the value
-    is NaN.
+    Sized from the lowest EFA-per-accelerator ratio among the EFA-capable
+    variants that can host the request, so the count is satisfiable on whatever
+    variant a cold cluster's autoscaler provisions and never strands GPUs. See
+    ``common.get_efa_count_for_accelerator_impl``. None when the catalog lacks
+    the ``MaximumEfaInterfaces`` column or no hosting-capable variant matches.
     """
-    return common.get_efa_interface_count_impl(_get_df(), instance_type)
-
-
-def get_efa_instance_type_for_accelerator(acc_name: str) -> Optional[str]:
-    """EFA-capable full-node instance type for an accelerator, or None.
-
-    The instance exposing the accelerator with the most EFA interfaces (e.g.
-    'H100' -> 'p5.48xlarge'). None when the catalog lacks the
-    ``MaximumEfaInterfaces`` column or no EFA-capable instance matches.
-    """
-    return common.get_efa_instance_type_for_accelerator_impl(
-        _get_df(), acc_name)
+    return common.get_efa_count_for_accelerator_impl(_get_df(), acc_name,
+                                                     acc_count)
 
 
 def get_instance_type_for_accelerator(

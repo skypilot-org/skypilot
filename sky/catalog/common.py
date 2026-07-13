@@ -2,6 +2,7 @@
 import ast
 import difflib
 import hashlib
+import math
 import os
 import tempfile
 import time
@@ -673,54 +674,46 @@ def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
     return f'{mode}:{int(total_size)}'
 
 
-def get_efa_interface_count_impl(
-    df: 'pd.DataFrame',
-    instance_type: str,
-) -> Optional[int]:
-    """Max EFA network interfaces for an instance type, or None.
-
-    Returns None (rather than raising) when the instance type is absent, the
-    catalog has no ``MaximumEfaInterfaces`` column (older/hosted catalog
-    without it), or the value is missing/NaN. The caller is a best-effort
-    high-performance-networking detection path that must degrade silently.
-    EFA interface count is a property of the instance type (region-agnostic).
-    """
-    df = _get_instance_type(df, instance_type, None)
-    if df.empty:
-        return None
-    row = df.iloc[0]
-    value = row.get('MaximumEfaInterfaces')
-    if value is None or pd.isna(value):
-        return None
-    return int(value)
-
-
-def get_efa_instance_type_for_accelerator_impl(
+def get_efa_count_for_accelerator_impl(
     df: 'pd.DataFrame',
     acc_name: str,
-) -> Optional[str]:
-    """The EFA-capable instance type for an accelerator (its full GPU node).
+    acc_count: Union[int, float],
+) -> Optional[int]:
+    """EFA interfaces to request for ``acc_count`` of ``acc_name``, or None.
 
-    Picks the instance with the most EFA interfaces among those exposing the
-    accelerator -- the full node (e.g. H100 -> p5.48xlarge, not p5.4xlarge).
-    Returns its full GPU count and EFA count via the per-instance accessors.
-    Returns None when the catalog has no ``MaximumEfaInterfaces`` column
-    (older/hosted catalog) or no EFA-capable instance exposes the accelerator.
-    This lets callers size a partial request (e.g. H100:4 on a p5.48xlarge)
-    proportionally, matching the live-node scan, since AWS has no instance with
-    a fractional-node GPU count to resolve directly.
+    On a scale-from-zero cluster we can't know which instance variant of the
+    accelerator the autoscaler will provision, so we size from the LOWEST
+    EFA-per-accelerator ratio among the EFA-capable variants that can host the
+    request (``AcceleratorCount >= acc_count``). This makes the request
+    satisfiable on whatever variant is chosen and never strands GPUs (the
+    per-accelerator EFA ask never exceeds any variant's per-accelerator supply,
+    so the accelerator stays the binding resource).
+
+    Sizing from the max-EFA variant instead over-requests on a leaner
+    same-accelerator variant, in two ways seen in the catalog today:
+      * Unschedulable -- H100:1 sized from p5.48xlarge (32 EFA / 8 GPU) asks for
+        4, but p5.4xlarge (1 EFA) can't satisfy it.
+      * Stranded GPUs -- H200:1 sized from p5e (32 EFA / 8 GPU) asks for 4, so
+        only 4 of p5en's (16 EFA / 8 GPU) 8 GPUs are usable (correct: 2).
+    Restricting to hosting-capable variants keeps a full-node request rich
+    (H100:8 -> 32 on p5.48xlarge) while a partial request drops to the leanest
+    variant's ratio (H100:1 -> 1).
+
+    Returns None (degrade to no EFA, i.e. today's behavior) when the catalog has
+    no ``MaximumEfaInterfaces`` column (older/hosted catalog) or no EFA-capable
+    variant of the accelerator can host the request.
     """
     if 'MaximumEfaInterfaces' not in df.columns:
         return None
     matches = df[
         df['AcceleratorName'].str.fullmatch(acc_name, case=False, na=False) &
-        df['MaximumEfaInterfaces'].notna()]
+        df['MaximumEfaInterfaces'].notna() & (df['MaximumEfaInterfaces'] > 0) &
+        df['AcceleratorCount'].notna() & (df['AcceleratorCount'] >= acc_count)]
     if matches.empty:
         return None
-    # sort_values().iloc[0] rather than .loc[.idxmax()] so a DataFrame with
-    # duplicate index labels (possible after catalog merges) can't mis-select.
-    matches = matches.sort_values(by='MaximumEfaInterfaces', ascending=False)
-    return matches['InstanceType'].iloc[0]
+    min_efa_per_acc = (matches['MaximumEfaInterfaces'] /
+                       matches['AcceleratorCount']).min()
+    return max(1, math.floor(acc_count * min_efa_per_acc))
 
 
 def get_instance_type_for_accelerator_impl(

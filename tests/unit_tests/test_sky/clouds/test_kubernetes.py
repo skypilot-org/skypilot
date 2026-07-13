@@ -4318,46 +4318,33 @@ class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
 
 
 class TestDeriveEfaCountFromCatalog(unittest.TestCase):
-    """_derive_efa_count_from_catalog resolves accelerator -> instance -> EFA
-    count from the catalog and scales it to the request, degrading to None
-    (unchanged behavior) whenever the catalog can't answer."""
+    """_derive_efa_count_from_catalog delegates to the AWS catalog sizing
+    helper (which sizes from the lowest EFA-per-accelerator ratio among
+    hosting-capable variants) and degrades to None on any catalog miss. The
+    sizing math itself is covered at the DataFrame level in test_catalog.py."""
 
-    def _derive(self, acc_type, acc_count, instance_type, efa_count, gpus):
-        with patch('sky.catalog.aws_catalog.'
-                   'get_efa_instance_type_for_accelerator',
-                   return_value=instance_type), \
-             patch('sky.catalog.aws_catalog.get_efa_interface_count',
-                   return_value=efa_count), \
-             patch('sky.catalog.get_accelerators_from_instance_type',
-                   return_value=gpus):
-            return kubernetes.Kubernetes._derive_efa_count_from_catalog(
+    def _derive(self, acc_type, acc_count, efa_count=None, raises=None):
+        with patch('sky.catalog.aws_catalog.get_efa_count_for_accelerator',
+                   side_effect=raises,
+                   return_value=efa_count) as m:
+            result = kubernetes.Kubernetes._derive_efa_count_from_catalog(
                 acc_type, acc_count)
+        return result, m
 
-    def test_full_node(self):
-        self.assertEqual(
-            self._derive('H100', 8, 'p5.48xlarge', 32, {'H100': 8}), 32)
+    def test_passes_through_catalog_count(self):
+        result, m = self._derive('H100', 8, efa_count=32)
+        self.assertEqual(result, 32)
+        m.assert_called_once_with('H100', 8)
 
-    def test_proportional_partial_request(self):
-        # H100:4 has no dedicated 4-GPU instance; resolve the full node
-        # (p5.48xlarge: 8 GPU / 32 EFA) and scale: floor(4/8 * 32) = 16.
-        self.assertEqual(
-            self._derive('H100', 4, 'p5.48xlarge', 32, {'H100': 8}), 16)
+    def test_none_when_catalog_returns_none(self):
+        # No hosting-capable EFA variant / no MaximumEfaInterfaces column.
+        result, _ = self._derive('H100', 8, efa_count=None)
+        self.assertIsNone(result)
 
-    def test_per_accelerator(self):
-        self.assertEqual(
-            self._derive('A100', 8, 'p4d.24xlarge', 4, {'A100': 8}), 4)
-
-    def test_none_when_catalog_lacks_efa_column(self):
-        # get_efa_interface_count returns None (column absent / older catalog).
-        self.assertIsNone(
-            self._derive('H100', 8, 'p5.48xlarge', None, {'H100': 8}))
-
-    def test_none_when_accelerator_unresolvable(self):
-        # No EFA-capable instance for the accelerator.
-        self.assertIsNone(self._derive('H100', 8, None, 32, {'H100': 8}))
-
-    def test_none_when_instance_gpu_count_unknown(self):
-        self.assertIsNone(self._derive('H100', 8, 'p5.48xlarge', 32, None))
+    def test_degrades_on_catalog_error(self):
+        # A catalog parse/lookup error must degrade to None, not propagate.
+        result, _ = self._derive('H100', 8, raises=KeyError('boom'))
+        self.assertIsNone(result)
 
 
 class TestKubernetesSpotLabelContext(unittest.TestCase):
