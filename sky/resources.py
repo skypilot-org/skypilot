@@ -2705,9 +2705,12 @@ class Resources:
 
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
-        # Derived properties can require catalogs that remote clients do not
-        # have. Serialize only the constraint explicitly supplied by the user.
-        add_if_not_none('memory', self._memory)
+        if isinstance(self.cloud, clouds.OpenStack):
+            # OpenStack flavor catalogs are scoped to the API server's cloud.
+            memory = self._memory
+        else:
+            memory = self.memory
+        add_if_not_none('memory', memory)
         add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 

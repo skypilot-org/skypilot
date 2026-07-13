@@ -417,6 +417,29 @@ def test_openstack_resources_serialize_without_local_catalog(
     assert 'memory' not in config
 
 
+def test_openstack_resources_ignore_client_catalog_memory():
+    with mock.patch.object(clouds.OpenStack,
+                           'get_vcpus_mem_from_instance_type',
+                           return_value=(64, 512)) as get_vcpus_mem:
+        resources = sky.Resources(cloud=clouds.OpenStack(),
+                                  instance_type='shared-flavor')
+
+        config = resources.to_yaml_config()
+
+    assert 'memory' not in config
+    get_vcpus_mem.assert_not_called()
+
+
+def test_openstack_resources_preserve_explicit_memory():
+    resources = sky.Resources(cloud=clouds.OpenStack(),
+                              instance_type='shared-flavor',
+                              memory='8')
+
+    config = resources.to_yaml_config()
+
+    assert config['memory'] == '8'
+
+
 def test_instance_type_inference_skips_uninitialized_openstack_catalog():
     aws_cloud = clouds.AWS()
     openstack_cloud = clouds.OpenStack()
