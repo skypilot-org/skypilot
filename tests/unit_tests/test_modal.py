@@ -125,6 +125,87 @@ def test_modal_catalog_gpu_to_sandbox_args():
         assert listings['B300'][0].device_memory == 288
 
 
+def test_modal_dynamic_instance_types_and_prices():
+    assert modal_catalog.get_default_instance_type() == '4CPU--16GB'
+    assert modal_catalog.get_default_instance_type(
+        cpus='16+', memory='64+') == '16CPU--64GB'
+    assert modal_catalog.get_default_instance_type(
+        cpus='0.25', memory='0.125') == '0.25CPU--0.125GB'
+    assert modal_catalog.get_modal_args_from_instance_type(
+        '0.25CPU--0.125GB') == (None, 0.125, 128)
+    assert modal_catalog.get_default_instance_type(
+        cpus='128') == '128CPU--336GB'
+    assert modal_catalog.get_default_instance_type(
+        cpus='128', memory='336') == '128CPU--336GB'
+    assert modal_catalog.get_modal_args_from_instance_type('128CPU--336GB') == (
+        None, 64, 344064)
+    assert modal_catalog.get_default_instance_type(cpus='129',
+                                                   memory='336') is None
+    assert modal_catalog.get_default_instance_type(cpus='128',
+                                                   memory='337') is None
+    assert not modal_catalog.instance_type_exists('129CPU--336GB')
+
+    instance_type = '16CPU--64GB'
+    assert modal_catalog.instance_type_exists(instance_type)
+    assert modal_catalog.get_vcpus_mem_from_instance_type(instance_type) == (16,
+                                                                             64)
+    assert modal_catalog.get_modal_args_from_instance_type(instance_type) == (
+        None, 8, 64 * 1024)
+    expected_price = (8 * 0.00003942 + 64 * 0.00000672) * 3600
+    assert modal_catalog.get_hourly_cost(
+        instance_type, region='auto') == pytest.approx(expected_price)
+    assert modal_catalog.get_hourly_cost(
+        instance_type, region='us') == pytest.approx(expected_price * 1.5)
+    assert modal_catalog.get_default_instance_type(
+        cpus='16', memory='64', max_hourly_cost=expected_price - 0.01) is None
+    assert modal_catalog.get_arch_from_instance_type(instance_type) is None
+    assert modal_catalog.get_local_disk_from_instance_type(
+        instance_type) is None
+    assert 'us-west' in {
+        region.name
+        for region in modal_catalog.get_region_zones_for_instance_type(
+            instance_type, False)
+    }
+
+
+def test_modal_dynamic_gpu_instance_type():
+    instance_types, fuzzy = modal_catalog.get_instance_type_for_accelerator(
+        'h100', 2, cpus='32+', memory='128+', region='us')
+
+    assert instance_types == ['32CPU--128GB--H100:2']
+    assert not fuzzy
+    instance_type = instance_types[0]
+    assert modal_catalog.get_accelerators_from_instance_type(instance_type) == {
+        'H100': 2
+    }
+    assert modal_catalog.get_vcpus_mem_from_instance_type(instance_type) == (
+        32, 128)
+    assert modal_catalog.get_modal_args_from_instance_type(instance_type) == (
+        'H100:2', 16, 128 * 1024)
+    expected_auto_price = (16 * 0.00003942 + 128 * 0.00000672 +
+                           2 * 0.001097) * 3600
+    assert modal_catalog.get_hourly_cost(
+        instance_type, region='us') == pytest.approx(expected_auto_price * 1.5)
+
+
+def test_modal_dynamic_resources_are_feasible():
+    resources = resources_lib.Resources(cloud=clouds.Modal(),
+                                        cpus='32',
+                                        memory='128',
+                                        accelerators={'H100': 2})
+
+    feasible = clouds.Modal()._get_feasible_launchable_resources(  # pylint: disable=protected-access
+        resources)
+
+    assert not feasible.fuzzy_candidate_list
+    assert len(feasible.resources_list) == 1
+    launchable = feasible.resources_list[0]
+    assert launchable.instance_type == '32CPU--128GB--H100:2'
+    assert launchable.cpus == '32.0'
+    assert launchable.memory == '128.0'
+    assert launchable.accelerators == {'H100': 2}
+
+
 def test_modal_catalog_generic_contract_methods():
     assert modal_catalog.get_arch_from_instance_type(
         'modal-cpu-4x-16gb') is None
@@ -407,6 +488,24 @@ def test_modal_deploy_variables_gpu_region(monkeypatch):
     assert variables['modal_region'] == 'us-west'
     assert variables['modal_gpu'] == 'A100-80GB:2'
     assert variables['modal_docker_image'] == 'ubuntu:22.04'
+
+
+def test_modal_deploy_variables_dynamic_resources(monkeypatch):
+    _set_active_modal_environment(monkeypatch)
+    cloud = clouds.Modal()
+    resources = resources_lib.Resources(cloud=cloud,
+                                        instance_type='32CPU--128GB--H100:2')
+
+    variables = cloud.make_deploy_resources_variables(
+        resources=resources,
+        cluster_name=resources_utils.ClusterName('test', 'test'),
+        region=clouds.Region('auto'),
+        zones=None,
+        num_nodes=1)
+
+    assert variables['modal_gpu'] == 'H100:2'
+    assert variables['modal_cpu'] == 16
+    assert variables['modal_memory'] == 128 * 1024
 
 
 def test_modal_deploy_variables_volume_mounts(monkeypatch):

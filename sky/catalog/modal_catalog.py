@@ -1,5 +1,7 @@
 """Modal service catalog."""
 
+import math
+import re
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import common as adaptors_common
@@ -45,6 +47,19 @@ _SANDBOX_MEMORY_GIB_PRICE_PER_SECOND = 0.00000672
 _DEFAULT_MODAL_CPU_CORES = 2.0
 _DEFAULT_SKY_VCPUS = 4.0
 _DEFAULT_MEMORY_GIB = 16
+_DEFAULT_MEMORY_CPU_RATIO = _DEFAULT_MEMORY_GIB / _DEFAULT_SKY_VCPUS
+
+# Modal validates these bounds when creating a Function or Sandbox. See:
+# https://modal.com/docs/guide/resources#how-much-can-i-request
+_MIN_MODAL_CPU_CORES = 0.125
+_MAX_MODAL_CPU_CORES = 64.0
+_MIN_MEMORY_MIB = 128
+_MAX_MEMORY_MIB = 344064
+
+_VIRTUAL_INSTANCE_TYPE_PATTERN = re.compile(
+    r'^(?P<vcpus>\d+(?:\.\d+)?)CPU--'
+    r'(?P<memory>\d+(?:\.\d+)?)GB'
+    r'(?:--(?P<accelerator>[\w-]+):(?P<count>\d+))?$')
 
 _GPU_PRICE_PER_SECOND = {
     'B300': 0.001972,
@@ -92,11 +107,87 @@ _GPU_COUNTS = {
 }
 
 
-def _base_compute_price_per_hour(gpu_name: Optional[str] = None,
+def _format_resource_value(value: float) -> str:
+    if value.is_integer():
+        return str(int(value))
+    return f'{value:.12f}'.rstrip('0').rstrip('.')
+
+
+def _canonical_accelerator(accelerator: str) -> Optional[str]:
+    accelerator_lower = accelerator.lower()
+    for supported_accelerator in _GPU_COUNTS:
+        if supported_accelerator.lower() == accelerator_lower:
+            return supported_accelerator
+    return None
+
+
+class ModalInstanceType:
+    """Virtual instance type for a Modal resource request."""
+
+    def __init__(self,
+                 vcpus: float,
+                 memory_gib: float,
+                 accelerator_count: Optional[int] = None,
+                 accelerator_type: Optional[str] = None):
+        modal_cpu = vcpus / 2
+        memory_mib = math.ceil(memory_gib * 1024)
+        if not _MIN_MODAL_CPU_CORES <= modal_cpu <= _MAX_MODAL_CPU_CORES:
+            raise ValueError('Modal CPU request is out of bounds.')
+        if not _MIN_MEMORY_MIB <= memory_mib <= _MAX_MEMORY_MIB:
+            raise ValueError('Modal memory request is out of bounds.')
+        if (accelerator_count is None) != (accelerator_type is None):
+            raise ValueError('Modal accelerator type and count must be set '
+                             'together.')
+        if accelerator_type is not None:
+            canonical_accelerator = _canonical_accelerator(accelerator_type)
+            if canonical_accelerator is None:
+                raise ValueError(
+                    f'Unsupported Modal accelerator {accelerator_type!r}.')
+            if accelerator_count not in _GPU_COUNTS[canonical_accelerator]:
+                raise ValueError(
+                    f'Unsupported Modal accelerator count '
+                    f'{canonical_accelerator}:{accelerator_count}.')
+            accelerator_type = canonical_accelerator
+        self.vcpus = vcpus
+        self.memory_mib = memory_mib
+        self.accelerator_count = accelerator_count
+        self.accelerator_type = accelerator_type
+
+    @property
+    def memory_gib(self) -> float:
+        return self.memory_mib / 1024
+
+    @property
+    def modal_cpu(self) -> float:
+        return self.vcpus / 2
+
+    @property
+    def name(self) -> str:
+        name = (f'{_format_resource_value(self.vcpus)}CPU--'
+                f'{_format_resource_value(self.memory_gib)}GB')
+        if self.accelerator_type is not None:
+            name += f'--{self.accelerator_type}:{self.accelerator_count}'
+        return name
+
+    @classmethod
+    def from_instance_type(cls, name: str) -> 'ModalInstanceType':
+        match = _VIRTUAL_INSTANCE_TYPE_PATTERN.fullmatch(name)
+        if match is None:
+            raise ValueError(f'Invalid Modal instance type {name!r}.')
+        accelerator_count = match.group('count')
+        return cls(vcpus=float(match.group('vcpus')),
+                   memory_gib=float(match.group('memory')),
+                   accelerator_count=(int(accelerator_count) if
+                                      accelerator_count is not None else None),
+                   accelerator_type=match.group('accelerator'))
+
+
+def _base_compute_price_per_hour(modal_cpu: float = _DEFAULT_MODAL_CPU_CORES,
+                                 memory_gib: float = _DEFAULT_MEMORY_GIB,
+                                 gpu_name: Optional[str] = None,
                                  gpu_count: int = 0) -> float:
-    per_second = (
-        _DEFAULT_MODAL_CPU_CORES * _SANDBOX_CPU_CORE_PRICE_PER_SECOND +
-        _DEFAULT_MEMORY_GIB * _SANDBOX_MEMORY_GIB_PRICE_PER_SECOND)
+    per_second = (modal_cpu * _SANDBOX_CPU_CORE_PRICE_PER_SECOND +
+                  memory_gib * _SANDBOX_MEMORY_GIB_PRICE_PER_SECOND)
     if gpu_name is not None:
         per_second += _GPU_PRICE_PER_SECOND[gpu_name] * gpu_count
     return per_second * 3600
@@ -151,7 +242,8 @@ def _make_catalog_df():
     for gpu_name, counts in _GPU_COUNTS.items():
         for gpu_count in counts:
             instance_type = _instance_type_for_gpu(gpu_name, gpu_count)
-            price = _base_compute_price_per_hour(gpu_name, gpu_count)
+            price = _base_compute_price_per_hour(gpu_name=gpu_name,
+                                                 gpu_count=gpu_count)
             for region in _REGION_MULTIPLIERS:
                 add_row(instance_type,
                         region,
@@ -167,7 +259,13 @@ _df = _make_catalog_df()
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_df, instance_type)
+    if common.instance_type_exists_impl(_df, instance_type):
+        return True
+    try:
+        ModalInstanceType.from_instance_type(instance_type)
+    except ValueError:
+        return False
+    return True
 
 
 def validate_region_zone(
@@ -189,13 +287,43 @@ def get_hourly_cost(instance_type: str,
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
+    if not common.instance_type_exists_impl(_df, instance_type):
+        instance = ModalInstanceType.from_instance_type(instance_type)
+        region = region or AUTO_REGION
+        if region not in _REGION_MULTIPLIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid Modal region {region!r}.')
+        return _base_compute_price_per_hour(modal_cpu=instance.modal_cpu,
+                                            memory_gib=instance.memory_gib,
+                                            gpu_name=instance.accelerator_type,
+                                            gpu_count=instance.accelerator_count
+                                            or 0) * _REGION_MULTIPLIERS[region]
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    if not common.instance_type_exists_impl(_df, instance_type):
+        instance = ModalInstanceType.from_instance_type(instance_type)
+        return instance.vcpus, instance.memory_gib
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+
+
+def _resources_from_requests(cpus: Optional[str],
+                             memory: Optional[str]) -> ModalInstanceType:
+    vcpus = (float(cpus.rstrip('+'))
+             if cpus is not None else _DEFAULT_SKY_VCPUS)
+    if memory is None:
+        memory_gib = min(vcpus * _DEFAULT_MEMORY_CPU_RATIO,
+                         _MAX_MEMORY_MIB / 1024)
+    elif memory.endswith('+'):
+        memory_gib = float(memory[:-1])
+    elif memory.endswith('x'):
+        memory_gib = float(memory[:-1]) * vcpus
+    else:
+        memory_gib = float(memory)
+    return ModalInstanceType(vcpus, memory_gib)
 
 
 def get_default_instance_type(
@@ -208,21 +336,42 @@ def get_default_instance_type(
         use_spot: bool = False,
         max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier, local_disk  # unused
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
-                                                      zone, use_spot,
-                                                      max_hourly_cost)
+    if use_spot or zone is not None:
+        return None
+    if region is not None and region not in _REGION_MULTIPLIERS:
+        return None
+    try:
+        instance = _resources_from_requests(cpus, memory)
+    except ValueError:
+        return None
+    if (max_hourly_cost is not None and
+            get_hourly_cost(instance.name, region=region) > max_hourly_cost):
+        return None
+    return instance.name
 
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
+    if not common.instance_type_exists_impl(_df, instance_type):
+        instance = ModalInstanceType.from_instance_type(instance_type)
+        if instance.accelerator_type is None:
+            return None
+        assert instance.accelerator_count is not None
+        return {instance.accelerator_type: instance.accelerator_count}
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
 def get_arch_from_instance_type(instance_type: str) -> Optional[str]:
+    if not common.instance_type_exists_impl(_df, instance_type):
+        ModalInstanceType.from_instance_type(instance_type)
+        return None
     return common.get_arch_from_instance_type_impl(_df, instance_type)
 
 
 def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
+    if not common.instance_type_exists_impl(_df, instance_type):
+        ModalInstanceType.from_instance_type(instance_type)
+        return None
     return common.get_local_disk_from_instance_type_impl(_df, instance_type)
 
 
@@ -238,23 +387,45 @@ def get_instance_type_for_accelerator(
     max_hourly_cost: Optional[float] = None
 ) -> Tuple[Optional[List[str]], List[str]]:
     del local_disk  # unused
-    if zone is not None:
+    if use_spot or zone is not None:
+        if use_spot:
+            return None, []
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Modal does not support zones.')
-    return common.get_instance_type_for_accelerator_impl(
-        df=_df,
-        acc_name=acc_name,
-        acc_count=acc_count,
-        cpus=cpus,
-        memory=memory,
-        use_spot=use_spot,
-        region=region,
-        zone=zone,
-        max_hourly_cost=max_hourly_cost)
+    if region is not None and region not in _REGION_MULTIPLIERS:
+        return None, []
+    canonical_accelerator = _canonical_accelerator(acc_name)
+    if (canonical_accelerator is None or
+            acc_count not in _GPU_COUNTS[canonical_accelerator]):
+        return common.get_instance_type_for_accelerator_impl(
+            df=_df,
+            acc_name=acc_name,
+            acc_count=acc_count,
+            cpus=None,
+            memory=None,
+            use_spot=False,
+            region=region,
+            zone=None,
+            max_hourly_cost=max_hourly_cost)
+    try:
+        base_instance = _resources_from_requests(cpus, memory)
+        instance = ModalInstanceType(base_instance.vcpus,
+                                     base_instance.memory_gib,
+                                     accelerator_count=acc_count,
+                                     accelerator_type=canonical_accelerator)
+    except ValueError:
+        return [], []
+    if (max_hourly_cost is not None and
+            get_hourly_cost(instance.name, region=region) > max_hourly_cost):
+        return [], []
+    return [instance.name], []
 
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List[cloud.Region]:
+    if not common.instance_type_exists_impl(_df, instance_type):
+        ModalInstanceType.from_instance_type(instance_type)
+        return [] if use_spot else regions()
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
@@ -334,6 +505,13 @@ def get_modal_args_from_instance_type(
     if not instance_type_exists(instance_type):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')
+
+    if not common.instance_type_exists_impl(_df, instance_type):
+        instance = ModalInstanceType.from_instance_type(instance_type)
+        gpu = instance.accelerator_type
+        if gpu is not None and instance.accelerator_count != 1:
+            gpu = f'{gpu}:{instance.accelerator_count}'
+        return gpu, instance.modal_cpu, instance.memory_mib
 
     accelerators = get_accelerators_from_instance_type(instance_type)
     gpu = None
