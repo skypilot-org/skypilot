@@ -72,7 +72,13 @@ _NAMESPACE_PROBE_TIMEOUT_SECONDS = 5
 # every scrape, which would turn the probe into per-scrape overhead.
 _LOCAL_CONTEXT_CACHE_TTL_SECONDS = 60 * 60
 
-# Process-level cache: context name -> (is_local, detection timestamp).
+# Retry interval for inconclusive detections (probe error, no in-cluster
+# identity). Kept much shorter than the cache TTL: a transient failure
+# (RBAC not yet applied, API server hiccup) must not pin a local context
+# as remote — and self-federation running — for a full TTL window.
+_LOCAL_CONTEXT_FAILURE_RETRY_SECONDS = 60
+
+# Process-level cache: context name -> (is_local, entry expiry time).
 _local_context_cache: Dict[str, Tuple[bool, float]] = {}
 _local_context_cache_lock = threading.Lock()
 
@@ -513,8 +519,9 @@ def is_local_context(context: str) -> bool:
     the API server's own cluster identity. Any failure (no identity
     anchor, 403, timeout) degrades to remote — the safe answer, since
     the local cluster stays reachable via the in-cluster context.
-    Results are cached at process level for
-    _LOCAL_CONTEXT_CACHE_TTL_SECONDS.
+    Conclusive results are cached at process level for
+    _LOCAL_CONTEXT_CACHE_TTL_SECONDS; inconclusive ones only for
+    _LOCAL_CONTEXT_FAILURE_RETRY_SECONDS so they are retried soon.
     """
     # Import lazily to avoid circular import (metrics -> provision ->
     # clouds -> metrics).
@@ -526,16 +533,18 @@ def is_local_context(context: str) -> bool:
     with _local_context_cache_lock:
         cached = _local_context_cache.get(context)
         if cached is not None:
-            is_local, detected_at = cached
-            if now - detected_at < _LOCAL_CONTEXT_CACHE_TTL_SECONDS:
+            is_local, expires_at = cached
+            if now < expires_at:
                 return is_local
     is_local = False
+    conclusive = False
     own_uid = _get_in_cluster_identity_uid()
     if own_uid is not None:
         try:
             core = kubernetes_adaptors.core_api(context)
             probed_uid = _read_cluster_identity_uid(core)
-            is_local = bool(probed_uid) and probed_uid == own_uid
+            conclusive = bool(probed_uid)
+            is_local = conclusive and probed_uid == own_uid
         except Exception as e:  # pylint: disable=broad-except
             status = getattr(e, 'status', None)
             status_str = f' (status={status})' if status is not None else ''
@@ -544,8 +553,10 @@ def is_local_context(context: str) -> bool:
                 f'namespace through context {context!r}{status_str}; '
                 f'assuming the context is remote: '
                 f'{common_utils.format_exception(e)}')
+    ttl = (_LOCAL_CONTEXT_CACHE_TTL_SECONDS
+           if conclusive else _LOCAL_CONTEXT_FAILURE_RETRY_SECONDS)
     with _local_context_cache_lock:
-        _local_context_cache[context] = (is_local, time.time())
+        _local_context_cache[context] = (is_local, time.time() + ttl)
     return is_local
 
 
@@ -555,6 +566,12 @@ def is_local_context(context: str) -> bool:
 # pathological kubeconfig fan out unbounded threads.
 _DETECTION_MAX_PARALLEL_PROBES = 8
 
+# Overall budget for one split_local_remote_contexts() call. The
+# per-probe _request_timeout only bounds the namespace HTTP call;
+# kubeconfig loading, exec credential plugins, or DNS can still hang a
+# probe, and that must not hold up the metrics/dashboard response.
+_DETECTION_TIMEOUT_SECONDS = _NAMESPACE_PROBE_TIMEOUT_SECONDS + 5
+
 
 def split_local_remote_contexts(
         contexts: List[str]) -> Tuple[List[str], List[str]]:
@@ -563,17 +580,37 @@ def split_local_remote_contexts(
     Shared by the federation routes and /dashboard_config so both agree
     on which contexts point at the API server's own cluster. Uncached
     contexts are probed in parallel (bounded) so the first call costs
-    roughly one probe timeout rather than one per context. Blocking —
-    call from a thread in async code.
+    roughly one probe timeout rather than one per context. Probes that
+    do not finish within _DETECTION_TIMEOUT_SECONDS are treated as
+    remote for this call (the safe answer); a straggler still populates
+    the cache when it eventually finishes. Blocking — call from a
+    thread in async code.
     """
     if not contexts:
         return [], []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(
-            len(contexts), _DETECTION_MAX_PARALLEL_PROBES)) as executor:
-        is_local_flags = list(executor.map(is_local_context, contexts))
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(contexts), _DETECTION_MAX_PARALLEL_PROBES))
+    futures = [executor.submit(is_local_context, ctx) for ctx in contexts]
+    concurrent.futures.wait(futures, timeout=_DETECTION_TIMEOUT_SECONDS)
+    # Do not wait for stragglers; queued probes that never started are
+    # cancelled outright.
+    executor.shutdown(wait=False, cancel_futures=True)
     local: List[str] = []
     remote: List[str] = []
-    for context, is_local in zip(contexts, is_local_flags):
+    for context, future in zip(contexts, futures):
+        is_local = False
+        if future.done() and not future.cancelled():
+            try:
+                is_local = future.result()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Local-context detection failed for '
+                               f'{context!r}; treating it as remote: '
+                               f'{common_utils.format_exception(e)}')
+        else:
+            logger.warning(
+                f'Local-context detection for {context!r} did not finish '
+                f'within {_DETECTION_TIMEOUT_SECONDS}s; treating it as '
+                f'remote for this request.')
         (local if is_local else remote).append(context)
     return local, remote
 

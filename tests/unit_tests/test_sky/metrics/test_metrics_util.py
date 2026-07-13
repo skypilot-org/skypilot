@@ -1,6 +1,8 @@
 """Unit tests for sky.metrics.utils."""
 import asyncio
 import subprocess
+import threading
+import time
 from unittest import mock
 
 import pytest
@@ -168,6 +170,51 @@ def test_is_local_context_cache_ttl_expiry():
         assert len(h.probe_calls) == 2
 
 
+def test_is_local_context_probe_failure_retried_soon():
+    """A failed probe is retried after the short failure window.
+
+    A transient error (RBAC not yet applied, API server hiccup) must not
+    pin a local context as remote — with self-federation running — for
+    the full cache TTL.
+    """
+    retry = utils._LOCAL_CONTEXT_FAILURE_RETRY_SECONDS  # pylint: disable=protected-access
+    fake_now = [0.0]
+    with _DetectionHarness(own_uid='uid-1',
+                           probe_exc=_FakeApiException(403)) as h:
+        with mock.patch.object(utils.time,
+                               'time',
+                               side_effect=lambda: fake_now[0]):
+            assert utils.is_local_context('ctx-a') is False
+            # Within the failure window: served from cache, no re-probe.
+            fake_now[0] = retry - 1.0
+            assert utils.is_local_context('ctx-a') is False
+            assert len(h.probe_calls) == 1
+            # After the failure window (well before the 1h TTL): the
+            # probe now succeeds and the context flips to local.
+            h._probe_exc = None  # pylint: disable=protected-access
+            h._probe_result = _fake_namespace('uid-1')  # pylint: disable=protected-access
+            fake_now[0] = retry + 1.0
+            assert utils.is_local_context('ctx-a') is True
+            assert len(h.probe_calls) == 2
+
+
+def test_is_local_context_no_identity_retried_soon():
+    """A missing identity anchor is also retried after the failure window."""
+    retry = utils._LOCAL_CONTEXT_FAILURE_RETRY_SECONDS  # pylint: disable=protected-access
+    fake_now = [0.0]
+    with mock.patch.object(utils.time, 'time', side_effect=lambda: fake_now[0]):
+        with _DetectionHarness(own_uid=None):
+            assert utils.is_local_context('ctx-a') is False
+        with _DetectionHarness(own_uid='uid-1',
+                               probe_result=_fake_namespace('uid-1')) as h:
+            # Still within the failure window: cached remote.
+            assert utils.is_local_context('ctx-a') is False
+            assert not h.probe_calls
+            # Identity became available: detection recovers quickly.
+            fake_now[0] = retry + 1.0
+            assert utils.is_local_context('ctx-a') is True
+
+
 def test_is_local_context_in_cluster_is_always_local():
     """The in-cluster context is local by construction: no probe needed."""
     with _DetectionHarness(own_uid='uid-1',
@@ -215,6 +262,47 @@ def test_split_local_remote_contexts_detection_unavailable():
             ['ctx-a', 'in-cluster'])
     assert local == ['in-cluster']
     assert remote == ['ctx-a']
+
+
+def test_split_local_remote_contexts_hung_probe_treated_remote():
+    """A probe stuck past the detection budget must not block the call."""
+    release = threading.Event()
+
+    def _fake_is_local(context):
+        if context == 'ctx-hung':
+            release.wait(10)
+        return context == 'ctx-local'
+
+    with mock.patch.object(utils, 'is_local_context',
+                           side_effect=_fake_is_local), \
+         mock.patch.object(utils, '_DETECTION_TIMEOUT_SECONDS', 0.2):
+        start = time.monotonic()
+        local, remote = utils.split_local_remote_contexts(
+            ['ctx-hung', 'ctx-local'])
+        elapsed = time.monotonic() - start
+    release.set()
+    # The hung probe is treated as remote (the safe answer) and the
+    # call returns within the detection budget, not the probe duration.
+    assert local == ['ctx-local']
+    assert remote == ['ctx-hung']
+    assert elapsed < 5
+
+
+def test_split_local_remote_contexts_probe_exception_treated_remote():
+    """An exception escaping a probe thread degrades that context to remote."""
+
+    def _fake_is_local(context):
+        if context == 'ctx-broken':
+            raise RuntimeError('kubeconfig exploded')
+        return context == 'ctx-local'
+
+    with mock.patch.object(utils,
+                           'is_local_context',
+                           side_effect=_fake_is_local):
+        local, remote = utils.split_local_remote_contexts(
+            ['ctx-broken', 'ctx-local'])
+    assert local == ['ctx-local']
+    assert remote == ['ctx-broken']
 
 
 class _IdentityUidHarness:
