@@ -856,6 +856,9 @@
                 },
                 "volumeName": {
                     "type": "string"
+                },
+                "clientsSubPath": {
+                    "type": "string"
                 }
             }
         },

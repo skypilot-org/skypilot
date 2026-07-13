@@ -369,6 +369,11 @@ storage:
   # leave empty to provision one from the fields below (subject to
   # storage.enabled).
   existingClaim: ""
+  # Volume subdirectory persisted at ~/.sky/api_server/clients (in-flight
+  # upload artifacts). Override when attaching a pre-existing volume whose
+  # layout keeps that data under a different directory, so the deployment
+  # keeps reading/writing the existing data instead of starting an empty one.
+  clientsSubPath: "api_server/clients"
   # Storage class name - leave empty to use cluster default
   # For RWX storage with RollingUpdate, use a storage class that supports ReadWriteMany access mode:
   # - GKE: Create a Filestore-backed storage class (https://cloud.google.com/filestore/docs/accessing-fileshares)
