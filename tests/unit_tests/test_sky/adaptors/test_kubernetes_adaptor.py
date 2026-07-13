@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import gc
+import logging
 import os
 import tempfile
 import time
@@ -305,3 +306,63 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
                     f'got {actual_host}. Race condition detected.')
     finally:
         os.unlink(config_file)
+
+
+def test_urllib3_log_suppression_is_set_once_per_process(monkeypatch):
+    """API getters suppress urllib3 warnings via a single setLevel() call.
+
+    Regression test for the pre-Python-3.13 fork deadlock
+    (https://github.com/python/cpython/pull/109462): Logger.setLevel()
+    acquires logging's process-wide lock, so it must be called once per
+    process on first k8s API use, not on every API call, while still
+    suppressing urllib3's verbose retry warnings.
+    """
+    api_client_mock = MagicMock()
+    monkeypatch.setattr(kubernetes,
+                        '_get_api_client',
+                        lambda context=None: api_client_mock)
+    monkeypatch.setattr(
+        kubernetes.kubernetes.client,
+        'CoreV1Api',
+        lambda api_client=None: SimpleNamespace(api_client=api_client),
+    )
+    monkeypatch.setattr(
+        kubernetes.kubernetes.client,
+        'BatchV1Api',
+        lambda api_client=None: SimpleNamespace(api_client=api_client),
+    )
+
+    urllib3_logger = logging.getLogger('urllib3')
+    original_level = urllib3_logger.level
+    original_set_level = urllib3_logger.setLevel
+    # Reset process-global suppression state so the test is self-contained
+    # even if another test already triggered a k8s API getter.
+    monkeypatch.setattr(kubernetes, '_leveled_loggers', set())
+    original_set_level(logging.NOTSET)
+
+    set_level_calls = []
+
+    def counting_set_level(level):
+        set_level_calls.append(level)
+        original_set_level(level)
+
+    monkeypatch.setattr(urllib3_logger, 'setLevel', counting_set_level)
+
+    try:
+        annotations.clear_request_level_cache()
+        kubernetes.core_api()
+
+        # Warnings are suppressed on the child loggers urllib3 actually
+        # emits through (e.g. urllib3.connectionpool retry warnings), which
+        # inherit the parent's effective level.
+        child_logger = logging.getLogger('urllib3.connectionpool')
+        assert not child_logger.isEnabledFor(logging.WARNING)
+        assert child_logger.isEnabledFor(logging.ERROR)
+
+        # Repeated and cross-API calls must not call setLevel() again.
+        kubernetes.core_api()
+        kubernetes.batch_api()
+        assert set_level_calls == [logging.ERROR]
+    finally:
+        annotations.clear_request_level_cache()
+        original_set_level(original_level)
