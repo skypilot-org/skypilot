@@ -307,6 +307,9 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    # When True, resize the existing cluster to the num_nodes specified in
+    # the task instead of performing a normal launch.
+    resize: bool = False
     extra_launch_context: Dict[str, Any] = {}
     # When True and the server supports it (API_VERSION >=
     # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a

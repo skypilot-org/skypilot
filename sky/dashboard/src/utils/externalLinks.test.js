@@ -3,8 +3,11 @@ import { act, renderHook } from '@testing-library/react';
 import {
   BUILTIN_URL_PATTERNS,
   extractLinksFromLogs,
+  resolveTemplateLinks,
   useLogLinkExtractor,
+  useTemplateLinks,
 } from '@/utils/externalLinks';
+import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 
 jest.mock('@/data/connectors/dashboard_config', () => ({
   getDashboardConfig: jest.fn().mockResolvedValue({ externalLinks: [] }),
@@ -104,5 +107,113 @@ describe('useLogLinkExtractor', () => {
     const first = result.current.scanLines;
     rerender();
     expect(result.current.scanLines).toBe(first);
+  });
+});
+
+describe('resolveTemplateLinks', () => {
+  const RAY_ENTRY = {
+    label: 'Ray Dashboard',
+    url: 'https://ray.internal.example.com/dashboard/${cluster_name}',
+  };
+
+  it('substitutes context values into ${var} placeholders', () => {
+    const links = resolveTemplateLinks([RAY_ENTRY], {
+      cluster_name: 'my-cluster',
+    });
+    expect(links).toEqual({
+      'Ray Dashboard': 'https://ray.internal.example.com/dashboard/my-cluster',
+    });
+  });
+
+  it('URI-encodes substituted values', () => {
+    const links = resolveTemplateLinks(
+      [{ label: 'Jobs', url: 'https://exp.internal/jobs?name=${job_name}' }],
+      { job_name: 'train run/v2' }
+    );
+    expect(links).toEqual({
+      Jobs: 'https://exp.internal/jobs?name=train%20run%2Fv2',
+    });
+  });
+
+  it('skips entries whose variables are missing or empty in the context', () => {
+    const entries = [
+      RAY_ENTRY,
+      { label: 'Job page', url: 'https://exp.internal/jobs/${job_id}' },
+    ];
+    // Cluster page context: no job_id, so only the Ray link resolves.
+    const links = resolveTemplateLinks(entries, {
+      cluster_name: 'my-cluster',
+      job_id: undefined,
+    });
+    expect(links).toEqual({
+      'Ray Dashboard': 'https://ray.internal.example.com/dashboard/my-cluster',
+    });
+  });
+
+  it('passes through static urls with no variables', () => {
+    const links = resolveTemplateLinks(
+      [{ label: 'Wiki', url: 'https://wiki.internal/skypilot' }],
+      {}
+    );
+    expect(links).toEqual({ Wiki: 'https://wiki.internal/skypilot' });
+  });
+
+  it('ignores regex entries and malformed input', () => {
+    const links = resolveTemplateLinks(
+      [
+        { label: 'Grafana', regex: 'https://grafana\\.internal/.*' },
+        null,
+        { label: 42, url: 'https://example.com' },
+      ],
+      { cluster_name: 'my-cluster' }
+    );
+    expect(links).toEqual({});
+    expect(resolveTemplateLinks(null, {})).toEqual({});
+  });
+
+  it('substitutes numeric context values (job ids)', () => {
+    const links = resolveTemplateLinks(
+      [{ label: 'Job page', url: 'https://exp.internal/jobs/${job_id}' }],
+      { job_id: 7 }
+    );
+    expect(links).toEqual({ 'Job page': 'https://exp.internal/jobs/7' });
+  });
+
+  it('skips non-allowlisted variables, including Object.prototype names', () => {
+    // ${toString} must not resolve to Object.prototype.toString; the entry
+    // is skipped like any other unresolvable variable. Server-side config
+    // validation rejects these, but the client must not trust the config.
+    const links = resolveTemplateLinks(
+      [
+        { label: 'Proto', url: 'https://x.internal/${toString}' },
+        { label: 'Ctor', url: 'https://x.internal/${constructor}' },
+        { label: 'Ok', url: 'https://x.internal/${cluster_name}' },
+      ],
+      { cluster_name: 'my-cluster' }
+    );
+    expect(links).toEqual({ Ok: 'https://x.internal/my-cluster' });
+  });
+});
+
+describe('useTemplateLinks', () => {
+  const flushConfigFetch = () => act(async () => {});
+
+  it('resolves admin-configured url templates against the context', async () => {
+    getDashboardConfig.mockResolvedValueOnce({
+      externalLinks: [
+        {
+          label: 'Ray Dashboard',
+          url: 'https://ray.internal.example.com/dashboard/${cluster_name}',
+        },
+        { label: 'Grafana', regex: 'https://grafana\\.internal/.*' },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useTemplateLinks({ cluster_name: 'my-cluster' })
+    );
+    await flushConfigFetch();
+    expect(result.current).toEqual({
+      'Ray Dashboard': 'https://ray.internal.example.com/dashboard/my-cluster',
+    });
   });
 });

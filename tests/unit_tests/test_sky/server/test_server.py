@@ -860,6 +860,11 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
         skypilot_config, 'get_nested', lambda keys, default: [{
             'label': 'Grafana',
             'regex': 'https://grafana.example.com/.*'
+        }, {
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        }, {
+            'label': 'Malformed entry without regex or url',
         }])
 
     client = TestClient(server.app)
@@ -871,6 +876,9 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
         'external_links': [{
             'label': 'Grafana',
             'regex': 'https://grafana.example.com/.*'
+        }, {
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}'
         }]
     }
 

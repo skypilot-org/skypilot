@@ -31,11 +31,12 @@ from sky.provision.kubernetes import debug as kubernetes_debug
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.server.requests import log_provider
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants as skylet_constants
-from sky.utils import command_runner
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import message_utils
@@ -43,6 +44,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -864,17 +866,17 @@ def _dump_request_id_info(
                     'traceback': _full_traceback()
                 })
 
-        # Copy request log file
+        # Copy request log file. Routed through the LogProvider so that
+        # deployments whose request logs are not on the local filesystem
+        # can fetch them from wherever they live.
         try:
-            log_path = (pathlib.Path(
-                server_constants.REQUEST_LOG_PATH_PREFIX).expanduser() /
-                        f'{request_id}.log')
-            if log_path.exists():
-                shutil.copy2(log_path, os.path.join(request_dir, 'request.log'))
+            copied = log_provider.get_log_provider().copy_log_file(
+                request_id, log_provider.RequestLogType.REQUEST,
+                pathlib.Path(request_dir) / 'request.log')
+            if copied:
                 logger.debug(f'Copied request log for {request_id}')
             else:
-                logger.debug(f'Request log not found for {request_id}: '
-                             f'{log_path}')
+                logger.debug(f'Request log not found for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to copy log for request {request_id}: {e}')
             if errors is not None:
@@ -888,11 +890,10 @@ def _dump_request_id_info(
         # Copy debug log file (only exists when
         # ENABLE_REQUEST_DEBUG_LOGGING is enabled)
         try:
-            debug_log_path = pathlib.Path(
-                sky_logging.DEBUG_LOG_DIR) / f'{request_id}.log'
-            if debug_log_path.exists():
-                shutil.copy2(debug_log_path,
-                             os.path.join(request_dir, 'request_debug.log'))
+            copied = log_provider.get_log_provider().copy_log_file(
+                request_id, log_provider.RequestLogType.DEBUG,
+                pathlib.Path(request_dir) / 'request_debug.log')
+            if copied:
                 logger.debug(f'Copied debug log for {request_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
@@ -1048,29 +1049,27 @@ def _kube_coordinates_for_handle(
         handle: Any) -> Optional[Tuple[Optional[str], str]]:
     """Resolve a cluster handle's (kube context, namespace), or None.
 
-    Returns None for clusters that aren't on Kubernetes (or whose runners can't
-    be resolved). For a Kubernetes cluster every command runner is a
-    KubernetesCommandRunner carrying its pod's (context, namespace); they're
-    cluster-wide identical, so runners[0] suffices. get_command_runners()
-    rebuilds from the cached cluster_info (no live API call), so this is cheap
-    and safe even when the context is defunct.
+    Returns None for clusters that aren't on Kubernetes. The coordinates come
+    from the cluster YAML's provider config -- static launch-time facts that
+    exist from the moment provisioning starts. Resolving them through
+    handle.get_command_runners() would not work here: for a cluster that never
+    finished provisioning, cached_cluster_info is unset, so the runner path
+    makes a live get_cluster_info() call that requires a Running head pod --
+    failing on exactly the stuck-in-INIT launches (e.g. pods Pending in a
+    Kueue queue) whose k8s state the dump most needs to capture.
     """
     launched_resources = getattr(handle, 'launched_resources', None)
     cloud = getattr(launched_resources, 'cloud', None)
     if not isinstance(cloud, clouds.Kubernetes):
         return None
 
-    runners = handle.get_command_runners()
-    k8s_runners: List[Any] = [
-        r for r in runners
-        if isinstance(r, command_runner.KubernetesCommandRunner)
-    ]
-    if not k8s_runners:
-        return None
-    runner = k8s_runners[0]
-    assert isinstance(runner, command_runner.KubernetesCommandRunner), runner
-    # .context/.namespace are set via tuple-unpacking mypy can't track.
-    return runner.context, runner.namespace  # type: ignore[attr-defined]
+    # Raises on a missing/unreadable YAML; the caller records that as a dump
+    # error for this cluster rather than silently skipping it.
+    provider_config = yaml_utils.read_yaml(handle.cluster_yaml).get(
+        'provider', {})
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    return context, namespace
 
 
 def _sanitize_context_name(context: Optional[str]) -> str:
@@ -1116,21 +1115,24 @@ def _collect_cluster_kubernetes_resources(
     try:
         coords = _kube_coordinates_for_handle(handle)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to get command runners for cluster '
-                       f'{cluster_name}: {e}')
+        # format_exception, not str(e): some exceptions (e.g.
+        # FetchClusterInfoError) stringify to '', which left the error record
+        # blank with only the traceback to go on.
+        error_str = common_utils.format_exception(e)
+        logger.warning(f'Failed to resolve kube coordinates for cluster '
+                       f'{cluster_name}: {error_str}')
         if errors is not None:
             errors.append({
                 'component': 'clusters',
                 'resource': f'{cluster_name}/kubernetes',
-                'error': str(e),
+                'error': error_str,
                 'traceback': _full_traceback()
             })
         return
 
     if coords is None:
-        logger.debug(
-            f'Cluster {cluster_name!r} is not on Kubernetes (or has no '
-            f'k8s runners); skipping k8s resource dump')
+        logger.debug(f'Cluster {cluster_name!r} is not on Kubernetes; '
+                     f'skipping k8s resource dump')
         return
 
     context, namespace = coords

@@ -348,6 +348,50 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
                          workspace_constants.WORKSPACE_SOURCE_AMBIGUOUS)
         self.assertEqual(resp['note'], "preferred 'team-x' not accessible")
 
+    def test_accessible_computed_after_resolution(self):
+        """`accessible` must reflect post-resolution state: the resolver can
+        heal a missed first-login grant on this very request, and the
+        response must not advertise the pre-heal (empty) set."""
+        fresh = models.User(id='alice', name='alice')
+        resolution = workspaces_core.WorkspaceResolution(
+            workspace='private-ws',
+            source=workspace_constants.WORKSPACE_SOURCE_SINGLE_MEMBERSHIP)
+        order = []
+
+        def _resolve(*_args, **_kwargs):
+            order.append('resolve')
+            return resolution
+
+        def _accessible():
+            order.append('accessible')
+            return {'private-ws'}
+
+        patches = [
+            mock.patch.object(users_server.global_user_state,
+                              'get_user',
+                              return_value=fresh),
+            mock.patch.object(users_server.workspaces_core,
+                              'resolve_workspace_for_user',
+                              side_effect=_resolve),
+            mock.patch.object(users_server.workspaces_core,
+                              'get_accessible_workspace_names',
+                              side_effect=_accessible),
+            mock.patch.object(users_server.skypilot_config,
+                              'is_active_workspace_set',
+                              return_value=False),
+        ]
+        for p_ in patches:
+            p_.start()
+        try:
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        finally:
+            for p_ in patches:
+                p_.stop()
+        self.assertEqual(order, ['resolve', 'accessible'])
+        self.assertEqual(resp['workspace'], 'private-ws')
+        self.assertEqual(resp['accessible'], ['private-ws'])
+
     def test_no_workspace_access_surfaces_message_verbatim(self):
         """User has zero accessible workspaces. The raise-site message
         already names the user ("User <name> (<id>) has no accessible

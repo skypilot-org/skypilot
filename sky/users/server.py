@@ -221,13 +221,14 @@ def get_user_workspace(
     # set `active_workspace` globally gets honored.
     if requested is None and skypilot_config.is_active_workspace_set():
         requested = skypilot_config.get_active_workspace()
-    accessible = sorted(workspaces_core.get_accessible_workspace_names())
     response: Dict[str, Any] = {
         'workspace': None,
         'source': None,
         'note': None,
         'preferred': user_for_resolve.preferred_workspace,
-        'accessible': accessible,
+        # Filled in AFTER resolution: the resolver can heal a missed
+        # first-login grant, which grows the accessible set.
+        'accessible': [],
     }
     try:
         resolution = workspaces_core.resolve_workspace_for_user(
@@ -245,14 +246,12 @@ def get_user_workspace(
         response['note'] = (e.note
                             if e.note else 'multiple workspaces accessible; '
                             'no preferred or active workspace set')
-        return response
     except exceptions.NoWorkspaceAccessError as e:
         # One-line message from the raise site ("User <name> (<id>) has
         # no accessible workspaces.") — short enough to fit in the tree
         # row and more informative than a generic stand-in.
         response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
         response['note'] = str(e)
-        return response
     except exceptions.PermissionDeniedError as e:
         # Per-workspace deny — raised when an explicit `requested`
         # workspace exists but the user can't access it. We keep the
@@ -262,10 +261,12 @@ def get_user_workspace(
         response['source'] = (
             workspace_constants.WORKSPACE_SOURCE_PERMISSION_DENIED)
         response['note'] = str(e)
-        return response
-    response['workspace'] = resolution.workspace
-    response['source'] = resolution.source
-    response['note'] = resolution.note
+    else:
+        response['workspace'] = resolution.workspace
+        response['source'] = resolution.source
+        response['note'] = resolution.note
+    response['accessible'] = sorted(
+        workspaces_core.get_accessible_workspace_names())
     return response
 
 
@@ -282,11 +283,11 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
 
+    # Main-process handler: refresh config so runtime `rbac.default_role` /
+    # `workspaces` changes are honored without a server restart (executor
+    # requests reload per request, sync handlers like this one do not).
+    skypilot_config.safe_reload_config()
     if not role:
-        # Main-process handler: refresh config so a runtime `rbac.default_role`
-        # change is honored without a server restart (executor requests reload
-        # per request, sync handlers like this one do not).
-        skypilot_config.safe_reload_config()
         role = rbac.get_default_role()
 
     # Create user
@@ -308,6 +309,11 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
                         password=password_hash,
                         user_type=models.UserType.BASIC.value))
         permission.permission_service.update_role(user_hash, role)
+        # Grant any private-workspace access the config's allowed_users owes
+        # this user: an admin may have listed this username before the account
+        # existed, in which case the startup / config-update sync dropped it.
+        permission.permission_service.resync_workspace_policies_for_new_user(
+            user_hash)
 
 
 @router.post('/update')

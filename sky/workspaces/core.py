@@ -1141,6 +1141,22 @@ def set_user_preferred_workspace(user: models.User,
     global_user_state.set_user_preferred_workspace(user.id, workspace)
 
 
+def _try_resync_new_user_grants(user: models.User) -> None:
+    """Best-effort one-shot re-sync of a possibly-missed first-login grant.
+
+    Swallows (and logs) failures: callers are on a deny path and should
+    fall through to their normal denial rather than surface a transient
+    lock/DB error as a 500.
+    """
+    try:
+        permission.permission_service.resync_workspace_policies_for_new_user(
+            user.id)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Workspace policy re-sync for user {user.name} '
+                     f'({user.id}) failed; denying based on current policies: '
+                     f'{common_utils.format_exception(e)}')
+
+
 def resolve_workspace_for_user(
         user: models.User,
         requested: Optional[str] = None) -> WorkspaceResolution:
@@ -1163,7 +1179,9 @@ def resolve_workspace_for_user(
          the implicit default is NOT valid; this step makes sure we don't
          over-reach to users for whom it IS valid.
       4. exactly one accessible workspace -> auto-select
-      5. zero accessible -> NoWorkspaceAccessError
+      5. zero accessible -> one-shot policy re-sync and recompute (heals a
+         first-login re-sync that failed transiently); still zero ->
+         NoWorkspaceAccessError
       6. multiple, none chosen, no 'default' access -> WorkspaceAmbiguousError
 
     Args:
@@ -1182,7 +1200,14 @@ def resolve_workspace_for_user(
             chosen, and the user has no access to 'default'.
     """
     if requested is not None:
-        check_workspace_permission(user, requested)
+        try:
+            check_workspace_permission(user, requested)
+        except exceptions.PermissionDeniedError:
+            # The denial can be a first-login grant that was never
+            # materialized (see the zero-accessible branch below); re-sync
+            # once and re-check before denying for real.
+            _try_resync_new_user_grants(user)
+            check_workspace_permission(user, requested)
         return WorkspaceResolution(
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
@@ -1190,6 +1215,22 @@ def resolve_workspace_for_user(
     accessible = sorted(
         _accessible_workspace_names_for_user(user.id,
                                              set(_load_workspaces().keys())))
+    if not accessible:
+        # Zero accessible workspaces can mean the user's private-workspace
+        # grant was never materialized: the new-user policy re-sync at first
+        # login is keyed on user creation and can fail transiently (lock
+        # timeout, DB error), after which it would never run again. Re-sync
+        # once and recompute before denying. This is the coldest path (the
+        # user is about to be denied everything) and the re-sync is
+        # idempotent and race-safe, so the retry also heals users whose
+        # records predate the re-sync.
+        _try_resync_new_user_grants(user)
+        accessible = sorted(
+            _accessible_workspace_names_for_user(
+                user.id, set(_load_workspaces().keys())))
+        if accessible:
+            logger.info(f'Workspace access for user {user.name} ({user.id}) '
+                        f'restored by policy re-sync: {accessible}')
 
     # Read preferred from the User dataclass: it is populated by
     # global_user_state.add_or_update_user(return_user=True), which the

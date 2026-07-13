@@ -630,6 +630,111 @@ class PermissionService:
             # check.
             self.invalidate_workspace_permission_cache(workspace_name)
 
+    def resync_workspace_policies_for_new_user(self, user_id: str) -> None:
+        """Grant a newly-created user any workspace access owed by config.
+
+        Private workspaces list their members in ``allowed_users`` (a mix
+        of user_ids and usernames). Those entries are resolved to casbin
+        policies at server startup and on workspace-config updates, but an
+        entry can only resolve once a matching user record exists, and a
+        user record is first created on login. An admin who adds a user to
+        ``allowed_users`` before that user has ever logged in therefore
+        produces an entry that resolves to nothing at sync time.
+
+        This method re-resolves the config from the perspective of a single
+        newly-created user: for each private workspace whose
+        ``allowed_users`` names this user (by id or unique username), it
+        adds the missing ``(user_id, workspace_name, '*')`` policy. It is
+        scoped to this one user and does not rebuild all policies.
+
+        Idempotent and concurrency-safe: policy writes are guarded by the
+        distributed policy lock and ``add_policy`` skips duplicates, so
+        concurrent replicas / workers converge on the same result.
+
+        Lock ordering matters: a workspace update (`update_workspace_fn`)
+        takes the config lock exclusively, then the policy lock nested
+        inside it. This method takes the same two locks in the same order
+        — config lock (shared, we only read) first, then the policy lock —
+        so the two paths cannot deadlock, and holding the config lock
+        across the policy write means the matches can never be computed
+        from a config snapshot that predates an admin's removal of this
+        user: whichever side takes the config lock second sees the other's
+        result. On a config-lock timeout the grant is SKIPPED (never
+        computed from a stale config); the zero-accessible retry in
+        `workspaces.core.resolve_workspace_for_user` picks it up later.
+        The pre-lock computation is only a cheap early exit so user
+        creation skips the distributed locks entirely when no private
+        workspace names the user.
+        """
+        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+            return
+
+        # Lazy imports to avoid a circular import: `sky.users.resolver`
+        # imports this module.
+        # pylint: disable=import-outside-toplevel
+        from sky.users import resolver as user_resolver
+
+        def _matching_workspaces() -> List[str]:
+            workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+            private_workspaces = {
+                workspace_name: workspace_config
+                for workspace_name, workspace_config in workspaces.items()
+                if workspace_config.get('private', False) and
+                workspace_config.get('allowed_users')
+            }
+            if not private_workspaces:
+                # Skip building the UserResolver (a full users-table read)
+                # when there is nothing to match against.
+                return []
+            resolver = user_resolver.UserResolver()
+            # Every form of this user that could appear in an allowed_users
+            # list: the user_id itself plus the unique username, if any.
+            user_entries = set(resolver.entries_for(user_id))
+            return [
+                workspace_name for workspace_name, workspace_config in
+                private_workspaces.items() if user_entries.intersection(
+                    workspace_config.get('allowed_users', []))
+            ]
+
+        if not _matching_workspaces():
+            return
+
+        added_any = False
+        try:
+            with skypilot_config.get_skypilot_config_lock(
+                    POLICY_UPDATE_LOCK_TIMEOUT_SECONDS, shared_lock=True):
+                # Fresh read inside the config lock (see docstring). Call
+                # reload_config directly: safe_reload_config would try to
+                # re-acquire the (non-reentrant) config lock we now hold.
+                skypilot_config.reload_config()
+                matching_workspaces = _matching_workspaces()
+                if not matching_workspaces:
+                    return
+                with _policy_lock():
+                    self._load_policy_no_lock()
+                    enforcer = self._ensure_enforcer()
+                    for workspace_name in matching_workspaces:
+                        # add_policy returns False if the policy already
+                        # exists.
+                        if enforcer.add_policy(user_id, workspace_name, '*'):
+                            logger.info(
+                                f'Granting user {user_id} access to private '
+                                f'workspace {workspace_name!r} on user '
+                                'creation (matched allowed_users after the '
+                                'user record was created).')
+                            added_any = True
+                    if added_any:
+                        enforcer.save_policy()
+        except locks.LockTimeout:
+            logger.warning(
+                f'Timed out acquiring the config lock; skipping the '
+                f'workspace policy re-sync for user {user_id}. It will be '
+                'retried on their next workspace resolution.')
+            return
+        if added_any:
+            self.invalidate_user_permission_cache(user_id)
+
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
         with _policy_lock():
@@ -663,16 +768,32 @@ permission_service = PermissionService()
 
 
 def seed_new_user_role(user_id: str) -> None:
-    """Reload config, then assign the default role to a new user.
+    """Reload config, then set up policies for a newly-created user.
+
+    Assigns the default role and grants any private-workspace access that
+    the config's `allowed_users` lists owe this user (see
+    `resync_workspace_policies_for_new_user` for why this can only happen
+    once the user record exists).
 
     Refreshes the in-memory config first so a runtime change to
-    `rbac.default_role` is honored without a server restart: the main API-server
-    process (auth middlewares, sync handlers) bypasses the executor's
-    per-request config reload. `add_user_if_not_exists` is a no-op if the user
-    already has a role.
+    `rbac.default_role` or `workspaces` is honored without a server restart:
+    the main API-server process (auth middlewares, sync handlers) bypasses the
+    executor's per-request config reload. `add_user_if_not_exists` is a no-op if
+    the user already has a role.
 
     Blocking (config file/DB read + policy lock). Async callers MUST offload it
     via `asyncio.to_thread` so it does not block the event loop.
     """
     skypilot_config.safe_reload_config()
     permission_service.add_user_if_not_exists(user_id)
+    try:
+        permission_service.resync_workspace_policies_for_new_user(user_id)
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail the user's first request over a transient grant
+        # failure (lock timeout, DB error): the grant is retried on the
+        # zero-accessible-workspaces path in
+        # `workspaces.core.resolve_workspace_for_user`, which re-syncs
+        # once more before denying access.
+        logger.error('Failed to grant private-workspace access for new '
+                     f'user {user_id}; will retry on their next workspace '
+                     f'resolution: {common_utils.format_exception(e)}')

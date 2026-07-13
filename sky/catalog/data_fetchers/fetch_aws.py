@@ -49,7 +49,8 @@ ALL_REGIONS = [
     'eu-south-2',
     'eu-west-3',
     'eu-north-1',
-    'me-south-1',
+    # 'me-south-1', # currently unreachable, so skip it to avoid
+    # failing the whole fetch. Re-enable once connectivity is restored.
     'me-central-1',
     'af-south-1',
     'ap-east-1',

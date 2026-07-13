@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { stripAnsiCodes } from '@/components/utils';
 import { getDashboardConfig } from '@/data/connectors/dashboard_config';
@@ -182,6 +182,105 @@ export const useLogLinkExtractor = () => {
   }, [urlPatterns, scanLines]);
 
   return { extractedLinks, scanLines };
+};
+
+// Variables that may appear as ${var} inside an admin-configured
+// `dashboard.external_links` url template. Must stay in sync with
+// DASHBOARD_LINK_TEMPLATE_VARIABLES in sky/skypilot_config.py, which
+// rejects unknown variables at config load time.
+export const TEMPLATE_LINK_VARIABLES = [
+  'cluster_name',
+  'job_id',
+  'job_name',
+  'user',
+  'workspace',
+];
+
+const TEMPLATE_VARIABLE_PATTERN = /\$\{([^}]*)\}/g;
+
+/**
+ * Resolve admin-configured url-template entries against a page's metadata.
+ *
+ * Each `{label, url}` entry has its ${var} placeholders substituted with
+ * URI-encoded values from `context`. An entry is skipped (not rendered
+ * broken) when any of its variables is missing or empty in the context, so
+ * e.g. a ${job_id} link only appears on job pages.
+ *
+ * @param {Array<{label: string, url: string}>} externalLinks
+ * @param {Object<string, string|number>} context e.g. {cluster_name, job_id}
+ * @returns {Object<string, string>} label -> resolved url map
+ */
+export const resolveTemplateLinks = (externalLinks, context) => {
+  const resolved = {};
+  if (!Array.isArray(externalLinks)) return resolved;
+  const ctx = context || {};
+  for (const entry of externalLinks) {
+    if (
+      !entry ||
+      typeof entry.label !== 'string' ||
+      typeof entry.url !== 'string'
+    ) {
+      continue;
+    }
+    let allResolved = true;
+    const url = entry.url.replace(
+      TEMPLATE_VARIABLE_PATTERN,
+      (_match, variable) => {
+        // Only allowlisted variables may be read from the context.
+        // Without this, a variable like ${toString} would resolve to an
+        // Object.prototype method instead of undefined and serialize
+        // function source into the URL.
+        if (!TEMPLATE_LINK_VARIABLES.includes(variable)) {
+          allResolved = false;
+          return '';
+        }
+        const value = ctx[variable];
+        if (value === undefined || value === null || value === '') {
+          allResolved = false;
+          return '';
+        }
+        return encodeURIComponent(String(value));
+      }
+    );
+    if (allResolved) {
+      resolved[entry.label] = url;
+    }
+  }
+  return resolved;
+};
+
+/**
+ * React hook that resolves admin-configured url-template links against the
+ * supplied page context. The admin config is fetched once on mount and
+ * cached at the connector layer. Re-resolves when the context values change
+ * (e.g. cluster data finishes loading).
+ *
+ * @param {Object<string, string|number>} context e.g. {cluster_name, job_id}
+ * @returns {Object<string, string>} label -> resolved url map
+ */
+export const useTemplateLinks = (context) => {
+  const [entries, setEntries] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDashboardConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setEntries(config?.externalLinks || []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.debug('useTemplateLinks failed:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return useMemo(
+    () => resolveTemplateLinks(entries, context),
+    [entries, context]
+  );
 };
 
 /**

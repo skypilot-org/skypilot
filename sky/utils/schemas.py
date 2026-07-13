@@ -2344,7 +2344,7 @@ def get_config_schema():
                 'case_insensitive_enum': ['admin', 'user', 'viewer']
             },
             # When true, GET /workspaces/config is restricted to admins (the
-            # config payload includes admin-only secrets). Defaults to false.
+            # config payload includes admin-only secrets). Defaults to true.
             'restrict_config_to_admins': {
                 'type': 'boolean',
             },
@@ -2689,7 +2689,7 @@ def get_config_schema():
                 'type': 'array',
                 'items': {
                     'type': 'object',
-                    'required': ['label', 'regex'],
+                    'required': ['label'],
                     'additionalProperties': False,
                     'properties': {
                         'label': {
@@ -2700,7 +2700,21 @@ def get_config_schema():
                             'type': 'string',
                             'minLength': 1,
                         },
+                        'url': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
                     },
+                    # Each entry is either a log-scanning pattern (regex) or
+                    # a templated link (url), never both.
+                    'oneOf': [
+                        {
+                            'required': ['regex']
+                        },
+                        {
+                            'required': ['url']
+                        },
+                    ],
                 },
             },
         },

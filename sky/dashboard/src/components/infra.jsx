@@ -88,6 +88,10 @@ import {
   NonCapitalizedTooltip,
   LastUpdatedTimestamp,
 } from '@/components/utils';
+import {
+  AllowedNodesHint,
+  AllowedNodesRowBadge,
+} from '@/components/AllowedNodesHint';
 import { Card } from '@/components/ui/card';
 import {
   Select,
@@ -507,9 +511,15 @@ export function InfrastructureSection({
                             {!hasGpuData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                {totalGpus}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                  {totalGpus}
+                                </span>
+                                <AllowedNodesRowBadge
+                                  id={rowId}
+                                  kind={rowKind}
+                                />
+                              </div>
                             )}
                           </td>
                           <td className="p-3 text-right">
@@ -757,6 +767,7 @@ export function ContextDetails({
         name="infra.contextDetail.statusPanel"
         context={{ contextName, isSlurm }}
       />
+      <AllowedNodesHint contextName={contextName} isSlurm={isSlurm} />
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
@@ -2097,19 +2108,26 @@ export function GPUs() {
       }
 
       try {
-        // Run sky check in parallel with data fetches (not blocking)
-        // Sky check refreshes cloud credentials but shouldn't delay data display
-        const skyCheckPromise = forceRefresh
-          ? runSkyCheck().catch((error) => {
-              console.error('Error during sky check refresh:', error);
-            })
-          : Promise.resolve();
+        // On a manual refresh (forceRefresh), run sky check and wait for it to
+        // finish *before* fetching the data. sky check (POST /check) is the only
+        // thing that refreshes the cached per-workspace enabled_clouds verdict,
+        // and the data fetches below read that cache. If the check runs
+        // concurrently with the fetches (as it used to), the fetches return the
+        // pre-check cache and the freshly-checked results only appear on the
+        // next poll/refresh, so a single Refresh click looks like it did nothing
+        // after a credential / allowed_contexts change. Awaiting the check first
+        // makes the manual refresh slower but correct. The periodic
+        // auto-refresh (!forceRefresh) never runs a check and just reads the cache.
+        if (forceRefresh) {
+          await runSkyCheck().catch((error) => {
+            console.error('Error during sky check refresh:', error);
+          });
+        }
 
-        // Fetch all data in parallel (including sky check)
+        // Fetch all data in parallel.
         // SSH Node Pools are fetched independently - they don't depend on Kubernetes data.
         // The SSH GPU info comes from getWorkspaceInfrastructure() which handles both K8s and SSH contexts.
         await Promise.all([
-          skyCheckPromise,
           fetchKubernetesData(forceRefresh, showLoadingIndicators),
           fetchSSHNodePools(forceRefresh),
           fetchCloudData(forceRefresh),

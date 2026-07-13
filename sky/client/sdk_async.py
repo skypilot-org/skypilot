@@ -109,8 +109,11 @@ async def get(request_id: str) -> Any:
                     payloads.RequestPayload(**await response.json()))
             elif response.status == 500:
                 try:
+                    # A failed request's payload is nested under 'detail'
+                    # (mirrors the sync sdk.get).
                     request_task = requests_lib.Request.decode(
-                        payloads.RequestPayload(**await response.json()))
+                        payloads.RequestPayload(
+                            **(await response.json()).get('detail')))
                     logger.debug(f'Got request with error: {request_task.name}')
                 except Exception:  # pylint: disable=broad-except
                     request_task = None

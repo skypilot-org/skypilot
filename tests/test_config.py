@@ -996,6 +996,78 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-project-config'), None) is None
 
 
+def test_config_save_validator(monkeypatch, tmp_path):
+    """Validators run before persisting and can veto the config save."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    # Isolate the validator registry so the test does not leak global state.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+
+    config_path = str(tmp_path / 'server_config.yaml')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                aws:
+                    labels:
+                        original: present
+                """))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    new_config.set_nested(('aws', 'labels', 'added'), 'yes')
+
+    # A validator that vetoes by raising blocks the save.
+    calls = []
+
+    def vetoing_validator(current, incoming):
+        calls.append((copy.deepcopy(current), copy.deepcopy(incoming)))
+        raise ValueError('rejected config change')
+
+    skypilot_config.register_config_save_validator(vetoing_validator)
+
+    with pytest.raises(ValueError, match='rejected config change'):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+
+    # The validator saw the currently-persisted config and the incoming
+    # config, and the on-disk config is unchanged.
+    assert len(calls) == 1
+    seen_current, seen_incoming = calls[0]
+    assert seen_current.get_nested(('aws', 'labels', 'added'), None) is None
+    assert seen_incoming.get_nested(('aws', 'labels', 'added'), None) == 'yes'
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present'
+            }
+        }
+    }
+
+    # A validator that passes lets the save through.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    passed = []
+
+    def passing_validator(current, incoming):
+        del current, incoming
+        passed.append(True)
+
+    skypilot_config.register_config_save_validator(passing_validator)
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert passed == [True]
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present',
+                'added': 'yes'
+            }
+        }
+    }
+
+    # Registration is idempotent.
+    skypilot_config.register_config_save_validator(passing_validator)
+    assert skypilot_config._CONFIG_SAVE_VALIDATORS.count(passing_validator) == 1
+
+
 def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     """Test that the nested config works."""
     from sky.provision.kubernetes import utils as kubernetes_utils
