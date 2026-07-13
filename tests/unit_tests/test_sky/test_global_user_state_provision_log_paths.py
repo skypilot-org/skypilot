@@ -48,9 +48,8 @@ def _history_row(name: str):
     engine = global_user_state._db_manager.get_engine()
     from sqlalchemy import orm  # pylint: disable=import-outside-toplevel
     with orm.Session(engine) as session:
-        return session.query(
-            global_user_state.cluster_history_table).filter_by(
-                name=name).first()
+        return session.query(global_user_state.cluster_history_table).filter_by(
+            name=name).first()
 
 
 def test_launch_records_path_in_scalar_and_list(tmp_path, monkeypatch):
@@ -59,9 +58,7 @@ def test_launch_records_path_in_scalar_and_list(tmp_path, monkeypatch):
 
     row = _history_row('c')
     assert row.provision_log_path == '/logs/try1/provision.log'
-    assert json.loads(row.provision_log_paths) == [
-        '/logs/try1/provision.log'
-    ]
+    assert json.loads(row.provision_log_paths) == ['/logs/try1/provision.log']
     assert global_user_state.get_cluster_history_provision_log_paths('c') == [
         '/logs/try1/provision.log'
     ]
@@ -77,9 +74,7 @@ def test_post_provision_update_does_not_null_path(tmp_path, monkeypatch):
 
     row = _history_row('c')
     assert row.provision_log_path == '/logs/try1/provision.log'
-    assert json.loads(row.provision_log_paths) == [
-        '/logs/try1/provision.log'
-    ]
+    assert json.loads(row.provision_log_paths) == ['/logs/try1/provision.log']
 
 
 def test_in_place_relaunch_appends_new_try(tmp_path, monkeypatch):
@@ -119,9 +114,7 @@ def test_relaunch_with_same_path_does_not_duplicate(tmp_path, monkeypatch):
     _add_cluster('c', provision_log_path='/logs/try1/provision.log')
 
     row = _history_row('c')
-    assert json.loads(row.provision_log_paths) == [
-        '/logs/try1/provision.log'
-    ]
+    assert json.loads(row.provision_log_paths) == ['/logs/try1/provision.log']
 
 
 def test_merge_folds_legacy_scalar_into_list():
