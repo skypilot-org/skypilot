@@ -67,9 +67,11 @@ logger = sky_logging.init_logger(__name__)
 # thread holds that lock leaves the lock permanently held in the child,
 # deadlocking its next logging call. Fixed in CPython 3.13 by
 # https://github.com/python/cpython/pull/109462; until then, keep setLevel()
-# calls rare instead of on every API call.
+# calls rare instead of on every API call. Guarded by the GIL only: set
+# membership/add are atomic, and a duplicate setLevel() from a racing first
+# call is idempotent. An explicit lock here would reintroduce a lock that a
+# fork could leave permanently held in the child.
 _leveled_loggers: Set[str] = set()
-_leveled_loggers_lock = threading.Lock()
 
 
 def _api_logging_decorator(logger_src: str, level: int):
@@ -88,10 +90,8 @@ def _api_logging_decorator(logger_src: str, level: int):
         @functools.wraps(api)
         def wrapped(*args, **kwargs):
             if logger_src not in _leveled_loggers:
-                with _leveled_loggers_lock:
-                    if logger_src not in _leveled_loggers:
-                        logging.getLogger(logger_src).setLevel(level)
-                        _leveled_loggers.add(logger_src)
+                logging.getLogger(logger_src).setLevel(level)
+                _leveled_loggers.add(logger_src)
             return api(*args, **kwargs)
 
         return wrapped
