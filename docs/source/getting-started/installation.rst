@@ -1132,6 +1132,11 @@ Minimal CPU task:
     echo "Hello from Modal on SkyPilot"
     python -V
 
+Use the standard ``cpus`` and ``memory`` fields to size Modal Sandboxes.
+SkyPilot represents each Modal physical core as two vCPUs. Modal currently
+supports 0.25--128 SkyPilot vCPUs and 0.125--336 GiB of memory; SkyPilot uses
+the selected values as both the Modal request and limit.
+
 GPU task:
 
 .. code-block:: yaml
