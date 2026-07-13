@@ -1,8 +1,10 @@
 """Tests for Modal cloud provider."""
 
+import pathlib
 import sys
 from types import SimpleNamespace
 
+import jinja2
 import pytest
 
 from sky import clouds
@@ -26,9 +28,11 @@ from sky.utils import volume as volume_utils
 from sky.volumes import volume as volume_lib
 
 
-def _provision_config(node_config, ports_to_open_on_launch=None):
+def _provision_config(node_config,
+                      ports_to_open_on_launch=None,
+                      provider_config=None):
     return common.ProvisionConfig(
-        provider_config={},
+        provider_config=provider_config or {},
         authentication_config={},
         docker_config={},
         node_config=node_config,
@@ -51,6 +55,11 @@ def _modal_unsupported_features(resources):
 def _set_modal_config(monkeypatch, config):
     monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
                         SimpleNamespace(config=SimpleNamespace(config=config)))
+
+
+def _set_active_modal_environment(monkeypatch, name='dev'):
+    monkeypatch.setattr(clouds.Modal, '_get_active_environment_name',
+                        classmethod(lambda cls: name))
 
 
 def test_modal_cloud_registration():
@@ -87,12 +96,33 @@ def test_modal_catalog_regions_and_prices():
     assert broad_price == pytest.approx(auto_price * 1.5)
     assert narrow_price == pytest.approx(auto_price * 1.75)
 
+    b300_price = modal_catalog.get_hourly_cost('modal-b300-1x', False, 'auto',
+                                               None)
+    expected_b300_price = (2 * 0.00003942 + 16 * 0.00000672 + 0.001972) * 3600
+    assert b300_price == pytest.approx(expected_b300_price)
+    assert modal_catalog.get_hourly_cost(
+        'modal-b300-1x', False, 'us', None) == pytest.approx(b300_price * 1.5)
+
 
 def test_modal_catalog_gpu_to_sandbox_args():
     assert modal_catalog.get_modal_args_from_instance_type(
         'modal-cpu-4x-16gb') == (None, 2.0, 16 * 1024)
     assert modal_catalog.get_modal_args_from_instance_type(
         'modal-a100-80gb-2x') == ('A100-80GB:2', 2.0, 16 * 1024)
+    for count in (1, 2, 4, 8):
+        instance_type = f'modal-b300-{count}x'
+        gpu_arg = 'B300' if count == 1 else f'B300:{count}'
+        assert modal_catalog.get_modal_args_from_instance_type(
+            instance_type) == (gpu_arg, 2.0, 16 * 1024)
+        assert modal_catalog.get_accelerators_from_instance_type(
+            instance_type) == {
+                'B300': count
+            }
+        listings = modal_catalog.list_accelerators(gpus_only=True,
+                                                   name_filter='^B300$',
+                                                   region_filter='^auto$',
+                                                   quantity_filter=count)
+        assert listings['B300'][0].device_memory == 288
 
 
 def test_modal_catalog_generic_contract_methods():
@@ -214,10 +244,27 @@ def test_modal_user_identity_from_workspace(monkeypatch):
         def from_context():
             return FakeWorkspace()
 
-    monkeypatch.setattr(modal_cloud.modal_adaptor, 'modal',
-                        SimpleNamespace(Workspace=FakeWorkspaceFactory))
+    class FakeEnvironment:
 
-    assert clouds.Modal.get_user_identities() == [['Modal workspace openpipe']]
+        name = 'dev'
+
+        def hydrate(self):
+            return self
+
+    class FakeEnvironmentFactory:
+
+        @staticmethod
+        def from_context():
+            return FakeEnvironment()
+
+    monkeypatch.setattr(
+        modal_cloud.modal_adaptor, 'modal',
+        SimpleNamespace(Workspace=FakeWorkspaceFactory,
+                        Environment=FakeEnvironmentFactory))
+
+    assert clouds.Modal.get_user_identities() == [[
+        'Modal workspace openpipe, environment dev'
+    ], ['Modal workspace openpipe']]
 
 
 def test_modal_credentials_from_env(monkeypatch):
@@ -311,7 +358,8 @@ def test_modal_credential_file_mounts_from_file(monkeypatch, tmp_path):
     }
 
 
-def test_modal_deploy_variables_auto_region():
+def test_modal_deploy_variables_auto_region(monkeypatch):
+    _set_active_modal_environment(monkeypatch)
     cloud = clouds.Modal()
     resources = resources_lib.Resources(cloud=cloud,
                                         instance_type='modal-cpu-4x-16gb')
@@ -324,13 +372,26 @@ def test_modal_deploy_variables_auto_region():
         num_nodes=1)
 
     assert variables['modal_region'] is None
+    assert variables['modal_environment_name'] == 'dev'
     assert variables['modal_gpu'] is None
     assert variables['modal_cpu'] == 2.0
     assert variables['modal_memory'] == 16 * 1024
     assert variables['modal_docker_image'] is None
 
 
-def test_modal_deploy_variables_gpu_region():
+def test_modal_template_persists_environment():
+    repo_root = pathlib.Path(__file__).parents[2]
+    template = jinja2.Template(
+        (repo_root /
+         'sky/templates/modal-ray.yml.j2').read_text(encoding='utf-8'))
+
+    rendered = template.render(modal_environment_name='dev', credentials={})
+
+    assert 'environment_name: "dev"' in rendered
+
+
+def test_modal_deploy_variables_gpu_region(monkeypatch):
+    _set_active_modal_environment(monkeypatch)
     cloud = clouds.Modal()
     resources = resources_lib.Resources(cloud=cloud,
                                         instance_type='modal-a100-80gb-2x',
@@ -348,7 +409,8 @@ def test_modal_deploy_variables_gpu_region():
     assert variables['modal_docker_image'] == 'ubuntu:22.04'
 
 
-def test_modal_deploy_variables_volume_mounts():
+def test_modal_deploy_variables_volume_mounts(monkeypatch):
+    _set_active_modal_environment(monkeypatch)
     cloud = clouds.Modal()
     resources = resources_lib.Resources(cloud=cloud,
                                         instance_type='modal-cpu-4x-16gb')
@@ -359,7 +421,7 @@ def test_modal_deploy_variables_volume_mounts():
                                         zone=None,
                                         name_on_cloud='cache-on-cloud',
                                         size=None,
-                                        config={'environment_name': 'dev'})
+                                        config={'environment_name': 'prod'})
     volume_mount = volume_utils.VolumeMount('/cache',
                                             'cache',
                                             volume_config,
@@ -376,9 +438,35 @@ def test_modal_deploy_variables_volume_mounts():
     assert variables['modal_volume_mounts'] == [{
         'Path': '/cache',
         'VolumeNameOnCloud': 'cache-on-cloud',
-        'EnvironmentName': 'dev',
+        'EnvironmentName': 'prod',
         'SubPath': 'models',
     }]
+
+
+def test_modal_volume_mount_inherits_cluster_environment(monkeypatch):
+    _set_active_modal_environment(monkeypatch)
+    cloud = clouds.Modal()
+    resources = resources_lib.Resources(cloud=cloud,
+                                        instance_type='modal-cpu-4x-16gb')
+    volume_config = models.VolumeConfig(name='cache',
+                                        type='modal-volume',
+                                        cloud='modal',
+                                        region=None,
+                                        zone=None,
+                                        name_on_cloud='cache-on-cloud',
+                                        size=None,
+                                        config={})
+    volume_mount = volume_utils.VolumeMount('/cache', 'cache', volume_config)
+
+    variables = cloud.make_deploy_resources_variables(
+        resources=resources,
+        cluster_name=resources_utils.ClusterName('test', 'test'),
+        region=clouds.Region('auto'),
+        zones=None,
+        num_nodes=1,
+        volume_mounts=[volume_mount])
+
+    assert variables['modal_volume_mounts'][0]['EnvironmentName'] == 'dev'
 
 
 def test_modal_volume_type_validation(monkeypatch):
@@ -405,6 +493,7 @@ def test_modal_volume_type_validation(monkeypatch):
 
 def test_modal_run_instances_creates_sandbox(monkeypatch):
     created = {}
+    lookup_calls = []
     image_calls = []
     secret_calls = []
     volume_calls = []
@@ -444,9 +533,14 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
             return f'secret:{len(secret_calls)}'
 
     monkeypatch.setattr(modal_instance.modal_utils,
-                        'get_active_sandboxes_by_name', lambda name: {})
-    monkeypatch.setattr(modal_instance.modal_utils, 'get_app',
-                        lambda create_if_missing: 'app')
+                        'get_active_sandboxes_by_name',
+                        lambda name, environment_name=None: lookup_calls.append(
+                            ('sandbox', name, environment_name)) or {})
+    monkeypatch.setattr(
+        modal_instance.modal_utils,
+        'get_app',
+        lambda create_if_missing, environment_name=None: lookup_calls.append(
+            ('app', create_if_missing, environment_name)) or 'app')
     monkeypatch.setattr(
         modal_instance.modal_utils,
         'get_image',
@@ -494,7 +588,8 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
                     'ReadOnly': True,
                     'ForcePathStyle': False,
                 }],
-            }, [8080, 8081]))
+            }, [8080, 8081],
+            provider_config={'environment_name': 'dev'}))
 
     assert record.provider_name == 'modal'
     assert record.head_instance_id == 'sb-created'
@@ -505,6 +600,8 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
     assert created['kwargs']['encrypted_ports'] == [8080, 8081]
     assert created['kwargs']['region'] is None
     assert created['kwargs']['gpu'] == 'H100'
+    assert created['kwargs']['cpu'] == (2.0, 2.0)
+    assert created['kwargs']['memory'] == (16 * 1024, 16 * 1024)
     assert created['kwargs']['secrets'] == ['secret:1']
     assert created['kwargs']['volumes']['/cache'] == 'volume:models'
     assert isinstance(created['kwargs']['volumes']['/bucket'],
@@ -516,6 +613,8 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
     }]
     assert volume_calls == [('cache-on-cloud', 'dev', False),
                             ('with_mount_options', 'models')]
+    assert lookup_calls == [('sandbox', 'test-on-cloud', 'dev'),
+                            ('app', True, 'dev')]
     assert bucket_calls == [{
         'bucket_name': 'bucket',
         'bucket_endpoint_url': None,
@@ -528,18 +627,21 @@ def test_modal_run_instances_creates_sandbox(monkeypatch):
 
 def test_modal_run_instances_reuses_existing_sandbox(monkeypatch):
     sandbox = SimpleNamespace(object_id='sb-existing')
-    monkeypatch.setattr(modal_instance.modal_utils,
-                        'get_active_sandboxes_by_name',
-                        lambda name: {'sb-existing': sandbox})
+    monkeypatch.setattr(
+        modal_instance.modal_utils,
+        'get_active_sandboxes_by_name',
+        lambda name, environment_name=None: {'sb-existing': sandbox})
     monkeypatch.setattr(modal_instance.modal_utils, 'sandbox_status',
                         lambda sandbox: None)
 
-    record = modal_instance.run_instances(region='auto',
-                                          cluster_name='test',
-                                          cluster_name_on_cloud='test-on-cloud',
-                                          config=_provision_config({
-                                              'PublicKey': 'ssh-ed25519 test',
-                                          }))
+    record = modal_instance.run_instances(
+        region='auto',
+        cluster_name='test',
+        cluster_name_on_cloud='test-on-cloud',
+        config=_provision_config({
+            'PublicKey': 'ssh-ed25519 test',
+        },
+                                 provider_config={'environment_name': 'dev'}))
 
     assert record.head_instance_id == 'sb-existing'
     assert not record.created_instance_ids
@@ -693,22 +795,34 @@ def test_modal_get_image_from_registry(monkeypatch):
 
 
 def test_modal_get_active_sandboxes_by_name(monkeypatch):
+    calls = []
     sandbox = SimpleNamespace(object_id='sb-existing')
+
+    class FakeApp:
+
+        @staticmethod
+        def lookup(name, environment_name=None, create_if_missing=False):
+            calls.append(('app', name, environment_name, create_if_missing))
+            return 'app'
 
     class FakeSandbox:
 
         @staticmethod
-        def from_name(app_name, name):
+        def from_name(app_name, name, environment_name=None):
             assert app_name == modal_utils.APP_NAME
             assert name == 'test-on-cloud'
+            calls.append(('sandbox', app_name, name, environment_name))
             return sandbox
 
     monkeypatch.setattr(modal_utils.modal_adaptor, 'modal',
-                        SimpleNamespace(Sandbox=FakeSandbox))
+                        SimpleNamespace(App=FakeApp, Sandbox=FakeSandbox))
 
-    assert modal_utils.get_active_sandboxes_by_name('test-on-cloud') == {
+    assert modal_utils.get_app(True, 'dev') == 'app'
+    assert modal_utils.get_active_sandboxes_by_name('test-on-cloud', 'dev') == {
         'sb-existing': sandbox
     }
+    assert calls == [('app', modal_utils.APP_NAME, 'dev', True),
+                     ('sandbox', modal_utils.APP_NAME, 'test-on-cloud', 'dev')]
 
 
 def test_modal_get_active_sandboxes_by_name_not_found(monkeypatch):
@@ -719,8 +833,8 @@ def test_modal_get_active_sandboxes_by_name_not_found(monkeypatch):
     class FakeSandbox:
 
         @staticmethod
-        def from_name(app_name, name):
-            del app_name, name  # unused
+        def from_name(app_name, name, environment_name=None):
+            del app_name, name, environment_name  # unused
             raise NotFoundError('missing')
 
     monkeypatch.setattr(
@@ -736,8 +850,8 @@ def test_modal_get_active_sandboxes_by_name_propagates_api_errors(monkeypatch):
     class FakeSandbox:
 
         @staticmethod
-        def from_name(app_name, name):
-            del app_name, name  # unused
+        def from_name(app_name, name, environment_name=None):
+            del app_name, name, environment_name  # unused
             raise RuntimeError('rate limited')
 
     monkeypatch.setattr(modal_utils.modal_adaptor, 'modal',
@@ -748,6 +862,7 @@ def test_modal_get_active_sandboxes_by_name_propagates_api_errors(monkeypatch):
 
 
 def test_modal_query_ports(monkeypatch):
+    lookup_calls = []
 
     class FakeTunnel:
 
@@ -765,11 +880,15 @@ def test_modal_query_ports(monkeypatch):
                 9000: FakeTunnel(url='https://api.modal.host:8443/path'),
             }
 
-    monkeypatch.setattr(modal_instance.modal_utils, 'get_head_sandbox',
-                        lambda cluster_name: FakeSandbox())
+    monkeypatch.setattr(
+        modal_instance.modal_utils,
+        'get_head_sandbox',
+        lambda cluster_name, environment_name=None: lookup_calls.append(
+            (cluster_name, environment_name)) or FakeSandbox())
 
-    endpoints = modal_instance.query_ports('test-on-cloud',
-                                           ['22', '8080', '9000'])
+    endpoints = modal_instance.query_ports(
+        'test-on-cloud', ['22', '8080', '9000'],
+        provider_config={'environment_name': 'dev'})
 
     assert endpoints[22][0] == common.SocketEndpoint(host='ssh.modal.host',
                                                      port=2222)
@@ -779,17 +898,53 @@ def test_modal_query_ports(monkeypatch):
     assert endpoints[9000][0] == common.HTTPSEndpoint(host='api.modal.host',
                                                       port=8443,
                                                       path='path')
+    assert lookup_calls == [('test-on-cloud', 'dev')]
+
+
+def test_modal_lifecycle_uses_provider_environment(monkeypatch):
+    lookup_calls = []
+
+    def fake_get_active_sandboxes(name, environment_name=None):
+        lookup_calls.append((name, environment_name))
+        return {}
+
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_active_sandboxes_by_name',
+                        fake_get_active_sandboxes)
+    provider_config = {'environment_name': 'dev'}
+
+    assert not modal_instance.query_instances(
+        'test', 'test-on-cloud', provider_config=provider_config)
+    modal_instance.get_cluster_info('auto',
+                                    'test-on-cloud',
+                                    provider_config=provider_config)
+    modal_instance.terminate_instances('test-on-cloud',
+                                       provider_config=provider_config)
+
+    assert lookup_calls == [('test-on-cloud', 'dev')] * 3
+
+
+def test_modal_lifecycle_supports_legacy_provider_config(monkeypatch):
+    lookup_calls = []
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_active_sandboxes_by_name',
+                        lambda name, environment_name=None: lookup_calls.append(
+                            (name, environment_name)) or {})
+
+    assert not modal_instance.query_instances(
+        'test', 'test-on-cloud', provider_config={})
+    assert lookup_calls == [('test-on-cloud', None)]
 
 
 def test_modal_query_instances_filters_terminated(monkeypatch):
     running = SimpleNamespace(object_id='sb-running')
     terminated = SimpleNamespace(object_id='sb-terminated')
-    monkeypatch.setattr(
-        modal_instance.modal_utils, 'get_active_sandboxes_by_name',
-        lambda name: {
-            'sb-running': running,
-            'sb-terminated': terminated,
-        })
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_active_sandboxes_by_name',
+                        lambda name, environment_name=None: {
+                            'sb-running': running,
+                            'sb-terminated': terminated,
+                        })
     monkeypatch.setattr(modal_instance.modal_utils, 'sandbox_status',
                         lambda sandbox: None if sandbox is running else 137)
 
@@ -801,12 +956,12 @@ def test_modal_query_instances_filters_terminated(monkeypatch):
 def test_modal_query_instances_can_include_terminated(monkeypatch):
     running = SimpleNamespace(object_id='sb-running')
     terminated = SimpleNamespace(object_id='sb-terminated')
-    monkeypatch.setattr(
-        modal_instance.modal_utils, 'get_active_sandboxes_by_name',
-        lambda name: {
-            'sb-running': running,
-            'sb-terminated': terminated,
-        })
+    monkeypatch.setattr(modal_instance.modal_utils,
+                        'get_active_sandboxes_by_name',
+                        lambda name, environment_name=None: {
+                            'sb-running': running,
+                            'sb-terminated': terminated,
+                        })
     monkeypatch.setattr(modal_instance.modal_utils, 'sandbox_status',
                         lambda sandbox: None if sandbox is running else 137)
 
@@ -835,8 +990,8 @@ def test_modal_terminate_instances_idempotent(monkeypatch):
         {},
     ]
 
-    def fake_get_active_sandboxes_by_name(name):
-        del name  # unused
+    def fake_get_active_sandboxes_by_name(name, environment_name=None):
+        del name, environment_name  # unused
         return sandboxes_by_call.pop(0)
 
     monkeypatch.setattr(modal_instance.modal_utils,

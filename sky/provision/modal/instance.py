@@ -17,10 +17,12 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _filter_instances(
-        cluster_name_on_cloud: str,
-        status_filters: Optional[List[status_lib.ClusterStatus]]
+    cluster_name_on_cloud: str,
+    status_filters: Optional[List[status_lib.ClusterStatus]],
+    environment_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    sandboxes = modal_utils.get_active_sandboxes_by_name(cluster_name_on_cloud)
+    sandboxes = modal_utils.get_active_sandboxes_by_name(
+        cluster_name_on_cloud, environment_name)
     if status_filters is None:
         return sandboxes
     filtered = {}
@@ -50,8 +52,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if config.count != 1:
         raise RuntimeError('Modal only supports single-node clusters.')
 
+    environment_name = config.provider_config.get('environment_name')
     active_instances = _filter_instances(cluster_name_on_cloud,
-                                         [status_lib.ClusterStatus.UP])
+                                         [status_lib.ClusterStatus.UP],
+                                         environment_name)
     if len(active_instances) > 1:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} has multiple Modal Sandboxes.')
@@ -68,7 +72,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                       resumed_instance_ids=[],
                                       created_instance_ids=[])
 
-    app = modal_utils.get_app(create_if_missing=True)
+    app = modal_utils.get_app(create_if_missing=True,
+                              environment_name=environment_name)
     public_key = config.node_config['PublicKey']
     modal_region = config.node_config.get('ModalRegion')
     modal_gpu = config.node_config.get('Gpu')
@@ -107,8 +112,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         idle_timeout=modal_idle_timeout,
         gpu=modal_gpu,
         region=modal_region,
-        cpu=modal_cpu,
-        memory=modal_memory,
+        cpu=((modal_cpu, modal_cpu) if modal_cpu is not None else None),
+        memory=((modal_memory,
+                 modal_memory) if modal_memory is not None else None),
         volumes=sandbox_volumes,
     )
     # Ensure the SSH tunnel exists before SkyPilot starts probing SSH.
@@ -125,15 +131,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
-    del region  # unused
-    if state == status_lib.ClusterStatus.UP:
-        sandbox = modal_utils.get_head_sandbox(cluster_name_on_cloud)
-        if sandbox is None:
-            raise RuntimeError(
-                f'No active Modal Sandbox found for {cluster_name_on_cloud}.')
-        modal_utils.get_ssh_tunnel(sandbox)
-    elif state is None:
-        return
+    # run_instances() already waits for the Sandbox SSH tunnel. This interface
+    # does not receive provider_config, so another lookup could use a different
+    # active Modal Environment than the one persisted for the cluster.
+    del region, cluster_name_on_cloud, state  # unused
 
 
 def stop_instances(
@@ -150,10 +151,10 @@ def terminate_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config  # unused
     if worker_only:
         return
-    instances = _filter_instances(cluster_name_on_cloud, None)
+    environment_name = (provider_config or {}).get('environment_name')
+    instances = _filter_instances(cluster_name_on_cloud, None, environment_name)
     for sandbox_id, sandbox in instances.items():
         try:
             logger.debug(f'Terminating Modal Sandbox {sandbox_id}.')
@@ -171,8 +172,10 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region  # unused
+    environment_name = (provider_config or {}).get('environment_name')
     running_instances = _filter_instances(cluster_name_on_cloud,
-                                          [status_lib.ClusterStatus.UP])
+                                          [status_lib.ClusterStatus.UP],
+                                          environment_name)
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for sandbox_id, sandbox in running_instances.items():
@@ -202,8 +205,9 @@ def query_instances(
     non_terminated_only: bool = True,
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
-    del cluster_name, provider_config, retry_if_missing  # unused
-    instances = _filter_instances(cluster_name_on_cloud, None)
+    del cluster_name, retry_if_missing  # unused
+    environment_name = (provider_config or {}).get('environment_name')
+    instances = _filter_instances(cluster_name_on_cloud, None, environment_name)
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
     for sandbox_id, sandbox in instances.items():
@@ -234,8 +238,10 @@ def query_ports(
     head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
-    del head_ip, provider_config  # unused
-    sandbox = modal_utils.get_head_sandbox(cluster_name_on_cloud)
+    del head_ip  # unused
+    environment_name = (provider_config or {}).get('environment_name')
+    sandbox = modal_utils.get_head_sandbox(cluster_name_on_cloud,
+                                           environment_name)
     if sandbox is None:
         return {}
 
