@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.10.19-slim AS gcloud-apt-install
+FROM python:3.13.14-slim AS gcloud-apt-install
 
 # Keep in sync with _GCLOUD_VERSION in sky/clouds/gcp.py. Pinned so the apt
 # install layer doesn't bake in a stale version via buildx registry caching
@@ -24,12 +24,14 @@ RUN apt-get update && \
 
 
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
-FROM python:3.10.19-slim AS process-source
+FROM python:3.13.14-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
 ARG NEXT_BASE_PATH=/dashboard
 WORKDIR /skypilot
+
+RUN pip install --no-cache-dir setuptools==78.1.1
 
 # Run NPM and node install in a separate step for caching.
 RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
@@ -75,7 +77,7 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.10.19-slim
+FROM python:3.13.14-slim
 
 ARG INSTALL_FROM_SOURCE=true
 
