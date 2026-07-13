@@ -853,6 +853,19 @@ class Kubernetes(clouds.Cloud):
                     f'No EFA interfaces detected on AWS nodes with '
                     f'accelerator {k8s_acc_label_key}, skipping enabling EFA.')
 
+        # Multi-node EFA jobs must co-locate every replica in a single AZ: an
+        # AWS EFA placement group is single-AZ, so pods that scatter across AZs
+        # cannot form the fabric (NCCL degrades or fails to init). SkyPilot
+        # schedules each pod independently with no cross-pod topology
+        # constraint, so on a multi-AZ cluster they can scatter. For a
+        # multi-node network_tier: best job on AWS EFA, tell the template to
+        # inject a required same-zone podAffinity keyed on the per-job label so
+        # every replica follows the first into whatever AZ it lands in (the user
+        # names no zone). network_type is only AWS_EFA when network_tier is
+        # BEST, so this stays off for every other tier and cloud.
+        k8s_efa_same_az = (num_nodes > 1 and network_type
+                           == KubernetesHighPerformanceNetworkType.AWS_EFA)
+
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
@@ -978,6 +991,7 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(timeout),
             'k8s_efa_count': str(k8s_efa_count)
                              if k8s_efa_count is not None else None,
+            'k8s_efa_same_az': k8s_efa_same_az,
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,

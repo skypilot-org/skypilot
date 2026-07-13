@@ -5296,3 +5296,21 @@ def test_get_spot_label_none_without_known_autoscaler():
     with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
          mock.patch.object(utils, 'get_autoscaler_type', return_value=None):
         assert utils.get_spot_label('ctx') == (None, None)
+
+
+def test_match_kubernetes_failure_hint_text_realistic_eviction_reason():
+    """The display helper maps a real kubelet eviction reason to the hint.
+
+    Uses the full reason string as it appears in the abnormal->INIT cluster
+    event (see backend_utils._update_cluster_status), exercising the display
+    (`_text`) variant end to end. The reason contains both 'ephemeral' and
+    'Evicted'; the 'ephemeral' entry must win, so the resolved hint points at
+    `resources.ephemeral_storage`.
+    """
+    reason = ('Evicted: The node was low on resource: ephemeral-storage. '
+              'Threshold quantity: 380764701840, available: 13249836Ki. '
+              'Container ray-node was using 4943246992Ki, request is 0, has '
+              'larger consumption of ephemeral-storage.')
+    hint = utils.match_kubernetes_failure_hint_text(reason)
+    assert hint is not None
+    assert 'resources.ephemeral_storage' in hint

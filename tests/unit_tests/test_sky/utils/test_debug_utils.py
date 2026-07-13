@@ -14,11 +14,12 @@ import pytest
 
 from sky import clouds
 from sky import exceptions
+from sky.adaptors import kubernetes as adaptors_kubernetes
 from sky.jobs import utils as managed_job_utils
 from sky.server import constants as server_constants
+from sky.server.requests import log_provider as log_provider_lib
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
-from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
@@ -2903,20 +2904,25 @@ class TestDumpRequestIdInfo:
         assert not errors
         assert not (tmp_path / 'requests').exists()
 
-    @mock.patch('sky.utils.debug_utils.shutil.copy2')
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_copies_log_file_when_exists(self, mock_get_request, mock_copy2,
-                                         tmp_path):
-        """Should copy request log when it exists."""
+    def test_copies_log_file_when_exists(self, mock_get_request,
+                                         mock_get_provider, tmp_path):
+        """Should copy request log via the LogProvider."""
         mock_get_request.return_value = _make_request(request_id='req-log')
+        provider = mock.MagicMock()
+        provider.copy_log_file.return_value = True
+        mock_get_provider.return_value = provider
 
-        with mock.patch('pathlib.Path.exists', return_value=True):
-            errors: List[Dict[str, str]] = []
-            debug_utils._dump_request_id_info({'req-log'}, str(tmp_path),
-                                              errors)
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-log'}, str(tmp_path), errors)
 
-        # copy2 should be called at least once (for the log file)
-        assert mock_copy2.called
+        # copy_log_file should be called for the request log
+        assert provider.copy_log_file.called
+        dest_paths = [
+            call.args[2] for call in provider.copy_log_file.call_args_list
+        ]
+        assert any(p.name == 'request.log' for p in dest_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -3142,6 +3148,72 @@ class TestDumpClusterInfo:
         debug_utils._dump_cluster_info({'init-cluster'}, str(tmp_path), errors)
 
         runner.rsync.assert_called_once()
+        assert not errors
+
+
+class TestDumpRequestIdInfoLogCollection:
+    """_dump_request_id_info collects logs via the LogProvider."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_get_request(self):
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        return_value=None):
+            yield
+
+    def test_logs_collected_via_log_provider(self, tmp_path):
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            del request_id  # unused
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text('request log content')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        request_dir = tmp_path / 'requests' / 'req-1'
+        assert (request_dir / 'request.log').exists()
+        assert (request_dir /
+                'request.log').read_text() == 'request log content'
+        # Debug log copy returned False -> no file, and that is not an
+        # error.
+        assert not (request_dir / 'request_debug.log').exists()
+        assert not errors
+
+        # Both log types were requested from the provider.
+        log_types = [
+            call.args[1] for call in provider.copy_log_file.call_args_list
+        ]
+        assert log_provider_lib.RequestLogType.REQUEST in log_types
+        assert log_provider_lib.RequestLogType.DEBUG in log_types
+
+    def test_provider_failure_is_recorded(self, tmp_path):
+        provider = mock.MagicMock()
+        provider.copy_log_file.side_effect = OSError('fetch failed')
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        # Failures are recorded in the errors manifest but do not abort
+        # the dump.
+        assert any(e['resource'] == 'req-1/log' for e in errors)
+
+    def test_default_provider_copies_local_files(self, tmp_path):
+        src = tmp_path / 'src.log'
+        src.write_text('local content')
+        with mock.patch('sky.server.requests.log_provider.local_log_path',
+                        return_value=src):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-2'}, str(tmp_path), errors)
+
+        request_dir = tmp_path / 'requests' / 'req-2'
+        assert (request_dir / 'request.log').read_text() == 'local content'
         assert not errors
 
 
@@ -3376,19 +3448,16 @@ class TestResolveRemoteSkyletLogPath:
 class TestCollectClusterKubernetesResources:
     """Tests for the _collect_cluster_kubernetes_resources helper."""
 
-    def _k8s_handle(self, runners):
+    def _k8s_handle(self, tmp_path, context='ctx', namespace='ns'):
         handle = mock.Mock()
         handle.launched_resources.cloud = clouds.Kubernetes()
         handle.cluster_name_on_cloud = 'cluster-abc'
-        handle.get_command_runners.return_value = runners
+        yaml_path = tmp_path / 'cluster.yaml'
+        yaml_path.write_text(f'provider:\n'
+                             f'  context: {context}\n'
+                             f'  namespace: {namespace}\n')
+        handle.cluster_yaml = str(yaml_path)
         return handle
-
-    def _k8s_runner(self, context, namespace, pod_name):
-        runner = mock.MagicMock(spec=command_runner.KubernetesCommandRunner)
-        runner.context = context
-        runner.namespace = namespace
-        runner.pod_name = pod_name
-        return runner
 
     def test_non_kubernetes_cluster_is_noop(self, tmp_path):
         """A cluster on another cloud must not touch the k8s code path."""
@@ -3402,17 +3471,15 @@ class TestCollectClusterKubernetesResources:
                 'c', str(tmp_path), handle, errors)
 
         dump.assert_not_called()
-        handle.get_command_runners.assert_not_called()
         assert not errors
 
-    def test_delegates_with_coordinates_from_runners(self, tmp_path):
-        """Context/namespace are pulled off the k8s runners and passed through;
-        the dump finds the cluster's objects by label, so no pod names needed."""
-        runners = [
-            self._k8s_runner('ctx', 'ns', 'pod-head'),
-            self._k8s_runner('ctx', 'ns', 'pod-worker'),
-        ]
-        handle = self._k8s_handle(runners)
+    def test_delegates_with_coordinates_from_cluster_yaml(self, tmp_path):
+        """Context/namespace come from the cluster YAML's provider config;
+        the dump finds the cluster's objects by label, so no pod names needed.
+        Crucially, command runners are never built: they require a Running
+        head pod, which an INIT cluster (e.g. pods Pending in a Kueue queue)
+        doesn't have -- exactly the launches this dump must still cover."""
+        handle = self._k8s_handle(tmp_path)
 
         errors: List[Dict[str, str]] = []
         with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
@@ -3425,6 +3492,7 @@ class TestCollectClusterKubernetesResources:
                                      cluster_name_on_cloud='cluster-abc',
                                      output_dir=os.path.join(
                                          str(tmp_path), 'kubernetes'))
+        handle.get_command_runners.assert_not_called()
         assert not errors
         # A context.json mapping is dropped pointing at the per-context dump.
         with open(os.path.join(str(tmp_path), 'kubernetes', 'context.json'),
@@ -3435,9 +3503,24 @@ class TestCollectClusterKubernetesResources:
         assert mapping['cluster_name_on_cloud'] == 'cluster-abc'
         assert mapping['context_dir'].startswith('kubernetes_contexts/')
 
+    def test_in_cluster_context_maps_to_none(self, tmp_path):
+        """The in-cluster context name resolves to context=None (in-cluster
+        auth), matching how the provisioner reads the same provider config."""
+        handle = self._k8s_handle(
+            tmp_path, context=adaptors_kubernetes.in_cluster_context_name())
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
+                        return_value=[]) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        assert dump.call_args.kwargs['context'] is None
+        assert not errors
+
     def test_provider_errors_are_prefixed_with_cluster(self, tmp_path):
         """Errors from the provider are re-tagged with component + cluster."""
-        handle = self._k8s_handle([self._k8s_runner('ctx', 'ns', 'pod-head')])
+        handle = self._k8s_handle(tmp_path)
         provider_errors = [{
             'resource': 'kubernetes/pods/pod-head',
             'error': 'boom',
@@ -3457,10 +3540,11 @@ class TestCollectClusterKubernetesResources:
             'traceback': 'tb',
         }]
 
-    def test_get_command_runners_failure_is_recorded(self, tmp_path):
-        """A k8s cluster whose runners can't be built records one error."""
-        handle = self._k8s_handle([])
-        handle.get_command_runners.side_effect = RuntimeError('unreachable')
+    def test_coordinate_failure_is_recorded(self, tmp_path):
+        """A k8s cluster whose YAML is missing records one error."""
+        handle = mock.Mock()
+        handle.launched_resources.cloud = clouds.Kubernetes()
+        handle.cluster_yaml = None
 
         errors: List[Dict[str, str]] = []
         with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
@@ -3473,19 +3557,22 @@ class TestCollectClusterKubernetesResources:
         assert errors[0]['resource'] == 'mycluster/kubernetes'
         assert errors[0]['component'] == 'clusters'
 
-    def test_no_kubernetes_runners_is_noop(self, tmp_path):
-        """A k8s-cloud handle whose runners aren't KubernetesCommandRunners
-        (e.g. cluster info unavailable) is skipped without error."""
-        handle = self._k8s_handle([mock.Mock()])  # plain runner, wrong type
+    def test_empty_str_exception_still_yields_error_message(self, tmp_path):
+        """Exceptions that stringify to '' (e.g. FetchClusterInfoError) must
+        still leave a readable error record, not a blank one."""
+        handle = self._k8s_handle(tmp_path)
 
         errors: List[Dict[str, str]] = []
-        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources'
-                       ) as dump:
+        with mock.patch.object(
+                debug_utils,
+                '_kube_coordinates_for_handle',
+                side_effect=exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.HEAD)):
             debug_utils._collect_cluster_kubernetes_resources(
                 'mycluster', str(tmp_path), handle, errors)
 
-        dump.assert_not_called()
-        assert not errors
+        assert len(errors) == 1
+        assert 'FetchClusterInfoError' in errors[0]['error']
 
 
 class TestSanitizeContextName:

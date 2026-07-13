@@ -93,7 +93,7 @@ class APIHealthResponse(ResponseBaseModel):
     # Whether GET /workspaces/config is restricted to admins (config payload
     # includes admin-only secrets). Lets the dashboard hide the config UI for
     # non-admins when enabled.
-    restrict_config_to_admins: bool = False
+    restrict_config_to_admins: bool = True
 
 
 class StatusResponse(ResponseBaseModel):
@@ -169,6 +169,10 @@ class ClusterJobRecord(ResponseBaseModel):
     status: job_lib.JobStatus
     log_path: str
     metadata: Dict[str, Any] = {}
+    # External links extracted from the job's logs (label -> url). Computed
+    # server-side by matching URLs harvested into `metadata` against the
+    # configured dashboard.external_links patterns.
+    links: Dict[str, str] = {}
 
 
 class UploadStatus(enum.Enum):

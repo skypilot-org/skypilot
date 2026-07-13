@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 import traceback
-from typing import Optional
+from typing import Dict, List, Optional
 
 import psutil
 
@@ -188,6 +188,81 @@ class UsageHeartbeatReportEvent(SkyletEvent):
             use_spot=_bool_env('SKYPILOT_HEARTBEAT_USE_SPOT'),
             instance_type=os.environ.get('SKYPILOT_HEARTBEAT_INSTANCE_TYPE'),
         )
+
+
+class JobLogLinkScanEvent(SkyletEvent):
+    """Harvest candidate URLs from running jobs' logs into job metadata.
+
+    Scanning at the producer (this cluster) means an external link printed by a
+    task is captured into the local jobs.db ``metadata`` even if no one ever
+    streams the logs. The controller / API server read these candidates and
+    match them against the configured ``dashboard.external_links`` patterns;
+    matching deliberately does not happen here, so the worker needs no config.
+
+    Incremental and bounded: only newly written bytes are scanned each tick, up
+    to a per-job byte budget, and scanning stops once enough distinct URLs have
+    been harvested. The controller's terminal-state scan reads the complete log
+    as the definitive backstop, so anything missed here is still recovered.
+    """
+    EVENT_INTERVAL_SECONDS = 60
+
+    # Stop scanning a job's log past this many bytes; links of interest are
+    # printed early, and this bounds work for chatty multi-GB logs.
+    _MAX_SCAN_BYTES = 10 * 1024 * 1024
+
+    def __init__(self) -> None:
+        super().__init__()
+        # job_id -> byte offset already scanned in run.log.
+        self._offsets: Dict[int, int] = {}
+        # job_id -> distinct candidate URLs already harvested.
+        self._harvested: Dict[int, List[str]] = {}
+
+    def _run(self) -> None:
+        # Imported lazily so this stays cheap; only newer skylets register the
+        # event, so the import always resolves where it runs.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import log_links
+        job_log_dirs = job_lib.get_nonterminal_job_log_dirs()
+        active_ids = set(job_log_dirs)
+        # Drop bookkeeping for jobs that are no longer active.
+        for job_id in [j for j in self._offsets if j not in active_ids]:
+            self._offsets.pop(job_id, None)
+            self._harvested.pop(job_id, None)
+        for job_id, log_dir in job_log_dirs.items():
+            if log_dir is None:
+                continue
+            harvested = self._harvested.get(job_id, [])
+            offset = self._offsets.get(job_id, 0)
+            # Stop once enough URLs are harvested, or once the remaining byte
+            # budget is tiny: a small trailing read may contain no newline,
+            # which would never advance the offset and would re-read the same
+            # bytes every tick.
+            if (len(harvested) >= log_links.DEFAULT_CANDIDATE_CAP or
+                    self._MAX_SCAN_BYTES - offset < 1024):
+                continue
+            run_log = os.path.join(os.path.expanduser(log_dir), 'run.log')
+            try:
+                with open(run_log, 'rb') as f:
+                    f.seek(offset)
+                    chunk = f.read(self._MAX_SCAN_BYTES - offset)
+            except OSError:
+                continue
+            # Only consume complete lines so a URL is never split across a chunk
+            # boundary (and thus skipped once we advance the offset).
+            last_newline = chunk.rfind(b'\n')
+            if last_newline == -1:
+                continue
+            consumed = last_newline + 1
+            self._offsets[job_id] = offset + consumed
+            lines = chunk[:consumed].decode('utf-8',
+                                            errors='replace').split('\n')
+            new_harvested = log_links.extract_candidate_urls(lines,
+                                                             existing=harvested)
+            self._harvested[job_id] = new_harvested
+            if len(new_harvested) != len(harvested):
+                job_lib.update_job_metadata(
+                    job_id,
+                    {log_links.EXTRACTED_URLS_METADATA_KEY: new_harvested})
 
 
 class StopEvent(SkyletEvent):

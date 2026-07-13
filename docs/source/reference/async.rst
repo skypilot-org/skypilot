@@ -62,7 +62,6 @@ the request with ``sky api logs``, or cancel the request with ``sky api cancel``
     ^C
     ⚙︎ Request will continue running asynchronously.
     ├── View logs: sky api logs 73d316ac
-    ├── Or, visit: http://127.0.0.1:46580/api/stream?request_id=73d316ac
     └── To cancel the request, run: sky api cancel 73d316ac
 
 

@@ -474,6 +474,21 @@ available_node_types:
                         values:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
+            {% if k8s_efa_same_az %}
+            # Multi-node EFA co-location: an AWS EFA placement group is
+            # single-AZ, so every replica of this job must schedule into one
+            # zone or the fabric cannot form. Attract each pod to the zone of
+            # the other pods of the same SkyPilot cluster -- the first pod fixes
+            # the AZ (Karpenter provisions an EFA node wherever it has
+            # capacity) and the rest follow; the user names no zone. required
+            # (not preferred): cross-AZ EFA is broken, so pend loudly rather
+            # than silently fall back to TCP.
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    skypilot-cluster-name: {{cluster_name_on_cloud}}
+                topologyKey: topology.kubernetes.io/zone
+            {% endif %}
           {% endif %}
           {% endif %}
           {% if k8s_host_network %}

@@ -2028,22 +2028,23 @@ def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 # substitute the real URL, others fall back to a generic phrase.
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
-     'Verify the image tag exists and registry credentials are configured.'),
+     'To fix: Verify the image tag exists and registry credentials are configured.'
+    ),
     (['OOMKilled'],
-     'The container ran out of memory. Increase the memory request with '
+     'The container ran out of memory. To fix: Increase the memory request with '
      '`resources.memory` in your task YAML; if `kubernetes.'
      'set_pod_resource_limits` is set, the memory limit scales with it.'),
     # 'ephemeral' must precede 'Evicted': an ephemeral-storage eviction reason
     # contains both, and the first match wins.
     (['ephemeral'],
      'The pod exceeded its ephemeral (local) storage limit and was evicted. '
-     'Increase `resources.ephemeral_storage` in your task YAML.'),
+     'To fix: Increase `resources.ephemeral_storage` in your task YAML.'),
     (['Evicted'],
-     'The pod was evicted by the node under resource pressure. Increase the '
+     'The pod was evicted by the node under resource pressure. To fix: Increase the '
      'relevant request (`resources.memory` or `resources.ephemeral_storage`) '
      'in your task YAML.'),
     (['Insufficient'],
-     'The cluster does not have enough free resources. View node '
+     'The cluster does not have enough free resources. To fix: View node '
      'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
 ]
 

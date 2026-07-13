@@ -1,4 +1,5 @@
 import pathlib
+from types import SimpleNamespace
 import typing
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -12,8 +13,10 @@ from sky.backends import backend_utils
 from sky.clouds import Region
 from sky.clouds import Zone
 from sky.clouds.aws import AWS
+from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
 from sky.provision.aws import config
+from sky.provision.aws import instance as aws_instance
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -36,6 +39,239 @@ def test_aws_label():
         'sprinto:short',
         'thisiexample_string_with_123_characters_length_thing_thing_thing_thing_thing_thing_thing_thin_thing_thing_thing_thing_thing_thingthisiexample_string_with_123_characters_length_thing_thing_thing_thing_thing_thing_thing_thin_thing_thing_thing_thing_thing_thing',
     )[0])
+
+
+def test_create_instances_adds_volume_tag_spec():
+    ec2_fail_fast = MagicMock()
+    ec2_fail_fast.create_instances.return_value = ['instance']
+
+    node_config = {
+        'SubnetIds': ['subnet-123'],
+        'SecurityGroupIds': ['sg-123'],
+        'InstanceType': 'g5.xlarge',
+    }
+    tags = {
+        'Owner': 'alice',
+    }
+
+    result = aws_instance._create_instances(
+        ec2_fail_fast=ec2_fail_fast,
+        cluster_name='cluster',
+        node_config=node_config,
+        tags=tags,
+        count=1,
+        associate_public_ip_address=True,
+        max_efa_interfaces=0,
+    )
+
+    assert result == ['instance']
+
+    call_kwargs = ec2_fail_fast.create_instances.call_args.kwargs
+    assert call_kwargs['MinCount'] == 1
+    assert call_kwargs['MaxCount'] == 1
+
+    tag_specs = {
+        tag_spec['ResourceType']: tag_spec['Tags']
+        for tag_spec in call_kwargs['TagSpecifications']
+    }
+    expected_tags = [{
+        'Key': 'Name',
+        'Value': 'cluster'
+    }, {
+        'Key': provision_constants.TAG_RAY_CLUSTER_NAME,
+        'Value': 'cluster'
+    }, {
+        'Key': provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
+        'Value': 'cluster'
+    }, {
+        'Key': 'Owner',
+        'Value': 'alice'
+    }]
+    assert tag_specs['instance'] == expected_tags
+    assert tag_specs['volume'] == expected_tags
+
+
+def test_merge_tag_specs_merges_volume_tags():
+    base_tag_specs = [{
+        'ResourceType': 'instance',
+        'Tags': [{
+            'Key': 'Name',
+            'Value': 'cluster'
+        }],
+    }, {
+        'ResourceType': 'volume',
+        'Tags': [{
+            'Key': 'Name',
+            'Value': 'cluster'
+        }, {
+            'Key': 'Owner',
+            'Value': 'alice'
+        }],
+    }]
+    user_tag_specs = [{
+        'ResourceType': 'volume',
+        'Tags': [{
+            'Key': 'Owner',
+            'Value': 'bob'
+        }, {
+            'Key': 'Team',
+            'Value': 'ml'
+        }],
+    }]
+
+    aws_instance._merge_tag_specs(base_tag_specs, user_tag_specs)
+
+    volume_tags = next(tag_spec['Tags']
+                       for tag_spec in base_tag_specs
+                       if tag_spec['ResourceType'] == 'volume')
+    assert volume_tags == [{
+        'Key': 'Name',
+        'Value': 'cluster'
+    }, {
+        'Key': 'Owner',
+        'Value': 'bob'
+    }, {
+        'Key': 'Team',
+        'Value': 'ml'
+    }]
+
+
+def test_run_instances_tags_resumed_instance_volumes():
+    stopped_instance = SimpleNamespace(
+        id='i-stopped',
+        state={'Name': 'stopped'},
+        placement={'AvailabilityZone': 'us-east-1a'},
+        tags=[{
+            'Key': key,
+            'Value': value
+        } for key, value in provision_constants.HEAD_NODE_TAGS.items()],
+        block_device_mappings=[{
+            'Ebs': {
+                'VolumeId': 'vol-1'
+            }
+        }, {
+            'Ebs': {
+                'VolumeId': 'vol-2'
+            }
+        }],
+    )
+
+    mock_ec2 = MagicMock()
+    mock_ec2.meta.client.meta.region_name = 'us-east-1'
+    mock_ec2.instances.filter.return_value = [stopped_instance]
+
+    mock_ec2_fail_fast = MagicMock()
+    mock_ec2_fail_fast.meta.client.start_instances.return_value = {}
+
+    provision_config = provision_common.ProvisionConfig(
+        provider_config={'use_internal_ips': False},
+        authentication_config={},
+        docker_config={},
+        node_config={},
+        count=1,
+        tags={'Owner': 'alice'},
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=None,
+    )
+
+    with patch.object(aws_instance,
+                      '_default_ec2_resource',
+                      return_value=mock_ec2), patch.object(
+                          aws_instance.aws,
+                          'resource',
+                          return_value=mock_ec2_fail_fast):
+        record = aws_instance.run_instances(region='us-east-1',
+                                            cluster_name='cluster',
+                                            cluster_name_on_cloud='cluster',
+                                            config=provision_config)
+
+    assert record.resumed_instance_ids == ['i-stopped']
+    assert record.created_instance_ids == []
+
+    create_tags_calls = mock_ec2.meta.client.create_tags.call_args_list
+    assert len(create_tags_calls) == 2
+    assert create_tags_calls[0].kwargs == {
+        'Resources': ['i-stopped'],
+        'Tags': [{
+            'Key': 'Owner',
+            'Value': 'alice'
+        }],
+    }
+    assert create_tags_calls[1].kwargs == {
+        'Resources': ['vol-1', 'vol-2'],
+        'Tags': [{
+            'Key': 'Owner',
+            'Value': 'alice'
+        }],
+    }
+
+
+@patch.object(aws_instance, 'logger')
+def test_run_instances_volume_tag_failure_does_not_abort_resume(mock_logger):
+    stopped_instance = SimpleNamespace(
+        id='i-stopped',
+        state={'Name': 'stopped'},
+        placement={'AvailabilityZone': 'us-east-1a'},
+        tags=[{
+            'Key': key,
+            'Value': value
+        } for key, value in provision_constants.HEAD_NODE_TAGS.items()],
+        block_device_mappings=[{
+            'Ebs': {
+                'VolumeId': 'vol-1'
+            }
+        }],
+    )
+
+    mock_ec2 = MagicMock()
+    mock_ec2.meta.client.meta.region_name = 'us-east-1'
+    mock_ec2.instances.filter.return_value = [stopped_instance]
+
+    def create_tags_side_effect(**kwargs):
+        if kwargs['Resources'] == ['vol-1']:
+            raise aws_instance.aws.botocore_exceptions().ClientError(
+                error_response={
+                    'Error': {
+                        'Code': 'UnauthorizedOperation',
+                        'Message': 'not allowed',
+                    }
+                },
+                operation_name='CreateTags',
+            )
+        return {}
+
+    mock_ec2.meta.client.create_tags.side_effect = create_tags_side_effect
+
+    mock_ec2_fail_fast = MagicMock()
+    mock_ec2_fail_fast.meta.client.start_instances.return_value = {}
+
+    provision_config = provision_common.ProvisionConfig(
+        provider_config={'use_internal_ips': False},
+        authentication_config={},
+        docker_config={},
+        node_config={},
+        count=1,
+        tags={'Owner': 'alice'},
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=None,
+    )
+
+    with patch.object(aws_instance,
+                      '_default_ec2_resource',
+                      return_value=mock_ec2), patch.object(
+                          aws_instance.aws,
+                          'resource',
+                          return_value=mock_ec2_fail_fast):
+        record = aws_instance.run_instances(region='us-east-1',
+                                            cluster_name='cluster',
+                                            cluster_name_on_cloud='cluster',
+                                            config=provision_config)
+
+    assert record.resumed_instance_ids == ['i-stopped']
+    mock_logger.warning.assert_any_call(
+        'Failed to update tags for resumed AWS volumes '
+        "['vol-1']: An error occurred (UnauthorizedOperation) when calling "
+        'the CreateTags operation: not allowed')
 
 
 def test_usable_subnets(monkeypatch):
