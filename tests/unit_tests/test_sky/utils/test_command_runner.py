@@ -409,6 +409,48 @@ def test_kubernetes_runner_rsync_does_not_set_exec_container_envvar_by_default(
     assert 'SKYPILOT_K8S_EXEC_CONTAINER=' not in captured['command']
 
 
+def test_rsync_includes_idle_io_timeout() -> None:
+    """rsync should carry an idle --timeout so a stalled connection (e.g. to an
+    unhealthy/terminating node) cannot hang the transfer indefinitely."""
+    captured = {}
+
+    def fake_run_with_log(command: str, *args, **kwargs):
+        captured['command'] = command
+        return 0, '', ''
+
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=fake_run_with_log):
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
+
+    assert command_runner.RSYNC_IO_TIMEOUT_OPTION in captured['command']
+    assert f'--timeout={command_runner.RSYNC_IO_TIMEOUT_SECONDS}' in captured[
+        'command']
+
+
+def test_get_remote_home_dir_bounds_probe_and_raises_on_timeout() -> None:
+    """The home-dir probe is bounded by a timeout, and a timeout surfaces as a
+    ValueError rather than hanging forever."""
+    captured = {}
+
+    def fake_run_with_log(command: str, *args, **kwargs):
+        captured['timeout'] = kwargs.get('timeout')
+        raise subprocess.TimeoutExpired(command, kwargs.get('timeout'))
+
+    with mock.patch.object(command_runner.log_lib,
+                           'run_with_log',
+                           side_effect=fake_run_with_log):
+        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'))
+        with pytest.raises(ValueError,
+                           match='Failed to get remote home directory'):
+            runner.get_remote_home_dir()
+
+    # The trivial `echo ~` probe must be bounded.
+    assert captured['timeout'] == (
+        command_runner._GET_REMOTE_HOME_DIR_TIMEOUT_SECONDS)
+
+
 def test_get_pod_primary_container_prefers_ray_node() -> None:
     from sky.provision.kubernetes import utils as kubernetes_utils
 
