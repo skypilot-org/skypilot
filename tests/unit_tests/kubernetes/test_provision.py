@@ -3533,3 +3533,104 @@ class TestCreatePodFinalizerHandling:
         # Must not have touched the live pod.
         core_api_mock.patch_namespaced_pod.assert_not_called()
         core_api_mock.delete_namespaced_pod.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pod scheduling summary at provision failure (SKY-6227)
+# ---------------------------------------------------------------------------
+
+
+def _summary_pod(name, *, scheduled):
+    """A pod mock that _pod_is_scheduled classifies deterministically."""
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod._metadata._name = name  # pylint: disable=protected-access
+    if scheduled:
+        pod.status.phase = 'Running'
+    else:
+        pod.status.phase = 'Pending'
+        pod.spec.node_name = None
+        pod.spec.node_selector = None
+        pod.status.conditions = []
+    return pod
+
+
+def _failed_scheduling_event(message):
+    event = mock.MagicMock()
+    event.metadata.creation_timestamp = '2021-01-01T00:00:00Z'
+    event.reason = 'FailedScheduling'
+    event.message = message
+    return event
+
+
+def test_scheduling_summary_counts_scheduled_vs_pending(monkeypatch):
+    """The provision-failure path must record how many of the requested pods
+    were actually placed (X/N) and each unscheduled pod's reason — the raised
+    error alone only explains a single pod."""
+    reason = ('0/367 nodes are available: 1 cannot allocate all claims, '
+              '366 node(s) had untolerated taints.')
+    pods = {
+        'job-head': _summary_pod('job-head', scheduled=True),
+        'job-worker1': _summary_pod('job-worker1', scheduled=False),
+        'job-worker2': _summary_pod('job-worker2', scheduled=False),
+    }
+    new_nodes = []
+    for name in pods:
+        node = mock.MagicMock()
+        node.metadata.name = name
+        new_nodes.append(node)
+
+    core_api_mock = mock.MagicMock()
+    core_api_mock.read_namespaced_pod.side_effect = (
+        lambda name, _namespace: pods[name])
+    events_mock = mock.MagicMock()
+    events_mock.items = [_failed_scheduling_event(reason)]
+    core_api_mock.list_namespaced_event.return_value = events_mock
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *args, **kwargs: core_api_mock)
+
+    info_output = []
+    monkeypatch.setattr(logger, 'info',
+                        lambda msg, *args: info_output.append(msg))
+
+    with pytest.raises(config_lib.KubernetesError) as e:
+        instance._raise_pod_scheduling_errors('ns', 'ctx', new_nodes)
+
+    # The X/N count is in the raised error, so it survives into failover
+    # handling and the job's failure reason.
+    assert '1/3 pods scheduled' in str(e.value)
+
+    # The full breakdown is logged (landing in provision.log at failure
+    # time), grouped by reason with the pods named.
+    summary = '\n'.join(info_output)
+    assert '1/3 pods scheduled at provision failure (2 unscheduled)' in summary
+    assert '2 pod(s) (job-worker1, job-worker2)' in summary
+    assert reason in summary
+
+
+def test_scheduling_summary_handles_no_failed_scheduling_event(monkeypatch):
+    """An unscheduled pod without a FailedScheduling event yet must still be
+    counted, with a placeholder reason."""
+    pods = {'job-head': _summary_pod('job-head', scheduled=False)}
+    node = mock.MagicMock()
+    node.metadata.name = 'job-head'
+
+    core_api_mock = mock.MagicMock()
+    core_api_mock.read_namespaced_pod.side_effect = (
+        lambda name, _namespace: pods[name])
+    events_mock = mock.MagicMock()
+    events_mock.items = []
+    core_api_mock.list_namespaced_event.return_value = events_mock
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *args, **kwargs: core_api_mock)
+
+    info_output = []
+    monkeypatch.setattr(logger, 'info',
+                        lambda msg, *args: info_output.append(msg))
+
+    with pytest.raises(config_lib.KubernetesError) as e:
+        instance._raise_pod_scheduling_errors('ns', 'ctx', [node])
+
+    assert '0/1 pods scheduled' in str(e.value)
+    summary = '\n'.join(info_output)
+    assert '(no FailedScheduling event)' in summary

@@ -1134,20 +1134,28 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
                 'content': json.dumps(content, indent=2, default=str),
             })
 
-    # Provision log (FILE — needs rsync). The path is recorded in cluster
-    # history, so this also works for terminated clusters.
+    # Provision logs (FILEs — need rsync). The paths are recorded in cluster
+    # history, so this also works for terminated clusters. All recorded tries
+    # are collected, not just the latest: a recovery re-launches the same
+    # cluster name, and the pre-recovery try's log is often the one that
+    # explains the failure. The latest try keeps the plain 'provision.log'
+    # name; earlier tries get logrotate-style suffixes ('provision.log.1' is
+    # the previous try, higher numbers are older).
     with _catch_to_errors(errors, 'managed_jobs',
                           f'{cluster_name}/provision_log'):
-        provision_log_path = (
-            global_user_state.get_cluster_history_provision_log_path(
+        provision_log_paths = (
+            global_user_state.get_cluster_history_provision_log_paths(
                 cluster_name))
-        if provision_log_path:
-            provision_log = pathlib.Path(provision_log_path).expanduser()
-            if provision_log.is_file():
-                file_paths.append({
-                    'remote_path': str(provision_log),
-                    'relative_path': f'{cluster_prefix}/provision.log',
-                })
+        # Oldest first -> iterate newest first so suffixes grow with age.
+        for age, log_path in enumerate(reversed(provision_log_paths)):
+            provision_log = pathlib.Path(log_path).expanduser()
+            if not provision_log.is_file():
+                continue
+            suffix = f'.{age}' if age else ''
+            file_paths.append({
+                'remote_path': str(provision_log),
+                'relative_path': f'{cluster_prefix}/provision.log{suffix}',
+            })
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
