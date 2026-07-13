@@ -60,38 +60,39 @@ KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
 
 logger = sky_logging.init_logger(__name__)
 
-
-def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
-    for attr_name in dir(obj):
-        attr = getattr(obj, attr_name)
-        # Skip methods starting with '__' since they are invoked through one
-        # of the main methods, which are already decorated.
-        if callable(attr) and not attr_name.startswith('__'):
-            decorated_types: Set[str] = getattr(attr, '_sky_decorator_types',
-                                                set())
-            if decoration_type not in decorated_types:
-                decorated_attr = decorator(attr)
-                decorated_attr._sky_decorator_types = (  # pylint: disable=protected-access
-                    decorated_types | {decoration_type})
-                setattr(obj, attr_name, decorated_attr)
-    return obj
+# Loggers whose level has already been set by _api_logging_decorator, so
+# that Logger.setLevel() is called at most once per logger per process.
+# setLevel() acquires the logging module's global lock (via
+# Manager._clear_cache()), and on Python < 3.13 a fork() while another
+# thread holds that lock leaves the lock permanently held in the child,
+# deadlocking its next logging call. Fixed in CPython 3.13 by
+# https://github.com/python/cpython/pull/109462; until then, keep setLevel()
+# calls rare instead of on every API call.
+_leveled_loggers: Set[str] = set()
+_leveled_loggers_lock = threading.Lock()
 
 
 def _api_logging_decorator(logger_src: str, level: int):
-    """Decorator to set logging level for API calls.
+    """Decorator to set the logging level of a logger used by API calls.
 
-    This is used to suppress the verbose logging from urllib3 when calls to the
-    Kubernetes API timeout.
+    This is used to suppress the verbose logging from urllib3 when calls to
+    the Kubernetes API timeout. The level is set once per process on first
+    use and never restored: the previous per-call set/restore was racy under
+    concurrent API calls (interleaved restores could leave the level set
+    anyway) and its frequent setLevel() calls made the pre-3.13 fork
+    deadlock described above easy to hit.
     """
 
     def decorated_api(api):
 
+        @functools.wraps(api)
         def wrapped(*args, **kwargs):
-            obj = api(*args, **kwargs)
-            _decorate_methods(obj,
-                              sky_logging.set_logging_level(logger_src, level),
-                              'api_log')
-            return obj
+            if logger_src not in _leveled_loggers:
+                with _leveled_loggers_lock:
+                    if logger_src not in _leveled_loggers:
+                        logging.getLogger(logger_src).setLevel(level)
+                        _leveled_loggers.add(logger_src)
+            return api(*args, **kwargs)
 
         return wrapped
 
