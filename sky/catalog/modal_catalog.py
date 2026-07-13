@@ -36,7 +36,9 @@ _REGION_MULTIPLIERS = {
     **{region: 1.75 for region in _NARROW_REGIONS},
 }
 
-# Modal Sandbox + Notebooks pricing, converted from per-second pricing.
+# Keep the supported GPU price, memory, and count tables in sync with:
+# https://modal.com/pricing and https://modal.com/docs/guide/gpu.
+# Modal Sandbox + Notebooks pricing is converted from per-second pricing.
 _SANDBOX_CPU_CORE_PRICE_PER_SECOND = 0.00003942
 _SANDBOX_MEMORY_GIB_PRICE_PER_SECOND = 0.00000672
 
@@ -45,6 +47,7 @@ _DEFAULT_SKY_VCPUS = 4.0
 _DEFAULT_MEMORY_GIB = 16
 
 _GPU_PRICE_PER_SECOND = {
+    'B300': 0.001972,
     'B200': 0.001736,
     'H200': 0.001261,
     'H100': 0.001097,
@@ -59,6 +62,7 @@ _GPU_PRICE_PER_SECOND = {
 }
 
 _GPU_MEMORY_GIB = {
+    'B300': 288,
     'B200': 180,
     'H200': 141,
     'H100': 80,
@@ -73,6 +77,7 @@ _GPU_MEMORY_GIB = {
 }
 
 _GPU_COUNTS = {
+    'B300': (1, 2, 4, 8),
     'B200': (1, 2, 4, 8),
     'H200': (1, 2, 4, 8),
     'H100': (1, 2, 4, 8),

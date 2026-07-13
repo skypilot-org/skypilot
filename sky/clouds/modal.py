@@ -13,7 +13,6 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
-from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -222,6 +221,7 @@ class Modal(clouds.Cloud):
             raise ValueError('Modal only supports single-node clusters.')
         assert zones is None, 'Modal does not support zones.'
         resources = resources.assert_launchable()
+        modal_environment_name = self._get_active_environment_name()
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
@@ -249,13 +249,15 @@ class Modal(clouds.Cloud):
                     'Path': volume_mount.path,
                     'VolumeNameOnCloud': volume_config.name_on_cloud,
                     'EnvironmentName':
-                        volume_config.config.get('environment_name'),
+                        volume_config.config.get('environment_name')
+                        or modal_environment_name,
                     'SubPath': volume_mount.sub_path,
                 })
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'modal_environment_name': modal_environment_name,
             'modal_region': modal_region,
             'modal_gpu': modal_gpu,
             'modal_cpu': modal_cpu,
@@ -373,16 +375,6 @@ class Modal(clouds.Cloud):
         return catalog.regions(clouds='modal')
 
     @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List[status_lib.ClusterStatus]:
-        del tag_filters, region, zone, kwargs  # unused
-        # pylint: disable=import-outside-toplevel
-        from sky.provision.modal import instance as modal_instance
-        statuses = modal_instance.query_instances('Modal', name, None)
-        return [status for status, _ in statuses.values() if status is not None]
-
-    @classmethod
     @annotations.lru_cache(scope='global', maxsize=1)
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         try:
@@ -400,4 +392,21 @@ class Modal(clouds.Cloud):
         identity = workspace_name or workspace_uuid
         if identity is None:
             return None
-        return [[f'Modal workspace {identity}']]
+        workspace_identity = f'Modal workspace {identity}'
+        environment_name = cls._get_active_environment_name()
+        return [[f'{workspace_identity}, environment {environment_name}'],
+                [workspace_identity]]
+
+    @classmethod
+    def _get_active_environment_name(cls) -> str:
+        try:
+            environment = modal_adaptor.modal.Environment.from_context()
+            environment.hydrate()
+            return environment.name
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get Modal environment identity.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e

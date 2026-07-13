@@ -24,8 +24,9 @@ _GCS_HMAC_ACCESS_KEY_ENV_VAR = 'GOOGLE_ACCESS_KEY_ID'
 _GCS_HMAC_SECRET_KEY_ENV_VAR = 'GOOGLE_ACCESS_KEY_SECRET'
 
 
-def get_app(create_if_missing: bool):
+def get_app(create_if_missing: bool, environment_name: Optional[str] = None):
     return modal_adaptor.modal.App.lookup(APP_NAME,
+                                          environment_name=environment_name,
                                           create_if_missing=create_if_missing)
 
 
@@ -144,9 +145,12 @@ exec /usr/sbin/sshd -D -e -p {SSH_PORT}
 """
 
 
-def get_active_sandboxes_by_name(name: str) -> Dict[str, Any]:
+def get_active_sandboxes_by_name(name: str,
+                                 environment_name: Optional[str] = None
+                                ) -> Dict[str, Any]:
     try:
-        sandbox = modal_adaptor.modal.Sandbox.from_name(APP_NAME, name)
+        sandbox = modal_adaptor.modal.Sandbox.from_name(
+            APP_NAME, name, environment_name=environment_name)
     except Exception as exc:  # pylint: disable=broad-except
         not_found_error = getattr(
             getattr(modal_adaptor.modal, 'exception', None), 'NotFoundError',
@@ -160,8 +164,10 @@ def get_active_sandboxes_by_name(name: str) -> Dict[str, Any]:
     return {sandbox.object_id: sandbox}
 
 
-def get_head_sandbox(cluster_name_on_cloud: str):
-    sandboxes = get_active_sandboxes_by_name(cluster_name_on_cloud)
+def get_head_sandbox(cluster_name_on_cloud: str,
+                     environment_name: Optional[str] = None):
+    sandboxes = get_active_sandboxes_by_name(cluster_name_on_cloud,
+                                             environment_name)
     if not sandboxes:
         return None
     return next(iter(sandboxes.values()))

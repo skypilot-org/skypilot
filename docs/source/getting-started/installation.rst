@@ -1112,6 +1112,9 @@ Alternatively, set token credentials in the environment:
   export MODAL_TOKEN_ID=<your_token_id>
   export MODAL_TOKEN_SECRET=<your_token_secret>
 
+SkyPilot records the active Modal Environment when creating a cluster. Activate
+the same Environment when managing that cluster.
+
 Verify the setup:
 
 .. code-block:: shell
