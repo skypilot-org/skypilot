@@ -839,6 +839,9 @@
                 "annotations": {
                     "type": "object"
                 },
+                "clientsSubPath": {
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -855,9 +858,6 @@
                     "type": "string"
                 },
                 "volumeName": {
-                    "type": "string"
-                },
-                "clientsSubPath": {
                     "type": "string"
                 }
             }

@@ -373,6 +373,9 @@ storage:
   # upload artifacts). Override when attaching a pre-existing volume whose
   # layout keeps that data under a different directory, so the deployment
   # keeps reading/writing the existing data instead of starting an empty one.
+  # Note: only takes effect when apiService.upgradeStrategy is "RollingUpdate";
+  # under "Recreate" the whole volume is mounted at ~/.sky and the clients
+  # directory is always at <volume>/.sky/api_server/clients.
   clientsSubPath: "api_server/clients"
   # Storage class name - leave empty to use cluster default
   # For RWX storage with RollingUpdate, use a storage class that supports ReadWriteMany access mode:
