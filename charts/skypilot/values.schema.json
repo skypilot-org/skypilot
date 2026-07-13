@@ -842,6 +842,9 @@
                 "enabled": {
                     "type": "boolean"
                 },
+                "existingClaim": {
+                    "type": "string"
+                },
                 "selector": {
                     "type": "object"
                 },

@@ -56,14 +56,16 @@ export function Config() {
 
   useEffect(() => {
     // If the caller can't read the config, it would 403, so skip the request
-    // entirely and show the access-denied card instead.
-    if (!canViewConfig) {
+    // entirely and show the access-denied card instead. The header (metrics
+    // button, version) is still rendered for everyone below.
+    if (canViewConfig) {
+      loadConfig();
+    } else {
       setLoading(false);
-      return;
     }
-    loadConfig();
 
-    // Check Grafana availability
+    // Check Grafana availability for everyone: the metrics button and version
+    // info in the header are shown regardless of config read access.
     const checkGrafana = async () => {
       const available = await checkGrafanaAvailability();
       setIsGrafanaAvailable(available);
@@ -175,85 +177,92 @@ export function Config() {
     );
   }
 
+  // Top header bar (title + metrics button + version) shown to everyone,
+  // regardless of whether they can read the config below.
+  const header = (
+    <div className="flex items-center justify-between mb-4 h-8">
+      <div className="text-base flex items-center">
+        <span className="text-sky-blue leading-none">SkyPilot API Server</span>
+      </div>
+
+      <div className="flex items-center">
+        <div className="text-sm flex items-center">
+          {(loading || saving) && (
+            <div className="flex items-center mr-4">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500">
+                {saving ? 'Applying...' : 'Loading...'}
+              </span>
+            </div>
+          )}
+        </div>
+        {isGrafanaAvailable && (
+          <button
+            onClick={() => {
+              const grafanaUrl = getGrafanaUrl();
+              // Get app name from environment variable
+              const releaseName =
+                process.env.SKYPILOT_RELEASE_NAME || 'skypilot';
+              const appName = `${releaseName}-api`;
+              window.open(
+                `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${appName}`,
+                '_blank'
+              );
+            }}
+            className="inline-flex items-center h-8 px-3 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
+          >
+            <svg
+              className="w-4 h-4 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+              />
+            </svg>
+            View API Server Metrics
+          </button>
+        )}
+        <NewVersionAvailable />
+        <PluginSlot
+          name="settings.version-display"
+          fallback={<VersionDisplay />}
+        />
+      </div>
+    </div>
+  );
+
   // The API server configuration exposes admin-only secrets. Anyone who can't
   // read it (restricted non-admins, or viewers) gets an access-denied card
-  // instead of a 403.
+  // instead of a 403 -- but the header above is still shown.
   if (!canViewConfig) {
     return (
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="text-base font-normal">
-            API Server Configuration
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-gray-600">
-            You must be an admin to view the API server configuration.
-          </p>
-        </CardContent>
-      </Card>
+      <>
+        {header}
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-base font-normal">
+              API Server Configuration
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-600">
+              You must be an admin to view the API server configuration.
+            </p>
+          </CardContent>
+        </Card>
+      </>
     );
   }
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-8">
-        <div className="text-base flex items-center">
-          <span className="text-sky-blue leading-none">
-            SkyPilot API Server
-          </span>
-        </div>
-
-        <div className="flex items-center">
-          <div className="text-sm flex items-center">
-            {(loading || saving) && (
-              <div className="flex items-center mr-4">
-                <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
-                  {saving ? 'Applying...' : 'Loading...'}
-                </span>
-              </div>
-            )}
-          </div>
-          {isGrafanaAvailable && (
-            <button
-              onClick={() => {
-                const grafanaUrl = getGrafanaUrl();
-                // Get app name from environment variable
-                const releaseName =
-                  process.env.SKYPILOT_RELEASE_NAME || 'skypilot';
-                const appName = `${releaseName}-api`;
-                window.open(
-                  `${grafanaUrl}/d/skypilot-apiserver-overview/skypilot-api-server?orgId=1&from=now-1h&to=now&timezone=browser&var-app=${appName}`,
-                  '_blank'
-                );
-              }}
-              className="inline-flex items-center h-8 px-3 text-sm font-medium text-white bg-sky-blue-bright border border-transparent rounded-md shadow-sm hover:bg-sky-blue focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-blue mr-4"
-            >
-              <svg
-                className="w-4 h-4 mr-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              View API Server Metrics
-            </button>
-          )}
-          <NewVersionAvailable />
-          <PluginSlot
-            name="settings.version-display"
-            fallback={<VersionDisplay />}
-          />
-        </div>
-      </div>
+      {header}
 
       {/* Main Content */}
       <Card className="w-full">

@@ -4194,6 +4194,127 @@ class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
         self.assertEqual(result, 'numeric-sa')
 
 
+class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
+    """Multi-node network_tier: best on AWS EFA sets k8s_efa_same_az so the pod
+    template injects a required same-zone podAffinity (EFA is single-AZ).
+    Single-node and non-EFA network types must not set it. Fails without the
+    fix (the deploy var does not exist).
+    """
+
+    def _deploy_vars(self, num_nodes, network_type):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = '8CPU--32GB--H100:8'
+        gpu_resources.accelerators = {'H100': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'eks-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        meta = ({
+            'efa_count': 32
+        } if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA else
+                None)
+
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='eks-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['H100'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: {
+                       ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                       ('kubernetes', 'provision_timeout'): 10,
+                       ('kubernetes', 'high_availability',
+                        'storage_class_name'): None,
+                   }.get((cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type, meta)):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='eks-context'),
+                zones=None,
+                num_nodes=num_nodes,
+                dryrun=False)
+
+    def test_multinode_aws_efa_best_sets_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertTrue(self._deploy_vars(2, N.AWS_EFA)['k8s_efa_same_az'])
+
+    def test_single_node_aws_efa_does_not_set_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertFalse(self._deploy_vars(1, N.AWS_EFA)['k8s_efa_same_az'])
+
+    def test_multinode_non_efa_does_not_set_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertFalse(self._deploy_vars(2, N.NONE)['k8s_efa_same_az'])
+
+    def _render_same_az_affinity(self, same_az):
+        """Render just the k8s_efa_same_az podAffinity block from the live
+        template, so a wrong label or topologyKey is caught -- not only the
+        deploy var. Keeps the assertion coupled to the real template file."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin_marker = '{% if k8s_efa_same_az %}'
+        end_marker = '{% endif %}'
+        begin = full.index(begin_marker)
+        end = full.index(end_marker, begin) + len(end_marker)
+        snippet = full[begin:end]
+        return jinja2.Template(snippet).render(
+            k8s_efa_same_az=same_az, cluster_name_on_cloud='my-cluster')
+
+    def test_same_az_affinity_renders_cluster_name_label_and_zone(self):
+        # When the flag is set the rendered podAffinity must carry the
+        # (non-deprecated) cluster-name label and the single-AZ topology key.
+        rendered = self._render_same_az_affinity(same_az=True)
+        self.assertIn('requiredDuringSchedulingIgnoredDuringExecution',
+                      rendered)
+        self.assertIn('skypilot-cluster-name: my-cluster', rendered)
+        self.assertIn('topologyKey: topology.kubernetes.io/zone', rendered)
+        # Must not use the deprecated skypilot-cluster label.
+        self.assertNotIn('skypilot-cluster:', rendered)
+
+    def test_same_az_affinity_absent_when_flag_unset(self):
+        # When the flag is unset the same-AZ affinity must not be rendered.
+        rendered = self._render_same_az_affinity(same_az=False)
+        self.assertNotIn('topology.kubernetes.io/zone', rendered)
+        self.assertNotIn('skypilot-cluster-name', rendered)
+
+
 class TestKubernetesSpotLabelContext(unittest.TestCase):
     """Regression test for TICKET-034.
 

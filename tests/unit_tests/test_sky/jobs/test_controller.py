@@ -9,13 +9,17 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import runpy
+import sys
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
+import warnings
 
 import pytest
 
+from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
@@ -1295,3 +1299,64 @@ class TestUserJobStatusClassification:
 
         failure_type = mock_set_failed.call_args.kwargs['failure_type']
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
+
+
+class TestDunderMainDispatchesToImportedModule:
+    """Regression: running this file as `__main__` must dispatch into the
+    IMPORTED `sky.jobs.controller` module, not into a second copy of it.
+
+    The controller process is launched as
+    `python -u -m sky.jobs.controller <uuid>`. Under `python -m pkg.mod`,
+    Python's `runpy` executes the module's source a SECOND time into a
+    fresh `__main__` namespace, in addition to the normal import of
+    `sky.jobs.controller`. That leaves the process with two distinct copies
+    of every class and module-level function defined in this file -- the
+    imported `sky.jobs.controller.JobController` and a separate
+    `__main__.JobController` -- and whichever `main()` actually runs
+    determines which copy every subsequently constructed object belongs to.
+    If the `__main__` guard called the LOCAL `main` (the `__main__` copy),
+    `mock.patch('sky.jobs.controller.JobController...')`, `isinstance`
+    checks, and `pickle` would all silently operate on the wrong class.
+
+    This test exercises the real `__main__` guard via `runpy` (it does not
+    reimplement the dispatch logic) and asserts that the imported module's
+    `main` -- addressed as `sky.jobs.controller.main` -- is the one that
+    gets called.
+    """
+
+    def test_run_as_main_calls_imported_module_main(self):
+        started = []
+
+        def _close_without_running(coro, *args, **kwargs):
+            # The `__main__` guard builds a coroutine and hands it to
+            # `asyncio.run`. Close it rather than run it: a coroutine does
+            # not execute any of its body until it is awaited, so this keeps
+            # a REGRESSION cheap and loud. Without this, a regression makes
+            # the `__main__` copy's own (unmocked) `main` coroutine run the
+            # real controller loop forever, and the test would hang CI
+            # instead of failing it. `asyncio.run` is resolved on the shared
+            # `asyncio` module at call time, so patching it here reaches the
+            # `__main__` copy too.
+            coro.close()
+            started.append(coro)
+
+        with warnings.catch_warnings():
+            # runpy warns that 'sky.jobs.controller' is already present in
+            # sys.modules (it was imported normally when this test module
+            # was collected). That is expected and is exactly the scenario
+            # under test, so it is suppressed rather than worked around.
+            warnings.filterwarnings('ignore',
+                                    message=r'.*found in sys\.modules.*',
+                                    category=RuntimeWarning)
+            with patch.object(controller_module, 'main',
+                              new_callable=AsyncMock) as mock_main, \
+                 patch.object(asyncio, 'run',
+                              side_effect=_close_without_running), \
+                 patch.object(sys, 'argv',
+                              ['sky.jobs.controller', 'test-uuid']):
+                runpy.run_module('sky.jobs.controller', run_name='__main__')
+
+        assert started, 'the __main__ guard never called asyncio.run'
+        # The imported module's `main` -- not the `__main__` copy's -- must be
+        # the one that was called.
+        mock_main.assert_called_once_with('test-uuid')

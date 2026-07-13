@@ -1376,6 +1376,59 @@ class TestDashboardSchema(unittest.TestCase):
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(instance=config, schema=self._get_schema())
 
+    def test_accepts_url_template_entry(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_mixed_regex_and_url_entries(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                    },
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_entry_with_both_regex_and_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'regex': r'https://example\.com/.*',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': '',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
 
 class TestDashboardConfigRegexValidation(unittest.TestCase):
     """Tests for the runtime regex-compile validation in skypilot_config."""
@@ -1404,6 +1457,61 @@ class TestDashboardConfigRegexValidation(unittest.TestCase):
                 'external_links': [{
                     'label': 'Good',
                     'regex': r'https://example\.com/.*',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+
+class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
+    """Tests for the url-template validation in skypilot_config."""
+
+    def test_unknown_template_variable_raises_value_error(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${clustername}',
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+                config, 'test_config')
+        self.assertIn('dashboard.external_links[0].url', str(ctx.exception))
+        self.assertIn('clustername', str(ctx.exception))
+        self.assertIn('cluster_name', str(ctx.exception))
+
+    def test_known_template_variables_pass(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        variables = '/'.join(
+            f'${{{v}}}'
+            for v in sorted(skypilot_config.DASHBOARD_LINK_TEMPLATE_VARIABLES))
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'All variables',
+                    'url': f'https://example.com/{variables}',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+    def test_static_url_without_variables_passes(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Static',
+                    'url': 'https://example.com/dashboard',
                 }],
             },
         }
