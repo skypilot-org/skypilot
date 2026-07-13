@@ -202,9 +202,7 @@ def test_is_local_context_no_identity_retried_soon():
     """A missing identity anchor is also retried after the failure window."""
     retry = utils._LOCAL_CONTEXT_FAILURE_RETRY_SECONDS  # pylint: disable=protected-access
     fake_now = [0.0]
-    with mock.patch.object(utils.time,
-                           'time',
-                           side_effect=lambda: fake_now[0]):
+    with mock.patch.object(utils.time, 'time', side_effect=lambda: fake_now[0]):
         with _DetectionHarness(own_uid=None):
             assert utils.is_local_context('ctx-a') is False
         with _DetectionHarness(own_uid='uid-1',
@@ -298,7 +296,8 @@ def test_split_local_remote_contexts_probe_exception_treated_remote():
             raise RuntimeError('kubeconfig exploded')
         return context == 'ctx-local'
 
-    with mock.patch.object(utils, 'is_local_context',
+    with mock.patch.object(utils,
+                           'is_local_context',
                            side_effect=_fake_is_local):
         local, remote = utils.split_local_remote_contexts(
             ['ctx-broken', 'ctx-local'])
