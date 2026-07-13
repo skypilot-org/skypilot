@@ -15,6 +15,7 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.catalog import openstack_catalog
 from sky.clouds import cloud as sky_cloud
 from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
@@ -1408,7 +1409,11 @@ class Resources:
                 sky_cloud.CloudCapability.COMPUTE,
                 raise_if_no_cloud_access=True)
             for cloud in enabled_clouds:
-                if cloud.instance_type_exists(self._instance_type):
+                try:
+                    exists = cloud.instance_type_exists(self._instance_type)
+                except openstack_catalog.OpenStackCatalogNotInitializedError:
+                    continue
+                if exists:
                     valid_clouds.append(cloud)
             if not valid_clouds:
                 if len(enabled_clouds) == 1:
@@ -2700,7 +2705,9 @@ class Resources:
 
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
-        add_if_not_none('memory', self.memory)
+        # Derived properties can require catalogs that remote clients do not
+        # have. Serialize only the constraint explicitly supplied by the user.
+        add_if_not_none('memory', self._memory)
         add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 

@@ -42,6 +42,10 @@ _CATALOG_COLUMNS = (
 )
 
 
+class OpenStackCatalogNotInitializedError(ValueError):
+    """Raised when the selected OpenStack catalog has not been refreshed."""
+
+
 class _CatalogContext(NamedTuple):
     cloud: str
     project_id: str
@@ -167,8 +171,9 @@ def _restore_active_context() -> bool:
 
     catalog_path = get_catalog_path(*context)
     if not os.path.exists(catalog_path):
-        raise RuntimeError('OpenStack catalog is not initialized. '
-                           'Run `sky check openstack` first.')
+        raise OpenStackCatalogNotInitializedError(
+            'OpenStack catalog is not initialized. '
+            'Run `sky check openstack` first.')
 
     global _active_context, _active_catalog_path, _active_context_signature
     global _active_catalog_signature, _df
@@ -329,19 +334,22 @@ def _get_df() -> 'pd.DataFrame':
     with _context_lock:
         context_signature = _file_signature(_active_context_path())
         if context_signature is None:
-            raise RuntimeError('OpenStack catalog is not initialized. '
-                               'Run `sky check openstack` first.')
+            raise OpenStackCatalogNotInitializedError(
+                'OpenStack catalog is not initialized. '
+                'Run `sky check openstack` first.')
         if (_active_catalog_path is None or
                 context_signature != _active_context_signature):
             _restore_active_context()
         catalog_path = _active_catalog_path
         if catalog_path is None:
-            raise RuntimeError('OpenStack catalog is not initialized. '
-                               'Run `sky check openstack` first.')
+            raise OpenStackCatalogNotInitializedError(
+                'OpenStack catalog is not initialized. '
+                'Run `sky check openstack` first.')
         catalog_signature = _file_signature(catalog_path)
         if catalog_signature is None:
-            raise RuntimeError('OpenStack catalog is not initialized. '
-                               'Run `sky check openstack` first.')
+            raise OpenStackCatalogNotInitializedError(
+                'OpenStack catalog is not initialized. '
+                'Run `sky check openstack` first.')
         if _df is None or catalog_signature != _active_catalog_signature:
             _df = pd.read_csv(catalog_path)
             _active_catalog_signature = catalog_signature
