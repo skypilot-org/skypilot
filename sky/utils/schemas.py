@@ -1960,6 +1960,46 @@ def get_config_schema():
             },
             **_check_not_both_fields_present('instance_tags', 'labels')
         },
+        'openstack': {
+            'type': 'object',
+            'required': ['cloud', 'network', 'ssh_user'],
+            'additionalProperties': False,
+            'properties': {
+                'cloud': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+                'network': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+                'external_network': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+                'ssh_user': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+                'use_internal_ips': {
+                    'type': 'boolean',
+                },
+                'security_group_name': {
+                    'type': 'string',
+                    'minLength': 1,
+                },
+            },
+            'anyOf': [{
+                'properties': {
+                    'use_internal_ips': {
+                        'const': True,
+                    },
+                },
+                'required': ['use_internal_ips'],
+            }, {
+                'required': ['external_network'],
+            }],
+        },
         'kubernetes': {
             'type': 'object',
             'required': [],

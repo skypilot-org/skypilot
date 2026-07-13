@@ -746,7 +746,10 @@ OR
 ~~~~~~~~~~~~~~~~~~~~~~
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM,
+Verda, Nebius, and OpenStack. IBM, Verda, and OpenStack only support non-docker
+images. OpenStack accepts a Glance image UUID or name and currently requires a
+cloud-init-enabled Debian or Ubuntu image.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 

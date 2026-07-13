@@ -160,6 +160,7 @@ Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
 SSH = clouds.SSH
 OCI = clouds.OCI
+OpenStack = clouds.OpenStack
 Paperspace = clouds.Paperspace
 PrimeIntellect = clouds.PrimeIntellect
 RunPod = clouds.RunPod
@@ -186,6 +187,7 @@ __all__ = [
     'SSH',
     'Lambda',
     'OCI',
+    'OpenStack',
     'Paperspace',
     'PrimeIntellect',
     'RunPod',

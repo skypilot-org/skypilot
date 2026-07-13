@@ -2400,6 +2400,51 @@ Example:
             vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
             vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
+.. _config-yaml-openstack:
+
+``openstack``
+~~~~~~~~~~~~~
+
+Configuration for an OpenStack named cloud.
+
+The initial integration uses one selected profile, project, region, and Nova
+availability zone. Run ``sky check openstack`` after changing this context so
+the local flavor catalog is refreshed.
+
+``cloud``
+    Name of the profile in ``clouds.yaml``.
+
+``network``
+    Name or ID of the existing tenant network used by launched servers.
+
+``ssh_user``
+    SSH user provided by the selected cloud-init-capable Glance image.
+
+``use_internal_ips``
+    Use fixed tenant addresses instead of allocating floating IPs.
+    Default: ``false``.
+
+``external_network``
+    Name or ID of the external network used to allocate floating IPs. Required
+    when ``use_internal_ips`` is ``false``.
+
+``security_group_name``
+    Name or ID of an existing, user-managed security group. When omitted,
+    SkyPilot creates and manages one security group per cluster. SkyPilot never
+    modifies or deletes a user-managed security group. Managed security groups
+    and floating IPs require the Neutron standard resource tags extension.
+
+Example:
+
+.. code-block:: yaml
+
+    openstack:
+      cloud: lab
+      network: tenant-net
+      external_network: public
+      ssh_user: ubuntu
+      use_internal_ips: false
+
 .. _config-yaml-nebius:
 
 ``nebius``
