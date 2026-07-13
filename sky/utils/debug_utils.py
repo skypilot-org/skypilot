@@ -1,6 +1,8 @@
 """Debug dump utilities for troubleshooting SkyPilot issues."""
 import collections
+import concurrent.futures
 import datetime
+import functools
 import hashlib
 import json
 import logging
@@ -12,7 +14,7 @@ import re
 import shutil
 import time
 import traceback
-from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypedDict
 import zipfile
 
 import sky
@@ -227,7 +229,8 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
 
 
 def _get_requests_from_managed_jobs(
-        debug_dump_context: DebugDumpContext) -> None:
+        debug_dump_context: DebugDumpContext,
+        reachability: '_KubeContextReachabilityChecker') -> None:
     """Parse request database to find requests related to managed jobs."""
     if not debug_dump_context['managed_job_ids']:
         return
@@ -235,29 +238,40 @@ def _get_requests_from_managed_jobs(
         f'Getting requests for {len(debug_dump_context["managed_job_ids"])} '
         f'managed jobs')
 
-    # Fetch job details to enable matching by name and user
+    # Fetch job details to enable matching by name and user. Skipped on an
+    # unreachable controller context: only the name/user matching below
+    # degrades; the request-body matching (job_id/job_ids) is local and
+    # still runs.
     job_names: Set[str] = set()
     job_user_hashes: Set[str] = set()
-    try:
-        jobs, _, _, _ = managed_jobs_core.queue_v2(
-            refresh=False,
-            job_ids=list(debug_dump_context['managed_job_ids']),
-            all_users=True)
-        for job in jobs:
-            name = job.get('job_name')
-            if name:
-                job_names.add(name)
-            user_hash = job.get('user_hash')
-            if user_hash:
-                job_user_hashes.add(user_hash)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to fetch managed job details: {e}')
-        debug_dump_context['errors'].append({
-            'component': 'cross_link',
-            'resource': 'managed_job_details',
-            'error': str(e),
-            'traceback': _full_traceback()
-        })
+    dead_context = _jobs_controller_unreachable_context(reachability)
+    if dead_context is not None:
+        logger.debug('Skipping managed job details fetch: controller '
+                     f'context {dead_context!r} unreachable (fast-fail).')
+        debug_dump_context['errors'].append(
+            _controller_skip_error('cross_link', 'managed_job_details',
+                                   dead_context))
+    else:
+        try:
+            jobs, _, _, _ = managed_jobs_core.queue_v2(
+                refresh=False,
+                job_ids=list(debug_dump_context['managed_job_ids']),
+                all_users=True)
+            for job in jobs:
+                name = job.get('job_name')
+                if name:
+                    job_names.add(name)
+                user_hash = job.get('user_hash')
+                if user_hash:
+                    job_user_hashes.add(user_hash)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to fetch managed job details: {e}')
+            debug_dump_context['errors'].append({
+                'component': 'cross_link',
+                'resource': 'managed_job_details',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
 
     try:
         # Get all requests with managed job-related names
@@ -480,7 +494,8 @@ def _managed_job_cluster_names_from_records(
 
 
 def _get_managed_jobs_from_clusters(
-        debug_dump_context: DebugDumpContext) -> None:
+        debug_dump_context: DebugDumpContext,
+        reachability: '_KubeContextReachabilityChecker') -> None:
     """Get managed job IDs whose underlying cluster is in the context.
 
     This must run FIRST in _build_debug_dump — before the recent-activity
@@ -497,6 +512,14 @@ def _get_managed_jobs_from_clusters(
     logger.debug(
         f'Getting managed jobs for '
         f'{len(debug_dump_context["cluster_names"])} requested clusters')
+    dead_context = _jobs_controller_unreachable_context(reachability)
+    if dead_context is not None:
+        logger.debug('Skipping cluster -> job expansion: controller '
+                     f'context {dead_context!r} unreachable (fast-fail).')
+        debug_dump_context['errors'].append(
+            _controller_skip_error('cross_link', 'managed_jobs_from_clusters',
+                                   dead_context))
+        return
     try:
         jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
                                                    all_users=True)
@@ -582,8 +605,11 @@ def _get_clusters_from_managed_jobs(
     debug_dump_context['cluster_names'].add(common.JOB_CONTROLLER_NAME)
 
 
-def _populate_recent_context(debug_dump_context: DebugDumpContext,
-                             minutes: float) -> None:
+def _populate_recent_context(
+    debug_dump_context: DebugDumpContext,
+    minutes: float,
+    reachability: '_KubeContextReachabilityChecker',
+) -> None:
     """Populate context with resources active within the given time window."""
     logger.debug(
         f'Populating context with resources from last {minutes} minutes')
@@ -655,38 +681,57 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
 
     # Get recent managed jobs via queue_v2 (handles remote controllers
     # via gRPC/SSH, unlike direct DB access which only works in
-    # consolidation mode).
-    try:
-        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                   all_users=True)
-        for job in jobs:
-            submitted_at = job.get('submitted_at') or 0
-            end_at = job.get('end_at') or time.time()
-            if submitted_at >= cutoff_time or end_at >= cutoff_time:
-                job_id = job.get('job_id')
-                if job_id is not None:
-                    reasons = []
-                    if submitted_at >= cutoff_time:
-                        reasons.append(f'submitted_at={submitted_at:.0f}')
-                    if end_at >= cutoff_time:
-                        reasons.append(f'end_at={end_at:.0f}')
-                    logger.debug(f'Recent: including managed job {job_id} '
-                                 f'({", ".join(reasons)} >= '
-                                 f'cutoff {cutoff_time:.0f})')
-                    debug_dump_context['managed_job_ids'].add(job_id)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to get recent managed jobs: {e}')
-        debug_dump_context['errors'].append({
-            'component': 'recent_context',
-            'resource': 'managed_jobs',
-            'error': str(e),
-            'traceback': _full_traceback()
-        })
+    # consolidation mode). Skipped when the controller's kube context is
+    # unreachable -- the exec into the controller would just eat a kubectl
+    # connect timeout.
+    dead_context = _jobs_controller_unreachable_context(reachability)
+    if dead_context is not None:
+        logger.debug('Skipping recent managed jobs scan: controller '
+                     f'context {dead_context!r} unreachable (fast-fail).')
+        debug_dump_context['errors'].append(
+            _controller_skip_error('recent_context', 'managed_jobs',
+                                   dead_context))
+    else:
+        try:
+            jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                       all_users=True)
+            for job in jobs:
+                submitted_at = job.get('submitted_at') or 0
+                end_at = job.get('end_at') or time.time()
+                if submitted_at >= cutoff_time or end_at >= cutoff_time:
+                    job_id = job.get('job_id')
+                    if job_id is not None:
+                        reasons = []
+                        if submitted_at >= cutoff_time:
+                            reasons.append(f'submitted_at={submitted_at:.0f}')
+                        if end_at >= cutoff_time:
+                            reasons.append(f'end_at={end_at:.0f}')
+                        logger.debug(f'Recent: including managed job {job_id} '
+                                     f'({", ".join(reasons)} >= '
+                                     f'cutoff {cutoff_time:.0f})')
+                        debug_dump_context['managed_job_ids'].add(job_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get recent managed jobs: {e}')
+            debug_dump_context['errors'].append({
+                'component': 'recent_context',
+                'resource': 'managed_jobs',
+                'error': str(e),
+                'traceback': _full_traceback()
+            })
 
     logger.debug(f'Found {len(debug_dump_context["request_ids"])} requests, '
                  f'{len(debug_dump_context["cluster_names"])} clusters, '
                  f'{len(debug_dump_context["managed_job_ids"])} managed jobs '
                  f'from recent activity')
+
+
+# Wall-clock deadline for the sky_check.check() enabled-clouds probe in the
+# dump. check() probes every enabled context and a defunct one costs ~20s
+# (urllib3 retries); per dead context that stacks. check() is general-purpose
+# with no timeout knob, so we bound it here (dump-only) rather than altering
+# global check behavior. Generous enough for a healthy multi-cloud check, tight
+# enough that a couple of dead contexts can't dominate the dump.
+_SKY_CHECK_TIMEOUT = 30
 
 
 def _dump_server_info(dump_dir: str,
@@ -747,9 +792,42 @@ def _dump_server_info(dump_dir: str,
 
     # Add cloud status (keyed by workspace name, each mapping cloud names
     # to a list of capability strings — already JSON-serializable).
+    #
+    # sky_check.check() probes every enabled context's credentials
+    # (list_namespaced_pod), and a defunct context costs ~20s there (urllib3
+    # retries). check() is general-purpose and has no timeout param, and we
+    # must NOT change its global behavior, so we bound it for the dump only:
+    # run it in a worker thread with a wall-clock deadline. On timeout we
+    # record a partial-result error and move on rather than hang the dump.
+    # (The worker may keep running briefly; check() is a read-only probe, so a
+    # lingering thread is harmless for this one-shot dump.)
+    #
+    # NOTE: we deliberately do NOT use the executor as a context manager -- its
+    # __exit__ calls shutdown(wait=True), which would re-block on the
+    # still-running worker and defeat the timeout. On timeout we shut it down
+    # with wait=False and let the orphaned worker finish in the background.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        server_info['enabled_clouds'] = sky_check.check(quiet=True)
+        future = executor.submit(sky_check.check, quiet=True)
+        server_info['enabled_clouds'] = future.result(
+            timeout=_SKY_CHECK_TIMEOUT)
+        executor.shutdown(wait=False)
+    except concurrent.futures.TimeoutError:
+        executor.shutdown(wait=False)
+        msg = (f'sky check timed out after {_SKY_CHECK_TIMEOUT}s (likely a '
+               f'defunct/unreachable cloud or kube context); skipping '
+               f'enabled_clouds in the dump.')
+        logger.warning(msg)
+        server_info['cloud_status_error'] = msg
+        if errors is not None:
+            errors.append({
+                'component': 'server_info',
+                'resource': 'cloud_status',
+                'error': msg,
+                'traceback': _full_traceback()
+            })
     except Exception as e:  # pylint: disable=broad-except
+        executor.shutdown(wait=False)
         server_info['cloud_status_error'] = str(e)
         if errors is not None:
             errors.append({
@@ -1262,10 +1340,259 @@ def _dump_kube_contexts_info(dump_dir: str,
                 })
 
 
+_KubeContextReachabilityChecker = Callable[[Optional[str]], bool]
+
+
+@functools.lru_cache(maxsize=128)
+def _kube_context_reachable(context: Optional[str]) -> bool:
+    """Bounded, memoized kube context reachability probe.
+
+    Multiple SkyPilot clusters can share one kube context, and the per-cluster
+    dump runs in parallel (see _dump_cluster_info), so without memoization N
+    clusters on one defunct context would each pay the ~API_TIMEOUT probe.
+    ``lru_cache`` memoizes per context for the lifetime of one dump; the caller
+    clears the cache at dump start so results do not carry over. ``None``
+    (in-cluster auth) is a valid key.
+
+    The probe itself is the bounded, no-retry signal #9937 added
+    (kubernetes_debug.context_reachable); see that function and
+    _resolve_remote_skylet_log_path for why kubectl's connect_timeout can't be
+    used here.
+    """
+    return kubernetes_debug.context_reachable(context)
+
+
+def _jobs_controller_unreachable_context(
+        reachability: _KubeContextReachabilityChecker) -> Optional[str]:
+    """Return the jobs controller's kube context iff it is unreachable.
+
+    Every managed-jobs read outside consolidation mode (queue_v2, the
+    controller debug manifest, log rsync) execs into the controller
+    cluster, and for a Kubernetes controller on a defunct context each
+    such call eats a full kubectl connect timeout -- ungated, they stack
+    on top of the per-cluster fast-fail this module already does. Callers
+    use this as a skip signal: a non-None return means "the controller
+    lives on kube context X and X is unreachable, don't try".
+
+    None means "don't skip", i.e. the one failure mode this gate exists
+    for (Kubernetes controller behind a dead context) is absent, and the
+    call either can't hang or is already bounded:
+      - consolidation mode: reads are local, no network at all;
+      - no controller cluster record, or a record without a handle: the
+        callers detect this from the DB and fail fast locally;
+      - a non-Kubernetes controller: its SSH connect_timeout is a real
+        TCP deadline, so an unreachable VM already fails fast;
+      - a reachable context.
+    Resolution errors also return None -- the gate fails open so the real
+    call runs and its own best-effort handler records the true failure,
+    rather than suppressing work based on a broken gate.
+    """
+    try:
+        if managed_job_utils.is_consolidation_mode():
+            return None
+        controller_name = (
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
+        record = global_user_state.get_cluster_from_name(controller_name)
+        if record is None:
+            return None
+        handle = record.get('handle')
+        if handle is None:
+            return None
+        coords = _kube_coordinates_for_handle(handle)
+        if coords is None:
+            return None
+        context, _ = coords
+        if reachability(context):
+            return None
+        return context
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not determine jobs controller reachability: {e}')
+        return None
+
+
+def _controller_skip_error(component: str, resource: str,
+                           context: str) -> Dict[str, str]:
+    """Error record for a managed-jobs read skipped by the fast-fail gate."""
+    return {
+        'component': component,
+        'resource': resource,
+        'error': (f'Skipped: jobs controller kube context {context!r} is '
+                  'unreachable (fast-fail).'),
+    }
+
+
+def _dump_one_cluster(
+        cluster_name: str, clusters_dir: str,
+        reachability: _KubeContextReachabilityChecker) -> List[Dict[str, str]]:
+    """Dump one cluster's state, events, requests, skylet log and k8s objects.
+
+    Returns this cluster's error records. Runs as a worker under
+    run_in_parallel, so it owns a private ``errors`` list (no shared mutable
+    state across threads); the caller merges them after all workers finish.
+    Best-effort throughout: any failure is recorded, never raised, so one bad
+    cluster can't abort the others.
+    """
+    errors: List[Dict[str, str]] = []
+    cluster_dir = os.path.join(clusters_dir, cluster_name)
+    os.makedirs(cluster_dir, exist_ok=True)
+
+    # Get cluster info, history, and events. Cluster history and
+    # events outlive the cluster row, so terminated clusters still
+    # produce data here.
+    try:
+        dump_data = debug_dump_helpers.get_cluster_dump_data(cluster_name)
+        for filename, content in dump_data:
+            file_path = os.path.join(cluster_dir, filename)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(content, f, indent=2, default=str)
+        if dump_data:
+            logger.debug(f'Dumped cluster {cluster_name!r} '
+                         f'({len(dump_data)} files)')
+        else:
+            logger.debug(f'Cluster {cluster_name!r} not found in DB or '
+                         f'cluster history')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get info for cluster {cluster_name}: {e}')
+        errors.append({
+            'component': 'clusters',
+            'resource': cluster_name,
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
+
+    # Copy the provision log if available. The path is recorded in
+    # cluster history, so this also works for terminated clusters.
+    try:
+        provision_log_path = (
+            global_user_state.get_cluster_history_provision_log_path(
+                cluster_name))
+        if provision_log_path:
+            provision_log = pathlib.Path(provision_log_path).expanduser()
+            if provision_log.is_file():
+                shutil.copy2(provision_log,
+                             os.path.join(cluster_dir, 'provision.log'))
+                logger.debug(
+                    f'Copied provision log for cluster {cluster_name!r}')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to copy provision log for cluster '
+                       f'{cluster_name}: {e}')
+        errors.append({
+            'component': 'clusters',
+            'resource': f'{cluster_name}/provision_log',
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
+
+    # Get associated requests
+    try:
+        requests = requests_lib.get_request_tasks(
+            requests_lib.RequestTaskFilter(
+                cluster_names=[cluster_name],
+                fields=['request_id', 'name', 'status', 'created_at']))
+        associated_requests = [{
+            'request_id': r.request_id,
+            'name': r.name,
+            'status': r.status.value if r.status else None,
+            'created_at': r.created_at,
+            'created_at_human': debug_dump_helpers.epoch_to_human(r.created_at),
+        } for r in requests]
+
+        assoc_path = os.path.join(cluster_dir, 'associated_requests.json')
+        with open(assoc_path, 'w', encoding='utf-8') as f:
+            json.dump(associated_requests, f, indent=2, default=str)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get associated requests for cluster '
+                       f'{cluster_name}: {e}')
+        errors.append({
+            'component': 'clusters',
+            'resource': f'{cluster_name}/associated_requests',
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
+
+    # Live cluster record for the skylet-log and Kubernetes sections
+    # below. None for terminated clusters, which have no reachable
+    # node or handle (their history/events were dumped above).
+    cluster_record = None
+    try:
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get cluster record for '
+                       f'{cluster_name}: {e}')
+        errors.append({
+            'component': 'clusters',
+            'resource': f'{cluster_name}/cluster_record',
+            'error': str(e),
+            'traceback': _full_traceback()
+        })
+
+    # Pull the skylet log from the head node. We attempt this for both UP
+    # and INIT clusters: an INIT cluster may be degraded (failed setup,
+    # partial provisioning) but still have a reachable node with a skylet
+    # log, which is exactly when the log is most useful. The only status we
+    # skip is STOPPED, which has no reachable node. A not-yet-provisioned
+    # cluster simply fails the rsync, which is handled best-effort.
+    status = cluster_record.get('status') if cluster_record else None
+    handle = cluster_record.get('handle') if cluster_record else None
+
+    if status != status_lib.ClusterStatus.STOPPED and handle is not None:
+        # For a Kubernetes cluster, skylet collection runs `kubectl exec`,
+        # whose connect_timeout maps to `--pod-running-timeout` and does NOT
+        # bound the API connect/TLS/discovery phase -- so against a defunct
+        # context it falls back to client-go defaults and hangs ~2min (see
+        # _resolve_remote_skylet_log_path). Gate it on a bounded, no-retry
+        # reachability probe (the same fast-fail signal #9937 added) so a dead
+        # context costs ~API_TIMEOUT instead of ~2min. Non-k8s clusters have no
+        # kube coordinates and skip the probe -- their SSH connect_timeout is a
+        # real TCP deadline, so they already fail fast.
+        skip_skylet = False
+        try:
+            coords = _kube_coordinates_for_handle(handle)
+        except Exception as e:  # pylint: disable=broad-except
+            # Couldn't resolve coordinates; fall through and let skylet
+            # collection record its own best-effort failure.
+            logger.debug(f'Could not resolve kube coordinates for cluster '
+                         f'{cluster_name!r}; skipping reachability gate: {e}')
+            coords = None
+        if coords is not None:
+            context, _ = coords
+            if not reachability(context):
+                logger.debug(f'Skipping skylet log for cluster '
+                             f'{cluster_name!r}: kube context {context!r} is '
+                             f'unreachable (fast-fail).')
+                skip_skylet = True
+        if not skip_skylet:
+            _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
+                                        errors, status)
+    else:
+        logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
+                     f'(status={status})')
+
+    # For Kubernetes clusters, also snapshot the related k8s objects (pods,
+    # events, Services, Kueue Workload, ...). Gated only on having a handle,
+    # not on status: these come from the kube API server, so they're
+    # reachable -- and most useful -- even when the cluster isn't UP. This path
+    # already fast-fails on a defunct context (the first list call is a
+    # no-retry, bounded probe; see kubernetes_debug._dump_pods).
+    if handle is not None:
+        _collect_cluster_kubernetes_resources(cluster_name, cluster_dir, handle,
+                                              errors)
+
+    return errors
+
+
 def _dump_cluster_info(cluster_names: Set[str],
                        dump_dir: str,
+                       reachability: '_KubeContextReachabilityChecker',
                        errors: Optional[List[Dict[str, str]]] = None) -> None:
-    """Collect cluster state and events."""
+    """Collect cluster state and events.
+
+    Clusters are dumped in parallel: each cluster's collection can make slow
+    network calls (skylet-log rsync, kube API reads), so a sequential loop let
+    a single unreachable cluster stack its timeout in front of every other
+    cluster. run_in_parallel keeps per-cluster best-effort isolation -- each
+    worker returns its own error records, merged here after all finish.
+    """
     if not cluster_names:
         logger.debug('No clusters to dump')
         return
@@ -1275,130 +1602,16 @@ def _dump_cluster_info(cluster_names: Set[str],
     clusters_dir = os.path.join(dump_dir, 'clusters')
     os.makedirs(clusters_dir, exist_ok=True)
 
-    for cluster_name in cluster_names:
-        cluster_dir = os.path.join(clusters_dir, cluster_name)
-        os.makedirs(cluster_dir, exist_ok=True)
+    cluster_list = list(cluster_names)
+    num_threads = min(len(cluster_list),
+                      subprocess_utils.get_parallel_threads())
+    results = subprocess_utils.run_in_parallel(
+        lambda name: _dump_one_cluster(name, clusters_dir, reachability),
+        cluster_list, num_threads)
 
-        # Get cluster info, history, and events. Cluster history and
-        # events outlive the cluster row, so terminated clusters still
-        # produce data here.
-        try:
-            dump_data = debug_dump_helpers.get_cluster_dump_data(cluster_name)
-            for filename, content in dump_data:
-                file_path = os.path.join(cluster_dir, filename)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(content, f, indent=2, default=str)
-            if dump_data:
-                logger.debug(f'Dumped cluster {cluster_name!r} '
-                             f'({len(dump_data)} files)')
-            else:
-                logger.debug(f'Cluster {cluster_name!r} not found in DB or '
-                             f'cluster history')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get info for cluster '
-                           f'{cluster_name}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'clusters',
-                    'resource': cluster_name,
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
-
-        # Copy the provision log if available. The path is recorded in
-        # cluster history, so this also works for terminated clusters.
-        try:
-            provision_log_path = (
-                global_user_state.get_cluster_history_provision_log_path(
-                    cluster_name))
-            if provision_log_path:
-                provision_log = pathlib.Path(provision_log_path).expanduser()
-                if provision_log.is_file():
-                    shutil.copy2(provision_log,
-                                 os.path.join(cluster_dir, 'provision.log'))
-                    logger.debug(
-                        f'Copied provision log for cluster {cluster_name!r}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to copy provision log for cluster '
-                           f'{cluster_name}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'clusters',
-                    'resource': f'{cluster_name}/provision_log',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
-
-        # Get associated requests
-        try:
-            requests = requests_lib.get_request_tasks(
-                requests_lib.RequestTaskFilter(
-                    cluster_names=[cluster_name],
-                    fields=['request_id', 'name', 'status', 'created_at']))
-            associated_requests = [{
-                'request_id': r.request_id,
-                'name': r.name,
-                'status': r.status.value if r.status else None,
-                'created_at': r.created_at,
-                'created_at_human': debug_dump_helpers.epoch_to_human(
-                    r.created_at),
-            } for r in requests]
-
-            assoc_path = os.path.join(cluster_dir, 'associated_requests.json')
-            with open(assoc_path, 'w', encoding='utf-8') as f:
-                json.dump(associated_requests, f, indent=2, default=str)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get associated requests for cluster '
-                           f'{cluster_name}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'clusters',
-                    'resource': f'{cluster_name}/associated_requests',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
-
-        # Live cluster record for the skylet-log and Kubernetes sections
-        # below. None for terminated clusters, which have no reachable
-        # node or handle (their history/events were dumped above).
-        cluster_record = None
-        try:
-            cluster_record = global_user_state.get_cluster_from_name(
-                cluster_name)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get cluster record for '
-                           f'{cluster_name}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'clusters',
-                    'resource': f'{cluster_name}/cluster_record',
-                    'error': str(e),
-                    'traceback': _full_traceback()
-                })
-
-        # Pull the skylet log from the head node. We attempt this for both UP
-        # and INIT clusters: an INIT cluster may be degraded (failed setup,
-        # partial provisioning) but still have a reachable node with a skylet
-        # log, which is exactly when the log is most useful. The only status we
-        # skip is STOPPED, which has no reachable node. A not-yet-provisioned
-        # cluster simply fails the rsync, which is handled best-effort.
-        status = cluster_record.get('status') if cluster_record else None
-        handle = cluster_record.get('handle') if cluster_record else None
-
-        if status != status_lib.ClusterStatus.STOPPED and handle is not None:
-            _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
-                                        errors, status)
-        else:
-            logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
-                         f'(status={status})')
-
-        # For Kubernetes clusters, also snapshot the related k8s objects (pods,
-        # events, Services, Kueue Workload, ...). Gated only on having a handle,
-        # not on status: these come from the kube API server, so they're
-        # reachable -- and most useful -- even when the cluster isn't UP.
-        if handle is not None:
-            _collect_cluster_kubernetes_resources(cluster_name, cluster_dir,
-                                                  handle, errors)
+    if errors is not None:
+        for cluster_errors in results:
+            errors.extend(cluster_errors)
 
     logger.debug('Exiting _dump_cluster_info')
 
@@ -1406,8 +1619,15 @@ def _dump_cluster_info(cluster_names: Set[str],
 def _dump_managed_job_info(
         managed_job_ids: Set[int],
         dump_dir: str,
+        reachability: '_KubeContextReachabilityChecker',
         errors: Optional[List[Dict[str, str]]] = None) -> None:
-    """Collect managed job state and logs."""
+    """Collect managed job state and logs.
+
+    Both phases exec into the jobs controller outside consolidation mode,
+    so both are gated on the controller context's reachability -- one
+    memoized probe covers the whole section (and, via the shared cache,
+    reuses the clusters section's probe of the same context).
+    """
     if not managed_job_ids:
         logger.debug('No managed jobs to dump')
         return
@@ -1416,6 +1636,17 @@ def _dump_managed_job_info(
 
     jobs_dir = os.path.join(dump_dir, 'managed_jobs')
     os.makedirs(jobs_dir, exist_ok=True)
+
+    dead_context = _jobs_controller_unreachable_context(reachability)
+    if dead_context is not None:
+        logger.debug('Skipping managed jobs collection: controller '
+                     f'context {dead_context!r} unreachable (fast-fail).')
+        if errors is not None:
+            errors.append(
+                _controller_skip_error('managed_jobs', 'controller_access',
+                                       dead_context))
+        logger.debug('Exiting _dump_managed_job_info')
+        return
 
     # Phase 1: Queue info from queue_v2 (works in both consolidation and
     # non-consolidation modes via existing gRPC/SSH plumbing)
@@ -1669,14 +1900,21 @@ def _build_debug_dump(
     # _get_requests_from_clusters. Combined with the via_cluster skip in
     # _get_clusters_from_requests, a cluster shared by many requests
     # (e.g. the controller) cannot drag unrelated jobs or clusters in.
+    # One reachability cache for the whole dump: the cross-link scans, the
+    # clusters section, and the managed-jobs section share per-context
+    # probe results, so a defunct context is probed exactly once per dump.
+    _kube_context_reachable.cache_clear()
+    reachability = _kube_context_reachable
+
     logger.debug('Cross-linking related resources')
-    _get_managed_jobs_from_clusters(debug_dump_context)
+    _get_managed_jobs_from_clusters(debug_dump_context, reachability)
     if recent_minutes is not None:
-        _populate_recent_context(debug_dump_context, recent_minutes)
+        _populate_recent_context(debug_dump_context, recent_minutes,
+                                 reachability)
     _get_managed_jobs_from_requests(debug_dump_context)
     _get_job_clusters_from_managed_jobs(debug_dump_context)
     _get_requests_from_clusters(debug_dump_context)
-    _get_requests_from_managed_jobs(debug_dump_context)
+    _get_requests_from_managed_jobs(debug_dump_context, reachability)
     _get_clusters_from_requests(debug_dump_context)
     _get_clusters_from_managed_jobs(debug_dump_context)
 
@@ -1700,9 +1938,11 @@ def _build_debug_dump(
                           errors=errors)
     _dump_cluster_info(debug_dump_context['cluster_names'],
                        dump_dir,
+                       reachability,
                        errors=errors)
     _dump_managed_job_info(debug_dump_context['managed_job_ids'],
                            dump_dir,
+                           reachability,
                            errors=errors)
 
     # Write client info if provided

@@ -1831,6 +1831,75 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+def test_debug_dump_unreachable_context_fast_fail(unreachable_context):
+    """Debug dump must fast-fail on a dead kube context.
+
+    With an unreachable context in allowed_contexts, the dump must (a)
+    complete within a hard wall-clock ceiling -- without fast-fail each dead
+    context stacked unbounded probe/exec timeouts -- and (b) still contain
+    the live cluster's data plus an explicit reachable:false marker for
+    the dead context, so fast-failing never silently drops resources.
+
+    The cluster-on-a-dead-context path (skylet-log and managed-jobs
+    gating) can't be built in CI -- a launch on a dead context fails -- and
+    is pinned by unit tests instead (test_debug_utils.py).
+    """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Kubernetes configs and credentials are located on the '
+                    'remote API server, not the machine running the test')
+    if unreachable_context is None:
+        pytest.skip('No kubeconfig available to inject the dead context into')
+
+    live_context = subprocess.check_output('kubectl config current-context',
+                                           shell=True).decode('utf-8').strip()
+    config = textwrap.dedent(f"""\
+    kubernetes:
+      allowed_contexts:
+        - {live_context}
+        - {unreachable_context}
+    """)
+    name = smoke_tests_utils.get_cluster_name()
+    dump_prefix = f'/tmp/{name}-dump'
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(config.encode('utf-8'))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'debug_dump_unreachable_context_fast_fail',
+            [
+                f'sky launch -y -c {name} --cpus 1 '
+                f'--infra kubernetes/{live_context} echo hi',
+                # The ceiling. Generous for a healthy dump (typically well
+                # under a minute here); far below what unbounded kubectl /
+                # credential-probe timeouts against the dead context stack
+                # up to. Asserted via $SECONDS rather than GNU timeout so
+                # the step also runs on macOS dev machines; a fully hung
+                # dump is still bounded by the Test-level timeout.
+                f'start=$SECONDS && sky debug-dump --recent-minutes 5 '
+                f'--output {dump_prefix}.zip && '
+                'elapsed=$((SECONDS - start)) && '
+                'echo "dump took ${elapsed}s" && [ "$elapsed" -lt 300 ]',
+                f'test -f {dump_prefix}.zip',
+                f'unzip -o {dump_prefix}.zip -d {dump_prefix}',
+                # Live cluster data is intact.
+                f'test -f {dump_prefix}/debug_dump_*/clusters/{name}/'
+                'cluster_info.json',
+                # The dead context is present and explicitly marked
+                # unreachable rather than silently missing.
+                f'grep -r \'"reachable": false\' '
+                f'{dump_prefix}/debug_dump_*/kubernetes_contexts/',
+            ],
+            f'sky down -y {name}; rm -rf {dump_prefix} {dump_prefix}.zip',
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
+                constants.SKY_API_SERVER_URL_ENV_VAR:
+                    sky.server.common.get_server_url()
+            },
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_launch_image_pull_back_off():
     """The launch error message for an unresolvable image must contain the
     Kubernetes failure reason (ImagePullBackOff or ErrImagePull), not the
