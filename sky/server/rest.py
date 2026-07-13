@@ -361,9 +361,21 @@ async def handle_server_unavailable_async(
 
 
 @_retry_on_server_unavailable()
+@retry_transient_errors()
 def request(method, url, **kwargs) -> 'requests.Response':
-    """Send a request to the API server, retry on server temporarily
-    unavailable."""
+    """Send a request to the API server.
+
+    Two independent retry layers wrap this call, each handling a distinct
+    recoverable failure so the sync client matches the async client
+    (``request_async``), which already retries both:
+    - ``@_retry_on_server_unavailable`` retries on the server's explicit
+      HTTP 503 backpressure (``ServerTemporarilyUnavailableError``).
+    - ``@retry_transient_errors`` retries transient network errors
+      (``_transient_errors``, which include ``requests.exceptions.ReadTimeout``).
+      A healthy but briefly saturated server can take longer than the read
+      timeout to respond without ever emitting a 503; previously that surfaced
+      as a hard failure even though the next attempt usually succeeds.
+    """
     return request_without_retry(method, url, **kwargs)
 
 
