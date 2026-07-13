@@ -73,7 +73,7 @@ class TestAllCloudsEnabled:
             _capture_mismatch_gpus_spec(f.name, 'T4:0.5')
 
             _capture_match_gpus_spec(f.name, 'T4:1')
-            _capture_match_gpus_spec(f.name, 'T4:1')
+            _capture_match_gpus_spec(f.name, 't4:1')
             _capture_match_gpus_spec(f.name, 'T4')
 
     def test_k8s_alias(self, enable_all_clouds):
