@@ -56,9 +56,10 @@ rsync_exclude: []
 initialization_commands: []
 
 setup_commands:
-  - {%- for initial_setup_command in initial_setup_commands %}
+  - |-
+    {% for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
-    {%- endfor %}
+    {% endfor %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;

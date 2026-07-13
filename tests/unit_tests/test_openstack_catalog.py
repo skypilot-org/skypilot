@@ -284,6 +284,23 @@ def test_catalog_context_survives_process_state_reset(monkeypatch,
     assert catalog.instance_type_exists('m1.small')
 
 
+def test_catalog_query_reports_uninitialized_catalog_as_value_error(
+        monkeypatch, tmp_path: Path):
+    catalog = _import_catalog()
+    _patch_catalog_dir(monkeypatch, catalog, tmp_path)
+    monkeypatch.setattr(catalog, '_active_context', None)
+    monkeypatch.setattr(catalog, '_active_catalog_path', None)
+    monkeypatch.setattr(catalog, '_active_context_signature', None)
+    monkeypatch.setattr(catalog, '_active_catalog_signature', None)
+    monkeypatch.setattr(catalog, '_df', None)
+
+    with pytest.raises(catalog.OpenStackCatalogNotInitializedError,
+                       match='sky check openstack') as exc_info:
+        catalog.instance_type_exists('m1.small')
+
+    assert isinstance(exc_info.value, ValueError)
+
+
 def test_refresh_replaces_catalog_atomically(monkeypatch, tmp_path: Path):
     catalog = _import_catalog()
     _patch_catalog_dir(monkeypatch, catalog, tmp_path)

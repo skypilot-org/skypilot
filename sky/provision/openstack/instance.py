@@ -359,7 +359,8 @@ def get_cluster_info(
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for server in servers:
-        if utils.server_status(server) in ('DELETED', 'SOFT_DELETED'):
+        server_status = utils.server_status(server)
+        if server_status in ('DELETED', 'SOFT_DELETED'):
             continue
         server_id = utils.get_attr(server, 'id')
         internal_ip, external_ip = utils.server_ips(server)
@@ -371,6 +372,10 @@ def get_cluster_info(
                     internal_ip = utils.get_attr(fixed_ips[0], 'ip_address')
                     break
         if internal_ip is None:
+            if server_status == 'ERROR':
+                raise RuntimeError(utils.format_server_fault(server))
+            if server_status == 'BUILD':
+                continue
             raise RuntimeError(
                 f'OpenStack server {server_id!r} has no fixed IPv4 address.')
         if not provider_config.get('use_internal_ips',

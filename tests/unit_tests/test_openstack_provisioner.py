@@ -377,6 +377,52 @@ def test_bootstrap_recovers_interrupted_untagged_security_group(
     assert len(connection.network.security_group_rule_items) == 2
 
 
+def test_bootstrap_adds_broad_self_rule_when_narrow_rule_exists(
+        monkeypatch, modules):
+    connection = _FakeConnection()
+    connection.network.security_group_items.append(
+        _Resource(id='managed-sg',
+                  name=modules.utils.managed_security_group_name('demo'),
+                  description=modules.utils.security_group_description('demo'),
+                  project_id='project-a',
+                  tags=modules.utils.managed_resource_tags(
+                      'demo', 'security-group')))
+    connection.network.security_group_rule_items.append(
+        _Resource(id='narrow-self-rule',
+                  security_group_id='managed-sg',
+                  direction='ingress',
+                  ether_type='IPv4',
+                  protocol='tcp',
+                  port_range_min=22,
+                  port_range_max=22,
+                  remote_ip_prefix=None,
+                  remote_group_id='managed-sg'))
+
+    _bootstrap(monkeypatch, modules, connection)
+
+    broad_self_rules = [
+        rule for rule in connection.network.security_group_rule_items
+        if rule.security_group_id == 'managed-sg' and
+        rule.direction == 'ingress' and rule.ether_type == 'IPv4' and
+        getattr(rule, 'protocol', None) is None and
+        getattr(rule, 'port_range_min', None) is None and
+        getattr(rule, 'port_range_max', None) is None and
+        getattr(rule, 'remote_ip_prefix', None) is None and
+        getattr(rule, 'remote_group_id', None) == 'managed-sg'
+    ]
+    assert len(broad_self_rules) == 1
+
+
+def test_bootstrap_keeps_exact_security_group_rules_idempotent(
+        monkeypatch, modules):
+    connection = _FakeConnection()
+
+    _bootstrap(monkeypatch, modules, connection)
+    _bootstrap(monkeypatch, modules, connection)
+
+    assert len(connection.network.security_group_rule_items) == 2
+
+
 def test_bootstrap_does_not_mutate_byo_security_group(monkeypatch, modules):
     connection = _FakeConnection()
     connection.network.security_group_items.append(
@@ -512,6 +558,62 @@ def test_run_instances_uses_internal_ip_without_floating_ip(
     head = info.get_head_instance()
     assert head.internal_ip == '10.0.0.10'
     assert head.external_ip is None
+
+
+def test_get_cluster_info_skips_building_server_without_fixed_ip(
+        monkeypatch, modules):
+    connection = _FakeConnection()
+    _install_connection(monkeypatch, modules, connection)
+    connection.compute.server_items.append(
+        _Resource(id='building',
+                  name='demo-head',
+                  project_id='project-a',
+                  status='BUILD',
+                  metadata=modules.utils.instance_metadata('demo'),
+                  fault=None,
+                  addresses={}))
+
+    info = modules.instance.get_cluster_info(
+        'RegionOne', 'demo',
+        _provision_config().provider_config)
+
+    assert not info.instances
+    assert info.head_instance_id is None
+
+
+def test_get_cluster_info_rejects_active_server_without_fixed_ip(
+        monkeypatch, modules):
+    connection = _FakeConnection()
+    _install_connection(monkeypatch, modules, connection)
+    connection.compute.server_items.append(
+        _Resource(id='active',
+                  name='demo-head',
+                  project_id='project-a',
+                  status='ACTIVE',
+                  metadata=modules.utils.instance_metadata('demo'),
+                  fault=None,
+                  addresses={}))
+
+    with pytest.raises(RuntimeError, match='no fixed IPv4 address'):
+        modules.instance.get_cluster_info('RegionOne', 'demo',
+                                          _provision_config().provider_config)
+
+
+def test_get_cluster_info_reports_error_server_fault(monkeypatch, modules):
+    connection = _FakeConnection()
+    _install_connection(monkeypatch, modules, connection)
+    connection.compute.server_items.append(
+        _Resource(id='failed',
+                  name='demo-head',
+                  project_id='project-a',
+                  status='ERROR',
+                  metadata=modules.utils.instance_metadata('demo'),
+                  fault={'message': 'No valid host'},
+                  addresses={}))
+
+    with pytest.raises(RuntimeError, match='No valid host'):
+        modules.instance.get_cluster_info('RegionOne', 'demo',
+                                          _provision_config().provider_config)
 
 
 def test_public_mode_rejects_missing_external_network_before_vm_creation(

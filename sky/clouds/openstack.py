@@ -11,6 +11,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import openstack as openstack_adaptor
 from sky.catalog import openstack_catalog
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -113,9 +114,11 @@ class OpenStack(clouds.Cloud):
                                               project_id=project_id,
                                               region=region,
                                               connection=connection)
-        except Exception:  # pylint: disable=broad-except
-            return False, ('Failed to verify OpenStack credentials. Check the '
-                           'selected clouds.yaml profile and API access.')
+        except Exception as e:  # pylint: disable=broad-except
+            return False, (
+                'Failed to verify OpenStack credentials. Check the '
+                'selected clouds.yaml profile and API access. '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, None
 
     @classmethod

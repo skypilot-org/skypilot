@@ -15,6 +15,7 @@ import sky
 from sky import clouds
 from sky import provision
 from sky.backends import cloud_vm_ray_backend
+from sky.catalog import openstack_catalog
 from sky.skylet import constants
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -298,7 +299,7 @@ def test_openstack_template_renders_external_provisioner_config():
             sky_wheel_hash='hash',
             sky_local_path='/tmp/sky.whl',
             credentials={},
-            initial_setup_commands=[],
+            initial_setup_commands=['echo FIRST;', 'echo SECOND;'],
             conda_installation_commands='true',
             uv_installation_commands='true',
             ray_skypilot_installation_commands='true',
@@ -330,6 +331,12 @@ def test_openstack_template_renders_external_provisioner_config():
         'AvailabilityZone': 'null',
         'AuthorizedKey': 'skypilot:ssh_public_key_content',
     }
+    assert len(config['setup_commands']) == 1
+    setup_lines = [
+        line.strip() for line in config['setup_commands'][0].splitlines()
+    ]
+    assert 'echo FIRST;' in setup_lines
+    assert 'echo SECOND;' in setup_lines
 
 
 def test_openstack_regions_and_zone_provision_loop_use_local_catalog():
@@ -390,6 +397,61 @@ def test_openstack_catalog_metadata_methods_delegate():
     arch.assert_called_once_with('m1.small', clouds='openstack')
     validate.assert_called_once_with('RegionOne', 'nova', clouds='openstack')
     assert clouds.OpenStack.get_zone_shell_cmd() is None
+
+
+def test_openstack_resources_serialize_without_local_catalog(
+        monkeypatch, tmp_path):
+    monkeypatch.setattr(openstack_catalog, '_active_context_path',
+                        lambda: str(tmp_path / 'missing-context.json'))
+    monkeypatch.setattr(openstack_catalog, '_active_catalog_path', None)
+    monkeypatch.setattr(openstack_catalog, '_active_context_signature', None)
+    monkeypatch.setattr(openstack_catalog, '_active_catalog_signature', None)
+    monkeypatch.setattr(openstack_catalog, '_df', None)
+
+    resources = sky.Resources(cloud=clouds.OpenStack(),
+                              instance_type='m1.small')
+
+    config = resources.to_yaml_config()
+
+    assert config['instance_type'] == 'm1.small'
+    assert 'memory' not in config
+
+
+def test_instance_type_inference_skips_uninitialized_openstack_catalog():
+    aws_cloud = clouds.AWS()
+    openstack_cloud = clouds.OpenStack()
+    error = openstack_catalog.OpenStackCatalogNotInitializedError(
+        'catalog is not initialized')
+    with mock.patch(
+            'sky.check.get_cached_enabled_clouds_or_refresh',
+            return_value=[aws_cloud, openstack_cloud]), \
+         mock.patch.object(aws_cloud,
+                           'instance_type_exists',
+                           return_value=True), \
+         mock.patch.object(openstack_cloud,
+                           'instance_type_exists',
+                           side_effect=error):
+        resources = sky.Resources(instance_type='m5.12xlarge')
+        resources.validate()
+
+    assert resources.cloud == aws_cloud
+
+
+def test_instance_type_inference_propagates_other_catalog_errors():
+    aws_cloud = clouds.AWS()
+    openstack_cloud = clouds.OpenStack()
+    with mock.patch(
+            'sky.check.get_cached_enabled_clouds_or_refresh',
+            return_value=[aws_cloud, openstack_cloud]), \
+         mock.patch.object(aws_cloud,
+                           'instance_type_exists',
+                           return_value=False), \
+         mock.patch.object(openstack_cloud,
+                           'instance_type_exists',
+                           side_effect=ValueError('malformed catalog')):
+        resources = sky.Resources(instance_type='m1.small')
+        with pytest.raises(ValueError, match='malformed catalog'):
+            resources.validate()
 
 
 def test_openstack_credentials_are_not_uploaded_to_workload_nodes():
@@ -463,6 +525,22 @@ def test_openstack_compute_credential_check_reports_missing_dependency():
         ok, reason = clouds.OpenStack._check_compute_credentials()
     assert not ok
     assert 'skypilot[openstack]' in reason
+
+
+def test_openstack_compute_credential_check_reports_api_error():
+    connection = mock.Mock()
+    connection.authorize.side_effect = RuntimeError('certificate verify failed')
+    with _mock_openstack_config({'cloud': 'lab'}), \
+         mock.patch('sky.clouds.openstack.adaptors_common.can_import_modules',
+                    return_value=True), \
+         mock.patch('sky.adaptors.openstack.get_connection',
+                    return_value=connection), \
+         mock.patch('sky.catalog.openstack_catalog.refresh_catalog') as refresh:
+        ok, reason = clouds.OpenStack._check_compute_credentials()
+
+    assert not ok
+    assert 'certificate verify failed' in reason
+    refresh.assert_not_called()
 
 
 def test_openstack_user_identity_uses_user_and_project_ids():

@@ -15,8 +15,9 @@ def _require_resource(resource: Any, kind: str, requested: str) -> Any:
 
 
 def _same_rule(rule: Any, expected: Dict[str, Any]) -> bool:
-    return all(
-        utils.get_attr(rule, key) == value for key, value in expected.items())
+    fields = ('direction', 'ether_type', 'protocol', 'port_range_min',
+              'port_range_max', 'remote_ip_prefix', 'remote_group_id')
+    return all(utils.get_attr(rule, key) == expected.get(key) for key in fields)
 
 
 def _ensure_managed_security_group_rules(connection: Any,
