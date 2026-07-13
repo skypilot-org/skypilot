@@ -308,19 +308,29 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
         os.unlink(config_file)
 
 
-def test_urllib3_log_suppression_is_set_once_per_process(monkeypatch):
-    """API getters suppress urllib3 warnings via a single setLevel() call.
+def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
+    """API getters suppress urllib3 warnings with rare setLevel() calls.
 
-    Regression test for the pre-Python-3.13 fork deadlock
-    (https://github.com/python/cpython/pull/109462): Logger.setLevel()
-    acquires logging's process-wide lock, so it must be called once per
-    process on first k8s API use, not on every API call, while still
-    suppressing urllib3's verbose retry warnings.
+    Two regression targets:
+    - kubernetes.client.Configuration.__init__ resets the urllib3 logger to
+      WARNING on every client construction (its `debug` property setter), so
+      the adaptor must re-assert the level *after* constructing a client, not
+      just once per process.
+    - Pre-Python-3.13 fork deadlock
+      (https://github.com/python/cpython/pull/109462): Logger.setLevel()
+      acquires logging's process-wide lock, so the adaptor must not call it
+      on every API call — only when a client construction reset the level.
     """
     api_client_mock = MagicMock()
-    monkeypatch.setattr(kubernetes,
-                        '_get_api_client',
-                        lambda context=None: api_client_mock)
+
+    def stomping_get_api_client(context=None):
+        # Mimic kubernetes.client.Configuration.__init__, which resets the
+        # urllib3 logger to WARNING (via the `debug` property setter) every
+        # time a client is constructed.
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        return api_client_mock
+
+    monkeypatch.setattr(kubernetes, '_get_api_client', stomping_get_api_client)
     monkeypatch.setattr(
         kubernetes.kubernetes.client,
         'CoreV1Api',
@@ -335,9 +345,6 @@ def test_urllib3_log_suppression_is_set_once_per_process(monkeypatch):
     urllib3_logger = logging.getLogger('urllib3')
     original_level = urllib3_logger.level
     original_set_level = urllib3_logger.setLevel
-    # Reset process-global suppression state so the test is self-contained
-    # even if another test already triggered a k8s API getter.
-    monkeypatch.setattr(kubernetes, '_leveled_loggers', set())
     original_set_level(logging.NOTSET)
 
     set_level_calls = []
@@ -352,17 +359,30 @@ def test_urllib3_log_suppression_is_set_once_per_process(monkeypatch):
         annotations.clear_request_level_cache()
         kubernetes.core_api()
 
-        # Warnings are suppressed on the child loggers urllib3 actually
-        # emits through (e.g. urllib3.connectionpool retry warnings), which
-        # inherit the parent's effective level.
+        # Despite the construction-time reset to WARNING, warnings must be
+        # suppressed on the child loggers urllib3 actually emits through
+        # (e.g. urllib3.connectionpool retry warnings), which inherit the
+        # parent's effective level.
         child_logger = logging.getLogger('urllib3.connectionpool')
         assert not child_logger.isEnabledFor(logging.WARNING)
         assert child_logger.isEnabledFor(logging.ERROR)
 
-        # Repeated and cross-API calls must not call setLevel() again.
+        # First getter call: one reset from client construction, one
+        # re-assert from the adaptor.
+        assert set_level_calls == [logging.WARNING, logging.ERROR]
+
+        # Cached getter calls construct no client, so the level is
+        # untouched and no setLevel() runs at all.
         kubernetes.core_api()
+        assert set_level_calls == [logging.WARNING, logging.ERROR]
+
+        # A different API getter constructs a new client (new reset), which
+        # must be re-asserted again.
         kubernetes.batch_api()
-        assert set_level_calls == [logging.ERROR]
+        assert set_level_calls == [
+            logging.WARNING, logging.ERROR, logging.WARNING, logging.ERROR
+        ]
+        assert not child_logger.isEnabledFor(logging.WARNING)
     finally:
         annotations.clear_request_level_cache()
         original_set_level(original_level)

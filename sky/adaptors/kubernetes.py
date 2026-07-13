@@ -16,7 +16,7 @@ import platform
 import threading
 import time
 import typing
-from typing import Any, Callable, List, Optional, Set
+from typing import Any, Callable, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -60,39 +60,36 @@ KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
 
 logger = sky_logging.init_logger(__name__)
 
-# Loggers whose level has already been set by _api_logging_decorator, so
-# that Logger.setLevel() is called at most once per logger per process.
-# setLevel() acquires the logging module's global lock (via
-# Manager._clear_cache()), and on Python < 3.13 a fork() while another
-# thread holds that lock leaves the lock permanently held in the child,
-# deadlocking its next logging call. Fixed in CPython 3.13 by
-# https://github.com/python/cpython/pull/109462; until then, keep setLevel()
-# calls rare instead of on every API call. Guarded by the GIL only: set
-# membership/add are atomic, and a duplicate setLevel() from a racing first
-# call is idempotent. An explicit lock here would reintroduce a lock that a
-# fork could leave permanently held in the child.
-_leveled_loggers: Set[str] = set()
-
 
 def _api_logging_decorator(logger_src: str, level: int):
-    """Decorator to set the logging level of a logger used by API calls.
+    """Decorator to keep a logger at the given level for API calls.
 
     This is used to suppress the verbose logging from urllib3 when calls to
-    the Kubernetes API timeout. The level is set once per process on first
-    use and never restored: the previous per-call set/restore was racy under
-    concurrent API calls (interleaved restores could leave the level set
-    anyway) and its frequent setLevel() calls made the pre-3.13 fork
-    deadlock described above easy to hit.
+    the Kubernetes API fail. kubernetes.client.Configuration.__init__ resets
+    the urllib3 logger back to WARNING every time a client is constructed
+    (via its `debug` property setter), so the level is re-asserted after the
+    decorated getter runs. The lock-free level read below keeps
+    Logger.setLevel() calls rare (once per client construction, not per API
+    call): setLevel() acquires logging's process-wide lock (via
+    Manager._clear_cache()), and on Python < 3.13 a fork() while another
+    thread holds that lock leaves the lock permanently held in the child,
+    deadlocking its next logging call. Fixed in CPython 3.13 by
+    https://github.com/python/cpython/pull/109462; the previous
+    implementation entered a set/restore context manager on every API
+    method call, making that deadlock easy to hit. The level is never
+    restored: the old restore was racy under concurrent API calls
+    (interleaved restores could leave the level set anyway).
     """
 
     def decorated_api(api):
 
         @functools.wraps(api)
         def wrapped(*args, **kwargs):
-            if logger_src not in _leveled_loggers:
-                logging.getLogger(logger_src).setLevel(level)
-                _leveled_loggers.add(logger_src)
-            return api(*args, **kwargs)
+            result = api(*args, **kwargs)
+            log = logging.getLogger(logger_src)
+            if log.level != level:
+                log.setLevel(level)
+            return result
 
         return wrapped
 
