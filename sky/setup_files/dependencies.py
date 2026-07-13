@@ -229,6 +229,14 @@ cloud_dependencies: Dict[str, List[str]] = {
         'huggingface_hub>=1.5,<1.9; python_version<"3.10"',
     ],
     'scp': local_ray,
+    'openstack': [
+        # openstacksdk 4.6+ requires Python 3.10, and 4.14+ requires 3.11.
+        # Keep each supported interpreter on the newest compatible line.
+        'openstacksdk>=4.1.0,<4.6.0; python_version < "3.10"',
+        ('openstacksdk>=4.1.0,<4.14.0; python_version >= "3.10" '
+         'and python_version < "3.11"'),
+        'openstacksdk>=4.1.0; python_version >= "3.11"',
+    ],
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,
     'ssh': kubernetes_dependencies,

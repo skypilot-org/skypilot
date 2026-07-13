@@ -37,6 +37,7 @@ FORBIDDEN_EAGER_IMPORTS = frozenset({
     'pydo',
     'runpod',
     'nebius',
+    'openstack',
 })
 
 

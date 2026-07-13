@@ -576,6 +576,10 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('workspaces',),
     ('db',),
     ('daemons',),
+    # OpenStack named profiles reference credentials installed on the API
+    # server. Do not let remote clients select a different server-side profile.
+    (
+        'openstack',),
     # TODO(kevin,tian): Override the whole controller config once our test
     # infrastructure supports setting dynamic server side configs.
     # Tests that are affected:
@@ -669,7 +673,7 @@ HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilo
 HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
 CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
-ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
+ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci', 'openstack',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
               'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')

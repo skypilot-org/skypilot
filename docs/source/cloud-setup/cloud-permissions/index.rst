@@ -28,6 +28,7 @@ Table of contents
 
     aws
     gcp
+    openstack
     nebius
     vsphere
     kubernetes

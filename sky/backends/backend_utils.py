@@ -1372,6 +1372,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         (
             clouds.AWS,
             clouds.OCI,
+            clouds.OpenStack,
             clouds.SCP,
             # TODO(jwj): Handle Slurm-specific auth logic
             clouds.Slurm,

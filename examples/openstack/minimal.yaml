@@ -1,0 +1,9 @@
+resources:
+  cloud: openstack
+  instance_type: <nova-flavor-name>
+  image_id: <glance-image-id-or-name>
+  disk_size: 20
+
+run: |
+  echo "Hello from OpenStack"
+  hostname
