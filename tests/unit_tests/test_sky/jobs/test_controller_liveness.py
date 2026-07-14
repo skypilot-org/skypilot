@@ -196,6 +196,54 @@ class TestLocalPidVerdict:
             record, legacy_job_id=42) == ControllerLiveness.DEAD)
 
 
+class TestJobOwnerRecordFromJobRow:
+    """JobOwnerRecord.from_job_row: dict-based construction with legacy
+    negative-pid normalization."""
+
+    def test_positive_pid_passes_through(self):
+        row = {
+            'controller_pid': 100,
+            'controller_pid_started_at': 1.0,
+            'controller_server_id': 'server-a',
+        }
+        owner = controller_liveness.JobOwnerRecord.from_job_row(
+            row, legacy_job_id=42)
+        assert owner.pid == 100
+        assert owner.pid_started_at == 1.0
+        assert owner.server_id == 'server-a'
+        assert owner.legacy_job_id == 42
+
+    def test_negative_pid_is_normalized_to_absolute(self):
+        """Between #7051 and #7847 a negative pid marked a multi-job
+        controller; from_job_row must normalize it so downstream liveness
+        checks (e.g. psutil) see a real pid."""
+        row = {
+            'controller_pid': -100,
+            'controller_pid_started_at': 1.0,
+            'controller_server_id': None,
+        }
+        owner = controller_liveness.JobOwnerRecord.from_job_row(row)
+        assert owner.pid == 100
+
+    def test_none_pid_stays_none(self):
+        row = {
+            'controller_pid': None,
+            'controller_pid_started_at': None,
+            'controller_server_id': None,
+        }
+        owner = controller_liveness.JobOwnerRecord.from_job_row(row)
+        assert owner.pid is None
+
+    def test_missing_keys_default_to_none(self):
+        """Rows that don't carry these columns at all (e.g. a narrower
+        field selection) shouldn't raise -- .get() everything."""
+        owner = controller_liveness.JobOwnerRecord.from_job_row({})
+        assert owner.pid is None
+        assert owner.pid_started_at is None
+        assert owner.server_id is None
+        assert owner.legacy_job_id is None
+
+
 class TestLocalPidLivenessProvider:
 
     def test_pid_none_is_dead(self):

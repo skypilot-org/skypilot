@@ -1475,7 +1475,8 @@ class TestControllerOwnershipStamping:
             server_id='server-b',
             schedule_state=state.ManagedJobScheduleState.ALIVE)
 
-        assert state.reset_job_for_recovery(job_id) is True
+        assert state.reset_job_for_recovery(
+            job_id, expected_pid=100, expected_pid_started_at=1.0) is True
 
         row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
         assert row.controller_pid is None
@@ -1592,17 +1593,49 @@ class TestResetJobForRecoveryCAS:
         row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
         assert row.controller_pid == 100
 
-    def test_unconditional_reset_when_no_expected_given(
+    def test_observed_none_pid_cas_wins_against_null_column(
             self, _mock_managed_jobs_db_conn):
-        job_id = self._seed(_mock_managed_jobs_db_conn,
-                            pid=100,
-                            pid_started_at=1.0)
+        """An observed pid of None (job never claimed) is NOT an
+        unconditional reset -- it CASes against a still-NULL column and
+        wins when nothing has claimed the job in the meantime."""
+        job_id = _make_waiting_job()
 
-        won = state.reset_job_for_recovery(job_id)
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=None,
+                                           expected_pid_started_at=None)
         assert won is True
 
         row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
         assert row.controller_pid is None
+        assert row.schedule_state == state.ManagedJobScheduleState.WAITING.value
+
+    def test_observed_none_pid_cas_loses_against_claimed_column(
+            self, _mock_managed_jobs_db_conn):
+        """If a controller claims the job (stamps a pid) between the
+        caller's observation and the reset, the observed-None CAS must lose
+        -- an unconditional reset here would clobber the concurrent
+        claim."""
+        job_id = _make_waiting_job()
+        # Simulate a concurrent claim that happened after the caller
+        # observed pid=None.
+        _set_controller_ownership(
+            _mock_managed_jobs_db_conn,
+            job_id,
+            pid=100,
+            pid_started_at=1.0,
+            server_id='server-a',
+            schedule_state=state.ManagedJobScheduleState.ALIVE)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=None,
+                                           expected_pid_started_at=None)
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+        assert row.controller_pid_started_at == 1.0
+        assert row.controller_server_id == 'server-a'
+        assert row.schedule_state == state.ManagedJobScheduleState.ALIVE.value
 
 
 class TestGetJobOwnerRecord:

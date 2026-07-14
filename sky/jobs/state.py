@@ -3414,29 +3414,28 @@ def reset_jobs_for_recovery() -> None:
         session.commit()
 
 
-def reset_job_for_recovery(
-        job_id: int,
-        expected_pid: Optional[int] = None,
-        expected_pid_started_at: Optional[float] = None) -> bool:
+def reset_job_for_recovery(job_id: int, *, expected_pid: Optional[int],
+                           expected_pid_started_at: Optional[float]) -> bool:
     """Set a job to WAITING and remove its controller ownership.
 
-    If expected_pid is given, this is a compare-and-swap: the reset only
-    takes effect if the job's current controller_pid (and, NULL-safely,
-    controller_pid_started_at) still match what the caller observed. This
-    guards against a race where the owning controller re-claimed the job
-    between the caller's liveness check and this write. If expected_pid is
-    None, the job is reset unconditionally (aside from matching job_id).
+    This is always a compare-and-swap: the reset only takes effect if the
+    job's current controller_pid and controller_pid_started_at still match
+    what the caller observed, using NULL-safe comparison for both columns.
+    An observed pid of None (the job was never claimed) therefore only
+    matches a column that is still NULL. This guards against a race where
+    the owning controller claimed (or re-claimed) the job between the
+    caller's observation and this write.
 
     Returns whether the reset was applied.
     """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        where_clause = [job_info_table.c.spot_job_id == job_id]
-        if expected_pid is not None:
-            where_clause.append(job_info_table.c.controller_pid == expected_pid)
-            where_clause.append(
-                job_info_table.c.controller_pid_started_at.is_not_distinct_from(
-                    expected_pid_started_at))
+        where_clause = [
+            job_info_table.c.spot_job_id == job_id,
+            job_info_table.c.controller_pid.is_not_distinct_from(expected_pid),
+            job_info_table.c.controller_pid_started_at.is_not_distinct_from(
+                expected_pid_started_at),
+        ]
         result = session.execute(
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(*where_clause)).values({

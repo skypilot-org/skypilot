@@ -24,7 +24,7 @@ import abc
 import dataclasses
 import enum
 import typing
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -65,6 +65,30 @@ class JobOwnerRecord:
     pid_started_at: Optional[float]
     server_id: Optional[str]
     legacy_job_id: Optional[int] = None
+
+    @classmethod
+    def from_job_row(cls,
+                     row: Mapping[str, Any],
+                     legacy_job_id: Optional[int] = None) -> 'JobOwnerRecord':
+        """Build a JobOwnerRecord from a job_info-derived row/dict.
+
+        Normalizes a legacy negative controller_pid to its absolute value
+        (see state.get_job_controller_process), so liveness checks and
+        ownership comparisons always operate on the real pid. Callers that
+        need the raw, possibly-negative value actually stored in the
+        database -- e.g. reset_job_for_recovery's CAS, which must match
+        what's in the column -- should read the row directly instead of
+        going through this method.
+        """
+        pid = row.get('controller_pid')
+        if pid is not None and pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a controller process that can handle multiple jobs.
+            pid = -pid
+        return cls(pid=pid,
+                   pid_started_at=row.get('controller_pid_started_at'),
+                   server_id=row.get('controller_server_id'),
+                   legacy_job_id=legacy_job_id)
 
 
 class ControllerLivenessProvider(abc.ABC):

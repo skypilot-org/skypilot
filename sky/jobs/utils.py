@@ -426,11 +426,8 @@ def ha_recovery_for_consolidation_mode() -> None:
                 # Note: we provide the legacy job id just in case, but we
                 # shouldn't have a running legacy job controller process at
                 # this point.
-                owner = controller_liveness.JobOwnerRecord(
-                    pid=controller_pid,
-                    pid_started_at=controller_pid_started_at,
-                    server_id=job.get('controller_server_id'),
-                    legacy_job_id=job_id)
+                owner = controller_liveness.JobOwnerRecord.from_job_row(
+                    job, legacy_job_id=job_id)
                 verdict = controller_liveness.check_job_owner(owner)
                 if verdict == controller_liveness.ControllerLiveness.ALIVE:
                     message = (f'Controller pid {controller_pid} for '
@@ -510,11 +507,8 @@ def recover_jobs_lost_from_other_servers() -> None:
         job_id = job['job_id']
         controller_pid = job['controller_pid']
         controller_pid_started_at = job.get('controller_pid_started_at')
-        owner = controller_liveness.JobOwnerRecord(
-            pid=controller_pid,
-            pid_started_at=controller_pid_started_at,
-            server_id=server_id,
-            legacy_job_id=job_id)
+        owner = controller_liveness.JobOwnerRecord.from_job_row(
+            job, legacy_job_id=job_id)
         verdict = controller_liveness.check_job_owner(owner)
 
         if verdict == controller_liveness.ControllerLiveness.DEAD:
@@ -742,8 +736,11 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
-        pid_started_at = tasks[0].get('controller_pid_started_at')
-        server_id = tasks[0].get('controller_server_id')
+        # Normalizes a legacy negative pid (see JobOwnerRecord.from_job_row)
+        # so the liveness check and the re-read guard below both operate on
+        # the real pid.
+        owner = controller_liveness.JobOwnerRecord.from_job_row(
+            tasks[0], legacy_job_id=job_id)
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
@@ -795,12 +792,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                          f'{schedule_state.value} but found none.')
             failure_reason = f'No controller pid set for {schedule_state.value}'
         else:
-            logger.debug(f'Checking controller pid {pid}')
-            owner = controller_liveness.JobOwnerRecord(
-                pid=pid,
-                pid_started_at=pid_started_at,
-                server_id=server_id,
-                legacy_job_id=job_id)
+            logger.debug(f'Checking controller pid {owner.pid}')
             verdict = controller_liveness.check_job_owner(owner)
             if verdict == controller_liveness.ControllerLiveness.ALIVE:
                 # The controller is still running, so this job is fine.
@@ -809,7 +801,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 # Fail closed: we can't tell whether the controller is alive,
                 # so don't terminalize the job.
                 logger.warning(f'Could not determine liveness of controller '
-                               f'pid {pid} for job {job_id}; skipping.')
+                               f'pid {owner.pid} for job {job_id}; skipping.')
                 _record_skipped_reset(reason='unknown_verdict')
                 continue
 
@@ -834,8 +826,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # another checker doesn't fail a job whose controller has since
         # restarted.
         current_owner = managed_job_state.get_job_owner_record(job_id)
-        if (current_owner is None or current_owner.pid != pid or
-                current_owner.pid_started_at != pid_started_at):
+        if (current_owner is None or current_owner.pid != owner.pid or
+                current_owner.pid_started_at != owner.pid_started_at):
             logger.info(f'Job {job_id} controller ownership changed since '
                         'the liveness check; skipping.')
             _record_reset_lost_race(path='janitor')

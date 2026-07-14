@@ -1681,6 +1681,30 @@ class TestHaRecoveryForConsolidationMode:
                                            expected_pid=100,
                                            expected_pid_started_at=1.0)
 
+    def test_negative_stored_pid_liveness_checked_absolute_and_cas_raw(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """Legacy rows from between #7051 and #7847 store a negative pid to
+        mark a multi-job controller. The liveness check must see the
+        absolute pid (psutil doesn't understand negative pids), but the CAS
+        reset must still match against the raw, negative value actually
+        stored in the DB."""
+        self._patch_common(
+            monkeypatch, tmp_path,
+            [self._job(controller_pid=-100, controller_pid_started_at=1.0)])
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        reset_mock = MagicMock(return_value=True)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        checked_owner = fake.check.call_args.args[0]
+        assert checked_owner.pid == 100
+        reset_mock.assert_called_once_with(1,
+                                           expected_pid=-100,
+                                           expected_pid_started_at=1.0)
+
     def test_dead_verdict_lost_race_does_not_raise(self, monkeypatch, tmp_path,
                                                    _register_liveness_provider):
         """reset_job_for_recovery losing the CAS (rowcount 0) must not raise."""
