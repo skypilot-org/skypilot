@@ -129,7 +129,7 @@ loop:
             import sky.sandbox
 
             with sky.sandbox.create(name='dev') as sb:
-                sb.exec('python', 'train.py')
+                sb.exec('python', 'train.py').wait()
             # Sandbox is terminated on exit.
 
 Working with the SDK
@@ -239,7 +239,7 @@ filesystem snapshot & restore:
 
             # Set up a sandbox, then snapshot its filesystem.
             sb = sky.sandbox.create(name='dev', image='python:3.12')
-            sb.exec('pip', 'install', 'numpy', 'pandas')
+            sb.exec('pip', 'install', 'numpy', 'pandas').wait()
             image = sb.snapshot()
 
             # Later: restore a fresh sandbox -- numpy/pandas already installed.
