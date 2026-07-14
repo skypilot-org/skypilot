@@ -50,6 +50,9 @@ Why sandboxes with SkyPilot
 * **Snapshot & restore:** capture a sandbox's whole filesystem into a snapshot
   image and restore a fresh sandbox from it later, so expensive setup is done
   once and resumed instead of re-run.
+* **Sandbox-to-sandbox networking:** sandboxes can't reach each other unless a
+  sandbox explicitly exposes ports with ``ports=``, which peers then dial via
+  stable endpoints that survive pod replacement.
 * **Docker-in-Docker:** pass ``enable_docker=True`` to run ``docker build``,
   ``docker run``, and ``docker compose`` inside a sandbox, with any base image;
   the daemon runs in a privileged sidecar while the container your code runs in
