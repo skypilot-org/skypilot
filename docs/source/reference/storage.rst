@@ -396,9 +396,11 @@ omitted whenever ``source`` already uses the ``hf://`` scheme.
 .. tip::
     ``MOUNT`` and ``MOUNT_CACHED`` behave identically for ``store: hf`` — the
     `hf-mount <https://github.com/huggingface/hf-mount>`_ FUSE backend has its
-    own on-disk cache. It also has a couple of environment requirements; if a
-    mount fails, see the Hugging Face entry in the FAQ below, or use
-    ``mode: COPY`` (which downloads via ``huggingface_hub`` and needs no FUSE).
+    own on-disk cache. To tune the mount via ``config.mount.hf_mount_args``,
+    use ``mode: MOUNT`` (those flags are only applied in ``MOUNT`` mode). The
+    backend also has a couple of environment requirements; if a mount fails,
+    see the Hugging Face entry in the FAQ below, or use ``mode: COPY`` (which
+    downloads via ``huggingface_hub`` and needs no FUSE).
 
 
 Using SkyPilot storage CLI
@@ -548,8 +550,8 @@ Storage YAML reference
             bucket. See MOUNT_CACHED mode in detail above. For store: hf,
             MOUNT_CACHED is equivalent to MOUNT (hf-mount provides its own
             on-disk cache); the rclone-specific tuning below (the type field and
-            the mount_cached parameters) does not apply — use
-            config.mount.hf_mount_args instead.
+            the mount_cached parameters) does not apply. To tune an hf-mount,
+            use mode: MOUNT with config.mount.hf_mount_args.
 
         type: str; either of MODEL_CHECKPOINT_RO, MODEL_CHECKPOINT_RW, DATASET_RO, or DATASET_RW
           Optional. Only valid when mode is MOUNT_CACHED. Specifies a pre-tuned
