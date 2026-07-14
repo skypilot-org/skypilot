@@ -817,13 +817,13 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
-    candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
+    candidate_regions = AWS.regions_with_offering(instance_type='p4d.24xlarge',
                                                   accelerators=None,
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
     original_resources = sky.Resources(infra='aws',
-                                       instance_type='p3.16xlarge',
+                                       instance_type='p4d.24xlarge',
                                        use_spot=True)
 
     # Filter the regions with proxy command in ~/.sky/config.yaml.
