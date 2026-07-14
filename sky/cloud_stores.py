@@ -366,8 +366,9 @@ class R2CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        'awscli_path=$(which aws) || '
+        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -402,7 +403,7 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               '$awscli_path s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
@@ -419,7 +420,7 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               '$awscli_path s3 '
                                f'cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
@@ -563,8 +564,9 @@ class OciS3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        'awscli_path=$(which aws) || '
+        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -605,7 +607,7 @@ class OciS3CloudStorage(CloudStorage):
             # upload path and OCI's S3 SDK guidance.
             'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
             'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            '$awscli_path s3 '
             'sync --no-follow-symlinks '
             f'{source} {destination} '
             f'--profile={oci_s3.OCI_S3_PROFILE_NAME}')
@@ -627,7 +629,7 @@ class OciS3CloudStorage(CloudStorage):
             # upload path and OCI's S3 SDK guidance.
             'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
             'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            '$awscli_path s3 '
             f'cp {source} {destination} '
             f'--profile={oci_s3.OCI_S3_PROFILE_NAME}')
 
@@ -641,8 +643,9 @@ class NebiusCloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        'awscli_path=$(which aws) || '
+        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -674,7 +677,7 @@ class NebiusCloudStorage(CloudStorage):
         # aws config file (Default path: ~/.aws/config).
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
-        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+        download_via_awscli = ('$awscli_path s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
@@ -687,7 +690,7 @@ class NebiusCloudStorage(CloudStorage):
         """Downloads a file using AWS CLI."""
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
-        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+        download_via_awscli = ('$awscli_path s3 '
                                f'cp {source} {destination} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
@@ -701,8 +704,9 @@ class CoreWeaveCloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        'awscli_path=$(which aws) || '
+        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -741,7 +745,7 @@ class CoreWeaveCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            '$awscli_path s3 '
             'sync --no-follow-symlinks '
             f'{source} {destination} '
             f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
@@ -758,7 +762,7 @@ class CoreWeaveCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            '$awscli_path s3 '
             f'cp {source} {destination} '
             f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
 
@@ -775,8 +779,9 @@ class VastDataCloudStorage(CloudStorage):
     """
 
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        'awscli_path=$(which aws) || '
+        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -804,7 +809,7 @@ class VastDataCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            '$awscli_path s3 '
             'sync --no-follow-symlinks '
             f'{source} {destination} '
             f'--endpoint {endpoint_url} '
@@ -823,7 +828,7 @@ class VastDataCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
-            f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+            '$awscli_path s3 '
             f'cp {source} {destination} '
             f'--endpoint {endpoint_url} '
             f'--profile={vastdata.VASTDATA_PROFILE_NAME}')
