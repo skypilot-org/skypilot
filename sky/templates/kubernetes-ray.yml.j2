@@ -1327,7 +1327,14 @@ available_node_types:
                   # ([ -s ]: a bare $(cat) of an empty file would render `... -c`
                   # with no interpreter and abort under set -e).
                   _py_bin=$([ -s ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path ] && cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path 2>/dev/null || command -v python3);
-                  {{sky_unset_pythonpath_and_set_cwd}} $_py_bin -c "from sky.skylet.ray_patches import patch; patch()" || echo "WARNING: could not apply Ray patches (patch tooling unavailable); continuing without them.";
+                  # Guard on a non-empty interpreter (else `env ... -c ...` would
+                  # eat `-c` as its own flag) and quote it (paths may contain
+                  # spaces). Missing interpreter -> skip the patches, don't abort.
+                  if [ -n "$_py_bin" ]; then
+                    {{sky_unset_pythonpath_and_set_cwd}} "$_py_bin" -c "from sky.skylet.ray_patches import patch; patch()" || echo "WARNING: could not apply Ray patches; continuing without them.";
+                  else
+                    echo "WARNING: no python interpreter found; skipping Ray patches.";
+                  fi
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
