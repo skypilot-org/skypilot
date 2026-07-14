@@ -3606,12 +3606,16 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
         if controller is None:
             raise RuntimeError('ENVIRONMENT FAILURE: no jobs controller '
                                'found in sky status; recovery NOT exercised.')
+        # Pass the SQL as a repr'd literal, not embedded in a '''...'''
+        # block: a query ending in a quoted literal (e.g. ...='EMERGENCY')
+        # would otherwise close the triple-quoted string early and raise a
+        # SyntaxError in the remote python.
         code = textwrap.dedent(f"""\
             import os
             import sqlite3
             conn = sqlite3.connect(
                 os.path.expanduser('~/.sky/spot_jobs.db'))
-            cursor = conn.execute('''{sql}''')
+            cursor = conn.execute({sql!r})
             conn.commit()
             if {repr(sql.lstrip().upper().startswith('SELECT'))}:
                 row = cursor.fetchone()
@@ -3619,7 +3623,15 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
             else:
                 print(cursor.rowcount)
             """)
-        result = subprocess.run(['ssh', controller, 'python3', '-'],
+        # Bare `python3` is not on the non-interactive ssh PATH on every
+        # controller: Kubernetes pods have no system python3, only the
+        # SkyPilot runtime env. Resolve the interpreter the way SkyPilot
+        # itself does (the path recorded in ~/.sky/python_path), falling back
+        # to python3 (present on VM controllers).
+        remote_python = ('$([ -s ~/.sky/python_path ] && '
+                         'cat ~/.sky/python_path 2>/dev/null || '
+                         'command -v python3)')
+        result = subprocess.run(['ssh', controller, f'exec {remote_python} -'],
                                 input=code,
                                 capture_output=True,
                                 text=True,
