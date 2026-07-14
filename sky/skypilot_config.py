@@ -350,8 +350,15 @@ def _resolve_server_config_path() -> Optional[str]:
 
 
 def get_server_config() -> config_utils.Config:
-    """Returns the server config."""
-    return _get_config_from_path(_resolve_server_config_path())
+    """Returns the effective server config.
+
+    This is the config file plus the DB-stored config overlay when the
+    server is backed by a database, read fresh from the backing store(s) on
+    every call. Unlike `to_dict()`, it is not affected by request-level
+    client config overrides (see `override_skypilot_config`), so it always
+    reflects the server's own config rather than the requesting client's.
+    """
+    return _compose_server_config()[0]
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -794,13 +801,11 @@ _db_manager = db_utils.DatabaseManager(db_name='config',
                                        create_table_fn=_create_table)
 
 
-def _reload_config_as_server() -> None:
-    # Build the new config fully, then swap it in with a single
-    # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
-    # `get_nested` reads without the config lock (hot path), so a transient
-    # empty config would be observable by a concurrent reader and e.g. make
-    # `rbac.get_default_role()` fall back to admin. On any exception below the
-    # previously-loaded config is left in place (stale is safer than empty).
+def _compose_server_config() -> Tuple[config_utils.Config, Optional[str]]:
+    """Builds the effective server config: config file + DB-stored overlay.
+
+    Returns (config, config_file_path).
+    """
     server_config_path = _resolve_server_config_path()
     server_config = _get_config_from_path(server_config_path)
     # Get the db url from the env var. _get_config_from_path should have moved
@@ -829,6 +834,17 @@ def _reload_config_as_server() -> None:
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'server config: \n'
                      f'{yaml_utils.dump_yaml_str(dict(server_config))}')
+    return server_config, server_config_path
+
+
+def _reload_config_as_server() -> None:
+    # Build the new config fully, then swap it in with a single
+    # `_set_loaded_config` at the end. Do NOT blank the loaded config up front:
+    # `get_nested` reads without the config lock (hot path), so a transient
+    # empty config would be observable by a concurrent reader and e.g. make
+    # `rbac.get_default_role()` fall back to admin. On any exception below the
+    # previously-loaded config is left in place (stale is safer than empty).
+    server_config, server_config_path = _compose_server_config()
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
 

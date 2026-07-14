@@ -767,7 +767,9 @@ def _dump_server_info(dump_dir: str,
     except Exception as e:  # pylint: disable=broad-except
         server_info['server_uptime_error'] = str(e)
 
-    # Add config info
+    # Add config info. Use get_server_config() (effective config file + DB
+    # overlay), not to_dict(), so per-request client config overrides don't
+    # leak into the reported server config.
     try:
         server_info['jobs_controller_consolidation_mode'] = (
             managed_job_utils.is_consolidation_mode())
