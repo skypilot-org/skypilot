@@ -1886,7 +1886,7 @@ class TestUpdateManagedJobsStatusesLiveness:
         task.update(overrides)
         return task
 
-    def _patch_common(self, monkeypatch, task):
+    def _patch_common(self, monkeypatch, tmp_path, task):
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_jobs_to_check_status',
                             lambda job_id=None: [self.JOB_ID])
@@ -1899,11 +1899,20 @@ class TestUpdateManagedJobsStatusesLiveness:
         monkeypatch.setattr(jobs_utils.managed_job_state, 'set_failed',
                             set_failed_mock)
         monkeypatch.setattr(jobs_utils.scheduler, 'job_done', MagicMock())
+        # Point the "controller is mid-restart" gate at a path that never
+        # exists, isolated from the real ~/.sky (a stray file there -- e.g.
+        # left behind by another suite that legitimately touches it -- would
+        # make this function return before ever reaching the code under
+        # test).
+        monkeypatch.setattr(jobs_utils.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restarting_signal'))
         return set_failed_mock
 
-    def test_unknown_verdict_skips_terminalize(self, monkeypatch,
+    def test_unknown_verdict_skips_terminalize(self, monkeypatch, tmp_path,
                                                _register_liveness_provider):
-        set_failed_mock = self._patch_common(monkeypatch, self._task())
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
         _register_liveness_provider(
             controller_liveness.ControllerLiveness.UNKNOWN)
 
@@ -1911,9 +1920,10 @@ class TestUpdateManagedJobsStatusesLiveness:
 
         set_failed_mock.assert_not_called()
 
-    def test_alive_verdict_leaves_job_alone(self, monkeypatch,
+    def test_alive_verdict_leaves_job_alone(self, monkeypatch, tmp_path,
                                             _register_liveness_provider):
-        set_failed_mock = self._patch_common(monkeypatch, self._task())
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
         _register_liveness_provider(
             controller_liveness.ControllerLiveness.ALIVE)
 
@@ -1922,11 +1932,12 @@ class TestUpdateManagedJobsStatusesLiveness:
         set_failed_mock.assert_not_called()
 
     def test_dead_verdict_with_ownership_race_skips_terminalize(
-            self, monkeypatch, _register_liveness_provider):
+            self, monkeypatch, tmp_path, _register_liveness_provider):
         """Ownership changed between the liveness check and the terminalize
         write (e.g. a new controller re-claimed the job) -- must not fail a
         job whose controller has since restarted."""
-        set_failed_mock = self._patch_common(monkeypatch, self._task())
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
         _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
         # The re-read observes a different pid than what was just checked.
         monkeypatch.setattr(
@@ -1942,10 +1953,11 @@ class TestUpdateManagedJobsStatusesLiveness:
         set_failed_mock.assert_not_called()
 
     def test_dead_verdict_without_race_terminalizes(
-            self, monkeypatch, _register_liveness_provider):
+            self, monkeypatch, tmp_path, _register_liveness_provider):
         """Control case: proves the fixture actually reaches the terminal
         path, so the two skip assertions above are meaningful."""
-        set_failed_mock = self._patch_common(monkeypatch, self._task())
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
         _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
         monkeypatch.setattr(
             jobs_utils.managed_job_state, 'get_job_owner_record',
