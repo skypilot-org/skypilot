@@ -96,13 +96,26 @@ class TestCreateServiceAccountTokenRole:
         assert exc.value.status_code == 400
         assert 'Invalid role' in exc.value.detail
 
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_cannot_set_role(self, mock_perm):
+        """A non-admin caller can't create a token with an explicit role."""
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        body = payloads.ServiceAccountTokenCreateBody(
+            token_name='scim_provisioning', expires_in_days=0, role='admin')
+        with pytest.raises(fastapi.HTTPException) as exc:
+            users_server.create_service_account_token(
+                _fake_request(user_id='regular-user'), body)
+        assert exc.value.status_code == 403
+        assert 'Only admins' in exc.value.detail
+
     @mock.patch('sky.users.server.global_user_state')
     @mock.patch('sky.users.server.token_service')
     @mock.patch('sky.users.server.permission')
     def test_role_applied_at_create(self, mock_perm, mock_token_service,
                                     mock_gus):
-        """A valid role is applied in the same handler (no separate call)."""
+        """An admin's requested role is applied in the same handler."""
         mock_gus.add_or_update_user.return_value = True  # new user
+        mock_perm.permission_service.get_user_roles.return_value = ['admin']
         mock_token_service.token_service.create_token.return_value = {
             'token_id': 'tid',
             'token_hash': 'h',

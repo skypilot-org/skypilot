@@ -821,12 +821,22 @@ def create_service_account_token(
             detail='Expiration days must be positive or 0 for never expire')
 
     # Validate the optional role up front so we fail before creating anything.
-    if (token_body.role is not None and
-            token_body.role not in rbac.get_supported_roles()):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Invalid role {token_body.role!r}. Supported roles: '
-            f'{", ".join(rbac.get_supported_roles())}.')
+    if token_body.role is not None:
+        if token_body.role not in rbac.get_supported_roles():
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid role {token_body.role!r}. Supported roles: '
+                f'{", ".join(rbac.get_supported_roles())}.')
+        # Assigning a role is an admin-only operation (mirrors the role-change
+        # endpoints); otherwise any authenticated user could mint a token with
+        # an elevated role. Non-admins get the default seeded role instead.
+        caller_roles = permission.permission_service.get_user_roles(
+            auth_user.id)
+        if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
+            raise fastapi.HTTPException(
+                status_code=403,
+                detail='Only admins can set a role when creating a service '
+                'account token.')
 
     try:
         # Generate a unique service account user ID
