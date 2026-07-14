@@ -3624,7 +3624,17 @@ def test_managed_jobs_emergency_recovery(generic_cloud: str):
                                 capture_output=True,
                                 text=True,
                                 timeout=60,
-                                check=True)
+                                check=False)
+        if result.returncode != 0:
+            # Surface the remote python's output so a failed controller read
+            # reports *why* it failed. A bare CalledProcessError hides the
+            # remote traceback (it lives in .stderr, which is otherwise
+            # discarded), which is exactly what we need to debug a
+            # non-consolidation smoke failure.
+            raise RuntimeError(
+                f'Remote sql on {controller} exited {result.returncode}. '
+                f'SQL: {sql!r}\n--- remote stdout ---\n{result.stdout}'
+                f'\n--- remote stderr ---\n{result.stderr}')
         return int(result.stdout.strip().splitlines()[-1])
 
     run_sql = _run_sql_locally if consolidation else _run_sql_on_controller
