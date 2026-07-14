@@ -507,6 +507,40 @@ def test_docker_preinstalled_package(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_non_debian_image():
+    """A non-Debian image boots on Kubernetes (pkg-manager-agnostic bootstrap).
+
+    The per-node bootstrap detects the image's package manager (dnf here)
+    rather than assuming Debian apt/dpkg, so a RHEL-family image reaches the
+    SkyPilot runtime and runs jobs. Regression test for the previously
+    Debian-only bootstrap, which failed such images during setup with a
+    misleading `container not found ("ray-node")`. Rocky Linux 9 is glibc-based
+    (unlike Alpine/musl, whose conda/uv runtime is unrelated to this path).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'kubernetes_non_debian_image',
+        [
+            # `sky launch` returns 0 only if the non-apt bootstrap installed the
+            # prereqs and ray came up on the Rocky Linux 9 (dnf) image.
+            f'sky launch -y -c {name} --infra kubernetes '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:rockylinux:9',
+            # Confirm it really ran on the RHEL-family image (not a fallback):
+            # a RHEL-family os-release and no apt-get on PATH.
+            f'sky exec {name} '
+            f'\'grep -qi rocky /etc/os-release && ! command -v apt-get\'',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        # A from-scratch runtime bootstrap on a non-Debian base + image pull is
+        # slower than the Debian happy path; give it headroom.
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.slurm
 def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
     """Test local .sqsh container images on Slurm (both absolute and relative paths)."""
