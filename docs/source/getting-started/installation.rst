@@ -1447,6 +1447,77 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 .. note::
   :code:`sky check` does not reflect IBM COS's enabled status. :code:`IBM: enabled` only guarantees that IBM VM instances are enabled.
 
+OpenStack |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install SkyPilot with the OpenStack dependency:
+
+.. code-block:: console
+
+  $ pip install "skypilot[openstack]"
+
+Configure a named cloud in ``~/.config/openstack/clouds.yaml`` and, if
+needed, store its secrets in ``~/.config/openstack/secure.yaml``. Certificate
+paths referenced by the profile must be absolute paths. The selected profile
+must resolve exactly one ``region_name``.
+
+For a remote API server, an administrator must install these files on the API
+server, such as through a Kubernetes Secret volume, and configure the
+``openstack`` block there. Client-side OpenStack config and credential files
+are not uploaded to the server. Remote clients cannot override the server's
+selected profile or network settings. The initial integration also does not
+copy OpenStack credentials to workload VMs.
+
+Select the profile, tenant network, image SSH user, and IP mode in
+``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+  openstack:
+    cloud: lab
+    network: tenant-net
+    external_network: public
+    ssh_user: ubuntu
+    use_internal_ips: false
+
+When the client or API server can reach tenant addresses directly, set
+``use_internal_ips: true`` and omit ``external_network``. Then verify the
+profile and populate the account-local flavor catalog:
+
+.. code-block:: console
+
+  $ sky check openstack
+
+OpenStack has no standard pricing API. To avoid comparing unknown OpenStack
+costs with public cloud prices, tasks must explicitly specify
+``cloud: openstack``. A displayed ``$0.00`` cost is an internal placeholder,
+not an estimate of the deployment's actual cost. A Glance ``image_id`` is also
+required. The image must be
+a cloud-init-enabled Debian or Ubuntu image, matching SkyPilot's setup command
+requirements. The initial integration supports CPU single-node clusters and
+direct image boot only.
+It uses one named profile, project, region, and availability zone. Run
+``sky check openstack`` again after changing any of them. Tear down existing
+OpenStack clusters before changing that server-side context; the initial
+integration does not manage clusters across profile changes.
+
+Use the bundled example for an end-to-end verification after replacing its
+flavor and Glance image placeholders:
+
+.. code-block:: console
+
+  $ sky check openstack
+  $ sky launch -y -c openstack-mvp examples/openstack/minimal.yaml
+  $ sky status --refresh
+  $ sky exec openstack-mvp 'hostname; uname -a'
+  $ sky stop -y openstack-mvp
+  $ sky status --refresh
+  $ sky start -y openstack-mvp
+  $ sky exec openstack-mvp 'hostname'
+  $ sky down -y openstack-mvp
+
+See :ref:`cloud-permissions-openstack` for the required project permissions.
+
 SCP (Samsung Cloud Platform) |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

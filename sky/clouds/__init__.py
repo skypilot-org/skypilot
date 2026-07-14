@@ -26,6 +26,7 @@ from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.mithril import Mithril
 from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
+from sky.clouds.openstack import OpenStack
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.primeintellect import PrimeIntellect
 from sky.clouds.runpod import RunPod
@@ -57,6 +58,7 @@ __all__ = [
     'Shadeform',
     'Vast',
     'OCI',
+    'OpenStack',
     'Verda',
     'Vsphere',
     'Kubernetes',

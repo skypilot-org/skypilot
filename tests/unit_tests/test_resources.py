@@ -329,6 +329,17 @@ def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
     assert loaded_r.labels == r.labels
 
 
+def test_to_yaml_config_preserves_derived_instance_memory():
+    with mock.patch.object(clouds.AWS,
+                           'get_vcpus_mem_from_instance_type',
+                           return_value=(8, 61)):
+        resources = Resources(cloud=clouds.AWS(), instance_type='mock-instance')
+
+        config = resources.to_yaml_config()
+
+    assert config['memory'] == '61'
+
+
 def test_resources_any_of():
     """Test Resources creation with any_of option."""
     # Test any_of with different resources options

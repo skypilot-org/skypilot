@@ -90,6 +90,7 @@ export const CLOUDS_LIST = [
   'Lambda',
   'SCP',
   'OCI',
+  'OpenStack',
   'RunPod',
   'VAST',
   'vSphere',
