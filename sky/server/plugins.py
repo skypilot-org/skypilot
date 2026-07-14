@@ -16,6 +16,7 @@ from sky.utils import config_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from sky.jobs import controller_liveness as controller_liveness_mod
     from sky.server.blob import blob_storage as blob_storage_mod
     from sky.server.requests import log_provider as log_provider_mod
     from sky.server.requests import storage as storage_mod
@@ -173,6 +174,21 @@ class ExtensionContext:
         # pylint: disable=import-outside-toplevel
         from sky.server.requests import log_provider as lp
         lp.set_log_provider(log_provider)
+
+    def register_controller_liveness_provider(
+        self,
+        provider: 'controller_liveness_mod.ControllerLivenessProvider',
+    ) -> None:
+        """Register a custom controller liveness provider.
+
+        Overrides how the server decides whether a managed job's controller
+        process is alive, e.g. for deployments where more than one server
+        instance can claim a job's controller (a plain local pid check is
+        meaningless once the pid might belong to a different machine).
+        """
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import controller_liveness as cl
+        cl.register(provider)
 
     def register_rbac_rule(self,
                            path: str,

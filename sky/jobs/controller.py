@@ -2084,6 +2084,7 @@ class ControllerManager:
 
         self._pid = os.getpid()
         self._pid_started_at = psutil.Process(self._pid).create_time()
+        self._server_id = os.environ.get(constants.APISERVER_UUID_ENV_VAR)
 
     async def _cleanup(self,
                        job_id: int,
@@ -2643,7 +2644,9 @@ class ControllerManager:
             # Check if there are any jobs that are waiting to launch
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
-                    pid=self._pid, pid_started_at=self._pid_started_at)
+                    pid=self._pid,
+                    pid_started_at=self._pid_started_at,
+                    server_id=self._server_id)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to get waiting job: {e}')
                 await asyncio.sleep(5)

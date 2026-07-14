@@ -630,6 +630,10 @@ IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.
 SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
+# Environment variable identifying this server instance (e.g. the pod UID),
+# used to distinguish which server instance's controller claimed a managed
+# job. See sky/jobs/controller_liveness.py.
+APISERVER_UUID_ENV_VAR = 'SKYPILOT_APISERVER_UUID'
 # Environment variable that is set to 'true' if persistent storage is enabled
 # for the API server deployment (via Helm storage.enabled=true).
 # This enables persistence of managed job logs and file mounts across rolling
