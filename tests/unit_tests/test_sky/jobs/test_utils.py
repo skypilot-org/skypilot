@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sky import exceptions
+from sky.jobs import controller_liveness
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 
@@ -791,7 +792,7 @@ class TestControllerProcessAlive:
             def is_running(self):
                 return True
 
-        monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
+        monkeypatch.setattr(controller_liveness.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
             pid=expected_pid, started_at=expected_start)
         assert jobs_utils.controller_process_alive(record, legacy_job_id=42)
@@ -816,7 +817,7 @@ class TestControllerProcessAlive:
             def is_running(self):
                 return True
 
-        monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
+        monkeypatch.setattr(controller_liveness.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(
             pid=expected_pid, started_at=recorded_start)
         assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
@@ -826,7 +827,7 @@ class TestControllerProcessAlive:
             self, monkeypatch):
         """Without start time, fallback relies on command keywords."""
         expected_pid = 2468
-        monkeypatch.setattr(jobs_utils.psutil, 'pid_exists',
+        monkeypatch.setattr(controller_liveness.psutil, 'pid_exists',
                             lambda pid: pid == expected_pid)
 
         class _KeywordProcess:
@@ -843,7 +844,8 @@ class TestControllerProcessAlive:
             def is_running(self):
                 return True
 
-        monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
+        monkeypatch.setattr(controller_liveness.psutil, 'Process',
+                            _KeywordProcess)
         record = managed_job_state.ControllerPidRecord(pid=expected_pid,
                                                        started_at=None)
         assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
@@ -854,7 +856,8 @@ class TestControllerProcessAlive:
             def cmdline(self):
                 return ['python', '-m', 'some.other.module']
 
-        monkeypatch.setattr(jobs_utils.psutil, 'Process', _NoKeywordProcess)
+        monkeypatch.setattr(controller_liveness.psutil, 'Process',
+                            _NoKeywordProcess)
         assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
                 False)
 

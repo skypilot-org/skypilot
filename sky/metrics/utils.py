@@ -213,6 +213,39 @@ SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER = prom.Gauge(
     multiprocess_mode='liveall',
 )
 
+# Controller liveness checks (sky/jobs/controller_liveness.py) that decided
+# NOT to reset a job's controller ownership, because the registered provider
+# said the owner might still be alive. `reason` is 'live_owner' (verdict
+# ALIVE) or 'unknown_verdict' (verdict UNKNOWN, e.g. the provider couldn't
+# reach whatever it checks) -- kept as the only two values to bound
+# cardinality.
+SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL = prom.Counter(
+    'sky_managed_jobs_skipped_reset_total',
+    'Controller ownership resets skipped because the owner might be alive',
+    ['reason'],
+)
+
+# A compare-and-swap reset lost the race: the job's controller ownership
+# changed between the caller observing it as dead and the reset attempt,
+# meaning the job was re-claimed (or already reset by another checker) in
+# between. `path` distinguishes the recovery-time checkers (the one-shot
+# ha_recovery and the periodic remote-owner sweep, which are otherwise
+# identical) from the future budgeted janitor requeue path.
+SKY_MANAGED_JOBS_RESET_LOST_RACE_TOTAL = prom.Counter(
+    'sky_managed_jobs_reset_lost_race_total',
+    'Compare-and-swap controller ownership resets that lost the race',
+    ['path'],
+)
+
+# Jobs whose controller ownership was reset by the periodic remote-owner
+# sweep (sky.jobs.utils.recover_jobs_lost_from_other_servers) because the
+# claiming server instance was confirmed gone.
+SKY_MANAGED_JOBS_REMOTE_SERVER_RECOVERED_TOTAL = prom.Counter(
+    'sky_managed_jobs_remote_server_recovered_total',
+    'Jobs recovered by the remote-owner sweep after their claiming server '
+    'instance was confirmed dead',
+)
+
 # --- Metrics federation (per remote Kubernetes context) ---
 # The /gpu-metrics and /endpoints-metrics endpoints federate each remote
 # compute context's Prometheus via a kubectl port-forward + /federate scrape.

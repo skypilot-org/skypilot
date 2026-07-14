@@ -41,9 +41,11 @@ from sky.backends import cloud_vm_ray_backend
 from sky.dag import DagExecution
 from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import controller_liveness
 from sky.jobs import runtime as managed_job_runtime
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
+from sky.metrics import utils as metrics_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.skylet import constants
@@ -67,7 +69,6 @@ if typing.TYPE_CHECKING:
     from google.protobuf import descriptor
     from google.protobuf import json_format
     import grpc
-    import psutil
     import sqlalchemy
 
     import sky
@@ -77,7 +78,6 @@ if typing.TYPE_CHECKING:
 else:
     json_format = adaptors_common.LazyImport('google.protobuf.json_format')
     descriptor = adaptors_common.LazyImport('google.protobuf.descriptor')
-    psutil = adaptors_common.LazyImport('psutil')
     grpc = adaptors_common.LazyImport('grpc')
     jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
     managed_jobsv1_pb2 = adaptors_common.LazyImport(
@@ -361,6 +361,34 @@ def cleanup_expired_api_access_tokens() -> int:
     return removed
 
 
+def _record_skipped_reset(reason: str) -> None:
+    """Record that a controller ownership reset was skipped.
+
+    reason is 'live_owner' (verdict ALIVE) or 'unknown_verdict' (verdict
+    UNKNOWN). Small wrapper so the long metric name doesn't force awkward
+    line wraps at every one of its several call sites.
+    """
+    if metrics_lib.METRICS_ENABLED:
+        metrics_lib.SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL.labels(
+            reason=reason).inc()
+
+
+def _record_reset_lost_race(path: str) -> None:
+    """Record that a compare-and-swap ownership reset lost the race.
+
+    path is 'recovery' (ha_recovery or the remote-owner sweep) or 'janitor'.
+    """
+    if metrics_lib.METRICS_ENABLED:
+        metrics_lib.SKY_MANAGED_JOBS_RESET_LOST_RACE_TOTAL.labels(
+            path=path).inc()
+
+
+def _record_remote_server_recovered() -> None:
+    """Record that the remote-owner sweep reset a job with a dead owner."""
+    if metrics_lib.METRICS_ENABLED:
+        metrics_lib.SKY_MANAGED_JOBS_REMOTE_SERVER_RECOVERED_TOTAL.inc()
+
+
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for consolidation mode.
 
@@ -379,7 +407,7 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Starting HA recovery at {datetime.now()}\n')
         jobs, _ = managed_job_state.get_managed_jobs_with_filters(fields=[
             'job_id', 'controller_pid', 'controller_pid_started_at',
-            'schedule_state', 'status'
+            'controller_server_id', 'schedule_state', 'status'
         ])
         for job in jobs:
             job_id = job['job_id']
@@ -395,42 +423,119 @@ def ha_recovery_for_consolidation_mode() -> None:
             # TODO(cooperc): Make sure we cannot have a controller process
             # running across API server restarts for consistency.
             if controller_pid is not None:
-                try:
-                    # Note: We provide the legacy job id to the
-                    # controller_process_alive just in case, but we shouldn't
-                    # have a running legacy job controller process at this point
-                    if controller_process_alive(
-                            managed_job_state.ControllerPidRecord(
-                                pid=controller_pid,
-                                started_at=controller_pid_started_at), job_id):
-                        message = (f'Controller pid {controller_pid} for '
-                                   f'job {job_id} is still running. '
-                                   'Skipping recovery.\n')
-                        logger.debug(message)
-                        f.write(message)
-                        continue
-                except Exception:  # pylint: disable=broad-except
-                    # _controller_process_alive may raise if psutil fails; we
-                    # should not crash the recovery logic because of this.
-                    message = ('Error checking controller pid '
-                               f'{controller_pid} for job {job_id}\n')
-                    logger.warning(message, exc_info=True)
+                # Note: we provide the legacy job id just in case, but we
+                # shouldn't have a running legacy job controller process at
+                # this point.
+                owner = controller_liveness.JobOwnerRecord(
+                    pid=controller_pid,
+                    pid_started_at=controller_pid_started_at,
+                    server_id=job.get('controller_server_id'),
+                    legacy_job_id=job_id)
+                verdict = controller_liveness.check_job_owner(owner)
+                if verdict == controller_liveness.ControllerLiveness.ALIVE:
+                    message = (f'Controller pid {controller_pid} for '
+                               f'job {job_id} is still running. '
+                               'Skipping recovery.\n')
+                    logger.debug(message)
                     f.write(message)
+                    _record_skipped_reset(reason='live_owner')
+                    continue
+                if verdict == controller_liveness.ControllerLiveness.UNKNOWN:
+                    # Fail closed: we can't tell whether the controller is
+                    # alive, so don't touch the job.
+                    message = (f'Could not determine liveness of controller '
+                               f'pid {controller_pid} for job {job_id}; '
+                               'skipping recovery.\n')
+                    logger.warning(message)
+                    f.write(message)
+                    _record_skipped_reset(reason='unknown_verdict')
+                    continue
 
-            # Controller process is not set or not alive.
+            # Controller process is not set, or confirmed DEAD.
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
                     # INACTIVE job may be mid-submission, don't set to WAITING.
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
             ]:
-                managed_job_state.reset_job_for_recovery(job_id)
+                won = managed_job_state.reset_job_for_recovery(
+                    job_id,
+                    expected_pid=controller_pid,
+                    expected_pid_started_at=controller_pid_started_at)
+                if not won:
+                    # Another checker (e.g. the remote-owner sweep) already
+                    # reset this job, or the owner re-claimed it since we
+                    # observed it as dead.
+                    message = (f'Lost the recovery race for job {job_id}; '
+                               'controller ownership already changed.\n')
+                    logger.info(message)
+                    f.write(message)
+                    _record_reset_lost_race(path='recovery')
+                    continue
                 message = (f'Job {job_id} completed recovery at '
                            f'{datetime.now()}\n')
                 logger.info(message)
                 f.write(message)
         f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
+
+
+def recover_jobs_lost_from_other_servers() -> None:
+    """Re-evaluate jobs claimed by other server instances.
+
+    Resets the ones whose claiming server is confirmed gone (verdict DEAD).
+    Unlike ha_recovery_for_consolidation_mode, this is meant to be called
+    repeatedly (see managed_job_refresh_thread.py): a job whose controller
+    genuinely died can observe a fresh-looking heartbeat at the moment
+    ha_recovery ran once at leadership acquisition, and would otherwise never
+    get picked back up. Cheap when there are no remote-owned jobs -- a single
+    filtered query.
+    """
+    my_server_id = os.environ.get(constants.APISERVER_UUID_ENV_VAR)
+    jobs, _ = managed_job_state.get_managed_jobs_with_filters(fields=[
+        'job_id', 'controller_pid', 'controller_pid_started_at',
+        'controller_server_id', 'schedule_state'
+    ])
+    for job in jobs:
+        server_id = job.get('controller_server_id')
+        if server_id is None or server_id == my_server_id:
+            continue
+        if job['schedule_state'] in [
+                managed_job_state.ManagedJobScheduleState.DONE,
+                managed_job_state.ManagedJobScheduleState.WAITING,
+                managed_job_state.ManagedJobScheduleState.INACTIVE,
+        ]:
+            continue
+
+        job_id = job['job_id']
+        controller_pid = job['controller_pid']
+        controller_pid_started_at = job.get('controller_pid_started_at')
+        owner = controller_liveness.JobOwnerRecord(
+            pid=controller_pid,
+            pid_started_at=controller_pid_started_at,
+            server_id=server_id,
+            legacy_job_id=job_id)
+        verdict = controller_liveness.check_job_owner(owner)
+
+        if verdict == controller_liveness.ControllerLiveness.DEAD:
+            won = managed_job_state.reset_job_for_recovery(
+                job_id,
+                expected_pid=controller_pid,
+                expected_pid_started_at=controller_pid_started_at)
+            if won:
+                logger.info(f'Remote-owner sweep recovered job {job_id} '
+                            f'(server {server_id} confirmed dead).')
+                _record_remote_server_recovered()
+            else:
+                logger.info(f'Remote-owner sweep lost the race for job '
+                            f'{job_id}; controller ownership already '
+                            'changed.')
+                _record_reset_lost_race(path='recovery')
+        elif verdict == controller_liveness.ControllerLiveness.UNKNOWN:
+            logger.warning(f'Could not determine liveness of job {job_id} '
+                           f'owned by server {server_id}; skipping.')
+            _record_skipped_reset(reason='unknown_verdict')
+        # ALIVE: the owning server is still around, nothing to do.
 
 
 async def get_job_status(
@@ -547,60 +652,19 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
     If legacy_job_id is provided, this will also return True for a legacy
     single-job controller process with that job id, based on the cmdline. This
     is how the old check worked before #7051.
+
+    This is a thin wrapper around controller_liveness.local_pid_verdict() --
+    the local-machine-only check -- that preserves this function's original
+    bool contract: an inconclusive check (e.g. psutil.AccessDenied) collapses
+    to False, same as it always has here. Callers that can act on the
+    distinction between "confirmed dead" and "couldn't tell" should call
+    controller_liveness.local_pid_verdict() directly instead.
     """
-    try:
-        process = psutil.Process(record.pid)
-
-        if record.started_at is not None:
-            if process.create_time() != record.started_at:
-                if not quiet:
-                    logger.debug(f'Controller process {record.pid} has started '
-                                 f'at {record.started_at} but process has '
-                                 f'started at {process.create_time()}')
-                return False
-        else:
-            # If we can't check the create_time try to check the cmdline instead
-            cmd_str = ' '.join(process.cmdline())
-            # pylint: disable=line-too-long
-            # Pre-#7051 cmdline: /path/to/python -u -m sky.jobs.controller <dag.yaml_path> --job-id <job_id>
-            # Post-#7051 cmdline: /path/to/python -u -msky.jobs.controller
-            # pylint: enable=line-too-long
-            if ('-m sky.jobs.controller' not in cmd_str and
-                    '-msky.jobs.controller' not in cmd_str):
-                if not quiet:
-                    logger.debug(f'Process {record.pid} is not a controller '
-                                 'process - missing "-m sky.jobs.controller" '
-                                 f'from cmdline: {cmd_str}')
-                return False
-            if (legacy_job_id is not None and '--job-id' in cmd_str and
-                    f'--job-id {legacy_job_id}' not in cmd_str):
-                if not quiet:
-                    logger.debug(f'Controller process {record.pid} has the '
-                                 f'wrong --job-id (expected {legacy_job_id}) '
-                                 f'in cmdline: {cmd_str}')
-                return False
-
-            # On linux, psutil.Process(pid) will return a valid process object
-            # even if the pid is actually a thread ID within the process. This
-            # hugely inflates the number of valid-looking pids, increasing the
-            # chance that we will falsely believe a controller is alive. The pid
-            # file should never contain thread IDs, just process IDs. We can
-            # check this with psutil.pid_exists(pid), which is false for TIDs.
-            # See pid_exists in psutil/_pslinux.py
-            if not psutil.pid_exists(record.pid):
-                if not quiet:
-                    logger.debug(
-                        f'Controller process {record.pid} is not a valid '
-                        'process id.')
-                return False
-
-        return process.is_running()
-
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
-            OSError) as e:
-        if not quiet:
-            logger.debug(f'Controller process {record.pid} is not running: {e}')
-        return False
+    verdict = controller_liveness.local_pid_verdict(record, legacy_job_id)
+    if not quiet and verdict != controller_liveness.ControllerLiveness.ALIVE:
+        logger.debug(f'Controller process {record.pid} is not alive '
+                     f'(verdict={verdict.value}).')
+    return verdict == controller_liveness.ControllerLiveness.ALIVE
 
 
 def update_managed_jobs_statuses(job_id: Optional[int] = None):
@@ -679,6 +743,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
         pid_started_at = tasks[0].get('controller_pid_started_at')
+        server_id = tasks[0].get('controller_server_id')
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
@@ -731,10 +796,21 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = f'No controller pid set for {schedule_state.value}'
         else:
             logger.debug(f'Checking controller pid {pid}')
-            if controller_process_alive(
-                    managed_job_state.ControllerPidRecord(
-                        pid=pid, started_at=pid_started_at), job_id):
+            owner = controller_liveness.JobOwnerRecord(
+                pid=pid,
+                pid_started_at=pid_started_at,
+                server_id=server_id,
+                legacy_job_id=job_id)
+            verdict = controller_liveness.check_job_owner(owner)
+            if verdict == controller_liveness.ControllerLiveness.ALIVE:
                 # The controller is still running, so this job is fine.
+                continue
+            if verdict == controller_liveness.ControllerLiveness.UNKNOWN:
+                # Fail closed: we can't tell whether the controller is alive,
+                # so don't terminalize the job.
+                logger.warning(f'Could not determine liveness of controller '
+                               f'pid {pid} for job {job_id}; skipping.')
+                _record_skipped_reset(reason='unknown_verdict')
                 continue
 
             # Double check job is not already DONE before marking as failed, to
@@ -751,6 +827,19 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = 'Controller process is dead'
 
         # At this point, either pid is None or process is dead.
+
+        # The observations above may be stale by now: the job's controller
+        # could have been re-claimed (or already reset) since we read it.
+        # Re-read ownership immediately before terminalizing so a race with
+        # another checker doesn't fail a job whose controller has since
+        # restarted.
+        current_owner = managed_job_state.get_job_owner_record(job_id)
+        if (current_owner is None or current_owner.pid != pid or
+                current_owner.pid_started_at != pid_started_at):
+            logger.info(f'Job {job_id} controller ownership changed since '
+                        'the liveness check; skipping.')
+            _record_reset_lost_race(path='janitor')
+            continue
 
         # The controller process for this managed job is not running: it must
         # have exited abnormally, and we should set the job status to
