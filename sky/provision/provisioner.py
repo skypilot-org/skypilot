@@ -690,7 +690,9 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
                 cluster_info=cluster_info,
-                ssh_credentials=ssh_credentials)
+                ssh_credentials=ssh_credentials,
+                no_restart=provision_record.is_instance_just_booted(
+                    head_instance.instance_id))
         else:
             logger.debug('Ray cluster on head is ready. Skip starting ray '
                          'cluster on head node.')
