@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import BenchmarkConfig  # noqa: E402
 from config import load_config
 from generators import GeneratorBase  # noqa: E402
+from generators import LaunchCancelGenerator
 from generators import LongConnGenerator
 from generators import QpsGenerator
 from generators import ShellGenerator
@@ -49,6 +50,8 @@ def _make_generators(cfg: BenchmarkConfig,
             gens.append(LongConnGenerator(spec, ctx))
         elif spec.type == 'ssh_bench':
             gens.append(SshBenchGenerator(spec, ctx))
+        elif spec.type == 'launch_cancel':
+            gens.append(LaunchCancelGenerator(spec, ctx))
         else:
             raise ValueError(f'unknown generator type: {spec.type}')
     return gens
@@ -92,6 +95,11 @@ def run_worker(cfg: BenchmarkConfig, worker_id: int, output_dir: str,
         if g.spec.type == 'shell':
             return True
         if g.spec.type == 'ssh_bench' and getattr(g, 'is_bounded', False):
+            return True
+        # launch_cancel drives the run: it finishes on its own bounds
+        # (duration_s / max_launches / drain) or halts on a suspected
+        # wedge — in both cases the worker should wrap up.
+        if g.spec.type == 'launch_cancel':
             return True
         return False
 
