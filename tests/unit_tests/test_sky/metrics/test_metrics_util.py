@@ -33,10 +33,25 @@ def _fake_namespace(uid):
 def _reset_local_context_detection_state():
     """Reset the process-level detection caches between tests."""
     utils._local_context_cache.clear()  # pylint: disable=protected-access
+    utils._local_context_probes.clear()  # pylint: disable=protected-access
     utils._in_cluster_identity_uid = None  # pylint: disable=protected-access
     yield
     utils._local_context_cache.clear()  # pylint: disable=protected-access
+    utils._local_context_probes.clear()  # pylint: disable=protected-access
     utils._in_cluster_identity_uid = None  # pylint: disable=protected-access
+
+
+def _seed_verdict(context, verdict):
+    """Mimics is_local_context writing its verdict to the shared cache.
+
+    The split tests mock is_local_context, so the real cache write never
+    runs; split_local_remote_contexts reads verdicts back through the
+    cache, so the mock must seed it just like the real probe would.
+    """
+    with utils._local_context_cache_lock:  # pylint: disable=protected-access
+        utils._local_context_cache[context] = (  # pylint: disable=protected-access
+            verdict, time.time() + 3600)
+    return verdict
 
 
 def test_start_svc_port_forward_terminates_on_exception():
@@ -244,7 +259,7 @@ def test_split_local_remote_contexts():
     """Contexts are partitioned by is_local_context, order preserved."""
 
     def _fake_is_local(context):
-        return context in ('in-cluster', 'ctx-local')
+        return _seed_verdict(context, context in ('in-cluster', 'ctx-local'))
 
     with mock.patch.object(utils,
                            'is_local_context',
@@ -253,6 +268,52 @@ def test_split_local_remote_contexts():
             ['ctx-remote-1', 'in-cluster', 'ctx-local', 'ctx-remote-2'])
     assert local == ['in-cluster', 'ctx-local']
     assert remote == ['ctx-remote-1', 'ctx-remote-2']
+
+
+def test_split_local_remote_contexts_warm_path_spawns_no_threads():
+    """A fully-cached call answers inline without spawning any probe."""
+    for ctx, verdict in (('ctx-local', True), ('ctx-remote', False)):
+        _seed_verdict(ctx, verdict)
+
+    def _must_not_probe(context):
+        raise AssertionError(f'unexpected probe for {context!r}')
+
+    with mock.patch.object(utils,
+                           'is_local_context',
+                           side_effect=_must_not_probe):
+        local, remote = utils.split_local_remote_contexts(
+            ['ctx-local', 'ctx-remote'])
+    assert local == ['ctx-local']
+    assert remote == ['ctx-remote']
+    # No probe thread was ever registered for the warm path.
+    assert not utils._local_context_probes  # pylint: disable=protected-access
+
+
+def test_split_local_remote_contexts_dedupes_probe_threads():
+    """Repeated calls for the same context reuse one daemon probe thread."""
+    gate = threading.Event()
+    seen_threads = []
+
+    def _fake_is_local(context):
+        seen_threads.append(threading.current_thread())
+        gate.wait(10)
+        return _seed_verdict(context, False)
+
+    with mock.patch.object(utils, 'is_local_context',
+                           side_effect=_fake_is_local), \
+         mock.patch.object(utils, '_DETECTION_TIMEOUT_SECONDS', 0.2):
+        utils.split_local_remote_contexts(['ctx-a'])
+        probe = utils._local_context_probes['ctx-a']  # pylint: disable=protected-access
+        # Daemon so a hung probe never blocks interpreter shutdown.
+        assert probe.daemon is True
+        # Second call while the first probe is still in flight must not
+        # spawn another thread for the same context.
+        utils.split_local_remote_contexts(['ctx-a'])
+        assert utils._local_context_probes['ctx-a'] is probe  # pylint: disable=protected-access
+    gate.set()
+    probe.join(5)
+    # Exactly one probe ran despite two split calls.
+    assert len(seen_threads) == 1
 
 
 def test_split_local_remote_contexts_detection_unavailable():
@@ -271,7 +332,7 @@ def test_split_local_remote_contexts_hung_probe_treated_remote():
     def _fake_is_local(context):
         if context == 'ctx-hung':
             release.wait(10)
-        return context == 'ctx-local'
+        return _seed_verdict(context, context == 'ctx-local')
 
     with mock.patch.object(utils, 'is_local_context',
                            side_effect=_fake_is_local), \
@@ -294,7 +355,7 @@ def test_split_local_remote_contexts_probe_exception_treated_remote():
     def _fake_is_local(context):
         if context == 'ctx-broken':
             raise RuntimeError('kubeconfig exploded')
-        return context == 'ctx-local'
+        return _seed_verdict(context, context == 'ctx-local')
 
     with mock.patch.object(utils,
                            'is_local_context',

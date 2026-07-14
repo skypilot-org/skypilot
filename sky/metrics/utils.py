@@ -1,6 +1,5 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
 import asyncio
-import concurrent.futures
 import contextlib
 import functools
 import os
@@ -81,6 +80,16 @@ _LOCAL_CONTEXT_FAILURE_RETRY_SECONDS = 60
 # Process-level cache: context name -> (is_local, entry expiry time).
 _local_context_cache: Dict[str, Tuple[bool, float]] = {}
 _local_context_cache_lock = threading.Lock()
+
+# In-flight probe threads, one per context at most (context name -> thread),
+# guarded by _local_context_cache_lock. Detection runs in a background
+# thread because a probe can hang indefinitely (kubeconfig exec credential
+# plugins run as subprocesses with no timeout, outside _request_timeout),
+# and a hung thread cannot be reaped in Python. Deduping by context bounds
+# the leak to one stranded thread per distinct context instead of one per
+# scrape cycle; probe threads are daemon so a stuck one never blocks
+# interpreter shutdown. Verdicts are read back through _local_context_cache.
+_local_context_probes: Dict[str, threading.Thread] = {}
 
 # UID of the kube-system namespace as seen through the in-cluster
 # credentials, i.e. the identity of the cluster this API server runs in.
@@ -560,12 +569,6 @@ def is_local_context(context: str) -> bool:
     return is_local
 
 
-# Bounds the probe threads spawned by split_local_remote_contexts for
-# uncached contexts. Keeps the worst-case first-call latency near one
-# probe timeout (instead of timeout * num_contexts) without letting a
-# pathological kubeconfig fan out unbounded threads.
-_DETECTION_MAX_PARALLEL_PROBES = 8
-
 # Overall budget for one split_local_remote_contexts() call. The
 # per-probe _request_timeout only bounds the namespace HTTP call;
 # kubeconfig loading, exec credential plugins, or DNS can still hang a
@@ -573,45 +576,97 @@ _DETECTION_MAX_PARALLEL_PROBES = 8
 _DETECTION_TIMEOUT_SECONDS = _NAMESPACE_PROBE_TIMEOUT_SECONDS + 5
 
 
+def _cached_local_verdict(context: str) -> Optional[bool]:
+    """Cached is_local_context verdict, or None if absent/expired.
+
+    Never probes, so it is safe to call from latency-sensitive paths.
+    """
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    if context == kubernetes_adaptors.in_cluster_context_name():
+        return True
+    with _local_context_cache_lock:
+        cached = _local_context_cache.get(context)
+        if cached is not None:
+            is_local, expires_at = cached
+            if time.time() < expires_at:
+                return is_local
+    return None
+
+
+def _probe_local_context(context: str) -> None:
+    """Thread target: run detection, which caches its own verdict."""
+    try:
+        is_local_context(context)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Local-context detection failed for {context!r}; '
+                       f'treating it as remote: '
+                       f'{common_utils.format_exception(e)}')
+
+
+def _ensure_probe(context: str) -> threading.Thread:
+    """Returns a live probe thread for context, starting one if needed.
+
+    At most one probe runs per context: a concurrent (or repeated) call
+    for the same context joins the existing thread instead of spawning a
+    new one, so a hung probe costs one stranded thread total rather than
+    one per scrape cycle. A finished thread is replaced, so the next call
+    after cache expiry re-probes through a fresh thread.
+    """
+    with _local_context_cache_lock:
+        thread = _local_context_probes.get(context)
+        if thread is None or not thread.is_alive():
+            # Daemon: probes are read-only and may hang indefinitely in
+            # kubeconfig loading / exec credential plugins; they must not
+            # block interpreter shutdown.
+            thread = threading.Thread(target=_probe_local_context,
+                                      args=(context,),
+                                      name=f'local-context-probe-{context}',
+                                      daemon=True)
+            _local_context_probes[context] = thread
+            thread.start()
+        return thread
+
+
 def split_local_remote_contexts(
         contexts: List[str]) -> Tuple[List[str], List[str]]:
     """Partitions contexts into (local, remote) via is_local_context().
 
     Shared by the federation routes and /dashboard_config so both agree
-    on which contexts point at the API server's own cluster. Uncached
-    contexts are probed in parallel (bounded) so the first call costs
-    roughly one probe timeout rather than one per context. Probes that
-    do not finish within _DETECTION_TIMEOUT_SECONDS are treated as
-    remote for this call (the safe answer); a straggler still populates
-    the cache when it eventually finishes. Blocking — call from a
-    thread in async code.
+    on which contexts point at the API server's own cluster. Cached
+    verdicts are answered inline (no thread). Only uncached contexts are
+    probed, each in a deduped daemon thread, so the first call costs
+    roughly one probe timeout rather than one per context and the warm
+    path spawns no threads at all. A context whose probe does not finish
+    within _DETECTION_TIMEOUT_SECONDS is treated as remote for this call
+    (the safe answer); a straggler still populates the cache when it
+    eventually finishes, and a later call reads it back. Blocking — call
+    from a thread in async code.
     """
     if not contexts:
         return [], []
-    executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(len(contexts), _DETECTION_MAX_PARALLEL_PROBES))
-    futures = [executor.submit(is_local_context, ctx) for ctx in contexts]
-    concurrent.futures.wait(futures, timeout=_DETECTION_TIMEOUT_SECONDS)
-    # Do not wait for stragglers; queued probes that never started are
-    # cancelled outright.
-    executor.shutdown(wait=False, cancel_futures=True)
+    # Only uncached contexts need a probe; an in-flight probe is joined
+    # rather than duplicated.
+    pending = {
+        context: _ensure_probe(context)
+        for context in contexts
+        if _cached_local_verdict(context) is None
+    }
+    deadline = time.monotonic() + _DETECTION_TIMEOUT_SECONDS
+    for thread in pending.values():
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
     local: List[str] = []
     remote: List[str] = []
-    for context, future in zip(contexts, futures):
-        is_local = False
-        if future.done() and not future.cancelled():
-            try:
-                is_local = future.result()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Local-context detection failed for '
-                               f'{context!r}; treating it as remote: '
-                               f'{common_utils.format_exception(e)}')
-        else:
+    for context in contexts:
+        verdict = _cached_local_verdict(context)
+        if verdict is None:
             logger.warning(
                 f'Local-context detection for {context!r} did not finish '
                 f'within {_DETECTION_TIMEOUT_SECONDS}s; treating it as '
                 f'remote for this request.')
-        (local if is_local else remote).append(context)
+        (local if verdict else remote).append(context)
     return local, remote
 
 
