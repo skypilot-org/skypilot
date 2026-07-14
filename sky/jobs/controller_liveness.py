@@ -24,7 +24,7 @@ import abc
 import dataclasses
 import enum
 import typing
-from typing import Any, Mapping, Optional
+from typing import Any, ClassVar, Mapping, Optional
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -94,9 +94,26 @@ class JobOwnerRecord:
 class ControllerLivenessProvider(abc.ABC):
     """Determines whether a job's controller process is alive."""
 
+    # Whether this provider's verdicts are authoritative for a job claimed by
+    # a DIFFERENT server instance (owner.server_id != this server's id).
+    # Providers that only inspect local state -- e.g. a local pid lookup --
+    # must leave this False: a pid lookup can return a confident wrong answer
+    # for a pid that only exists on some other machine (or, worse, happens to
+    # be reused locally by an unrelated process), so it cannot be trusted to
+    # judge whether a *remote* owner is alive. Only a provider that can
+    # actually observe other server instances (e.g. via a shared registry)
+    # should set this True.
+    handles_remote_owners: ClassVar[bool] = False
+
     @abc.abstractmethod
     def check(self, owner: JobOwnerRecord) -> ControllerLiveness:
-        """Return the liveness verdict for the given job owner."""
+        """Return the liveness verdict for the given job owner.
+
+        Providers should treat an owner with pid=None as DEAD (no controller
+        was ever stamped for the job). Consumers additionally short-circuit
+        that case themselves rather than relying on this, so a provider that
+        gets it wrong degrades gracefully.
+        """
         raise NotImplementedError
 
 
@@ -222,10 +239,18 @@ def local_pid_verdict(
         # The process is definitely gone.
         logger.debug(f'Controller process {record.pid} is not running: {e}')
         return ControllerLiveness.DEAD
-    except (psutil.AccessDenied, OSError) as e:
-        # We couldn't answer the question either way (e.g. permissions, or a
-        # transient OS-level failure). Unlike psutil.NoSuchProcess/
-        # ZombieProcess, this does not tell us the process is gone.
+    except psutil.AccessDenied as e:
+        # Controller processes are spawned by the same user that runs this
+        # check, so a pid we cannot inspect belongs to some other user's
+        # process -- that process is not the controller. This also restores
+        # the pre-provider behavior for pid-reuse by a different user.
+        logger.debug(f'Access denied checking controller process '
+                     f'{record.pid}; treating as DEAD: {e}')
+        return ControllerLiveness.DEAD
+    except OSError as e:
+        # We couldn't answer the question either way (e.g. a transient
+        # OS-level failure). Unlike psutil.NoSuchProcess/ZombieProcess, this
+        # does not tell us the process is gone.
         logger.debug(f'Could not determine liveness of controller process '
                      f'{record.pid}: {e}')
         return ControllerLiveness.UNKNOWN

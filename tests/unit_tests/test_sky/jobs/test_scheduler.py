@@ -195,3 +195,20 @@ class TestSubmitJobsLivenessGating:
 
         check_mock.assert_not_called()
         assert set_waiting_mock.call_args.args[0] == [1]
+
+    def test_pid_none_owner_allows_submission_without_consulting_provider(
+            self, tmp_path, monkeypatch):
+        """A job_info row exists but no controller was ever stamped (pid is
+        None): this must submit without consulting the provider, same as no
+        owner record at all. This is master's shortcut for an unclaimed job
+        -- restoring it guarantees a buggy plugin provider can never strand
+        a brand-new job in its one-shot PENDING transition."""
+        owner = controller_liveness.JobOwnerRecord(pid=None,
+                                                   pid_started_at=None,
+                                                   server_id=None)
+        check_mock = mock.MagicMock()
+
+        set_waiting_mock = self._run(monkeypatch, tmp_path, owner, check_mock)
+
+        check_mock.assert_not_called()
+        assert set_waiting_mock.call_args.args[0] == [1]

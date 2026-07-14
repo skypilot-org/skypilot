@@ -343,7 +343,12 @@ def submit_jobs(job_ids: List[int],
     job_ids_without_controller_process = []
     for job_id in job_ids:
         owner = state.get_job_owner_record(job_id)
-        if owner is not None:
+        # An owner with no pid means no controller was ever stamped for this
+        # job -- always submit without consulting the provider. This
+        # restores master's shortcut for an unclaimed job, and guarantees a
+        # buggy plugin provider can never strand a brand-new job in its
+        # one-shot PENDING -> submitted transition.
+        if owner is not None and owner.pid is not None:
             # why? TODO(cooperc): figure out why this is needed, fix it, and
             # remove
             verdict = controller_liveness.check_job_owner(owner)

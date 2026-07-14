@@ -66,8 +66,10 @@ class TestLocalPidVerdict:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_access_denied_is_unknown(self, monkeypatch):
-        """psutil.AccessDenied can't tell us the process is gone -> UNKNOWN."""
+    def test_access_denied_is_dead(self, monkeypatch):
+        """psutil.AccessDenied -> DEAD: controller processes are spawned by
+        the same user running this check, so a pid we cannot inspect belongs
+        to some other user's process, not the controller."""
 
         class _FakeProcess:
 
@@ -76,6 +78,24 @@ class TestLocalPidVerdict:
 
             def create_time(self):
                 raise psutil.AccessDenied()
+
+        monkeypatch.setattr(controller_liveness.psutil, 'Process', _FakeProcess)
+        record = managed_job_state.ControllerPidRecord(pid=1234,
+                                                       started_at=1700000000.0)
+        assert (controller_liveness.local_pid_verdict(record) ==
+                ControllerLiveness.DEAD)
+
+    def test_os_error_is_unknown(self, monkeypatch):
+        """A generic OSError (e.g. a transient failure) can't tell us the
+        process is gone -> UNKNOWN, unlike AccessDenied."""
+
+        class _FakeProcess:
+
+            def __init__(self, pid):
+                del pid  # unused
+
+            def create_time(self):
+                raise OSError('transient failure')
 
         monkeypatch.setattr(controller_liveness.psutil, 'Process', _FakeProcess)
         record = managed_job_state.ControllerPidRecord(pid=1234,
@@ -264,6 +284,21 @@ class TestLocalPidLivenessProvider:
             pid_started_at=started_at,
             server_id='some-other-server-entirely')
         assert provider.check(owner) == ControllerLiveness.ALIVE
+
+    def test_does_not_handle_remote_owners(self):
+        """A local-pid-only provider's verdicts about a job claimed by a
+        different server instance are not authoritative -- the remote-owner
+        sweep (sky.jobs.utils.recover_jobs_lost_from_other_servers) must not
+        run against it. This is also the ControllerLivenessProvider ABC's
+        default."""
+        assert controller_liveness.LocalPidLivenessProvider.handles_remote_owners is False
+
+
+class TestHandlesRemoteOwnersDefault:
+    """ControllerLivenessProvider.handles_remote_owners defaults to False."""
+
+    def test_abc_default_is_false(self):
+        assert controller_liveness.ControllerLivenessProvider.handles_remote_owners is False
 
 
 class TestRegistry:

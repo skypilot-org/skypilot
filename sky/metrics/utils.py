@@ -214,11 +214,16 @@ SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER = prom.Gauge(
 )
 
 # Controller liveness checks (sky/jobs/controller_liveness.py) that decided
-# NOT to reset a job's controller ownership, because the registered provider
-# said the owner might still be alive. `reason` is 'live_owner' (verdict
-# ALIVE) or 'unknown_verdict' (verdict UNKNOWN, e.g. the provider couldn't
-# reach whatever it checks) -- kept as the only two values to bound
-# cardinality.
+# NOT to reset a job's controller ownership. `reason` is one of:
+#   - 'live_owner': the registered provider's verdict was ALIVE.
+#   - 'unknown_verdict': the provider's verdict was UNKNOWN (e.g. it
+#     couldn't reach whatever it checks) -- fail closed, same as ALIVE.
+#   - 'ownership_changed': the janitor's (update_managed_jobs_statuses) cheap
+#     re-read guard, run immediately before each point where it would
+#     terminalize a job, found that controller ownership had changed since
+#     the liveness check that decided the job needed resetting -- i.e. it
+#     was re-claimed (or already reset by another checker) in the meantime.
+# Kept to these three values to bound cardinality.
 SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL = prom.Counter(
     'sky_managed_jobs_skipped_reset_total',
     'Controller ownership resets skipped because the owner might be alive',
@@ -228,9 +233,14 @@ SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL = prom.Counter(
 # A compare-and-swap reset lost the race: the job's controller ownership
 # changed between the caller observing it as dead and the reset attempt,
 # meaning the job was re-claimed (or already reset by another checker) in
-# between. `path` distinguishes the recovery-time checkers (the one-shot
-# ha_recovery and the periodic remote-owner sweep, which are otherwise
-# identical) from the future budgeted janitor requeue path.
+# between. Only ever emitted for the recovery-path checkers (the one-shot
+# ha_recovery and the periodic remote-owner sweep, which share a single
+# CAS-reset helper and are otherwise identical) -- they're the only callers
+# that actually attempt a CAS reset, so `path` is always 'recovery'. The
+# janitor (update_managed_jobs_statuses) never attempts a CAS reset; its
+# ownership-changed re-read-guard skips are recorded via
+# SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL{reason='ownership_changed'} instead,
+# since nothing was written for those.
 SKY_MANAGED_JOBS_RESET_LOST_RACE_TOTAL = prom.Counter(
     'sky_managed_jobs_reset_lost_race_total',
     'Compare-and-swap controller ownership resets that lost the race',

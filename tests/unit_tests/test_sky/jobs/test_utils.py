@@ -1679,7 +1679,27 @@ class TestHaRecoveryForConsolidationMode:
 
         reset_mock.assert_called_once_with(1,
                                            expected_pid=100,
-                                           expected_pid_started_at=1.0)
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id=None)
+
+    def test_dead_verdict_resets_with_server_id_cas_expectation(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """A stamped controller_server_id must be passed through to the CAS
+        reset, so a re-claim by a different server instance (that happens to
+        reuse the same pid) is still caught."""
+        self._patch_common(monkeypatch, tmp_path,
+                           [self._job(controller_server_id='server-a')])
+        _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
+        reset_mock = MagicMock(return_value=True)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        reset_mock.assert_called_once_with(1,
+                                           expected_pid=100,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id='server-a')
 
     def test_negative_stored_pid_liveness_checked_absolute_and_cas_raw(
             self, monkeypatch, tmp_path, _register_liveness_provider):
@@ -1703,7 +1723,8 @@ class TestHaRecoveryForConsolidationMode:
         assert checked_owner.pid == 100
         reset_mock.assert_called_once_with(1,
                                            expected_pid=-100,
-                                           expected_pid_started_at=1.0)
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id=None)
 
     def test_dead_verdict_lost_race_does_not_raise(self, monkeypatch, tmp_path,
                                                    _register_liveness_provider):
@@ -1734,7 +1755,8 @@ class TestHaRecoveryForConsolidationMode:
         fake.check.assert_not_called()
         reset_mock.assert_called_once_with(1,
                                            expected_pid=None,
-                                           expected_pid_started_at=None)
+                                           expected_pid_started_at=None,
+                                           expected_server_id=None)
 
     @pytest.mark.parametrize('schedule_state', [
         managed_job_state.ManagedJobScheduleState.DONE,
@@ -1756,18 +1778,48 @@ class TestHaRecoveryForConsolidationMode:
 
         reset_mock.assert_not_called()
 
+    def test_dedupes_by_job_id_for_multi_task_jobs(self, monkeypatch, tmp_path,
+                                                   _register_liveness_provider):
+        """get_managed_jobs_with_filters returns one row per task; a
+        multi-task job must still only be checked/reset once, or a 2nd+ task
+        row would spuriously trip the lost-recovery-race path."""
+        # Two rows for the same job_id=1, as a 2-task job would produce.
+        self._patch_common(monkeypatch, tmp_path, [self._job(), self._job()])
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        reset_mock = MagicMock(return_value=True)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        assert fake.check.call_count == 1
+        reset_mock.assert_called_once_with(1,
+                                           expected_pid=100,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id=None)
+
 
 class TestRecoverJobsLostFromOtherServers:
     """recover_jobs_lost_from_other_servers: the periodic remote-owner sweep
     (managed_job_refresh_thread.py's safety net for genuine-death starvation
-    -- see ha_recovery's one-shot-per-leadership-acquisition limitation)."""
+    -- see ha_recovery's one-shot-per-leadership-acquisition limitation).
+
+    Filtering by server_id/schedule_state has moved into the dedicated SQL
+    query (state.get_nonterminal_jobs_owned_by_other_servers, tested in
+    test_jobs_state.py); this class fakes that query directly and focuses on
+    what the sweep itself does: the handles_remote_owners capability gate,
+    passing my_server_id through, and the per-job verdict/CAS handling.
+    """
 
     _SERVER_ID_ENV_VAR = 'SKYPILOT_APISERVER_UUID'
 
     def _patch(self, monkeypatch, jobs):
+        query_mock = MagicMock(return_value=jobs)
         monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'get_managed_jobs_with_filters',
-                            lambda fields=None: (jobs, len(jobs)))
+                            'get_nonterminal_jobs_owned_by_other_servers',
+                            query_mock)
+        return query_mock
 
     def _job(self, **overrides):
         job = {
@@ -1780,41 +1832,63 @@ class TestRecoverJobsLostFromOtherServers:
         job.update(overrides)
         return job
 
-    def test_null_server_id_is_skipped(self, monkeypatch,
-                                       _register_liveness_provider):
-        monkeypatch.delenv(self._SERVER_ID_ENV_VAR, raising=False)
-        self._patch(monkeypatch, [self._job(controller_server_id=None)])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        reset_mock = MagicMock()
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        fake.check.assert_not_called()
-        reset_mock.assert_not_called()
-
-    def test_owned_by_self_is_skipped(self, monkeypatch,
-                                      _register_liveness_provider):
+    def test_noop_without_handles_remote_owners(self, monkeypatch,
+                                                _register_liveness_provider):
+        """The default (local-pid-only) provider's verdicts about a
+        different server's jobs are not authoritative -- the sweep must not
+        even query for remote-owned jobs."""
         monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        self._patch(monkeypatch, [self._job(controller_server_id='my-server')])
+        query_mock = self._patch(monkeypatch, [self._job()])
         fake = _register_liveness_provider(
             controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = False
         reset_mock = MagicMock()
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'reset_job_for_recovery', reset_mock)
 
         jobs_utils.recover_jobs_lost_from_other_servers()
 
+        query_mock.assert_not_called()
         fake.check.assert_not_called()
         reset_mock.assert_not_called()
+
+    def test_runs_with_handles_remote_owners_true(self, monkeypatch,
+                                                  _register_liveness_provider):
+        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
+        query_mock = self._patch(monkeypatch, [self._job()])
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
+        reset_mock = MagicMock(return_value=True)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.recover_jobs_lost_from_other_servers()
+
+        query_mock.assert_called_once_with('my-server')
+        reset_mock.assert_called_once()
+
+    def test_passes_my_server_id_from_env(self, monkeypatch,
+                                          _register_liveness_provider):
+        monkeypatch.delenv(self._SERVER_ID_ENV_VAR, raising=False)
+        query_mock = self._patch(monkeypatch, [])
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
+
+        jobs_utils.recover_jobs_lost_from_other_servers()
+
+        # No SKYPILOT_APISERVER_UUID set -> None, NULL-safe on the query
+        # side (see get_nonterminal_jobs_owned_by_other_servers).
+        query_mock.assert_called_once_with(None)
 
     def test_dead_remote_owner_resets(self, monkeypatch,
                                       _register_liveness_provider):
         monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
         self._patch(monkeypatch, [self._job()])
-        _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
         reset_mock = MagicMock(return_value=True)
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'reset_job_for_recovery', reset_mock)
@@ -1823,14 +1897,16 @@ class TestRecoverJobsLostFromOtherServers:
 
         reset_mock.assert_called_once_with(1,
                                            expected_pid=100,
-                                           expected_pid_started_at=1.0)
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id='server-b')
 
     def test_alive_remote_owner_no_reset(self, monkeypatch,
                                          _register_liveness_provider):
         monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
         self._patch(monkeypatch, [self._job()])
-        _register_liveness_provider(
+        fake = _register_liveness_provider(
             controller_liveness.ControllerLiveness.ALIVE)
+        fake.handles_remote_owners = True
         reset_mock = MagicMock()
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'reset_job_for_recovery', reset_mock)
@@ -1843,8 +1919,9 @@ class TestRecoverJobsLostFromOtherServers:
                                            _register_liveness_provider):
         monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
         self._patch(monkeypatch, [self._job()])
-        _register_liveness_provider(
+        fake = _register_liveness_provider(
             controller_liveness.ControllerLiveness.UNKNOWN)
+        fake.handles_remote_owners = True
         reset_mock = MagicMock()
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'reset_job_for_recovery', reset_mock)
@@ -1857,7 +1934,9 @@ class TestRecoverJobsLostFromOtherServers:
                                       _register_liveness_provider):
         monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
         self._patch(monkeypatch, [self._job()])
-        _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
         reset_mock = MagicMock(return_value=False)
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'reset_job_for_recovery', reset_mock)
@@ -1866,31 +1945,11 @@ class TestRecoverJobsLostFromOtherServers:
 
         reset_mock.assert_called_once()
 
-    @pytest.mark.parametrize('schedule_state', [
-        managed_job_state.ManagedJobScheduleState.DONE,
-        managed_job_state.ManagedJobScheduleState.WAITING,
-        managed_job_state.ManagedJobScheduleState.INACTIVE,
-    ])
-    def test_terminal_schedule_states_are_excluded(self, monkeypatch,
-                                                   _register_liveness_provider,
-                                                   schedule_state):
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        self._patch(monkeypatch, [self._job(schedule_state=schedule_state)])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        reset_mock = MagicMock()
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        fake.check.assert_not_called()
-        reset_mock.assert_not_called()
-
 
 class TestUpdateManagedJobsStatusesLiveness:
     """update_managed_jobs_statuses (the janitor): liveness-gated
-    terminalize, and the pre-terminalize ownership re-read guard."""
+    terminalize, and the two ownership re-read guards (pre-cleanup and
+    post-cleanup/pre-set_failed) before terminalizing."""
 
     JOB_ID = 42
     PID = 100
@@ -1998,3 +2057,96 @@ class TestUpdateManagedJobsStatusesLiveness:
         set_failed_mock.assert_called_once()
         assert (set_failed_mock.call_args.kwargs['failure_type'] ==
                 managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+
+    def test_server_id_mismatch_alone_skips_terminalize(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """Same pid/started_at, but a different server_id (e.g. a different
+        server instance re-claimed the job after a coincidental pid reuse)
+        must still be caught by the re-read guard."""
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_owner_record',
+            lambda job_id: controller_liveness.JobOwnerRecord(
+                pid=self.PID,
+                pid_started_at=self.PID_STARTED_AT,
+                server_id='some-other-server',
+                legacy_job_id=self.JOB_ID))
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        set_failed_mock.assert_not_called()
+
+    def test_ownership_changed_during_cleanup_skips_terminalize(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """Second guard: even if the pre-cleanup re-read finds ownership
+        unchanged, cluster cleanup (_cleanup_job_clusters) is slow -- a
+        second re-read immediately before set_failed must also catch a race
+        that happened while cleanup ran."""
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
+        matching_owner = controller_liveness.JobOwnerRecord(
+            pid=self.PID,
+            pid_started_at=self.PID_STARTED_AT,
+            server_id=None,
+            legacy_job_id=self.JOB_ID)
+        changed_owner = controller_liveness.JobOwnerRecord(
+            pid=self.PID + 1,
+            pid_started_at=self.PID_STARTED_AT,
+            server_id=None,
+            legacy_job_id=self.JOB_ID)
+        owner_reads = MagicMock(side_effect=[matching_owner, changed_owner])
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_job_owner_record', owner_reads)
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', lambda name: None)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        # First re-read (pre-cleanup) passed, so cleanup ran and a second
+        # re-read (post-cleanup) happened; that one caught the race.
+        assert owner_reads.call_count == 2
+        set_failed_mock.assert_not_called()
+
+    def test_alive_verdict_records_live_owner_metric(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        _register_liveness_provider(
+            controller_liveness.ControllerLiveness.ALIVE)
+        record_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils, '_record_skipped_reset', record_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        set_failed_mock.assert_not_called()
+        record_mock.assert_called_once_with(reason='live_owner')
+
+    def test_ownership_race_records_ownership_changed_metric(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """The re-read guard skip must go through
+        SKIPPED_RESET_TOTAL{reason='ownership_changed'}, not the CAS
+        lost-race metric -- the janitor never attempts a CAS reset."""
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        _register_liveness_provider(controller_liveness.ControllerLiveness.DEAD)
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_owner_record',
+            lambda job_id: controller_liveness.JobOwnerRecord(
+                pid=self.PID + 1,
+                pid_started_at=self.PID_STARTED_AT,
+                server_id=None,
+                legacy_job_id=self.JOB_ID))
+        record_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils, '_record_skipped_reset', record_mock)
+        lost_race_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils, '_record_reset_lost_race',
+                            lost_race_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        set_failed_mock.assert_not_called()
+        record_mock.assert_called_once_with(reason='ownership_changed')
+        lost_race_mock.assert_not_called()

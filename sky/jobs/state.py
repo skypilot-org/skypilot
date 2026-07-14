@@ -3415,16 +3415,20 @@ def reset_jobs_for_recovery() -> None:
 
 
 def reset_job_for_recovery(job_id: int, *, expected_pid: Optional[int],
-                           expected_pid_started_at: Optional[float]) -> bool:
+                           expected_pid_started_at: Optional[float],
+                           expected_server_id: Optional[str]) -> bool:
     """Set a job to WAITING and remove its controller ownership.
 
     This is always a compare-and-swap: the reset only takes effect if the
-    job's current controller_pid and controller_pid_started_at still match
-    what the caller observed, using NULL-safe comparison for both columns.
-    An observed pid of None (the job was never claimed) therefore only
-    matches a column that is still NULL. This guards against a race where
-    the owning controller claimed (or re-claimed) the job between the
-    caller's observation and this write.
+    job's current controller_pid, controller_pid_started_at, and
+    controller_server_id still match what the caller observed, using
+    NULL-safe comparison for all three columns. An observed pid of None (the
+    job was never claimed) therefore only matches a column that is still
+    NULL. This guards against a race where the owning controller claimed (or
+    re-claimed) the job between the caller's observation and this write --
+    including a re-claim by a different server instance that happened to
+    stamp the same pid (e.g. after a controller VM restart), which the pid
+    and started_at columns alone would not catch.
 
     Returns whether the reset was applied.
     """
@@ -3435,6 +3439,8 @@ def reset_job_for_recovery(job_id: int, *, expected_pid: Optional[int],
             job_info_table.c.controller_pid.is_not_distinct_from(expected_pid),
             job_info_table.c.controller_pid_started_at.is_not_distinct_from(
                 expected_pid_started_at),
+            job_info_table.c.controller_server_id.is_not_distinct_from(
+                expected_server_id),
         ]
         result = session.execute(
             sqlalchemy.update(job_info_table).where(
@@ -3447,6 +3453,60 @@ def reset_job_for_recovery(job_id: int, *, expected_pid: Optional[int],
                 }))
         session.commit()
         return result.rowcount == 1
+
+
+def get_nonterminal_jobs_owned_by_other_servers(
+        my_server_id: Optional[str]) -> List[Dict[str, Any]]:
+    """Get non-terminal jobs claimed by a controller_server_id other than
+    ``my_server_id``.
+
+    Used by the remote-owner sweep (sky.jobs.utils.
+    recover_jobs_lost_from_other_servers) to find jobs some other server
+    instance claimed. Queries job_info only -- one row per job, unlike the
+    spot table's one row per task -- so the result is already deduplicated
+    by job_id and needs no join.
+
+    NULL-safe for ``my_server_id``: when it is None, any non-NULL
+    controller_server_id counts as "other" (there is no server identity to
+    compare against, so we can't tell self-claims apart from other-claims by
+    id alone; this only matters for a consolidated deployment that somehow
+    has SKYPILOT_APISERVER_UUID unset).
+
+    Returns dicts with job_id, controller_pid, controller_pid_started_at,
+    controller_server_id, and schedule_state (as a ManagedJobScheduleState,
+    matching get_managed_jobs_with_filters).
+    """
+    terminal_states = (
+        ManagedJobScheduleState.DONE.value,
+        ManagedJobScheduleState.WAITING.value,
+        ManagedJobScheduleState.INACTIVE.value,
+    )
+    where_clause = [
+        job_info_table.c.controller_server_id.isnot(None),
+        job_info_table.c.schedule_state.notin_(terminal_states),
+    ]
+    if my_server_id is not None:
+        where_clause.append(
+            job_info_table.c.controller_server_id != my_server_id)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id,
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at,
+                job_info_table.c.controller_server_id,
+                job_info_table.c.schedule_state,
+            ).where(sqlalchemy.and_(*where_clause))).fetchall()
+
+    return [{
+        'job_id': row.spot_job_id,
+        'controller_pid': row.controller_pid,
+        'controller_pid_started_at': row.controller_pid_started_at,
+        'controller_server_id': row.controller_server_id,
+        'schedule_state': ManagedJobScheduleState(row.schedule_state),
+    } for row in rows]
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:

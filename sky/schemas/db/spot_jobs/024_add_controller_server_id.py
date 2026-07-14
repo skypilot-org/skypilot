@@ -6,6 +6,10 @@ that liveness checks can tell whether the process that claimed a job even
 ran on this machine (see sky/jobs/controller_liveness.py). NULL preserves
 today's behavior: a local pid check.
 
+Revisions 022 and 023 are reserved by in-flight migrations in #9868 and
+#9869; this file intentionally chains off 021 until those land (rechain at
+merge if needed).
+
 Revision ID: 024
 Revises: 021
 Create Date: 2026-07-14
