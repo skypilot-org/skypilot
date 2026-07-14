@@ -827,16 +827,16 @@ def create_service_account_token(
                 status_code=400,
                 detail=f'Invalid role {token_body.role!r}. Supported roles: '
                 f'{", ".join(rbac.get_supported_roles())}.')
-        # Assigning a role is an admin-only operation (mirrors the role-change
-        # endpoints); otherwise any authenticated user could mint a token with
-        # an elevated role. Non-admins get the default seeded role instead.
-        caller_roles = permission.permission_service.get_user_roles(
-            auth_user.id)
-        if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
-            raise fastapi.HTTPException(
-                status_code=403,
-                detail='Only admins can set a role when creating a service '
-                'account token.')
+        # Only admins may create an admin-role service account; otherwise a
+        # non-admin could escalate by minting an admin-scoped token.
+        if token_body.role == rbac.RoleName.ADMIN.value:
+            caller_roles = permission.permission_service.get_user_roles(
+                auth_user.id)
+            if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
+                raise fastapi.HTTPException(
+                    status_code=403,
+                    detail='Only admins can create a service account with the '
+                    'admin role.')
 
     try:
         # Generate a unique service account user ID

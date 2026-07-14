@@ -97,8 +97,8 @@ class TestCreateServiceAccountTokenRole:
         assert 'Invalid role' in exc.value.detail
 
     @mock.patch('sky.users.server.permission')
-    def test_non_admin_cannot_set_role(self, mock_perm):
-        """A non-admin caller can't create a token with an explicit role."""
+    def test_non_admin_cannot_set_admin_role(self, mock_perm):
+        """A non-admin caller can't create an admin-role token."""
         mock_perm.permission_service.get_user_roles.return_value = ['user']
         body = payloads.ServiceAccountTokenCreateBody(
             token_name='scim_provisioning', expires_in_days=0, role='admin')
@@ -107,6 +107,29 @@ class TestCreateServiceAccountTokenRole:
                 _fake_request(user_id='regular-user'), body)
         assert exc.value.status_code == 403
         assert 'Only admins' in exc.value.detail
+
+    @mock.patch('sky.users.server.global_user_state')
+    @mock.patch('sky.users.server.token_service')
+    @mock.patch('sky.users.server.permission')
+    def test_non_admin_can_set_non_admin_role(self, mock_perm,
+                                              mock_token_service, mock_gus):
+        """A non-admin may create a token with a non-admin role."""
+        mock_gus.add_or_update_user.return_value = True
+        mock_perm.permission_service.get_user_roles.return_value = ['user']
+        mock_token_service.token_service.create_token.return_value = {
+            'token_id': 'tid',
+            'token_hash': 'h',
+            'token': 'sky_x',
+            'expires_at': None,
+        }
+        body = payloads.ServiceAccountTokenCreateBody(token_name='sa_user',
+                                                      expires_in_days=0,
+                                                      role='user')
+        result = users_server.create_service_account_token(
+            _fake_request(user_id='regular-user'), body)
+        assert result['token'] == 'sky_x'
+        assert mock_perm.permission_service.update_role.call_args[0][
+            1] == 'user'
 
     @mock.patch('sky.users.server.global_user_state')
     @mock.patch('sky.users.server.token_service')
