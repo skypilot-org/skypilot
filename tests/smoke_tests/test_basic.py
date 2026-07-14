@@ -1832,6 +1832,7 @@ def test_kubernetes_context_failover(unreachable_context):
 
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency
 def test_debug_dump_unreachable_context_fast_fail(unreachable_context):
     """Debug dump must fast-fail on a dead kube context.
 
