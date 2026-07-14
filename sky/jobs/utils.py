@@ -101,7 +101,15 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 _PROVISION_LOG_POLL_GAP_SECONDS = 1
 
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
-JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
+# Total budget of consecutive failed job-status fetches the controller
+# tolerates while the cluster is confirmed UP, before it recovers
+# (relaunches) the job. On busy HPC-style nodes (e.g. an MPI solve pinning
+# every core) SSH-based status fetches can stall well past a minute while
+# the workload is perfectly healthy, and a recovery relaunch destroys it —
+# so operators running such workloads can extend the budget via the
+# environment on the jobs controller. See skypilot-org/skypilot#10123.
+JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = int(
+    os.environ.get('SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60))
 
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
