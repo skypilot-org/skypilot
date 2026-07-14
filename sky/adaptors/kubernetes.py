@@ -80,13 +80,20 @@ def _api_logging_decorator(logger_src: str, level: int):
     restored: the old restore was racy under concurrent API calls
     (interleaved restores could leave the level set anyway).
     """
+    # Resolve the logger once at decoration (module import) time rather
+    # than inside wrapped(): on Python < 3.13, logging.getLogger() also
+    # acquires the process-wide logging lock on every call (only converted
+    # to the exception-safe context-manager form by the CPython commit
+    # above), so calling it per API call would reintroduce the per-call
+    # global lock traffic this decorator exists to avoid. Loggers are
+    # process-lifetime singletons, so the cached reference stays valid.
+    log = logging.getLogger(logger_src)
 
     def decorated_api(api):
 
         @functools.wraps(api)
         def wrapped(*args, **kwargs):
             result = api(*args, **kwargs)
-            log = logging.getLogger(logger_src)
             if log.level != level:
                 log.setLevel(level)
             return result
