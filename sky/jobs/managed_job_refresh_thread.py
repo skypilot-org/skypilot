@@ -23,14 +23,6 @@ logger = sky_logging.init_logger(__name__)
 _LOCK_PROBE_INTERVAL_SECONDS = 5
 _ACQUIRE_RETRY_INTERVAL_SECONDS = 5
 
-# How often the leader re-evaluates jobs claimed by other server instances
-# (see managed_job_utils.recover_jobs_lost_from_other_servers). ha_recovery
-# only runs once per leadership acquisition, so a job whose remote controller
-# died AFTER that point -- but whose heartbeat still looked fresh at the
-# time -- would otherwise never be picked back up. Not configurable: this is
-# an internal safety-net cadence, not a tuning knob.
-_REMOTE_OWNER_SWEEP_INTERVAL_SECONDS = 30
-
 # How long to wait after acquiring the consolidation-mode lock before running
 # recovery. During a rolling update the new leader blocks on acquire() while
 # the old API server still holds the lock. The lock is released when the old
@@ -145,14 +137,12 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
         finally:
             signal_file.unlink(missing_ok=True)
 
-        # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS, remote-
-        # owner sweep at _REMOTE_OWNER_SWEEP_INTERVAL_SECONDS, lock probe at
-        # _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
+        # Event-loop tick at events.EVENT_CHECKING_INTERVAL_SECONDS,
+        # lock probe at _LOCK_PROBE_INTERVAL_SECONDS, sleep 1s between.
         refresh_event = events.ManagedJobEvent()
         now = time.monotonic()
         last_probe = now
         last_event = now - events.EVENT_CHECKING_INTERVAL_SECONDS
-        last_sweep = now - _REMOTE_OWNER_SWEEP_INTERVAL_SECONDS
         while True:
             now = time.monotonic()
             if now - last_probe >= _LOCK_PROBE_INTERVAL_SECONDS:
@@ -166,14 +156,6 @@ class ManagedJobRefreshDaemonThread(threading.Thread):
                 except Exception:  # pylint: disable=broad-except
                     logger.exception('ManagedJobEvent tick failed; will retry')
                 last_event = now
-            if now - last_sweep >= _REMOTE_OWNER_SWEEP_INTERVAL_SECONDS:
-                # Only runs while we hold the lock (this loop is only
-                # reached, and only continues, while we're the leader).
-                try:
-                    managed_job_utils.recover_jobs_lost_from_other_servers()
-                except Exception:  # pylint: disable=broad-except
-                    logger.exception('Remote-owner sweep failed; will retry')
-                last_sweep = now
             time.sleep(1)
 
     def _lock_still_held(self) -> bool:

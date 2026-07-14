@@ -103,6 +103,11 @@ class ControllerLivenessProvider(abc.ABC):
     # judge whether a *remote* owner is alive. Only a provider that can
     # actually observe other server instances (e.g. via a shared registry)
     # should set this True.
+    #
+    # Gates sky.jobs.utils.update_managed_jobs_statuses's (the janitor's)
+    # remote-owner recovery branch: only when this is True does a DEAD
+    # verdict about a remote-owned job trigger a reset-for-recovery instead
+    # of falling through to the default terminalize-the-job behavior.
     handles_remote_owners: ClassVar[bool] = False
 
     @abc.abstractmethod

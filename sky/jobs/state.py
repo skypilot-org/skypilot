@@ -3455,60 +3455,6 @@ def reset_job_for_recovery(job_id: int, *, expected_pid: Optional[int],
         return result.rowcount == 1
 
 
-def get_nonterminal_jobs_owned_by_other_servers(
-        my_server_id: Optional[str]) -> List[Dict[str, Any]]:
-    """Get non-terminal jobs claimed by a controller_server_id other than
-    ``my_server_id``.
-
-    Used by the remote-owner sweep (sky.jobs.utils.
-    recover_jobs_lost_from_other_servers) to find jobs some other server
-    instance claimed. Queries job_info only -- one row per job, unlike the
-    spot table's one row per task -- so the result is already deduplicated
-    by job_id and needs no join.
-
-    NULL-safe for ``my_server_id``: when it is None, any non-NULL
-    controller_server_id counts as "other" (there is no server identity to
-    compare against, so we can't tell self-claims apart from other-claims by
-    id alone; this only matters for a consolidated deployment that somehow
-    has SKYPILOT_APISERVER_UUID unset).
-
-    Returns dicts with job_id, controller_pid, controller_pid_started_at,
-    controller_server_id, and schedule_state (as a ManagedJobScheduleState,
-    matching get_managed_jobs_with_filters).
-    """
-    terminal_states = (
-        ManagedJobScheduleState.DONE.value,
-        ManagedJobScheduleState.WAITING.value,
-        ManagedJobScheduleState.INACTIVE.value,
-    )
-    where_clause = [
-        job_info_table.c.controller_server_id.isnot(None),
-        job_info_table.c.schedule_state.notin_(terminal_states),
-    ]
-    if my_server_id is not None:
-        where_clause.append(
-            job_info_table.c.controller_server_id != my_server_id)
-
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        rows = session.execute(
-            sqlalchemy.select(
-                job_info_table.c.spot_job_id,
-                job_info_table.c.controller_pid,
-                job_info_table.c.controller_pid_started_at,
-                job_info_table.c.controller_server_id,
-                job_info_table.c.schedule_state,
-            ).where(sqlalchemy.and_(*where_clause))).fetchall()
-
-    return [{
-        'job_id': row.spot_job_id,
-        'controller_pid': row.controller_pid,
-        'controller_pid_started_at': row.controller_pid_started_at,
-        'controller_server_id': row.controller_server_id,
-        'schedule_state': ManagedJobScheduleState(row.schedule_state),
-    } for row in rows]
-
-
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
     engine = _db_manager.get_engine()

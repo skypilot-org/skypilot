@@ -233,27 +233,28 @@ SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL = prom.Counter(
 # A compare-and-swap reset lost the race: the job's controller ownership
 # changed between the caller observing it as dead and the reset attempt,
 # meaning the job was re-claimed (or already reset by another checker) in
-# between. Only ever emitted for the recovery-path checkers (the one-shot
-# ha_recovery and the periodic remote-owner sweep, which share a single
-# CAS-reset helper and are otherwise identical) -- they're the only callers
-# that actually attempt a CAS reset, so `path` is always 'recovery'. The
-# janitor (update_managed_jobs_statuses) never attempts a CAS reset; its
-# ownership-changed re-read-guard skips are recorded via
-# SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL{reason='ownership_changed'} instead,
-# since nothing was written for those.
+# between. Only ever emitted by the two call sites that actually attempt a
+# CAS reset -- the one-shot ha_recovery and the janitor's
+# (update_managed_jobs_statuses) remote-owner recovery branch -- so `path`
+# is always 'recovery'. The janitor's ownership-changed re-read-guard skips
+# for locally-owned jobs are not CAS attempts (nothing is written); those
+# are recorded via
+# SKY_MANAGED_JOBS_SKIPPED_RESET_TOTAL{reason='ownership_changed'} instead.
 SKY_MANAGED_JOBS_RESET_LOST_RACE_TOTAL = prom.Counter(
     'sky_managed_jobs_reset_lost_race_total',
     'Compare-and-swap controller ownership resets that lost the race',
     ['path'],
 )
 
-# Jobs whose controller ownership was reset by the periodic remote-owner
-# sweep (sky.jobs.utils.recover_jobs_lost_from_other_servers) because the
-# claiming server instance was confirmed gone.
+# Jobs whose controller ownership was reset (instead of terminalized) by the
+# janitor's (sky.jobs.utils.update_managed_jobs_statuses) remote-owner
+# recovery branch, because the claiming server instance was confirmed gone by
+# a capability-gated liveness provider (see
+# ControllerLivenessProvider.handles_remote_owners).
 SKY_MANAGED_JOBS_REMOTE_SERVER_RECOVERED_TOTAL = prom.Counter(
     'sky_managed_jobs_remote_server_recovered_total',
-    'Jobs recovered by the remote-owner sweep after their claiming server '
-    'instance was confirmed dead',
+    'Jobs recovered by the janitor after their claiming server instance was '
+    'confirmed dead',
 )
 
 # --- Metrics federation (per remote Kubernetes context) ---

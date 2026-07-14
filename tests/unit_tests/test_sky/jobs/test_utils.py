@@ -1,6 +1,6 @@
 """Unit tests for sky.jobs.utils functions."""
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -1800,152 +1800,6 @@ class TestHaRecoveryForConsolidationMode:
                                            expected_server_id=None)
 
 
-class TestRecoverJobsLostFromOtherServers:
-    """recover_jobs_lost_from_other_servers: the periodic remote-owner sweep
-    (managed_job_refresh_thread.py's safety net for genuine-death starvation
-    -- see ha_recovery's one-shot-per-leadership-acquisition limitation).
-
-    Filtering by server_id/schedule_state has moved into the dedicated SQL
-    query (state.get_nonterminal_jobs_owned_by_other_servers, tested in
-    test_jobs_state.py); this class fakes that query directly and focuses on
-    what the sweep itself does: the handles_remote_owners capability gate,
-    passing my_server_id through, and the per-job verdict/CAS handling.
-    """
-
-    _SERVER_ID_ENV_VAR = 'SKYPILOT_APISERVER_UUID'
-
-    def _patch(self, monkeypatch, jobs):
-        query_mock = MagicMock(return_value=jobs)
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'get_nonterminal_jobs_owned_by_other_servers',
-                            query_mock)
-        return query_mock
-
-    def _job(self, **overrides):
-        job = {
-            'job_id': 1,
-            'controller_pid': 100,
-            'controller_pid_started_at': 1.0,
-            'controller_server_id': 'server-b',
-            'schedule_state': managed_job_state.ManagedJobScheduleState.ALIVE,
-        }
-        job.update(overrides)
-        return job
-
-    def test_noop_without_handles_remote_owners(self, monkeypatch,
-                                                _register_liveness_provider):
-        """The default (local-pid-only) provider's verdicts about a
-        different server's jobs are not authoritative -- the sweep must not
-        even query for remote-owned jobs."""
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        query_mock = self._patch(monkeypatch, [self._job()])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        fake.handles_remote_owners = False
-        reset_mock = MagicMock()
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        query_mock.assert_not_called()
-        fake.check.assert_not_called()
-        reset_mock.assert_not_called()
-
-    def test_runs_with_handles_remote_owners_true(self, monkeypatch,
-                                                  _register_liveness_provider):
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        query_mock = self._patch(monkeypatch, [self._job()])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        fake.handles_remote_owners = True
-        reset_mock = MagicMock(return_value=True)
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        query_mock.assert_called_once_with('my-server')
-        reset_mock.assert_called_once()
-
-    def test_passes_my_server_id_from_env(self, monkeypatch,
-                                          _register_liveness_provider):
-        monkeypatch.delenv(self._SERVER_ID_ENV_VAR, raising=False)
-        query_mock = self._patch(monkeypatch, [])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        fake.handles_remote_owners = True
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        # No SKYPILOT_APISERVER_UUID set -> None, NULL-safe on the query
-        # side (see get_nonterminal_jobs_owned_by_other_servers).
-        query_mock.assert_called_once_with(None)
-
-    def test_dead_remote_owner_resets(self, monkeypatch,
-                                      _register_liveness_provider):
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        self._patch(monkeypatch, [self._job()])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        fake.handles_remote_owners = True
-        reset_mock = MagicMock(return_value=True)
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        reset_mock.assert_called_once_with(1,
-                                           expected_pid=100,
-                                           expected_pid_started_at=1.0,
-                                           expected_server_id='server-b')
-
-    def test_alive_remote_owner_no_reset(self, monkeypatch,
-                                         _register_liveness_provider):
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        self._patch(monkeypatch, [self._job()])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.ALIVE)
-        fake.handles_remote_owners = True
-        reset_mock = MagicMock()
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        reset_mock.assert_not_called()
-
-    def test_unknown_remote_owner_no_reset(self, monkeypatch,
-                                           _register_liveness_provider):
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        self._patch(monkeypatch, [self._job()])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.UNKNOWN)
-        fake.handles_remote_owners = True
-        reset_mock = MagicMock()
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()
-
-        reset_mock.assert_not_called()
-
-    def test_lost_race_does_not_raise(self, monkeypatch,
-                                      _register_liveness_provider):
-        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, 'my-server')
-        self._patch(monkeypatch, [self._job()])
-        fake = _register_liveness_provider(
-            controller_liveness.ControllerLiveness.DEAD)
-        fake.handles_remote_owners = True
-        reset_mock = MagicMock(return_value=False)
-        monkeypatch.setattr(jobs_utils.managed_job_state,
-                            'reset_job_for_recovery', reset_mock)
-
-        jobs_utils.recover_jobs_lost_from_other_servers()  # must not raise
-
-        reset_mock.assert_called_once()
-
-
 class TestUpdateManagedJobsStatusesLiveness:
     """update_managed_jobs_statuses (the janitor): liveness-gated
     terminalize, and the two ownership re-read guards (pre-cleanup and
@@ -2150,3 +2004,192 @@ class TestUpdateManagedJobsStatusesLiveness:
         set_failed_mock.assert_not_called()
         record_mock.assert_called_once_with(reason='ownership_changed')
         lost_race_mock.assert_not_called()
+
+
+class TestUpdateManagedJobsStatusesRemoteRecovery:
+    """update_managed_jobs_statuses (the janitor): the remote-owner recovery
+    branch (sky.jobs.controller_liveness.ControllerLivenessProvider.
+    handles_remote_owners), which resets -- instead of terminalizing -- a
+    job whose DEAD verdict is about a controller claimed by a DIFFERENT,
+    capability-vouched-for server instance.
+    """
+
+    JOB_ID = 42
+    PID = 100
+    PID_STARTED_AT = 1.0
+    MY_SERVER_ID = 'my-server'
+    REMOTE_SERVER_ID = 'server-b'
+    _SERVER_ID_ENV_VAR = 'SKYPILOT_APISERVER_UUID'
+
+    def _task(self, **overrides):
+        task = {
+            'job_id': self.JOB_ID,
+            'job_name': 'job',
+            'pool': None,
+            'schedule_state': managed_job_state.ManagedJobScheduleState.ALIVE,
+            'controller_pid': self.PID,
+            'controller_pid_started_at': self.PID_STARTED_AT,
+            'controller_server_id': self.REMOTE_SERVER_ID,
+            'status': managed_job_state.ManagedJobStatus.RUNNING,
+        }
+        task.update(overrides)
+        return task
+
+    def _patch_common(self, monkeypatch, tmp_path, task):
+        monkeypatch.setenv(self._SERVER_ID_ENV_VAR, self.MY_SERVER_ID)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_jobs_to_check_status',
+                            lambda job_id=None: [self.JOB_ID])
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'get_managed_job_tasks', lambda job_id: [task])
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_schedule_state',
+            lambda job_id: managed_job_state.ManagedJobScheduleState.ALIVE)
+        set_failed_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'set_failed',
+                            set_failed_mock)
+        monkeypatch.setattr(jobs_utils.scheduler, 'job_done', MagicMock())
+        # Only exercised by the terminalize fallback (the re-read guards);
+        # the reset path never reaches these, but a matching owner keeps
+        # that fallback well-behaved for the tests that expect it.
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_job_owner_record',
+            lambda job_id: controller_liveness.JobOwnerRecord(
+                pid=self.PID,
+                pid_started_at=self.PID_STARTED_AT,
+                server_id=task['controller_server_id'],
+                legacy_job_id=self.JOB_ID))
+        monkeypatch.setattr(jobs_utils.global_user_state,
+                            'get_handle_from_cluster_name', lambda name: None)
+        # Isolated from the real ~/.sky, same as
+        # TestUpdateManagedJobsStatusesLiveness._patch_common.
+        monkeypatch.setattr(jobs_utils.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(tmp_path / 'restarting_signal'))
+        return set_failed_mock
+
+    def test_remote_owned_dead_capable_provider_resets(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
+        reset_mock = MagicMock(return_value=True)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+        recovered_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils, '_record_remote_server_recovered',
+                            recovered_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        reset_mock.assert_called_once_with(
+            self.JOB_ID,
+            expected_pid=self.PID,
+            expected_pid_started_at=self.PID_STARTED_AT,
+            expected_server_id=self.REMOTE_SERVER_ID)
+        recovered_mock.assert_called_once_with()
+        set_failed_mock.assert_not_called()
+
+    def test_remote_owned_dead_default_provider_terminalizes(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """Without a capable provider, a DEAD verdict about a remote pid is
+        untrustworthy -- fall through to the pre-existing terminalize
+        behavior (exact master parity for no-plugin deployments)."""
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = False
+        reset_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        reset_mock.assert_not_called()
+        set_failed_mock.assert_called_once()
+        assert (set_failed_mock.call_args.kwargs['failure_type'] ==
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER)
+
+    def test_remote_owned_unknown_capable_provider_skips(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.UNKNOWN)
+        fake.handles_remote_owners = True
+        reset_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        reset_mock.assert_not_called()
+        set_failed_mock.assert_not_called()
+
+    def test_remote_owned_dead_capable_provider_lost_race(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        set_failed_mock = self._patch_common(monkeypatch, tmp_path,
+                                             self._task())
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
+        reset_mock = MagicMock(return_value=False)
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+        lost_race_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils, '_record_reset_lost_race',
+                            lost_race_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        reset_mock.assert_called_once()
+        lost_race_mock.assert_called_once_with()
+        set_failed_mock.assert_not_called()
+
+    def test_local_owned_dead_terminalizes_unchanged(
+            self, monkeypatch, tmp_path, _register_liveness_provider):
+        """A DEAD verdict about a job owned by THIS server instance must
+        still terminalize as before -- the remote-owner recovery branch is
+        gated on owner.server_id != this server, not merely non-None."""
+        set_failed_mock = self._patch_common(
+            monkeypatch, tmp_path,
+            self._task(controller_server_id=self.MY_SERVER_ID))
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
+        reset_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        reset_mock.assert_not_called()
+        set_failed_mock.assert_called_once()
+
+    @pytest.mark.parametrize('schedule_state', [
+        managed_job_state.ManagedJobScheduleState.DONE,
+        managed_job_state.ManagedJobScheduleState.WAITING,
+        managed_job_state.ManagedJobScheduleState.INACTIVE,
+    ])
+    def test_ineligible_schedule_state_terminalizes_instead_of_resetting(
+            self, monkeypatch, tmp_path, _register_liveness_provider,
+            schedule_state):
+        """A remote-owned job in a schedule state that's ineligible for
+        reset (mirrors ha_recovery_for_consolidation_mode's exclusion set)
+        must still terminalize, not be reset for recovery."""
+        set_failed_mock = self._patch_common(
+            monkeypatch, tmp_path, self._task(schedule_state=schedule_state))
+        fake = _register_liveness_provider(
+            controller_liveness.ControllerLiveness.DEAD)
+        fake.handles_remote_owners = True
+        reset_mock = MagicMock()
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery', reset_mock)
+
+        jobs_utils.update_managed_jobs_statuses(self.JOB_ID)
+
+        reset_mock.assert_not_called()
+        set_failed_mock.assert_called_once()

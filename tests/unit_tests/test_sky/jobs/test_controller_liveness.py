@@ -287,10 +287,10 @@ class TestLocalPidLivenessProvider:
 
     def test_does_not_handle_remote_owners(self):
         """A local-pid-only provider's verdicts about a job claimed by a
-        different server instance are not authoritative -- the remote-owner
-        sweep (sky.jobs.utils.recover_jobs_lost_from_other_servers) must not
-        run against it. This is also the ControllerLivenessProvider ABC's
-        default."""
+        different server instance are not authoritative -- the janitor's
+        remote-owner recovery branch (sky.jobs.utils.
+        update_managed_jobs_statuses) must not run against it. This is also
+        the ControllerLivenessProvider ABC's default."""
         assert controller_liveness.LocalPidLivenessProvider.handles_remote_owners is False
 
 
