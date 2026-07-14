@@ -46,7 +46,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import ux_utils
-from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1129,22 +1128,26 @@ def _kube_coordinates_for_handle(
 
     Returns None for clusters that aren't on Kubernetes. The coordinates come
     from the cluster YAML's provider config -- static launch-time facts that
-    exist from the moment provisioning starts. Resolving them through
-    handle.get_command_runners() would not work here: for a cluster that never
-    finished provisioning, cached_cluster_info is unset, so the runner path
-    makes a live get_cluster_info() call that requires a Running head pod --
-    failing on exactly the stuck-in-INIT launches (e.g. pods Pending in a
-    Kueue queue) whose k8s state the dump most needs to capture.
+    exist from the moment provisioning starts. The cluster YAML itself is
+    fetched from the database (with a legacy on-disk fallback), since
+    provisioning deletes the on-disk copy once the YAML is committed to the
+    database. Resolving the coordinates through handle.get_command_runners()
+    would not work here: for a cluster that never finished provisioning,
+    cached_cluster_info is unset, so the runner path makes a live
+    get_cluster_info() call that requires a Running head pod -- failing on
+    exactly the stuck-in-INIT launches (e.g. pods Pending in a Kueue queue)
+    whose k8s state the dump most needs to capture.
     """
     launched_resources = getattr(handle, 'launched_resources', None)
     cloud = getattr(launched_resources, 'cloud', None)
     if not isinstance(cloud, clouds.Kubernetes):
         return None
 
-    # Raises on a missing/unreadable YAML; the caller records that as a dump
-    # error for this cluster rather than silently skipping it.
-    provider_config = yaml_utils.read_yaml(handle.cluster_yaml).get(
-        'provider', {})
+    # Raises on a missing/None YAML (from the database or the legacy on-disk
+    # fallback); the caller records that as a dump error for this cluster
+    # rather than silently skipping it.
+    provider_config = global_user_state.get_cluster_yaml_dict(
+        handle.cluster_yaml).get('provider', {})
     context = kubernetes_utils.get_context_from_config(provider_config)
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     return context, namespace

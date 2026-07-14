@@ -3849,15 +3849,20 @@ class TestResolveRemoteSkyletLogPath:
 class TestCollectClusterKubernetesResources:
     """Tests for the _collect_cluster_kubernetes_resources helper."""
 
-    def _k8s_handle(self, tmp_path, context='ctx', namespace='ns'):
+    def _k8s_handle(self, tmp_path):
+        """Build a handle whose cluster_yaml points at a path that does NOT
+        exist on disk.
+
+        This mirrors production: backend_utils.write_cluster_config commits
+        the final cluster YAML to the database via
+        global_user_state.set_cluster_yaml(...) and then deletes the on-disk
+        tmp file, so for any cluster launched by current code there is
+        nothing to read at handle.cluster_yaml on the local filesystem.
+        """
         handle = mock.Mock()
         handle.launched_resources.cloud = clouds.Kubernetes()
         handle.cluster_name_on_cloud = 'cluster-abc'
-        yaml_path = tmp_path / 'cluster.yaml'
-        yaml_path.write_text(f'provider:\n'
-                             f'  context: {context}\n'
-                             f'  namespace: {namespace}\n')
-        handle.cluster_yaml = str(yaml_path)
+        handle.cluster_yaml = str(tmp_path / 'cluster.yaml')
         return handle
 
     def test_non_kubernetes_cluster_is_noop(self, tmp_path):
@@ -3874,13 +3879,22 @@ class TestCollectClusterKubernetesResources:
         dump.assert_not_called()
         assert not errors
 
-    def test_delegates_with_coordinates_from_cluster_yaml(self, tmp_path):
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_yaml_dict')
+    def test_delegates_with_coordinates_from_cluster_yaml(
+            self, mock_get_yaml_dict, tmp_path):
         """Context/namespace come from the cluster YAML's provider config;
         the dump finds the cluster's objects by label, so no pod names needed.
         Crucially, command runners are never built: they require a Running
         head pod, which an INIT cluster (e.g. pods Pending in a Kueue queue)
         doesn't have -- exactly the launches this dump must still cover."""
         handle = self._k8s_handle(tmp_path)
+        mock_get_yaml_dict.return_value = {
+            'provider': {
+                'context': 'ctx',
+                'namespace': 'ns'
+            }
+        }
 
         errors: List[Dict[str, str]] = []
         with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
@@ -3888,6 +3902,7 @@ class TestCollectClusterKubernetesResources:
             debug_utils._collect_cluster_kubernetes_resources(
                 'mycluster', str(tmp_path), handle, errors)
 
+        mock_get_yaml_dict.assert_called_once_with(handle.cluster_yaml)
         dump.assert_called_once_with(context='ctx',
                                      namespace='ns',
                                      cluster_name_on_cloud='cluster-abc',
@@ -3904,11 +3919,19 @@ class TestCollectClusterKubernetesResources:
         assert mapping['cluster_name_on_cloud'] == 'cluster-abc'
         assert mapping['context_dir'].startswith('kubernetes_contexts/')
 
-    def test_in_cluster_context_maps_to_none(self, tmp_path):
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_yaml_dict')
+    def test_in_cluster_context_maps_to_none(self, mock_get_yaml_dict,
+                                             tmp_path):
         """The in-cluster context name resolves to context=None (in-cluster
         auth), matching how the provisioner reads the same provider config."""
-        handle = self._k8s_handle(
-            tmp_path, context=adaptors_kubernetes.in_cluster_context_name())
+        handle = self._k8s_handle(tmp_path)
+        mock_get_yaml_dict.return_value = {
+            'provider': {
+                'context': adaptors_kubernetes.in_cluster_context_name(),
+                'namespace': 'ns'
+            }
+        }
 
         errors: List[Dict[str, str]] = []
         with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
@@ -3919,9 +3942,18 @@ class TestCollectClusterKubernetesResources:
         assert dump.call_args.kwargs['context'] is None
         assert not errors
 
-    def test_provider_errors_are_prefixed_with_cluster(self, tmp_path):
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_yaml_dict')
+    def test_provider_errors_are_prefixed_with_cluster(self, mock_get_yaml_dict,
+                                                       tmp_path):
         """Errors from the provider are re-tagged with component + cluster."""
         handle = self._k8s_handle(tmp_path)
+        mock_get_yaml_dict.return_value = {
+            'provider': {
+                'context': 'ctx',
+                'namespace': 'ns'
+            }
+        }
         provider_errors = [{
             'resource': 'kubernetes/pods/pod-head',
             'error': 'boom',
@@ -3941,8 +3973,18 @@ class TestCollectClusterKubernetesResources:
             'traceback': 'tb',
         }]
 
-    def test_coordinate_failure_is_recorded(self, tmp_path):
-        """A k8s cluster whose YAML is missing records one error."""
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_yaml_dict',
+                side_effect=ValueError('Attempted to read a None YAML.'))
+    def test_coordinate_failure_is_recorded(self, mock_get_yaml_dict, tmp_path):
+        """A k8s cluster whose YAML is missing records one error.
+
+        The accessor is mocked (rather than exercising the real
+        global_user_state DB path) so this test stays hermetic -- it
+        mirrors the ValueError the real accessor raises for a None
+        cluster_yaml without touching a real DB engine.
+        """
+        del mock_get_yaml_dict  # only need the side_effect
         handle = mock.Mock()
         handle.launched_resources.cloud = clouds.Kubernetes()
         handle.cluster_yaml = None
@@ -3957,6 +3999,43 @@ class TestCollectClusterKubernetesResources:
         assert len(errors) == 1
         assert errors[0]['resource'] == 'mycluster/kubernetes'
         assert errors[0]['component'] == 'clusters'
+
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_yaml_dict')
+    def test_coordinates_resolve_from_db_when_yaml_not_on_disk(
+            self, mock_get_yaml_dict, tmp_path):
+        """Regression test: cluster YAMLs live in the database, not on disk.
+
+        backend_utils.write_cluster_config commits the final cluster YAML to
+        the database and then deletes the on-disk tmp file, so
+        handle.cluster_yaml points at a path with nothing there for any
+        cluster launched by current code. The debug dump must resolve kube
+        coordinates via the DB-backed accessor
+        (global_user_state.get_cluster_yaml_dict) rather than reading the
+        filesystem, or this would fail for every such cluster.
+        """
+        handle = self._k8s_handle(tmp_path)
+        assert not os.path.exists(handle.cluster_yaml)
+        mock_get_yaml_dict.return_value = {
+            'provider': {
+                'context': 'db-ctx',
+                'namespace': 'db-ns'
+            }
+        }
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.provision.kubernetes.debug.dump_cluster_resources',
+                        return_value=[]) as dump:
+            debug_utils._collect_cluster_kubernetes_resources(
+                'mycluster', str(tmp_path), handle, errors)
+
+        mock_get_yaml_dict.assert_called_once_with(handle.cluster_yaml)
+        dump.assert_called_once_with(context='db-ctx',
+                                     namespace='db-ns',
+                                     cluster_name_on_cloud='cluster-abc',
+                                     output_dir=os.path.join(
+                                         str(tmp_path), 'kubernetes'))
+        assert not errors
 
     def test_empty_str_exception_still_yields_error_message(self, tmp_path):
         """Exceptions that stringify to '' (e.g. FetchClusterInfoError) must
