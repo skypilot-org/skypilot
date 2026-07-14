@@ -508,29 +508,43 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 
 @pytest.mark.kubernetes
-def test_kubernetes_non_debian_image():
-    """A non-Debian image boots on Kubernetes (pkg-manager-agnostic bootstrap).
+@pytest.mark.parametrize(
+    'image,pkg_mgr',
+    [
+        # RHEL family / dnf -- community rebuild (validated on real hardware).
+        ('rockylinux:9', 'dnf'),
+        # RHEL family / dnf -- Red Hat's official UBI (the motivating image
+        # family; UBI ships the free ubi repos so prereqs install cleanly).
+        ('redhat/ubi9', 'dnf'),
+        # SUSE family / zypper -- a distinct package manager (exercises the
+        # openssh-server -> openssh name mapping).
+        ('opensuse/leap:15', 'zypper'),
+    ])
+def test_kubernetes_non_debian_image(image, pkg_mgr):
+    """A range of non-Debian images boot on Kubernetes (pkg-manager-agnostic
+    bootstrap).
 
-    The per-node bootstrap detects the image's package manager (dnf here)
-    rather than assuming Debian apt/dpkg, so a RHEL-family image reaches the
-    SkyPilot runtime and runs jobs. Regression test for the previously
+    The per-node bootstrap detects the image's package manager (dnf/zypper
+    here) rather than assuming Debian apt/dpkg, so RHEL- and SUSE-family images
+    reach the SkyPilot runtime and run jobs. Regression test for the previously
     Debian-only bootstrap, which failed such images during setup with a
-    misleading `container not found ("ray-node")`. Rocky Linux 9 is glibc-based
-    (unlike Alpine/musl, whose conda/uv runtime is unrelated to this path).
+    misleading `container not found ("ray-node")`. All images here are
+    glibc-based; Alpine/musl is intentionally excluded because its conda/uv
+    runtime is unrelated to (and would mask) this bootstrap path.
     """
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'kubernetes_non_debian_image',
         [
             # `sky launch` returns 0 only if the non-apt bootstrap installed the
-            # prereqs and ray came up on the Rocky Linux 9 (dnf) image.
+            # prereqs and ray came up on the non-Debian image.
             f'sky launch -y -c {name} --infra kubernetes '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
-            f'--image-id docker:rockylinux:9',
-            # Confirm it really ran on the RHEL-family image (not a fallback):
-            # a RHEL-family os-release and no apt-get on PATH.
+            f'--image-id docker:{image}',
+            # Confirm it really ran on the non-Debian image (not a fallback):
+            # the image's own package manager is present and apt-get is not.
             f'sky exec {name} '
-            f'\'grep -qi rocky /etc/os-release && ! command -v apt-get\'',
+            f'\'command -v {pkg_mgr} && ! command -v apt-get\'',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
