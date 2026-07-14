@@ -1831,6 +1831,7 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
 def test_debug_dump_unreachable_context_fast_fail(unreachable_context):
     """Debug dump must fast-fail on a dead kube context.
 
@@ -1843,10 +1844,12 @@ def test_debug_dump_unreachable_context_fast_fail(unreachable_context):
     The cluster-on-a-dead-context path (skylet-log and managed-jobs
     gating) can't be built in CI -- a launch on a dead context fails -- and
     is pinned by unit tests instead (test_debug_utils.py).
+
+    Marked no_remote_server: the fixture injects the dead context into the
+    kubeconfig on the machine running the test, but against a remote API
+    server the kubeconfig the server reads lives elsewhere, so the injected
+    context never reaches existing_allowed_contexts() and no marker is dumped.
     """
-    if smoke_tests_utils.is_non_docker_remote_api_server():
-        pytest.skip('Kubernetes configs and credentials are located on the '
-                    'remote API server, not the machine running the test')
     if unreachable_context is None:
         pytest.skip('No kubeconfig available to inject the dead context into')
 
