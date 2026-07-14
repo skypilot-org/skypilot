@@ -45,7 +45,7 @@ def resnet50_estimate_runtime(resources):
         elif instance == 'g4dn.metal':
             num_t4s = 8
         else:
-            assert False, 'Not supported: {}'.format(resources)
+            raise ValueError('Not supported: {}'.format(resources))
         return _gpu(num_t4s, T4_PEAK_FLOPS)
 
     elif isinstance(resources.cloud, sky.GCP):
