@@ -62,6 +62,17 @@ class TestProbePorts:
 class TestRayStartCommands:
     """ray_head_start_command / ray_worker_start_command behavior."""
 
+    def test_head_stops_ray_by_default(self):
+        cmd = instance_setup.ray_head_start_command(custom_resource=None,
+                                                    custom_ray_options=None)
+        assert f'{constants.SKY_RAY_CMD} stop; ' in cmd
+
+    def test_head_skips_ray_stop_after_boot(self):
+        cmd = instance_setup.ray_head_start_command(custom_resource=None,
+                                                    custom_ray_options=None,
+                                                    no_restart=True)
+        assert f'{constants.SKY_RAY_CMD} stop; ' not in cmd
+
     def test_head_uses_default_ports_when_env_vars_unset(self):
         cmd = instance_setup.ray_head_start_command(custom_resource=None,
                                                     custom_ray_options=None)

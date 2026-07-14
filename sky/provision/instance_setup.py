@@ -393,7 +393,8 @@ _SHARED_RAY_PORT_FLAGS = (
 
 
 def ray_head_start_command(custom_resource: Optional[str],
-                           custom_ray_options: Optional[Dict[str, Any]]) -> str:
+                           custom_ray_options: Optional[Dict[str, Any]],
+                           no_restart: bool = False) -> str:
     """Returns the command to start Ray on the head node."""
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
@@ -416,8 +417,9 @@ def ray_head_start_command(custom_resource: Optional[str],
         for key, value in custom_ray_options.items():
             ray_options += f' --{key}={value}'
 
+    stop_ray = '' if no_restart else f'{constants.SKY_RAY_CMD} stop; '
     cmd = (
-        _host_network_probe_cmd('head') + f'{constants.SKY_RAY_CMD} stop; '
+        _host_network_probe_cmd('head') + stop_ray +
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         # worker_maximum_startup_concurrency controls the maximum number of
         # workers that can be started concurrently. However, it also controls
@@ -481,7 +483,8 @@ def ray_worker_start_command(custom_resource: Optional[str],
 @timeline.event
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_info: common.ClusterInfo,
-                           ssh_credentials: Dict[str, Any]) -> None:
+                           ssh_credentials: Dict[str, Any],
+                           no_restart: bool) -> None:
     """Start Ray on the head node."""
     runners = provision.get_command_runners(cluster_info.provider_name,
                                             cluster_info, **ssh_credentials)
@@ -492,7 +495,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # Log the head node's output to the provision.log
     log_path_abs = str(provision_logging.get_log_path())
     cmd = ray_head_start_command(custom_resource,
-                                 cluster_info.custom_ray_options)
+                                 cluster_info.custom_ray_options, no_restart)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = head_runner.run(
