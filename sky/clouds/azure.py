@@ -734,6 +734,31 @@ class Azure(clouds.Cloud):
         return azure_subscription_id
 
     @classmethod
+    def check_quota_available(cls,
+                              resources: 'resources.Resources') -> bool:
+        """Check if Azure quota is available based on `resources`.
+
+        Azure-specific implementation of check_quota_available. The
+        function works by fetching a TTL-cached per-region quota snapshot
+        (the Compute Usage API for per-family and regional vCPU headroom,
+        and the Resource SKUs API for subscription restrictions) and
+        comparing the headroom against the instance type's vCPU count.
+        Mirrors the AWS/GCP contract: False only on a conclusive no; True
+        on any doubt, so a provisionable region is never skipped.
+
+        Returns:
+            False if the region conclusively cannot provision the
+            instance type, and True otherwise.
+        """
+        resources = resources.assert_launchable()
+        instance_type = resources.instance_type
+        region = resources.region
+        if region is None:
+            return True
+        return azure_utils.check_quota_available(instance_type, region,
+                                                 resources.use_spot)
+
+    @classmethod
     def _is_s_series(cls, instance_type: Optional[str]) -> bool:
         # For azure naming convention, see https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions  # pylint: disable=line-too-long
         if instance_type is None:

@@ -1,5 +1,7 @@
 """Utilies for Azure"""
 
+import threading
+import time
 import typing
 
 from sky import exceptions
@@ -185,3 +187,188 @@ def get_shared_image_gallery_image_size(
     except azure.exceptions().AzureError as e:
         raise exceptions.ResourcesUnavailableError(
             f'Failed to get Shared Image Gallery image size: {e}.') from e
+
+
+class RegionQuotaCapacity(typing.NamedTuple):
+    """One region's quota picture for the current subscription.
+
+    ``family_headroom`` maps a normalized family name (lowercase, spaces
+    stripped, since the Usage API emits names like ``standard NDASv4_A100
+    Family`` with stray spaces) to remaining vCPUs (limit - current).
+    ``family_by_sku`` keeps the Resource SKUs API's original casing;
+    normalize with :func:`_normalize_family` when joining against
+    ``family_headroom``.
+    """
+    family_headroom: typing.Dict[str, int]
+    total_vcpu_headroom: typing.Optional[int]
+    restricted_skus: typing.FrozenSet[str]
+    family_by_sku: typing.Dict[str, str]
+    # SKUs whose CpuArchitectureType capability is not x64 (ARM sizes).
+    # SkyPilot's Azure provisioner deploys x64 images with no architecture
+    # handling, so creates on these sizes always fail.
+    arm64_skus: typing.FrozenSet[str]
+    # SKUs carrying a ConfidentialComputingType capability (DCas/ECas SNP
+    # etc.). They can only be created with securityType=ConfidentialVM;
+    # SkyPilot provisions standard security-type VMs, so Azure rejects the
+    # create ("not supported ... with '<NULL>' security type").
+    confidential_skus: typing.FrozenSet[str]
+
+
+class _TimedQuotaSnapshot(typing.NamedTuple):
+    fetched_at: float
+    capacity: RegionQuotaCapacity
+
+
+# Quota moves as VMs come and go, but the two Azure API round-trips per
+# region take seconds; a short TTL turns a multi-SKU, multi-region
+# failover into at most one fetch per region.
+_QUOTA_SNAPSHOT_TTL_SECONDS = 300.0
+_quota_snapshot_lock = threading.Lock()
+_quota_snapshots: typing.Dict[str, _TimedQuotaSnapshot] = {}
+
+
+def _normalize_family(name: str) -> str:
+    """Normalizes a family name for matching across the two Azure APIs."""
+    return name.replace(' ', '').lower()
+
+
+def _fetch_region_quota_capacity(region: str) -> RegionQuotaCapacity:
+    """Fetches the region's quota picture (Usage + Resource SKUs APIs).
+
+    Raises:
+        Exception: Any Azure SDK failure; callers treat it as
+            inconclusive (quota assumed available).
+    """
+    compute_client = azure.get_client('compute', azure.get_subscription_id())
+
+    family_headroom: typing.Dict[str, int] = {}
+    total_vcpu_headroom: typing.Optional[int] = None
+    for usage in compute_client.usage.list(region):
+        name = _normalize_family(str(usage.name.value))
+        headroom = int(usage.limit) - int(usage.current_value)
+        if name == 'cores':
+            total_vcpu_headroom = headroom
+        else:
+            family_headroom[name] = headroom
+
+    restricted: typing.Set[str] = set()
+    arm64: typing.Set[str] = set()
+    confidential: typing.Set[str] = set()
+    family_by_sku: typing.Dict[str, str] = {}
+    for sku in compute_client.resource_skus.list(
+            filter=f'location eq {region!r}'):
+        if str(sku.resource_type) != 'virtualMachines':
+            continue
+        name = str(sku.name)
+        family_by_sku[name] = str(sku.family or '')
+        for restriction in sku.restrictions or []:
+            if (str(restriction.reason_code) == 'NotAvailableForSubscription'
+                    and 'Location' in str(restriction.type)):
+                restricted.add(name)
+        for capability in sku.capabilities or []:
+            if (str(capability.name) == 'CpuArchitectureType' and
+                    str(capability.value).lower() != 'x64'):
+                arm64.add(name)
+            if str(capability.name) == 'ConfidentialComputingType':
+                confidential.add(name)
+
+    return RegionQuotaCapacity(family_headroom=family_headroom,
+                               total_vcpu_headroom=total_vcpu_headroom,
+                               restricted_skus=frozenset(restricted),
+                               family_by_sku=family_by_sku,
+                               arm64_skus=frozenset(arm64),
+                               confidential_skus=frozenset(confidential))
+
+
+def get_region_quota_capacity(region: str) -> RegionQuotaCapacity:
+    """Returns a TTL-cached quota snapshot for ``region``."""
+    with _quota_snapshot_lock:
+        cached = _quota_snapshots.get(region)
+        age = None if cached is None else time.monotonic() - cached.fetched_at
+        if age is not None and age < _QUOTA_SNAPSHOT_TTL_SECONDS:
+            return cached.capacity
+    # Fetch outside the lock so slow Azure calls do not serialize
+    # other regions; stamp the time after the fetch so a slow fetch does
+    # not shorten the snapshot's effective TTL.
+    capacity = _fetch_region_quota_capacity(region)
+    with _quota_snapshot_lock:
+        _quota_snapshots[region] = _TimedQuotaSnapshot(
+            fetched_at=time.monotonic(), capacity=capacity)
+    return capacity
+
+
+def _instance_type_vcpus(instance_type: str) -> int:
+    """vCPUs the instance type consumes, from the catalog (0 = unknown)."""
+    # pylint: disable=import-outside-toplevel
+    from sky import catalog
+    try:
+        vcpus, _ = catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                            clouds='azure')
+        return int(vcpus) if vcpus else 0
+    except Exception:  # pylint: disable=broad-except
+        # Inconclusive: callers fall back to a nonzero-quota check.
+        return 0
+
+
+def check_quota_available(instance_type: str, region: str,
+                          use_spot: bool) -> bool:
+    """Checks whether ``instance_type`` has launchable quota in ``region``.
+
+    Mirrors the AWS/GCP contract: returns False only on a conclusive no
+    (the SKU is restricted for the subscription in the region, the SKU is
+    not sold there, or the vCPU family / regional-total headroom is smaller
+    than the SKU's vCPUs); returns True on any doubt (API failure, unknown
+    SKU size, missing family row) so a provisionable region is never
+    preemptively skipped.
+
+    Args:
+        instance_type: Azure SKU name (e.g. ``Standard_NC40ads_H100_v5``).
+        region: Azure region name (e.g. ``southcentralus``).
+        use_spot: Whether the check is for a spot instance; gated on the
+            region-wide low-priority vCPU bucket instead of the on-demand
+            family quota.
+
+    Returns:
+        False if the region conclusively cannot provision the instance
+        type, True otherwise.
+    """
+    try:
+        capacity = get_region_quota_capacity(region)
+    except Exception:  # pylint: disable=broad-except
+        # Inconclusive; never block a provision on a failed probe.
+        return True
+
+    if instance_type in capacity.restricted_skus:
+        return False
+    # SKUs SkyPilot's Azure provisioner cannot create as it deploys VMs
+    # today (standard security type, x64 images): a provision attempt is
+    # destined to fail, which is exactly what this check exists to skip.
+    # Once security type / image architecture are modeled in Resources,
+    # these two gates should be conditioned on the request instead.
+    if instance_type in capacity.confidential_skus:
+        return False
+    if instance_type in capacity.arm64_skus:
+        return False
+
+    family_raw = capacity.family_by_sku.get(instance_type)
+    if not family_raw:
+        # The SKU is not sold in this region at all.
+        return False
+    family = _normalize_family(family_raw)
+
+    needed = _instance_type_vcpus(instance_type)
+    if needed <= 0:
+        # Size unknown: only the conclusive zero-quota case can block.
+        needed = 1
+
+    if use_spot:
+        spot_headroom = capacity.family_headroom.get('lowprioritycores')
+        return spot_headroom is None or spot_headroom >= needed
+
+    family_headroom = capacity.family_headroom.get(family)
+    if family_headroom is not None and family_headroom < needed:
+        return False
+    if (capacity.total_vcpu_headroom is not None and
+            capacity.total_vcpu_headroom < needed):
+        return False
+    return True

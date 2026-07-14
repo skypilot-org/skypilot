@@ -263,3 +263,169 @@ def _make_arm_template():
             },
         }
     }
+
+
+class TestCheckQuotaAvailable:
+    """Tests for azure_utils.check_quota_available."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_snapshots(self):
+        azure_utils._quota_snapshots.clear()
+        yield
+        azure_utils._quota_snapshots.clear()
+
+    def _capacity(self,
+                  family_headroom,
+                  total=10_000,
+                  restricted=frozenset(),
+                  family_by_sku=None,
+                  arm64=frozenset(),
+                  confidential=frozenset()):
+        return azure_utils.RegionQuotaCapacity(
+            family_headroom=family_headroom,
+            total_vcpu_headroom=total,
+            restricted_skus=restricted,
+            family_by_sku=family_by_sku or {},
+            arm64_skus=arm64,
+            confidential_skus=confidential)
+
+    def test_restricted_sku_is_conclusively_unavailable(self, monkeypatch):
+        capacity = self._capacity(
+            family_headroom={'standardhbv3family': 3540},
+            restricted=frozenset({'Standard_HB120rs_v3'}),
+            family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'southcentralus', False)
+
+    def test_insufficient_family_headroom_blocks(self, monkeypatch):
+        capacity = self._capacity(
+            family_headroom={'standardncadsh100v5family': 20},
+            family_by_sku={'Standard_NC40ads_H100_v5':
+                               'StandardNCadsH100v5Family'})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 40)
+        assert not azure_utils.check_quota_available(
+            'Standard_NC40ads_H100_v5', 'australiaeast', False)
+
+    def test_sufficient_headroom_allows(self, monkeypatch):
+        capacity = self._capacity(
+            family_headroom={'standardhbv3family': 3540},
+            family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        assert azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                 'southcentralus', False)
+
+    def test_total_regional_vcpu_headroom_blocks(self, monkeypatch):
+        # Family quota alone is not enough; the regional total gates too.
+        capacity = self._capacity(
+            family_headroom={'standardhbv3family': 3540},
+            total=100,
+            family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'southcentralus', False)
+
+    def test_sku_not_sold_in_region_blocks(self, monkeypatch):
+        capacity = self._capacity(family_headroom={})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'koreacentral', False)
+
+    def test_probe_failure_is_inconclusive_never_blocks(self, monkeypatch):
+        # Mirrors AWS/GCP: an API failure must not skip a region.
+        def boom(region):
+            raise RuntimeError('SDK exploded')
+
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity', boom)
+        assert azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                 'southcentralus', False)
+
+    def test_spot_gates_on_low_priority_bucket(self, monkeypatch):
+        capacity = self._capacity(
+            family_headroom={
+                'standardhbv3family': 3540,
+                'lowprioritycores': 8,
+            },
+            family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'southcentralus', True)
+        assert azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                 'southcentralus', False)
+
+    def test_arm64_and_confidential_skus_are_unprovisionable(
+            self, monkeypatch):
+        # The provisioner deploys standard-security-type x64 VMs, so these
+        # sizes always fail at create time regardless of quota headroom.
+        capacity = self._capacity(
+            family_headroom={
+                'standarddpsv5family': 64,
+                'standardecadsv5family': 64,
+            },
+            family_by_sku={
+                'Standard_D2ps_v5': 'standardDPSv5Family',
+                'Standard_EC20ads_v5': 'standardECADSv5Family',
+            },
+            arm64=frozenset({'Standard_D2ps_v5'}),
+            confidential=frozenset({'Standard_EC20ads_v5'}))
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        assert not azure_utils.check_quota_available(
+            'Standard_D2ps_v5', 'southcentralus', False)
+        assert not azure_utils.check_quota_available(
+            'Standard_EC20ads_v5', 'southcentralus', False)
+
+    def test_unknown_instance_size_blocks_only_on_zero_quota(
+            self, monkeypatch):
+        # An unsized SKU degrades to a nonzero-quota check (needed=1).
+        capacity = self._capacity(
+            family_headroom={'standardhbv3family': 0},
+            family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: capacity)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 0)
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'southcentralus', False)
+
+    def test_snapshot_is_ttl_cached_per_region(self, monkeypatch):
+        calls = []
+
+        def fake_fetch(region):
+            calls.append(region)
+            return self._capacity(
+                family_headroom={'standardhbv3family': 3540},
+                family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
+                            fake_fetch)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        for _ in range(3):
+            azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                              'southcentralus', False)
+        azure_utils.check_quota_available('Standard_HB120rs_v3', 'eastus',
+                                          False)
+        assert calls == ['southcentralus', 'eastus']
+
+    def test_usage_family_names_are_normalized(self):
+        # The Usage API emits family names with stray spaces and mixed
+        # casing; matching against Resource SKUs families must survive it.
+        assert azure_utils._normalize_family(
+            'standard NDASv4_A100 Family') == 'standardndasv4_a100family'
+        assert azure_utils._normalize_family(
+            'StandardHBv3Family') == 'standardhbv3family'
