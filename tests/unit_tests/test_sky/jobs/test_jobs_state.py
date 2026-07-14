@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import datetime
 import time
+from typing import Optional
 from unittest import mock
 
 import filelock
@@ -1360,3 +1361,368 @@ class TestGetLatestRecoveryAndPendingReasons:
                                                                           [1])
         assert recovery == {}
         assert pending == {1: 'Job is in backoff'}
+
+
+def _make_waiting_job(name: str = 'job') -> int:
+    """Create a job in WAITING schedule state, ready to be claimed by
+    get_waiting_job_async."""
+    job_id = state.set_job_info_without_job_id(name=name,
+                                               workspace='ws1',
+                                               entrypoint='ep',
+                                               pool=None,
+                                               pool_hash=None,
+                                               user_hash='user1')
+    state.set_pending(job_id,
+                      task_id=0,
+                      task_name='task0',
+                      resources_str='{}',
+                      metadata='{}')
+    state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                '/tmp/env', None, 100)
+    return job_id
+
+
+def _claim_job(pid: int,
+               pid_started_at: float,
+               server_id: Optional[str] = None):
+    """Run get_waiting_job_async to completion on a fresh event loop."""
+
+    async def _claim():
+        return await state.get_waiting_job_async(pid=pid,
+                                                 pid_started_at=pid_started_at,
+                                                 server_id=server_id)
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_claim())
+    finally:
+        loop.close()
+
+
+def _get_job_info_row(engine, job_id: int):
+    """Read the raw job_info row for job_id (controller_* columns et al)."""
+    with state.orm.Session(engine) as session:
+        return session.execute(
+            state.sqlalchemy.select(
+                state.job_info_table.c.controller_pid,
+                state.job_info_table.c.controller_pid_started_at,
+                state.job_info_table.c.controller_server_id,
+                state.job_info_table.c.schedule_state,
+            ).where(state.job_info_table.c.spot_job_id == job_id)).fetchone()
+
+
+def _set_controller_ownership(
+        engine,
+        job_id: int,
+        *,
+        pid: Optional[int],
+        pid_started_at: Optional[float],
+        server_id: Optional[str] = None,
+        schedule_state: Optional[state.ManagedJobScheduleState] = None):
+    """Directly write controller ownership columns, bypassing the claim path.
+
+    Used to set up CAS test scenarios that aren't reachable through
+    get_waiting_job_async (e.g. a job already ALIVE with an arbitrary
+    recorded pid/started_at).
+    """
+    updates = {
+        state.job_info_table.c.controller_pid: pid,
+        state.job_info_table.c.controller_pid_started_at: pid_started_at,
+        state.job_info_table.c.controller_server_id: server_id,
+    }
+    if schedule_state is not None:
+        updates[state.job_info_table.c.schedule_state] = schedule_state.value
+    with state.orm.Session(engine) as session:
+        session.query(state.job_info_table).filter(
+            state.job_info_table.c.spot_job_id == job_id).update(updates)
+        session.commit()
+
+
+class TestControllerOwnershipStamping:
+    """get_waiting_job_async claim stamping + reset clearing of server_id."""
+
+    def test_claim_stamps_server_id(self, _mock_managed_jobs_db_conn):
+        job_id = _make_waiting_job()
+        result = _claim_job(pid=4242, pid_started_at=1.5, server_id='server-a')
+        assert result is not None
+        assert result['job_id'] == job_id
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 4242
+        assert row.controller_pid_started_at == 1.5
+        assert row.controller_server_id == 'server-a'
+        assert (
+            row.schedule_state == state.ManagedJobScheduleState.LAUNCHING.value)
+
+    def test_claim_without_server_id_leaves_it_null(self,
+                                                    _mock_managed_jobs_db_conn):
+        job_id = _make_waiting_job()
+        result = _claim_job(pid=999, pid_started_at=2.5)
+        assert result is not None
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 999
+        assert row.controller_server_id is None
+
+    def test_reset_job_for_recovery_clears_server_id(
+            self, _mock_managed_jobs_db_conn):
+        job_id = _make_waiting_job()
+        _set_controller_ownership(
+            _mock_managed_jobs_db_conn,
+            job_id,
+            pid=100,
+            pid_started_at=1.0,
+            server_id='server-b',
+            schedule_state=state.ManagedJobScheduleState.ALIVE)
+
+        assert state.reset_job_for_recovery(
+            job_id,
+            expected_pid=100,
+            expected_pid_started_at=1.0,
+            expected_server_id='server-b') is True
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid is None
+        assert row.controller_pid_started_at is None
+        assert row.controller_server_id is None
+        assert row.schedule_state == state.ManagedJobScheduleState.WAITING.value
+
+    def test_reset_jobs_for_recovery_clears_server_id(
+            self, _mock_managed_jobs_db_conn):
+        job_id = _make_waiting_job()
+        _set_controller_ownership(
+            _mock_managed_jobs_db_conn,
+            job_id,
+            pid=100,
+            pid_started_at=1.0,
+            server_id='server-b',
+            schedule_state=state.ManagedJobScheduleState.ALIVE)
+
+        state.reset_jobs_for_recovery()
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid is None
+        assert row.controller_pid_started_at is None
+        assert row.controller_server_id is None
+        assert row.schedule_state == state.ManagedJobScheduleState.WAITING.value
+
+
+class TestResetJobForRecoveryCAS:
+    """Compare-and-swap semantics of reset_job_for_recovery."""
+
+    def _seed(self, engine, *, pid, pid_started_at):
+        job_id = _make_waiting_job()
+        _set_controller_ownership(
+            engine,
+            job_id,
+            pid=pid,
+            pid_started_at=pid_started_at,
+            server_id='server-a',
+            schedule_state=state.ManagedJobScheduleState.ALIVE)
+        return job_id
+
+    def test_matching_expected_succeeds(self, _mock_managed_jobs_db_conn):
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=1.0)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=100,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id='server-a')
+        assert won is True
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid is None
+        assert row.controller_server_id is None
+        assert row.schedule_state == state.ManagedJobScheduleState.WAITING.value
+
+    def test_stale_expected_started_at_fails_and_row_unchanged(
+            self, _mock_managed_jobs_db_conn):
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=1.0)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=100,
+                                           expected_pid_started_at=0.5,
+                                           expected_server_id='server-a')
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+        assert row.controller_pid_started_at == 1.0
+        assert row.controller_server_id == 'server-a'
+        assert row.schedule_state == state.ManagedJobScheduleState.ALIVE.value
+
+    def test_stale_expected_pid_fails(self, _mock_managed_jobs_db_conn):
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=1.0)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=999,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id='server-a')
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+
+    def test_stale_expected_server_id_fails_and_row_unchanged(
+            self, _mock_managed_jobs_db_conn):
+        """pid and started_at match, but server_id doesn't -- e.g. a
+        different server instance re-claimed the job with a coincidentally
+        reused pid. The CAS must still lose."""
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=1.0)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=100,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id='server-b')
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+        assert row.controller_pid_started_at == 1.0
+        assert row.controller_server_id == 'server-a'
+        assert row.schedule_state == state.ManagedJobScheduleState.ALIVE.value
+
+    def test_expected_none_matches_null_column(self,
+                                               _mock_managed_jobs_db_conn):
+        """NULL-safe comparison: expected_pid_started_at=None matches a
+        NULL column."""
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=None)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=100,
+                                           expected_pid_started_at=None,
+                                           expected_server_id='server-a')
+        assert won is True
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid is None
+
+    def test_expected_value_does_not_match_null_column(
+            self, _mock_managed_jobs_db_conn):
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=None)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=100,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id='server-a')
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+
+    def test_expected_server_id_none_does_not_match_non_null_column(
+            self, _mock_managed_jobs_db_conn):
+        """NULL-safe comparison also rejects the reverse mismatch: an
+        observed server_id of None does not match a row that actually has
+        one stamped."""
+        job_id = self._seed(_mock_managed_jobs_db_conn,
+                            pid=100,
+                            pid_started_at=1.0)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=100,
+                                           expected_pid_started_at=1.0,
+                                           expected_server_id=None)
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+        assert row.controller_server_id == 'server-a'
+
+    def test_observed_none_pid_cas_wins_against_null_column(
+            self, _mock_managed_jobs_db_conn):
+        """An observed pid of None (job never claimed) is NOT an
+        unconditional reset -- it CASes against a still-NULL column and
+        wins when nothing has claimed the job in the meantime."""
+        job_id = _make_waiting_job()
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=None,
+                                           expected_pid_started_at=None,
+                                           expected_server_id=None)
+        assert won is True
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid is None
+        assert row.schedule_state == state.ManagedJobScheduleState.WAITING.value
+
+    def test_observed_none_pid_cas_loses_against_claimed_column(
+            self, _mock_managed_jobs_db_conn):
+        """If a controller claims the job (stamps a pid) between the
+        caller's observation and the reset, the observed-None CAS must lose
+        -- an unconditional reset here would clobber the concurrent
+        claim."""
+        job_id = _make_waiting_job()
+        # Simulate a concurrent claim that happened after the caller
+        # observed pid=None.
+        _set_controller_ownership(
+            _mock_managed_jobs_db_conn,
+            job_id,
+            pid=100,
+            pid_started_at=1.0,
+            server_id='server-a',
+            schedule_state=state.ManagedJobScheduleState.ALIVE)
+
+        won = state.reset_job_for_recovery(job_id,
+                                           expected_pid=None,
+                                           expected_pid_started_at=None,
+                                           expected_server_id=None)
+        assert won is False
+
+        row = _get_job_info_row(_mock_managed_jobs_db_conn, job_id)
+        assert row.controller_pid == 100
+        assert row.controller_pid_started_at == 1.0
+        assert row.controller_server_id == 'server-a'
+        assert row.schedule_state == state.ManagedJobScheduleState.ALIVE.value
+
+
+class TestGetJobOwnerRecord:
+    """state.get_job_owner_record: the liveness-check-oriented owner lookup."""
+
+    def test_missing_job_returns_none(self, _mock_managed_jobs_db_conn):
+        assert state.get_job_owner_record(999999) is None
+
+    def test_returns_stamped_fields(self, _mock_managed_jobs_db_conn):
+        job_id = _make_waiting_job()
+        _claim_job(pid=555, pid_started_at=9.5, server_id='server-c')
+
+        owner = state.get_job_owner_record(job_id)
+        assert owner is not None
+        assert owner.pid == 555
+        assert owner.pid_started_at == 9.5
+        assert owner.server_id == 'server-c'
+        assert owner.legacy_job_id == job_id
+
+    def test_no_controller_stamped_yet(self, _mock_managed_jobs_db_conn):
+        job_id = _make_waiting_job()
+        owner = state.get_job_owner_record(job_id)
+        assert owner is not None
+        assert owner.pid is None
+        assert owner.server_id is None
+        assert owner.legacy_job_id == job_id
+
+    def test_negative_legacy_pid_is_made_positive(self,
+                                                  _mock_managed_jobs_db_conn):
+        """Between #7051 and #7847 a negative pid marked a multi-job
+        controller."""
+        job_id = _make_waiting_job()
+        _set_controller_ownership(_mock_managed_jobs_db_conn,
+                                  job_id,
+                                  pid=-777,
+                                  pid_started_at=1.0)
+
+        owner = state.get_job_owner_record(job_id)
+        assert owner is not None
+        assert owner.pid == 777

@@ -60,6 +60,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import controller_liveness
 from sky.jobs import file_content_utils
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
@@ -341,16 +342,22 @@ def submit_jobs(job_ids: List[int],
     """
     job_ids_without_controller_process = []
     for job_id in job_ids:
-        controller_process = state.get_job_controller_process(job_id)
-        if controller_process is not None:
+        owner = state.get_job_owner_record(job_id)
+        # An owner with no pid means no controller was ever stamped for this
+        # job -- always submit without consulting the provider. This
+        # restores master's shortcut for an unclaimed job, and guarantees a
+        # buggy plugin provider can never strand a brand-new job in its
+        # one-shot PENDING -> submitted transition.
+        if owner is not None and owner.pid is not None:
             # why? TODO(cooperc): figure out why this is needed, fix it, and
             # remove
-            if managed_job_utils.controller_process_alive(
-                    controller_process, job_id):
-                # This can happen when HA recovery runs for some reason but the
-                # job controller is still alive.
-                logger.warning(f'Job {job_id} is still alive with controller '
-                               f'{controller_process}, skipping submission')
+            verdict = controller_liveness.check_job_owner(owner)
+            if verdict != controller_liveness.ControllerLiveness.DEAD:
+                # This can happen when HA recovery runs for some reason but
+                # the job controller is still alive, or we can't tell
+                # (verdict UNKNOWN) -- fail closed and don't double-submit.
+                logger.warning(f'Job {job_id} controller liveness verdict is '
+                               f'{verdict.value}, skipping submission')
                 continue
         job_ids_without_controller_process.append(job_id)
     job_ids = job_ids_without_controller_process

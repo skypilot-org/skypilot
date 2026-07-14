@@ -35,6 +35,7 @@ from sky.utils.plugin_extensions import ExternalClusterFailure
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
 
+    from sky.jobs import controller_liveness
     from sky.schemas.generated import managed_jobsv1_pb2
 else:
     managed_jobsv1_pb2 = adaptors_common.LazyImport(
@@ -187,6 +188,14 @@ job_info_table = sqlalchemy.Table(
     # In consolidation mode, managed jobs shares the filemount blob managed
     # by API server. This id is a reference to the blob.
     sqlalchemy.Column('file_mounts_blob_id',
+                      sqlalchemy.Text,
+                      server_default=None),
+    # Identifies which server instance's controller claimed this job (from
+    # the SKYPILOT_APISERVER_UUID env var at claim time). NULL for legacy
+    # rows and for any deployment that never sets a server identity, in
+    # which case liveness falls back to a local pid check. See
+    # sky/jobs/controller_liveness.py.
+    sqlalchemy.Column('controller_server_id',
                       sqlalchemy.Text,
                       server_default=None),
 )
@@ -437,6 +446,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'schedule_state': r.get('schedule_state'),
         'controller_pid': r.get('controller_pid'),
         'controller_pid_started_at': r.get('controller_pid_started_at'),
+        'controller_server_id': r.get('controller_server_id'),
         # the _path columns are for backwards compatibility, use the _content
         # columns instead
         'dag_yaml_path': r.get('dag_yaml_path'),
@@ -1292,6 +1302,42 @@ def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
             # indicate a controller process that can handle multiple jobs.
             pid = -pid
         return ControllerPidRecord(pid=pid, started_at=row[1])
+
+
+def get_job_owner_record(
+        job_id: int) -> Optional['controller_liveness.JobOwnerRecord']:
+    """Get the recorded controller ownership for a job, for liveness checks.
+
+    Unlike get_job_controller_process, this returns a record even when no
+    controller has ever been stamped (pid is None) -- callers pass that
+    through to sky.jobs.controller_liveness, whose default provider treats a
+    pid-less owner as DEAD. Returns None only if the job has no job_info row
+    at all.
+    """
+    # controller_liveness imports this module at module scope, so importing
+    # it back at module scope here would be circular; only JobOwnerRecord's
+    # constructor is needed, so do it lazily.
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import controller_liveness
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.controller_pid,
+                job_info_table.c.controller_pid_started_at,
+                job_info_table.c.controller_server_id).where(
+                    job_info_table.c.spot_job_id == job_id)).fetchone()
+        if row is None:
+            return None
+        pid = row[0]
+        if pid is not None and pid < 0:
+            # Between #7051 and #7847, the controller pid was negative to
+            # indicate a controller process that can handle multiple jobs.
+            pid = -pid
+        return controller_liveness.JobOwnerRecord(pid=pid,
+                                                  pid_started_at=row[1],
+                                                  server_id=row[2],
+                                                  legacy_job_id=job_id)
 
 
 def is_legacy_controller_process(job_id: int) -> bool:
@@ -2667,11 +2713,19 @@ def get_pool_worker_used_resources(
 
 @db_retries.retry_async
 async def get_waiting_job_async(
-        pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
+        pid: int,
+        pid_started_at: float,
+        *,
+        server_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get the next job that should transition to LAUNCHING.
 
     Selects the highest-priority WAITING or ALIVE_WAITING job and atomically
     transitions it to LAUNCHING state to prevent race conditions.
+
+    server_id, if given, is stamped onto controller_server_id so liveness
+    checks can later tell whether the claiming server instance is this one
+    (see sky/jobs/controller_liveness.py). NULL preserves today's local-pid
+    check.
 
     Returns the job information if a job was successfully transitioned to
     LAUNCHING, or None if no suitable job was found.
@@ -2744,6 +2798,7 @@ async def get_waiting_job_async(
                         ManagedJobScheduleState.LAUNCHING.value,
                     job_info_table.c.controller_pid: pid,
                     job_info_table.c.controller_pid_started_at: pid_started_at,
+                    job_info_table.c.controller_server_id: server_id,
                 }))
 
         if update_result.rowcount != 1:
@@ -3352,24 +3407,52 @@ def reset_jobs_for_recovery() -> None:
         ).update({
             job_info_table.c.controller_pid: None,
             job_info_table.c.controller_pid_started_at: None,
+            job_info_table.c.controller_server_id: None,
             job_info_table.c.schedule_state:
                 (ManagedJobScheduleState.WAITING.value)
         })
         session.commit()
 
 
-def reset_job_for_recovery(job_id: int) -> None:
-    """Set a job to WAITING and remove PID, allowing it to be recovered."""
+def reset_job_for_recovery(job_id: int, *, expected_pid: Optional[int],
+                           expected_pid_started_at: Optional[float],
+                           expected_server_id: Optional[str]) -> bool:
+    """Set a job to WAITING and remove its controller ownership.
+
+    This is always a compare-and-swap: the reset only takes effect if the
+    job's current controller_pid, controller_pid_started_at, and
+    controller_server_id still match what the caller observed, using
+    NULL-safe comparison for all three columns. An observed pid of None (the
+    job was never claimed) therefore only matches a column that is still
+    NULL. This guards against a race where the owning controller claimed (or
+    re-claimed) the job between the caller's observation and this write --
+    including a re-claim by a different server instance that happened to
+    stamp the same pid (e.g. after a controller VM restart), which the pid
+    and started_at columns alone would not catch.
+
+    Returns whether the reset was applied.
+    """
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.controller_pid: None,
-                job_info_table.c.controller_pid_started_at: None,
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.WAITING.value,
-            })
+        where_clause = [
+            job_info_table.c.spot_job_id == job_id,
+            job_info_table.c.controller_pid.is_not_distinct_from(expected_pid),
+            job_info_table.c.controller_pid_started_at.is_not_distinct_from(
+                expected_pid_started_at),
+            job_info_table.c.controller_server_id.is_not_distinct_from(
+                expected_server_id),
+        ]
+        result = session.execute(
+            sqlalchemy.update(job_info_table).where(
+                sqlalchemy.and_(*where_clause)).values({
+                    job_info_table.c.controller_pid: None,
+                    job_info_table.c.controller_pid_started_at: None,
+                    job_info_table.c.controller_server_id: None,
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.WAITING.value,
+                }))
         session.commit()
+        return result.rowcount == 1
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:

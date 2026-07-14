@@ -9,6 +9,7 @@ raising would either prevent SIGTERM or stall drain.
 import signal
 from unittest import mock
 
+from sky.jobs import controller_liveness
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 
@@ -110,3 +111,104 @@ class TestKillLocalConsolidationControllers:
                 mock.patch.object(scheduler.os, 'kill') as kill_mock:
             scheduler.kill_local_job_controllers(sig=signal.SIGKILL)
         kill_mock.assert_called_once_with(101, signal.SIGKILL)
+
+
+class TestSubmitJobsLivenessGating:
+    """submit_jobs: skip (re-)submission unless the controller verdict is DEAD.
+
+    ALIVE and UNKNOWN are both treated as "don't touch it": we can't prove
+    the previous controller is gone, so submitting again risks running the
+    job twice.
+    """
+
+    def _write_files(self, tmp_path):
+        dag_path = tmp_path / 'dag.yaml'
+        user_yaml_path = tmp_path / 'user.yaml'
+        env_path = tmp_path / 'env'
+        dag_path.write_text('dag: contents')
+        user_yaml_path.write_text('user: yaml')
+        env_path.write_text('ENV=1')
+        return str(dag_path), str(user_yaml_path), str(env_path)
+
+    def _run(self, monkeypatch, tmp_path, owner, check_mock):
+        dag_path, user_yaml_path, env_path = self._write_files(tmp_path)
+        # Don't let an ambient SKYPILOT_CONFIG env var pull in a real file.
+        monkeypatch.delenv(scheduler.skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                           raising=False)
+        monkeypatch.setattr(scheduler.state, 'get_job_owner_record',
+                            lambda job_id: owner)
+        monkeypatch.setattr(scheduler.controller_liveness, 'check_job_owner',
+                            check_mock)
+        with mock.patch.object(scheduler.state,
+                               'scheduler_set_waiting') as set_waiting_mock, \
+                mock.patch.object(scheduler, 'maybe_start_controllers'):
+            scheduler.submit_jobs([1],
+                                  dag_path,
+                                  user_yaml_path,
+                                  env_path,
+                                  priority=100)
+        return set_waiting_mock
+
+    def test_dead_owner_allows_submission(self, tmp_path, monkeypatch):
+        owner = controller_liveness.JobOwnerRecord(pid=100,
+                                                   pid_started_at=1.0,
+                                                   server_id=None)
+        check_mock = mock.MagicMock(
+            return_value=controller_liveness.ControllerLiveness.DEAD)
+
+        set_waiting_mock = self._run(monkeypatch, tmp_path, owner, check_mock)
+
+        set_waiting_mock.assert_called_once()
+        assert set_waiting_mock.call_args.args[0] == [1]
+
+    def test_alive_owner_skips_submission(self, tmp_path, monkeypatch):
+        owner = controller_liveness.JobOwnerRecord(pid=100,
+                                                   pid_started_at=1.0,
+                                                   server_id=None)
+        check_mock = mock.MagicMock(
+            return_value=controller_liveness.ControllerLiveness.ALIVE)
+
+        set_waiting_mock = self._run(monkeypatch, tmp_path, owner, check_mock)
+
+        set_waiting_mock.assert_called_once()
+        assert set_waiting_mock.call_args.args[0] == []
+
+    def test_unknown_owner_fails_closed_skips_submission(
+            self, tmp_path, monkeypatch):
+        owner = controller_liveness.JobOwnerRecord(pid=100,
+                                                   pid_started_at=1.0,
+                                                   server_id=None)
+        check_mock = mock.MagicMock(
+            return_value=controller_liveness.ControllerLiveness.UNKNOWN)
+
+        set_waiting_mock = self._run(monkeypatch, tmp_path, owner, check_mock)
+
+        assert set_waiting_mock.call_args.args[0] == []
+
+    def test_no_owner_record_allows_submission_without_consulting_provider(
+            self, tmp_path, monkeypatch):
+        """No job_info row for this job at all (fresh submission): the
+        provider is never consulted, since there's no owner to check."""
+        check_mock = mock.MagicMock()
+
+        set_waiting_mock = self._run(monkeypatch, tmp_path, None, check_mock)
+
+        check_mock.assert_not_called()
+        assert set_waiting_mock.call_args.args[0] == [1]
+
+    def test_pid_none_owner_allows_submission_without_consulting_provider(
+            self, tmp_path, monkeypatch):
+        """A job_info row exists but no controller was ever stamped (pid is
+        None): this must submit without consulting the provider, same as no
+        owner record at all. This is master's shortcut for an unclaimed job
+        -- restoring it guarantees a buggy plugin provider can never strand
+        a brand-new job in its one-shot PENDING transition."""
+        owner = controller_liveness.JobOwnerRecord(pid=None,
+                                                   pid_started_at=None,
+                                                   server_id=None)
+        check_mock = mock.MagicMock()
+
+        set_waiting_mock = self._run(monkeypatch, tmp_path, owner, check_mock)
+
+        check_mock.assert_not_called()
+        assert set_waiting_mock.call_args.args[0] == [1]
