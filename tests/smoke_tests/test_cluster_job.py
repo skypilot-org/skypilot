@@ -532,7 +532,11 @@ def test_kubernetes_non_debian_image(image, pkg_mgr):
     glibc-based; Alpine/musl is intentionally excluded because its conda/uv
     runtime is unrelated to (and would mask) this bootstrap path.
     """
-    name = smoke_tests_utils.get_cluster_name()
+    # get_cluster_name() keys off the (shared) test function name, so the
+    # parametrized cases would otherwise collide on one cluster name -- append a
+    # per-image suffix (e.g. rockyl / ubi9 / leap) to keep each unique.
+    name = (smoke_tests_utils.get_cluster_name() + '-' +
+            image.split(':')[0].split('/')[-1][:6])
     test = smoke_tests_utils.Test(
         'kubernetes_non_debian_image',
         [
