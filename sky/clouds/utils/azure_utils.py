@@ -244,8 +244,16 @@ def _fetch_region_quota_capacity(region: str) -> RegionQuotaCapacity:
     family_headroom: typing.Dict[str, int] = {}
     total_vcpu_headroom: typing.Optional[int] = None
     for usage in compute_client.usage.list(region):
+        # Skip malformed rows (missing or non-numeric limits) instead of
+        # failing the whole region fetch over one bad entry.
+        if usage.limit is None or usage.current_value is None:
+            continue
+        try:
+            headroom = int(float(usage.limit)) - int(
+                float(usage.current_value))
+        except (TypeError, ValueError):
+            continue
         name = _normalize_family(str(usage.name.value))
-        headroom = int(usage.limit) - int(usage.current_value)
         if name == 'cores':
             total_vcpu_headroom = headroom
         else:
@@ -267,6 +275,7 @@ def _fetch_region_quota_capacity(region: str) -> RegionQuotaCapacity:
                 restricted.add(name)
         for capability in sku.capabilities or []:
             if (str(capability.name) == 'CpuArchitectureType' and
+                    capability.value is not None and
                     str(capability.value).lower() != 'x64'):
                 arm64.add(name)
             if str(capability.name) == 'ConfidentialComputingType':
@@ -350,11 +359,12 @@ def check_quota_available(instance_type: str, region: str,
     if instance_type in capacity.arm64_skus:
         return False
 
-    family_raw = capacity.family_by_sku.get(instance_type)
-    if not family_raw:
+    if instance_type not in capacity.family_by_sku:
         # The SKU is not sold in this region at all.
         return False
-    family = _normalize_family(family_raw)
+    # An empty family name is inconclusive: the family-quota gate below
+    # is skipped, but the regional-total gate still applies.
+    family = _normalize_family(capacity.family_by_sku[instance_type])
 
     needed = _instance_type_vcpus(instance_type)
     if needed <= 0:
@@ -365,9 +375,10 @@ def check_quota_available(instance_type: str, region: str,
         spot_headroom = capacity.family_headroom.get('lowprioritycores')
         return spot_headroom is None or spot_headroom >= needed
 
-    family_headroom = capacity.family_headroom.get(family)
-    if family_headroom is not None and family_headroom < needed:
-        return False
+    if family:
+        family_headroom = capacity.family_headroom.get(family)
+        if family_headroom is not None and family_headroom < needed:
+            return False
     if (capacity.total_vcpu_headroom is not None and
             capacity.total_vcpu_headroom < needed):
         return False

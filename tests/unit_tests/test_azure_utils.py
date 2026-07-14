@@ -429,3 +429,114 @@ class TestCheckQuotaAvailable:
             'standard NDASv4_A100 Family') == 'standardndasv4_a100family'
         assert azure_utils._normalize_family(
             'StandardHBv3Family') == 'standardhbv3family'
+
+    def test_empty_family_name_skips_family_gate_not_the_total_gate(
+            self, monkeypatch):
+        # A SKU sold in the region whose family name the API omits is NOT
+        # a conclusive no: the family gate is skipped, but the
+        # regional-total gate still applies.
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        roomy = self._capacity(family_headroom={},
+                               total=10_000,
+                               family_by_sku={'Standard_HB120rs_v3': ''})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: roomy)
+        assert azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                 'southcentralus', False)
+        cramped = self._capacity(family_headroom={},
+                                 total=8,
+                                 family_by_sku={'Standard_HB120rs_v3': ''})
+        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+                            lambda region: cramped)
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'southcentralus', False)
+
+
+class _FakeUsageName:
+
+    def __init__(self, value):
+        self.value = value
+
+
+class _FakeUsage:
+
+    def __init__(self, name, limit, current_value):
+        self.name = _FakeUsageName(name)
+        self.limit = limit
+        self.current_value = current_value
+
+
+class _FakeCapability:
+
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+
+class _FakeSku:
+
+    def __init__(self, name, family, capabilities=()):
+        self.resource_type = 'virtualMachines'
+        self.name = name
+        self.family = family
+        self.restrictions = []
+        self.capabilities = list(capabilities)
+
+
+class _FakeComputeClient:
+
+    def __init__(self, usages, skus):
+        self.usage = self
+        self.resource_skus = self
+        self._usages = usages
+        self._skus = skus
+
+    def list(self, *args, **kwargs):
+        # Dispatched by the argument shape: usage.list(region) is
+        # positional, resource_skus.list(filter=...) is keyword-only.
+        if 'filter' in kwargs:
+            return list(self._skus)
+        return list(self._usages)
+
+
+class TestFetchRegionQuotaCapacity:
+    """Tests for the Azure API response parsing."""
+
+    def test_malformed_rows_and_null_capabilities_are_tolerated(
+            self, monkeypatch):
+        usages = [
+            # Float-string limits parse; None limits are skipped rather
+            # than failing the whole region fetch.
+            _FakeUsage('standardHBv3Family', '3600.0', '60.0'),
+            _FakeUsage('brokenFamily', None, 5),
+            _FakeUsage('alsoBroken', 'not-a-number', 5),
+            _FakeUsage('cores', 10_000, 120),
+        ]
+        skus = [
+            # A None CpuArchitectureType value must not classify the SKU
+            # as ARM (str(None).lower() != 'x64' would).
+            _FakeSku('Standard_HB120rs_v3',
+                     'standardHBv3Family',
+                     capabilities=[
+                         _FakeCapability('CpuArchitectureType', None),
+                     ]),
+            _FakeSku('Standard_D2ps_v5',
+                     'standardDPSv5Family',
+                     capabilities=[
+                         _FakeCapability('CpuArchitectureType', 'Arm64'),
+                     ]),
+        ]
+        monkeypatch.setattr(
+            azure_utils.azure, 'get_client',
+            lambda name, subscription_id: _FakeComputeClient(usages, skus))
+        monkeypatch.setattr(azure_utils.azure, 'get_subscription_id',
+                            lambda: 'sub-id')
+
+        capacity = azure_utils._fetch_region_quota_capacity('southcentralus')
+
+        assert capacity.family_headroom == {'standardhbv3family': 3540}
+        assert capacity.total_vcpu_headroom == 9880
+        assert capacity.arm64_skus == frozenset({'Standard_D2ps_v5'})
+        assert capacity.family_by_sku['Standard_HB120rs_v3'] == (
+            'standardHBv3Family')
