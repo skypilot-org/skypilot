@@ -379,7 +379,8 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
-                '{ which jq || sudo apt update && sudo apt install -y jq; } && '
+                '{ which jq || '
+                '{ sudo apt update && sudo apt install -y jq; }; } && '
                 '{ [ -f /etc/docker/daemon.json ] || '
                 'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
