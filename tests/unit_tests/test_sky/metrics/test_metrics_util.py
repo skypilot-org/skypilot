@@ -379,6 +379,60 @@ def test_get_in_cluster_identity_uid_empty_uid_is_none():
         assert utils._get_in_cluster_identity_uid() is None  # pylint: disable=protected-access
 
 
+def test_add_cluster_name_label_basic():
+    text = ('# HELP foo Foo metric\n'
+            '# TYPE foo gauge\n'
+            'foo{bar="baz"} 1.0\n'
+            '\n'
+            'no_labels_metric 2.0')
+    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
+    lines = result.split('\n')
+    assert lines[0] == '# HELP foo Foo metric'
+    assert lines[1] == '# TYPE foo gauge'
+    assert lines[2] == 'foo{cluster="ctx-a",bar="baz"} 1.0'
+    assert lines[3] == ''
+    # A metric line without a label section still gets a cluster label.
+    assert lines[4] == 'no_labels_metric 2.0'
+
+
+def test_add_cluster_name_label_skips_already_labeled():
+    """Lines already carrying a cluster label are left untouched.
+
+    Re-stamping would produce two cluster labels on one line, a hard
+    duplicate-label error that rolls back the whole /gpu-metrics scrape.
+    This is the safety net for a local context misdetected as remote.
+    """
+    text = ('foo{cluster="other",bar="baz"} 1.0\n'
+            'foo{bar="baz",cluster="other"} 2.0\n'
+            'foo{cluster=""} 3.0')
+    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
+    lines = result.split('\n')
+    # Unchanged — not re-stamped, not replaced.
+    assert lines == [
+        'foo{cluster="other",bar="baz"} 1.0',
+        'foo{bar="baz",cluster="other"} 2.0',
+        'foo{cluster=""} 3.0',
+    ]
+    for line in lines:
+        assert line.count('cluster=') == 1
+
+
+def test_add_cluster_name_label_does_not_match_cluster_suffix_labels():
+    """A label like `k8s_cluster` is not mistaken for a `cluster` label."""
+    text = 'foo{k8s_cluster="other"} 1.0'
+    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
+    assert result == 'foo{cluster="ctx-a",k8s_cluster="other"} 1.0'
+
+
+def test_add_cluster_name_label_brace_in_label_value():
+    """A '}' inside a label value must not truncate the label section."""
+    text = 'foo{bar="}",cluster="other"} 1.0'
+    result = asyncio.run(utils.add_cluster_name_label(text, 'ctx-a'))
+    # The real cluster label (after the '}' in bar's value) is detected,
+    # so the line is skipped rather than double-stamped.
+    assert result == 'foo{bar="}",cluster="other"} 1.0'
+
+
 def test_get_prometheus_target_defaults():
     with mock.patch.object(utils.skypilot_config,
                            'get_nested',

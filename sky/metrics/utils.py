@@ -831,27 +831,56 @@ async def send_metrics_request_with_port_forward(
             stop_svc_port_forward(port_forward_process)
 
 
+# Matches an existing `cluster="..."` label token in a metric line's label
+# section. Valid exposition escapes quotes inside label values, so the raw
+# substring `cluster="` can only start an actual label; the lookbehind keeps
+# names like `k8s_cluster` from matching.
+_CLUSTER_LABEL_RE = re.compile(r'(?<![A-Za-z0-9_])cluster="')
+
+
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
-    """Adds a cluster_name label to each metric line.
+    """Adds a cluster label to each metric line.
+
+    Skips lines that already carry a `cluster` label (stamped by a
+    previous federation pass, or labeled at the source): re-stamping
+    would produce two `cluster` labels on one line, which is a hard
+    duplicate-label error that makes Prometheus roll back the entire
+    /gpu-metrics scrape body. This is the safety net for the fail-safe
+    path in split_local_remote_contexts(): if a local context is ever
+    misdetected as remote (missing RBAC, cold start, transient probe
+    error), its already-stamped series are federated back here, and
+    skipping keeps them byte-identical to the stored series so ingestion
+    collapses them to a no-op instead of poisoning the scrape.
+
     Args:
         metrics_text: The text containing the metrics
         context: The cluster name
     """
     lines = metrics_text.strip().split('\n')
     modified_lines = []
+    already_labeled = 0
 
     for line in lines:
         # keep comment lines and empty lines as-is
         if line.startswith('#') or not line.strip():
             modified_lines.append(line)
             continue
-        # if line is a metric line with labels, add cluster label
+        # if line is a metric line with labels, add cluster label. rfind
+        # for the closing brace: label values may legitimately contain '}'
+        # (the sample value/timestamp after the label section cannot).
         brace_start = line.find('{')
-        brace_end = line.find('}')
-        if brace_start != -1 and brace_end != -1:
+        brace_end = line.rfind('}')
+        if brace_start != -1 and brace_end > brace_start:
             metric_name = line[:brace_start]
             existing_labels = line[brace_start + 1:brace_end]
             rest_of_line = line[brace_end + 1:]
+
+            if _CLUSTER_LABEL_RE.search(existing_labels):
+                # Already attributed; re-stamping would duplicate the
+                # cluster label and invalidate the whole scrape body.
+                already_labeled += 1
+                modified_lines.append(line)
+                continue
 
             if existing_labels:
                 new_labels = f'cluster="{context}",{existing_labels}'
@@ -863,6 +892,16 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
         else:
             # keep other lines as-is
             modified_lines.append(line)
+
+    if already_labeled:
+        # Aggregated (never per line): during real self-federation nearly
+        # every line matches. A large fraction usually means this context
+        # resolves to the central Prometheus itself, i.e. a local context
+        # is being federated as remote (e.g. detection lacks RBAC).
+        logger.debug(
+            f'{already_labeled}/{len(lines)} series federated from context '
+            f'{context!r} already carried a cluster label and were left '
+            f'unstamped.')
 
     return '\n'.join(modified_lines)
 
