@@ -505,6 +505,9 @@ class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
     expires_in_days: Optional[int] = None
+    # Optional role for the new service account (e.g. 'admin'). When omitted,
+    # the account is seeded with the default role.
+    role: Optional[str] = None
 
 
 class ServiceAccountTokenDeleteBody(RequestBody):
