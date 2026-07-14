@@ -677,3 +677,124 @@ def test_slurm_get_hourly_cost_end_to_end(mock_nested):
     # Accelerator-only pricing: partition A100=5.00, cpu/memory ignored
     expected = 4 * 5.00
     assert cost == pytest.approx(expected)
+
+
+def _efa_catalog_df():
+    """Tiny AWS-catalog-like frame exercising the EFA sizing helper.
+
+    Same-accelerator variants differ in EFA-per-accelerator, which is the crux
+    of the sizing rule: H100 (p5.48xlarge 4/GPU vs p5.4xlarge 1/GPU), H200
+    (p5e 4/GPU vs p5en 2/GPU). A100 is present but not EFA-capable (NaN).
+    """
+    return pd.DataFrame([
+        {
+            'InstanceType': 'p5.4xlarge',
+            'AcceleratorName': 'H100',
+            'AcceleratorCount': 1,
+            'MaximumEfaInterfaces': 1.0
+        },
+        {
+            'InstanceType': 'p5.48xlarge',
+            'AcceleratorName': 'H100',
+            'AcceleratorCount': 8,
+            'MaximumEfaInterfaces': 32.0
+        },
+        {
+            'InstanceType': 'p5e.48xlarge',
+            'AcceleratorName': 'H200',
+            'AcceleratorCount': 8,
+            'MaximumEfaInterfaces': 32.0
+        },
+        {
+            'InstanceType': 'p5en.48xlarge',
+            'AcceleratorName': 'H200',
+            'AcceleratorCount': 8,
+            'MaximumEfaInterfaces': 16.0
+        },
+        {
+            'InstanceType': 'p4d.24xlarge',
+            'AcceleratorName': 'A100',
+            'AcceleratorCount': 8,
+            'MaximumEfaInterfaces': np.nan
+        },
+    ])
+
+
+def test_efa_count_full_node_uses_hosting_variant_ratio():
+    df = _efa_catalog_df()
+    # H100:8 only fits the 8-GPU p5.48xlarge (4 EFA/GPU) -> the full 32.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
+                                                             8) == 32
+
+
+def test_efa_count_partial_request_uses_leanest_variant():
+    df = _efa_catalog_df()
+    # H100:1 fits p5.4xlarge (1 EFA/GPU) and p5.48xlarge (4) -> min ratio 1 -> 1.
+    # Sizing from the max (4) would be unschedulable on p5.4xlarge (1 EFA).
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100', 1) == 1
+
+
+def test_efa_count_avoids_stranding_on_leaner_variant():
+    df = _efa_catalog_df()
+    # H200:1 -> min(p5e 4, p5en 2) = 2, not 4. At 4, p5en (16 EFA / 8 GPU) fits
+    # only 4 pods and strands 4 of its 8 GPUs.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H200', 1) == 2
+
+
+def test_efa_count_partial_multi_gpu():
+    df = _efa_catalog_df()
+    # H100:4 only fits the 8-GPU node -> floor(4 * 4 EFA/GPU) = 16.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
+                                                             4) == 16
+
+
+def test_efa_count_none_when_request_exceeds_all_variants():
+    df = _efa_catalog_df()
+    # No H100 variant has >= 16 accelerators to host the request -> None.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
+                                                             16) is None
+
+
+def test_efa_count_none_cases():
+    df = _efa_catalog_df()
+    # Accelerator present but only NaN EFA -> None.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'A100',
+                                                             8) is None
+    # Accelerator absent -> None.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'V100',
+                                                             1) is None
+    # Missing column (older/hosted catalog) -> None, not a KeyError.
+    df2 = df.drop(columns=['MaximumEfaInterfaces'])
+    assert catalog_common.get_efa_count_for_accelerator_impl(df2, 'H100',
+                                                             1) is None
+
+
+def test_efa_count_case_insensitive_fullmatch():
+    df = _efa_catalog_df()
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'h100',
+                                                             8) == 32
+    # Full match, not a prefix/substring.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H10',
+                                                             1) is None
+
+
+def test_efa_count_at_least_one():
+    # A sub-1 EFA-per-accelerator ratio still requests >= 1 EFA.
+    df = pd.DataFrame([{
+        'InstanceType': 'trn1.32xlarge',
+        'AcceleratorName': 'Trainium',
+        'AcceleratorCount': 16,
+        'MaximumEfaInterfaces': 8.0
+    }])
+    # 8 / 16 = 0.5 EFA/acc -> floor(1 * 0.5) = 0 -> clamped to 1.
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'Trainium',
+                                                             1) == 1
+
+
+def test_efa_count_duplicate_index_safe():
+    # Catalog merges can leave duplicate index labels; the min-ratio selection
+    # must not mis-select or raise on them.
+    df = _efa_catalog_df()
+    df.index = [0] * len(df)
+    assert catalog_common.get_efa_count_for_accelerator_impl(df, 'H100',
+                                                             8) == 32

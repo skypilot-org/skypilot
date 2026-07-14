@@ -1498,3 +1498,62 @@ class TestStreamLogsByIdExternalStoreFallback:
         # Should not raise.
         msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
         assert 'external log store' in msg
+
+
+class TestTryToGetJobEndTime:
+    """Tests for try_to_get_job_end_time's best-effort fallback."""
+
+    def _disable_runtime(self, monkeypatch):
+        # Skip the managed-job runtime fast path so the test exercises the
+        # get_job_timestamp probe.
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+
+    def test_returns_timestamp_on_success(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp',
+                            lambda *args, **kwargs: 12345.0)
+        assert jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster',
+                                                  1) == 12345.0
+
+    def test_ssh_connection_failure_falls_back(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise exceptions.CommandError(returncode=255,
+                                          command='cmd',
+                                          error_msg='ssh failed',
+                                          detailed_reason='connection refused')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        result = jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+        assert isinstance(result, float)
+        assert result == pytest.approx(time.time(), abs=5)
+
+    def test_deleted_kubernetes_pod_falls_back(self, monkeypatch):
+        # On Kubernetes the pod can be deleted between the job-status check and
+        # the end-time fetch, which fails with returncode 1 rather than 255.
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise exceptions.CommandError(
+                returncode=1,
+                command='cmd',
+                error_msg='exec failed',
+                detailed_reason='Error from server (NotFound): pods '
+                '"my-pod" not found')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        result = jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+        assert isinstance(result, float)
+        assert result == pytest.approx(time.time(), abs=5)
+
+    def test_non_command_error_reraises(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise ValueError('unexpected')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        with pytest.raises(ValueError):
+            jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)

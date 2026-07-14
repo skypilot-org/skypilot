@@ -4194,6 +4194,159 @@ class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
         self.assertEqual(result, 'numeric-sa')
 
 
+class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
+    """Scale-from-zero EFA wiring in _detect_network_type.
+
+    On an AWS cluster with GPU pools at min=0, only non-GPU system nodes are up
+    at schedule time, so scanning nodes for vpc.amazonaws.com/efa finds nothing
+    and network_tier: best would omit the EFA request (NCCL -> TCP). The fix
+    falls back to a catalog-derived count. These tests drive
+    _detect_network_type against a cold node set and mock the derivation
+    (_derive_efa_count_from_catalog); the derivation math is covered directly by
+    TestDeriveEfaCountFromCatalog below. Cold cases fail without the fix.
+    """
+
+    # An AWS EKS system node carries the cloud-provider label even with no GPU.
+    _AWS_SYSTEM_NODE_LABELS = {
+        'k8s.io/cloud-provider-aws': 'abc123',
+        'topology.kubernetes.io/zone': 'us-east-2a',
+        'node.kubernetes.io/instance-type': 'm6i.large',
+    }
+
+    def _node(self, labels, allocatable):
+        node = mock.MagicMock()
+        node.metadata.labels = dict(labels)
+        node.status.allocatable = dict(allocatable)
+        return node
+
+    def _cold_aws_nodes(self):
+        # Scale-from-zero: only a non-GPU AWS system node is up.
+        return [self._node(self._AWS_SYSTEM_NODE_LABELS, {'cpu': '2'})]
+
+    def _detect(self,
+                nodes,
+                acc_count,
+                acc_type,
+                derived_efa=None,
+                tier=None,
+                autoscaler='karpenter'):
+        # autoscaler defaults to a configured value: the scale-from-zero EFA
+        # fallback only fires on a cluster that can actually scale up a GPU
+        # node. Pass autoscaler=None to model a static cluster.
+        tier = tier if tier is not None else resources_utils.NetworkTier.BEST
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=nodes), \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=autoscaler), \
+             patch.object(kubernetes.Kubernetes,
+                          '_derive_efa_count_from_catalog',
+                          return_value=derived_efa):
+            return kubernetes.Kubernetes._detect_network_type(
+                'ctx',
+                tier,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=acc_count,
+                acc_type=acc_type)
+
+    def test_cold_aws_node_requests_catalog_derived_efa(self):
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32)
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta['efa_count'], 32)
+
+    def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
+        # A static cluster (no autoscaler) with no GPU node can never schedule
+        # the pod, so the fallback must NOT request EFA even if a count is
+        # derivable -- otherwise the pod pends to provision_timeout.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 autoscaler=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_cold_aws_node_no_derivable_count_falls_through(self):
+        # Catalog can't size it (e.g. column absent) -> no EFA metadata,
+        # today's behavior. Safe no-op, no regression.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_warm_node_scan_wins_over_catalog(self):
+        # A running GPU+EFA node advertises the count directly; the live scan
+        # must win and the catalog derivation must not be consulted.
+        warm = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '16',
+            })
+        _net, meta = self._detect([warm], 8, 'H100', derived_efa=999)
+        self.assertEqual(meta['efa_count'], 16)  # from the node, not 999
+
+    def test_non_aws_cold_cluster_gets_no_efa(self):
+        # A cold non-AWS node (no cloud-provider-aws label) must not trigger the
+        # AWS fallback even if a count could be derived.
+        node = self._node({'kubernetes.io/hostname': 'n1'}, {'cpu': '2'})
+        net, meta = self._detect([node], 8, 'H100', derived_efa=32)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_not_best_tier_returns_none(self):
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 tier=resources_utils.NetworkTier.STANDARD)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+
+class TestDeriveEfaCountFromCatalog(unittest.TestCase):
+    """_derive_efa_count_from_catalog delegates to the AWS catalog sizing
+    helper (which sizes from the lowest EFA-per-accelerator ratio among
+    hosting-capable variants) and degrades to None on any catalog miss. The
+    sizing math itself is covered at the DataFrame level in test_catalog.py."""
+
+    def _derive(self, acc_type, acc_count, efa_count=None, raises=None):
+        with patch('sky.catalog.aws_catalog.get_efa_count_for_accelerator',
+                   side_effect=raises,
+                   return_value=efa_count) as m:
+            result = kubernetes.Kubernetes._derive_efa_count_from_catalog(
+                acc_type, acc_count)
+        return result, m
+
+    def test_passes_through_catalog_count(self):
+        result, m = self._derive('H100', 8, efa_count=32)
+        self.assertEqual(result, 32)
+        m.assert_called_once_with('H100', 8)
+
+    def test_none_when_catalog_returns_none(self):
+        # No hosting-capable EFA variant / no MaximumEfaInterfaces column.
+        result, _ = self._derive('H100', 8, efa_count=None)
+        self.assertIsNone(result)
+
+    def test_degrades_on_catalog_error(self):
+        # A catalog parse/lookup error must degrade to None, not propagate.
+        result, _ = self._derive('H100', 8, raises=KeyError('boom'))
+        self.assertIsNone(result)
+
+
 class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
     """Multi-node network_tier: best on AWS EFA sets k8s_efa_same_az so the pod
     template injects a required same-zone podAffinity (EFA is single-AZ).

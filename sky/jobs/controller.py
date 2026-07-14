@@ -957,16 +957,9 @@ class JobController:
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 logger.info(f'Task {task_id} succeeded! '
                             'Getting end time and cleaning up')
-                try:
-                    success_end_time = await asyncio.to_thread(
-                        managed_job_utils.try_to_get_job_end_time,
-                        self._backend, cluster_name, job_id_on_pool_cluster)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.warning(
-                        f'Failed to get job end time: '
-                        f'{common_utils.format_exception(e)}',
-                        exc_info=True)
-                    success_end_time = 0
+                success_end_time = await asyncio.to_thread(
+                    managed_job_utils.try_to_get_job_end_time, self._backend,
+                    cluster_name, job_id_on_pool_cluster)
 
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
@@ -1103,9 +1096,16 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await asyncio.to_thread(self.download_log_and_stream,
-                                            task_id, handle,
-                                            job_id_on_pool_cluster)
+                    try:
+                        await asyncio.to_thread(self.download_log_and_stream,
+                                                task_id, handle,
+                                                job_id_on_pool_cluster)
+                    except Exception as e:  # pylint: disable=broad-except
+                        # We don't want to crash here, so just log and continue.
+                        logger.warning(
+                            f'Failed to download and stream logs: '
+                            f'{common_utils.format_exception(e)}',
+                            exc_info=True)
 
                     failure_reason = (
                         'To see the details, run: '
