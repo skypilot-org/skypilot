@@ -910,7 +910,10 @@ class Cloud:
         quota utilization because many cloud providers' APIs don't have a
         built-in command for checking the real-time utilization. Checking
         real-time utilization is a more difficult endeavor that involves
-        observability etc., so we are holding off on that for now.
+        observability etc., so we are holding off on that for now. Clouds
+        whose APIs do expose live utilization (e.g., Azure's Usage API) may
+        additionally treat a fresh headroom reading as conclusive, provided
+        stale readings are re-verified before blocking a region.
 
         If for at any point the function fails, whether it's because we can't
         import the necessary dependencies or a query using a cloud provider's

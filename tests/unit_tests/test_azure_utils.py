@@ -278,23 +278,19 @@ class TestCheckQuotaAvailable:
                   family_headroom,
                   total=10_000,
                   restricted=frozenset(),
-                  family_by_sku=None,
-                  arm64=frozenset(),
-                  confidential=frozenset()):
+                  family_by_sku=None):
         return azure_utils.RegionQuotaCapacity(family_headroom=family_headroom,
                                                total_vcpu_headroom=total,
                                                restricted_skus=restricted,
                                                family_by_sku=family_by_sku or
-                                               {},
-                                               arm64_skus=arm64,
-                                               confidential_skus=confidential)
+                                               {})
 
     def test_restricted_sku_is_conclusively_unavailable(self, monkeypatch):
         capacity = self._capacity(
             family_headroom={'standardhbv3family': 3540},
             restricted=frozenset({'Standard_HB120rs_v3'}),
             family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
                                                      'southcentralus', False)
@@ -305,7 +301,7 @@ class TestCheckQuotaAvailable:
             family_by_sku={
                 'Standard_NC40ads_H100_v5': 'StandardNCadsH100v5Family'
             })
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
                             lambda instance_type: 40)
@@ -316,7 +312,7 @@ class TestCheckQuotaAvailable:
         capacity = self._capacity(
             family_headroom={'standardhbv3family': 3540},
             family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
                             lambda instance_type: 120)
@@ -329,7 +325,7 @@ class TestCheckQuotaAvailable:
             family_headroom={'standardhbv3family': 3540},
             total=100,
             family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
                             lambda instance_type: 120)
@@ -338,19 +334,21 @@ class TestCheckQuotaAvailable:
 
     def test_sku_not_sold_in_region_blocks(self, monkeypatch):
         capacity = self._capacity(family_headroom={})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
                                                      'koreacentral', False)
 
-    def test_probe_failure_is_inconclusive_never_blocks(self, monkeypatch):
-        # Mirrors AWS/GCP: an API failure must not skip a region.
+    def test_probe_failure_propagates_to_the_caller(self, monkeypatch):
+        # The call site (cloud_vm_ray_backend) catches, logs, and treats
+        # the check as inconclusive; swallowing here would hide the error.
         def boom(region):
             raise RuntimeError('SDK exploded')
 
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity', boom)
-        assert azure_utils.check_quota_available('Standard_HB120rs_v3',
-                                                 'southcentralus', False)
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity', boom)
+        with pytest.raises(RuntimeError, match='SDK exploded'):
+            azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                              'southcentralus', False)
 
     def test_spot_gates_on_low_priority_bucket(self, monkeypatch):
         capacity = self._capacity(
@@ -359,7 +357,7 @@ class TestCheckQuotaAvailable:
                 'lowprioritycores': 8,
             },
             family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
                             lambda instance_type: 120)
@@ -368,33 +366,12 @@ class TestCheckQuotaAvailable:
         assert azure_utils.check_quota_available('Standard_HB120rs_v3',
                                                  'southcentralus', False)
 
-    def test_arm64_and_confidential_skus_are_unprovisionable(self, monkeypatch):
-        # The provisioner deploys standard-security-type x64 VMs, so these
-        # sizes always fail at create time regardless of quota headroom.
-        capacity = self._capacity(
-            family_headroom={
-                'standarddpsv5family': 64,
-                'standardecadsv5family': 64,
-            },
-            family_by_sku={
-                'Standard_D2ps_v5': 'standardDPSv5Family',
-                'Standard_EC20ads_v5': 'standardECADSv5Family',
-            },
-            arm64=frozenset({'Standard_D2ps_v5'}),
-            confidential=frozenset({'Standard_EC20ads_v5'}))
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
-                            lambda region: capacity)
-        assert not azure_utils.check_quota_available('Standard_D2ps_v5',
-                                                     'southcentralus', False)
-        assert not azure_utils.check_quota_available('Standard_EC20ads_v5',
-                                                     'southcentralus', False)
-
     def test_unknown_instance_size_blocks_only_on_zero_quota(self, monkeypatch):
         # An unsized SKU degrades to a nonzero-quota check (needed=1).
         capacity = self._capacity(
             family_headroom={'standardhbv3family': 0},
             family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: capacity)
         monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
                             lambda instance_type: 0)
@@ -421,6 +398,70 @@ class TestCheckQuotaAvailable:
                                           False)
         assert calls == ['southcentralus', 'eastus']
 
+        # A snapshot older than the TTL is refetched.
+        snapshot = azure_utils._quota_snapshots['southcentralus']
+        azure_utils._quota_snapshots['southcentralus'] = snapshot._replace(
+            fetched_at=snapshot.fetched_at -
+            azure_utils._QUOTA_SNAPSHOT_TTL_SECONDS - 1)
+        azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                          'southcentralus', False)
+        assert calls == ['southcentralus', 'eastus', 'southcentralus']
+
+    def test_stale_no_headroom_is_reverified_before_blocking(self, monkeypatch):
+        # Quota frees up when clusters come down; a cached "no headroom"
+        # older than the block window must not condemn the region without
+        # a fresh reading.
+        capacities = iter([
+            self._capacity(
+                family_headroom={'standardhbv3family': 0},
+                family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'}),
+            self._capacity(
+                family_headroom={'standardhbv3family': 3540},
+                family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'}),
+        ])
+        calls = []
+
+        def fake_fetch(region):
+            calls.append(region)
+            return next(capacities)
+
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
+                            fake_fetch)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        # Fresh fetch: the zero-headroom verdict is conclusive.
+        assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                     'southcentralus', False)
+        # Age the snapshot past the block window (still within the TTL):
+        # the stale "no" triggers a re-verify, which now sees headroom.
+        snapshot = azure_utils._quota_snapshots['southcentralus']
+        azure_utils._quota_snapshots['southcentralus'] = snapshot._replace(
+            fetched_at=snapshot.fetched_at -
+            azure_utils._QUOTA_BLOCK_MAX_AGE_SECONDS - 1)
+        assert azure_utils.check_quota_available('Standard_HB120rs_v3',
+                                                 'southcentralus', False)
+        assert calls == ['southcentralus', 'southcentralus']
+
+    def test_recent_no_headroom_blocks_without_refetch(self, monkeypatch):
+        calls = []
+
+        def fake_fetch(region):
+            calls.append(region)
+            return self._capacity(
+                family_headroom={'standardhbv3family': 0},
+                family_by_sku={'Standard_HB120rs_v3': 'standardHBv3Family'})
+
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
+                            fake_fetch)
+        monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
+                            lambda instance_type: 120)
+        # Within the block window a cached "no" is trusted, so a
+        # multi-SKU failover does not refetch per blocked check.
+        for _ in range(3):
+            assert not azure_utils.check_quota_available(
+                'Standard_HB120rs_v3', 'southcentralus', False)
+        assert calls == ['southcentralus']
+
     def test_usage_family_names_are_normalized(self):
         # The Usage API emits family names with stray spaces and mixed
         # casing; matching against Resource SKUs families must survive it.
@@ -439,14 +480,15 @@ class TestCheckQuotaAvailable:
         roomy = self._capacity(family_headroom={},
                                total=10_000,
                                family_by_sku={'Standard_HB120rs_v3': ''})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: roomy)
         assert azure_utils.check_quota_available('Standard_HB120rs_v3',
                                                  'southcentralus', False)
+        azure_utils._quota_snapshots.clear()
         cramped = self._capacity(family_headroom={},
                                  total=8,
                                  family_by_sku={'Standard_HB120rs_v3': ''})
-        monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
+        monkeypatch.setattr(azure_utils, '_fetch_region_quota_capacity',
                             lambda region: cramped)
         assert not azure_utils.check_quota_available('Standard_HB120rs_v3',
                                                      'southcentralus', False)
@@ -466,21 +508,20 @@ class _FakeUsage:
         self.current_value = current_value
 
 
-class _FakeCapability:
+class _FakeRestriction:
 
-    def __init__(self, name, value):
-        self.name = name
-        self.value = value
+    def __init__(self, reason_code, restriction_type):
+        self.reason_code = reason_code
+        self.type = restriction_type
 
 
 class _FakeSku:
 
-    def __init__(self, name, family, capabilities=()):
+    def __init__(self, name, family, restrictions=()):
         self.resource_type = 'virtualMachines'
         self.name = name
         self.family = family
-        self.restrictions = []
-        self.capabilities = list(capabilities)
+        self.restrictions = list(restrictions)
 
 
 class _FakeComputeClient:
@@ -502,28 +543,30 @@ class _FakeComputeClient:
 class TestFetchRegionQuotaCapacity:
     """Tests for the Azure API response parsing."""
 
-    def test_malformed_rows_and_null_capabilities_are_tolerated(
+    def test_malformed_rows_are_tolerated_and_restrictions_parse(
             self, monkeypatch):
         usages = [
-            # Float-string limits parse; None limits are skipped rather
-            # than failing the whole region fetch.
+            # Float-string limits parse; None and garbage limits are
+            # skipped rather than failing the whole region fetch.
             _FakeUsage('standardHBv3Family', '3600.0', '60.0'),
             _FakeUsage('brokenFamily', None, 5),
             _FakeUsage('alsoBroken', 'not-a-number', 5),
             _FakeUsage('cores', 10_000, 120),
         ]
         skus = [
-            # A None CpuArchitectureType value must not classify the SKU
-            # as ARM (str(None).lower() != 'x64' would).
-            _FakeSku('Standard_HB120rs_v3',
-                     'standardHBv3Family',
-                     capabilities=[
-                         _FakeCapability('CpuArchitectureType', None),
+            _FakeSku('Standard_HB120rs_v3', 'standardHBv3Family'),
+            _FakeSku('Standard_ND96asr_v4',
+                     'standardNDASv4_A100Family',
+                     restrictions=[
+                         _FakeRestriction('NotAvailableForSubscription',
+                                          'Location'),
                      ]),
-            _FakeSku('Standard_D2ps_v5',
-                     'standardDPSv5Family',
-                     capabilities=[
-                         _FakeCapability('CpuArchitectureType', 'Arm64'),
+            # Zone-scoped restrictions do not restrict the region.
+            _FakeSku('Standard_NC24ads_A100_v4',
+                     'standardNCADSA100v4Family',
+                     restrictions=[
+                         _FakeRestriction('NotAvailableForSubscription',
+                                          'Zone'),
                      ]),
         ]
         monkeypatch.setattr(
@@ -536,6 +579,6 @@ class TestFetchRegionQuotaCapacity:
 
         assert capacity.family_headroom == {'standardhbv3family': 3540}
         assert capacity.total_vcpu_headroom == 9880
-        assert capacity.arm64_skus == frozenset({'Standard_D2ps_v5'})
+        assert capacity.restricted_skus == frozenset({'Standard_ND96asr_v4'})
         assert capacity.family_by_sku['Standard_HB120rs_v3'] == (
             'standardHBv3Family')
