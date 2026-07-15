@@ -112,6 +112,14 @@ def _task_statuses(engine, job_id: int = 1):
         return [row[0] for row in rows]
 
 
+def _failure_reason(engine, job_id: int = 1):
+    with engine.connect() as conn:
+        row = conn.execute(
+            sqlalchemy.select(state.spot_table.c.failure_reason).where(
+                state.spot_table.c.spot_job_id == job_id)).fetchone()
+        return row[0] if row else None
+
+
 def _job_events(engine, job_id: int = 1):
     with engine.connect() as conn:
         return conn.execute(
@@ -354,7 +362,8 @@ class TestUpdateManagedJobsStatusesRequeue:
 
     def test_terminal_status_is_preserved(self, _janitor_env):
         # Controller died after writing SUCCEEDED but before marking the job
-        # DONE: converge the bookkeeping without overriding the status.
+        # DONE, and cleanup succeeds: converge the bookkeeping without
+        # overriding the status.
         engine = _janitor_env['engine']
         _seed_job(engine, status='SUCCEEDED')
         managed_job_utils.update_managed_jobs_statuses()
@@ -362,6 +371,27 @@ class TestUpdateManagedJobsStatusesRequeue:
         assert _job_info_row(engine).schedule_state == 'DONE'
         assert _job_info_row(engine).emergency_recovery_count is None
         _janitor_env['terminate_cluster'].assert_called_once()
+
+    def test_terminal_status_cleanup_failure_escalates(self, _janitor_env,
+                                                       monkeypatch):
+        # Controller died after writing SUCCEEDED but before marking the job
+        # DONE, and cleanup fails: the terminal status must NOT be silently
+        # preserved, since that would hide a possibly-leaked cluster. Escalate
+        # to FAILED_CONTROLLER instead, which is the function's deliberate
+        # signal that the cluster may not have been cleaned up.
+        engine = _janitor_env['engine']
+        _seed_job(engine, status='SUCCEEDED')
+        monkeypatch.setattr(_janitor_env['terminate_cluster'], 'side_effect',
+                            RuntimeError('boom'))
+        managed_job_utils.update_managed_jobs_statuses()
+        assert _task_statuses(engine) == ['FAILED_CONTROLLER']
+        assert _job_info_row(engine).schedule_state == 'DONE'
+        reason = _failure_reason(engine)
+        assert 'Resources may have leaked' in reason
+        assert 'cleanup failed' in reason
+        # Once from the terminal-status branch's cleanup attempt, once more
+        # from the terminal path's free retry.
+        assert _janitor_env['terminate_cluster'].call_count == 2
 
     def test_alive_controller_is_untouched(self, _janitor_env, monkeypatch):
         engine = _janitor_env['engine']
