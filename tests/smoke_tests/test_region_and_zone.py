@@ -163,6 +163,39 @@ def test_ibm_region():
 
 
 @pytest.mark.azure
+def test_azure_region_config_availability_zone():
+    """Pins the VM to an availability zone via azure.region_configs.
+
+    Launches with the per-region pin set through a config override and
+    verifies with the Azure CLI that the created VM actually landed in
+    that zone (SkyPilot deploys Azure VMs zoneless by default).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'eastus'
+    zone = '2'
+    test = smoke_tests_utils.Test(
+        'azure_region_config_availability_zone',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra azure/{region} '
+            f'--config azure.region_configs.{region}.availability_zone={zone} '
+            'tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            # Verify with the Azure CLI that the VM is in the pinned zone.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, 'az vm list '
+                f'--query "[?starts_with(name, \'{name}\') '
+                f'&& zones[0]==\'{zone}\'].name" '
+                '--output tsv | grep .'),
+        ],
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
 def test_azure_region():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
