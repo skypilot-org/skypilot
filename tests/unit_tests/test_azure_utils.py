@@ -1,6 +1,7 @@
 """Tests for Azure utilities and provisioning config."""
 from unittest import mock
 
+import jsonschema
 import pytest
 
 from sky import clouds
@@ -10,6 +11,8 @@ from sky.clouds.utils import azure_utils
 from sky.provision.azure.config import _remove_msi_resources_from_template
 from sky.provision.azure.config import _remove_network_resources_from_template
 from sky.provision.azure.config import _resolve_custom_managed_identity
+from sky.utils import config_utils
+from sky.utils import schemas
 
 _SIG_IMAGE_ID = ('/subscriptions/sub-123/resourceGroups/my-rg/providers/'
                  'Microsoft.Compute/galleries/my-gallery/images/my-image/'
@@ -263,3 +266,54 @@ def _make_arm_template():
             },
         }
     }
+
+
+class TestRegionAvailabilityZone:
+    """Tests for the azure.region_configs.<region>.availability_zone pin."""
+
+    _CONFIG = {
+        'azure': {
+            'region_configs': {
+                'southcentralus': {
+                    'availability_zone': '2',
+                },
+            },
+        },
+    }
+
+    def _resolve(self, region):
+        return config_utils.get_cloud_config_value_from_dict(
+            dict_config=self._CONFIG,
+            cloud='azure',
+            region=region,
+            keys=('availability_zone',))
+
+    def test_pinned_region_resolves_zone(self):
+        assert self._resolve('southcentralus') == '2'
+
+    def test_unpinned_region_stays_zoneless(self):
+        assert self._resolve('eastus') is None
+
+    def test_no_region_configs_stays_zoneless(self):
+        assert config_utils.get_cloud_config_value_from_dict(
+            dict_config={'azure': {}},
+            cloud='azure',
+            region='southcentralus',
+            keys=('availability_zone',)) is None
+
+    def test_schema_accepts_region_configs(self):
+        config = {
+            'azure': {
+                'region_configs': {
+                    'southcentralus': {
+                        'availability_zone': '2',
+                    },
+                },
+            },
+        }
+        jsonschema.validate(config, schemas.get_config_schema())
+
+    def test_schema_rejects_cloud_level_availability_zone(self):
+        config = {'azure': {'availability_zone': '2'}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(config, schemas.get_config_schema())

@@ -1515,6 +1515,37 @@ errors from the cloud provider will be surfaced.
       team: ml-infra
       environment: production
 
+.. _config-yaml-azure-region-configs:
+
+``azure.region_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Advanced per-region Azure configuration (optional).
+
+``availability_zone``
+    Availability zone to pin VMs launched in this region to (optional).
+    By default, SkyPilot launches Azure VMs without a zone constraint and
+    Azure picks the placement. In capacity-constrained regions a SKU may
+    only be allocatable in a specific zone, where a zoneless request fails
+    with a capacity error while a zone-pinned request succeeds.
+
+    Azure availability zone labels are region-relative: the same SKU can
+    map to different physical zones under the same label in different
+    regions, so the pin must be configured per region. Regions without a
+    configured zone keep the default zoneless placement.
+
+Example:
+
+.. code-block:: yaml
+
+    azure:
+        # Region-specific configuration
+        region_configs:
+            southcentralus:
+                availability_zone: "2"
+            spaincentral:
+                availability_zone: "1"
+
 .. _config-yaml-azure-vpc-name:
 
 ``azure.vpc_name``

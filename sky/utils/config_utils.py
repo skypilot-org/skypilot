@@ -6,7 +6,7 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-_REGION_CONFIG_CLOUDS = ['nebius', 'oci']
+_REGION_CONFIG_CLOUDS = ['azure', 'nebius', 'oci']
 
 # Kubernetes API use list to represent dictionary fields with patch strategy
 # merge and each item is indexed by the patch merge key. The following map

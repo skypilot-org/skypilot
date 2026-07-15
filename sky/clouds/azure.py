@@ -431,6 +431,16 @@ class Azure(clouds.Cloud):
                 'image_version': version,
             }
 
+        # Availability zone to pin VMs to, if configured for this
+        # region. Azure zones are region-relative labels (the same SKU can
+        # live in different physical zones under the same label across
+        # regions), so the pin is only configurable per region.
+        availability_zone = skypilot_config.get_effective_region_config(
+            cloud='azure',
+            region=region_name,
+            keys=('availability_zone',),
+            default_value=None)
+
         # Determine resource group for deploying the instance.
         resource_group_name = skypilot_config.get_effective_region_config(
             cloud='azure',
@@ -491,8 +501,9 @@ class Azure(clouds.Cloud):
             'num_gpus': acc_count,
             'use_spot': resources.use_spot,
             'region': region_name,
-            # Azure does not support specific zones.
+            # Azure does not support specific zones in `resources.zone`.
             'zones': None,
+            'availability_zone': availability_zone,
             **image_config,
             'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,

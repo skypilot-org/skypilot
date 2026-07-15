@@ -298,6 +298,9 @@ def _create_vm(
                 storage_account_type=node_config['azure_arm_parameters']
                 ['osDiskTier']),
             disk_size_gb=node_config['azure_arm_parameters']['osDiskSizeGB']))
+    availability_zone = node_config['azure_arm_parameters'].get(
+        'availabilityZone', None)
+    zones = None if availability_zone is None else [str(availability_zone)]
     vm_instance = compute.VirtualMachine(
         location=provider_config['location'],
         tags=node_tags,
@@ -308,6 +311,7 @@ def _create_vm(
         identity=compute.VirtualMachineIdentity(
             type='UserAssigned',
             user_assigned_identities={provider_config['msi']: {}}),
+        zones=zones,
         priority=node_config['azure_arm_parameters'].get('priority', None))
     vm_poller = compute_client.virtual_machines.begin_create_or_update(
         resource_group_name=provider_config['resource_group'],

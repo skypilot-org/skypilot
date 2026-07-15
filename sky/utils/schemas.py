@@ -1957,6 +1957,22 @@ def get_config_schema():
                         'type': 'null',
                     }]
                 },
+                'region_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    # Keyed by Azure region name (e.g. 'eastus').
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'availability_zone': {
+                                'type': 'string',
+                            },
+                        },
+                    },
+                },
                 **_LABELS_SCHEMA,
                 **_CAPABILITIES_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,

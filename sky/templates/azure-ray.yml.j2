@@ -86,6 +86,10 @@ available_node_types:
             sharedGalleryImageId: {{shared_gallery_image_id}}
             osDiskSizeGB: {{disk_size}}
             osDiskTier: {{disk_tier}}
+            {%- if availability_zone is not none %}
+            # Availability zone to pin the VM to (region-relative label).
+            availabilityZone: "{{availability_zone}}"
+            {%- endif %}
             {%- if use_spot %}
             # optionally set priority to use Spot instances
             priority: Spot
