@@ -101,12 +101,16 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
 ]
 
 
-def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
-    """Warn if local file mounts or workdir may be lost during rolling update.
+def _check_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
+    """Warn or fail if local file mounts may be lost during rolling update.
 
     When rolling update is enabled with consolidation mode but no jobs bucket
     is configured, local file mounts and workdirs are stored locally on the API
-    server pod and will be lost during a rolling update.
+    server pod and will be lost during a rolling update. By default this
+    emits a warning and accepts the job; setting
+    ``jobs.require_durable_file_mounts: true`` in the SkyPilot config rejects
+    the job at submission instead, for deployments that would rather fail
+    fast than advertise a recovery that cannot restage the job's files.
     """
     # If rolling update is not enabled, don't warn.
     if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
@@ -146,15 +150,23 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     if not has_local_file_mounts and not has_local_workdir:
         return
 
-    logger.warning(
-        f'{colorama.Fore.YELLOW}WARNING: Local file mounts or workdir detected '
+    guidance = (
+        'Local file mounts or workdir detected '
         'with rolling update enabled for API server. To persist files'
         ' across API server restarts/update, use buckets, volumes, or git '
         'for your file mounts; or, configure a bucket in your SkyPilot config '
         'under `jobs.bucket`; or, enable persistent storage in Helm with '
         '`storage.enabled=true`. See: https://docs.skypilot.co/en/latest/'
-        'reference/kubernetes/kubernetes-deployment.html'
-        f'{colorama.Style.RESET_ALL}')
+        'reference/kubernetes/kubernetes-deployment.html')
+    if skypilot_config.get_nested(('jobs', 'require_durable_file_mounts'),
+                                  False):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{guidance} Alternatively, unset '
+                '`jobs.require_durable_file_mounts` in the SkyPilot config '
+                'to accept the job with a warning instead.')
+    logger.warning(f'{colorama.Fore.YELLOW}WARNING: {guidance}'
+                   f'{colorama.Style.RESET_ALL}')
 
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
@@ -851,8 +863,9 @@ def launch(
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
 
-    # Warn if file mounts may be lost during rolling update
-    _warn_file_mounts_rolling_update(dag)
+    # Warn (or fail, if `jobs.require_durable_file_mounts` is set) if file
+    # mounts may be lost during rolling update.
+    _check_file_mounts_rolling_update(dag)
 
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER

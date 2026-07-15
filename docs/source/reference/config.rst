@@ -432,6 +432,22 @@ Supported bucket types:
     # bucket: vastdata://my-bucket/
     # bucket: cos://<region>/<bucket>
 
+.. _config-yaml-jobs-require-durable-file-mounts:
+
+``jobs.require_durable_file_mounts``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to reject managed jobs whose local file mounts or workdir cannot survive an API server replacement (optional).
+
+When rolling update is enabled for a consolidation-mode API server without persistent storage or a :ref:`jobs.bucket <config-yaml-jobs-bucket>`, files uploaded from the local machine live only on the API server and cannot be restaged if the job recovers after the server is replaced. By default, SkyPilot warns at submission and accepts the job. Set this to ``true`` to reject the submission instead:
+
+.. code-block:: yaml
+
+  jobs:
+    require_durable_file_mounts: true
+
+Default: ``false``.
+
 .. _config-yaml-jobs-force-disable-cloud-bucket:
 
 ``jobs.force_disable_cloud_bucket``
