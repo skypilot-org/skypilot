@@ -3674,21 +3674,10 @@ def reset_job_for_recovery(job_id: int) -> None:
         session.commit()
 
 
-class JobRequeueOutcome(enum.Enum):
-    """Outcome of try_requeue_job_for_recovery."""
-    # The job was reset to WAITING and its recovery budget was charged.
-    REQUEUED = 'REQUEUED'
-    # The job's recovery budget is exhausted; nothing was written.
-    BUDGET_EXHAUSTED = 'BUDGET_EXHAUSTED'
-    # The job's owner record changed between the caller's observation and this
-    # call (re-claimed, marked DONE, or already reset); nothing was written.
-    LOST_RACE = 'LOST_RACE'
-
-
 @db_retries.retry
 def try_requeue_job_for_recovery(
-        job_id: int, observed_pid: int, observed_pid_started_at: Optional[float]
-) -> Tuple[JobRequeueOutcome, int]:
+        job_id: int, observed_pid: int,
+        observed_pid_started_at: Optional[float]) -> Optional[str]:
     """Requeue a dead-controller job for recovery, charging its budget.
 
     Atomically (in one transaction): verify the job is still owned by the
@@ -3702,10 +3691,18 @@ def try_requeue_job_for_recovery(
     concurrent re-claim (or another janitor invocation) a no-op, so a stale
     "dead" observation can never reset a job out from under a new owner.
 
+    On a successful requeue, this does not change the job status, but logs
+    the recovery and writes a durable trace to the job event log (see
+    add_job_event) before returning.
+
     Returns:
-        (outcome, attempt): attempt is the budget attempt just charged for
-        REQUEUED, or the attempt that would have been needed for
-        BUDGET_EXHAUSTED. It is meaningless (0) for LOST_RACE.
+        None if the caller should leave the job alone this tick: either the
+        job was successfully requeued, or the caller's "dead" observation
+        turned out to be stale (the job was re-claimed, reset, or completed
+        between the observation and this call), so there is nothing to do
+        until the next sweep re-evaluates the fresh state. A short failure
+        note (to be composed into the caller's failure_reason) if the job's
+        emergency-recovery budget is exhausted.
     """
     now = time.time()
     engine = _db_manager.get_engine()
@@ -3720,14 +3717,18 @@ def try_requeue_job_for_recovery(
                     job_info_table.c.spot_job_id ==
                     job_id).with_for_update()).fetchone()
         if row is None:
-            return JobRequeueOutcome.LOST_RACE, 0
+            logger.info(f'Job {job_id} changed state during the dead '
+                        'controller check; skipping.')
+            return None
         (current_pid, current_pid_started_at, current_schedule_state,
          recovery_count, last_recovery_at) = row
         if (current_pid != observed_pid or
                 current_pid_started_at != observed_pid_started_at):
             # The job was re-claimed (or reset) since the caller observed the
             # dead controller.
-            return JobRequeueOutcome.LOST_RACE, 0
+            logger.info(f'Job {job_id} changed state during the dead '
+                        'controller check; skipping.')
+            return None
         if current_schedule_state in [
                 ManagedJobScheduleState.DONE.value,
                 ManagedJobScheduleState.WAITING.value,
@@ -3737,7 +3738,9 @@ def try_requeue_job_for_recovery(
             # WAITING/INACTIVE: the job is not claimed, so there is nothing to
             # requeue (and a pid should not be set) - treat as a lost race and
             # let the next sweep re-evaluate.
-            return JobRequeueOutcome.LOST_RACE, 0
+            logger.info(f'Job {job_id} changed state during the dead '
+                        'controller check; skipping.')
+            return None
 
         # Decay-aware budget check, mirroring the controller's in-place
         # emergency retry: a job whose last recovery attempt is older than the
@@ -3747,7 +3750,8 @@ def try_requeue_job_for_recovery(
                 managed_job_constants.EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS):
             attempt = (recovery_count or 0) + 1
         if attempt > managed_job_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS:
-            return JobRequeueOutcome.BUDGET_EXHAUSTED, attempt
+            return (f'the job\'s recovery budget is exhausted '
+                    f'({attempt - 1} recovery attempts)')
 
         # NULL-safe fence on the started_at we observed: pre-#7847 rows have
         # no controller_pid_started_at.
@@ -3774,9 +3778,26 @@ def try_requeue_job_for_recovery(
                 })).rowcount
         if count != 1:
             session.rollback()
-            return JobRequeueOutcome.LOST_RACE, 0
+            logger.info(f'Job {job_id} changed state during the dead '
+                        'controller check; skipping.')
+            return None
         session.commit()
-        return JobRequeueOutcome.REQUEUED, attempt
+
+    max_attempts = managed_job_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+    logger.error(f'Controller process {observed_pid} for job {job_id} died '
+                 'unexpectedly. Requeued the job for recovery '
+                 f'(attempt {attempt}/{max_attempts}).')
+    # The requeue does not change the job status, but leave a durable trace
+    # in the job event log.
+    _, status = get_latest_task_id_status(job_id)
+    if status is not None:
+        add_job_event(
+            job_id,
+            task_id=None,
+            new_status=status,
+            reason=('Controller process died unexpectedly; requeued the job '
+                    f'for recovery (attempt {attempt}/{max_attempts})'))
+    return None
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:

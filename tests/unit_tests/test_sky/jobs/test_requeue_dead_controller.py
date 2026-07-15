@@ -2,8 +2,10 @@
 
 Covers:
 - state.try_requeue_job_for_recovery: the fenced, budget-charging reset that
-  makes a dead-controller job claimable by a fresh controller. Run against a
-  real temporary SQLite database.
+  makes a dead-controller job claimable by a fresh controller. Returns None
+  on success (or a stale/lost-race observation) and a failure-note string
+  when the recovery budget is exhausted. Run against a real temporary SQLite
+  database.
 - The dead-controller branch of utils.update_managed_jobs_statuses: requeue
   vs budget exhaustion vs preserving an already-terminal status.
 - state.is_legacy_controller_process: pid-NULL jobs that are managed by the
@@ -125,10 +127,8 @@ class TestTryRequeueJobForRecovery:
     def test_requeue_first_attempt(self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine)
-        outcome, attempt = state.try_requeue_job_for_recovery(
-            1, _PID, _PID_STARTED_AT)
-        assert outcome is state.JobRequeueOutcome.REQUEUED
-        assert attempt == 1
+        result = state.try_requeue_job_for_recovery(1, _PID, _PID_STARTED_AT)
+        assert result is None
         row = _job_info_row(engine)
         assert row.controller_pid is None
         assert row.controller_pid_started_at is None
@@ -139,6 +139,11 @@ class TestTryRequeueJobForRecovery:
         # Task status is untouched: the fresh controller's resume path
         # dispatches on it.
         assert _task_statuses(engine) == ['RUNNING']
+        # The function itself writes the durable trace of the requeue.
+        events = _job_events(engine)
+        assert len(events) == 1
+        assert events[0].new_status == 'RUNNING'
+        assert 'requeued' in events[0].reason
 
     def test_budget_continues_from_in_place_retries(self,
                                                     _mock_managed_jobs_db_conn):
@@ -148,10 +153,8 @@ class TestTryRequeueJobForRecovery:
         _seed_job(engine,
                   emergency_recovery_count=3,
                   last_emergency_recovery_at=time.time() - 60)
-        outcome, attempt = state.try_requeue_job_for_recovery(
-            1, _PID, _PID_STARTED_AT)
-        assert outcome is state.JobRequeueOutcome.REQUEUED
-        assert attempt == 4
+        result = state.try_requeue_job_for_recovery(1, _PID, _PID_STARTED_AT)
+        assert result is None
         assert _job_info_row(engine).emergency_recovery_count == 4
 
     def test_decay_starts_a_new_episode(self, _mock_managed_jobs_db_conn):
@@ -159,24 +162,24 @@ class TestTryRequeueJobForRecovery:
         _seed_job(engine,
                   emergency_recovery_count=_MAX,
                   last_emergency_recovery_at=time.time() - _WINDOW - 1)
-        outcome, attempt = state.try_requeue_job_for_recovery(
-            1, _PID, _PID_STARTED_AT)
-        assert outcome is state.JobRequeueOutcome.REQUEUED
-        assert attempt == 1
+        result = state.try_requeue_job_for_recovery(1, _PID, _PID_STARTED_AT)
+        assert result is None
+        assert _job_info_row(engine).emergency_recovery_count == 1
 
     def test_budget_exhausted_writes_nothing(self, _mock_managed_jobs_db_conn):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine,
                   emergency_recovery_count=_MAX,
                   last_emergency_recovery_at=time.time() - 60)
-        outcome, attempt = state.try_requeue_job_for_recovery(
-            1, _PID, _PID_STARTED_AT)
-        assert outcome is state.JobRequeueOutcome.BUDGET_EXHAUSTED
-        assert attempt == _MAX + 1
+        result = state.try_requeue_job_for_recovery(1, _PID, _PID_STARTED_AT)
+        assert result is not None
+        assert 'recovery budget is exhausted' in result
+        assert f'({_MAX} recovery attempts)' in result
         row = _job_info_row(engine)
         assert row.controller_pid == _PID
         assert row.schedule_state == 'ALIVE'
         assert row.emergency_recovery_count == _MAX
+        assert _job_events(engine) == []
 
     @pytest.mark.parametrize('observed_pid,observed_started_at', [
         (_PID + 1, _PID_STARTED_AT),
@@ -188,22 +191,22 @@ class TestTryRequeueJobForRecovery:
                                                observed_started_at):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine)
-        outcome, _ = state.try_requeue_job_for_recovery(1, observed_pid,
-                                                        observed_started_at)
-        assert outcome is state.JobRequeueOutcome.LOST_RACE
+        result = state.try_requeue_job_for_recovery(1, observed_pid,
+                                                    observed_started_at)
+        assert result is None
         row = _job_info_row(engine)
         assert row.controller_pid == _PID
         assert row.schedule_state == 'ALIVE'
         assert row.emergency_recovery_count is None
+        assert _job_events(engine) == []
 
     def test_null_started_at_matches_null(self, _mock_managed_jobs_db_conn):
         # Pre-#7847 rows have no controller_pid_started_at; observing
         # started_at None must fence against exactly those rows.
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, pid_started_at=None)
-        outcome, attempt = state.try_requeue_job_for_recovery(1, _PID, None)
-        assert outcome is state.JobRequeueOutcome.REQUEUED
-        assert attempt == 1
+        result = state.try_requeue_job_for_recovery(1, _PID, None)
+        assert result is None
         assert _job_info_row(engine).schedule_state == 'WAITING'
 
     @pytest.mark.parametrize('schedule_state', ['DONE', 'WAITING', 'INACTIVE'])
@@ -212,15 +215,14 @@ class TestTryRequeueJobForRecovery:
                                                     schedule_state):
         engine = _mock_managed_jobs_db_conn
         _seed_job(engine, schedule_state=schedule_state)
-        outcome, _ = state.try_requeue_job_for_recovery(1, _PID,
-                                                        _PID_STARTED_AT)
-        assert outcome is state.JobRequeueOutcome.LOST_RACE
+        result = state.try_requeue_job_for_recovery(1, _PID, _PID_STARTED_AT)
+        assert result is None
         assert _job_info_row(engine).schedule_state == schedule_state
+        assert _job_events(engine) == []
 
     def test_missing_job_is_a_noop(self, _mock_managed_jobs_db_conn):
-        outcome, _ = state.try_requeue_job_for_recovery(42, _PID,
-                                                        _PID_STARTED_AT)
-        assert outcome is state.JobRequeueOutcome.LOST_RACE
+        result = state.try_requeue_job_for_recovery(42, _PID, _PID_STARTED_AT)
+        assert result is None
 
 
 class TestIsLegacyControllerProcess:
@@ -322,7 +324,9 @@ class TestUpdateManagedJobsStatusesRequeue:
         # its cluster is not torn down.
         assert _task_statuses(engine) == ['RUNNING']
         _janitor_env['terminate_cluster'].assert_not_called()
-        _janitor_env['maybe_start_controllers'].assert_called_once()
+        # Consolidation-mode controller startup is owned exclusively by the
+        # leader daemon's tick; the janitor itself must not kick it off.
+        _janitor_env['maybe_start_controllers'].assert_not_called()
         events = _job_events(engine)
         assert len(events) == 1
         assert events[0].new_status == 'RUNNING'

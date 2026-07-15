@@ -687,7 +687,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # that need to be checked.
         return
 
-    jobs_requeued = False
     for job_id in job_ids:
         assert job_id is not None
         tasks = managed_job_state.get_managed_job_tasks(job_id)
@@ -794,44 +793,13 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             # budget with the controller's in-place retries, so a job whose
             # controller keeps dying eventually escapes to FAILED_CONTROLLER
             # below.
-            outcome, attempt = managed_job_state.try_requeue_job_for_recovery(
+            failure_note = managed_job_state.try_requeue_job_for_recovery(
                 job_id, pid, pid_started_at)
-            if outcome is managed_job_state.JobRequeueOutcome.REQUEUED:
-                max_attempts = (
-                    managed_job_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS)
-                logger.error(
-                    f'Controller process {pid} for job {job_id} died '
-                    'unexpectedly. Requeued the job for recovery by a fresh '
-                    f'controller (attempt {attempt}/{max_attempts}).')
-                # The requeue does not change the job status, but leave a
-                # durable trace in the job event log.
-                status_for_event = next((task['status']
-                                         for task in tasks
-                                         if not task['status'].is_terminal()),
-                                        tasks[-1]['status'])
-                managed_job_state.add_job_event(
-                    job_id,
-                    task_id=None,
-                    new_status=status_for_event,
-                    reason=('Controller process died unexpectedly; requeued '
-                            f'the job for recovery (attempt {attempt}/'
-                            f'{max_attempts})'))
-                jobs_requeued = True
+            if failure_note is None:
+                # Requeued (or our observation went stale) - nothing further
+                # to do this sweep.
                 continue
-            if outcome is managed_job_state.JobRequeueOutcome.LOST_RACE:
-                # The job changed hands (re-claimed, reset, or completed)
-                # between our pid check and the requeue attempt. Our "dead"
-                # observation is stale - do nothing and let the next sweep
-                # re-evaluate the fresh state.
-                logger.info(f'Job {job_id} changed state during the dead '
-                            'controller check; skipping.')
-                continue
-            assert (outcome is
-                    managed_job_state.JobRequeueOutcome.BUDGET_EXHAUSTED), (
-                        outcome)
-            failure_reason = ('Controller process is dead and the job\'s '
-                              'recovery budget is exhausted '
-                              f'({attempt - 1} recovery attempts)')
+            failure_reason = f'Controller process is dead and {failure_note}'
 
         # At this point, either pid is None or process is dead.
 
@@ -872,13 +840,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             override_terminal=True)
 
         scheduler.job_done(job_id, idempotent=True)
-
-    if jobs_requeued:
-        # Make sure controller processes exist to claim the requeued jobs.
-        # The periodic callers already invoke this right after us (see
-        # sky/skylet/events.py ManagedJobEvent._run), but the cancel path
-        # (cancel_jobs_by_id) does not.
-        scheduler.maybe_start_controllers()
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
