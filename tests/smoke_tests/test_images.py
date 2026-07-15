@@ -126,6 +126,60 @@ def test_azure_private_image():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.azure
+def test_azure_acr_managed_identity_image():
+    """Pulls a private ACR image authenticated by the VM's managed identity.
+
+    Mirrors the SIG fixture in test_azure_private_image: the registry and
+    identity live in SkyPilot's Azure CI subscription. Required one-time
+    setup (names are fixture constants below):
+
+      az acr create -g skypilot-sig-test -n skypilotcitest --sku Basic
+      az acr import -n skypilotcitest --source docker.io/library/ubuntu:22.04 \
+          --image skypilot-ci-test:latest
+      az identity create -g skypilot-sig-test -n skypilot-ci-acr-pull
+      az role assignment create --role AcrPull \
+          --assignee-object-id $(az identity show -g skypilot-sig-test \
+              -n skypilot-ci-acr-pull --query principalId -o tsv) \
+          --scope $(az acr show -n skypilotcitest --query id -o tsv)
+
+    Empty docker credentials select the managed-identity path; the identity
+    is attached to the VM via azure.remote_identity.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    registry = 'skypilotcitest.azurecr.io'
+    subscription_id = azure.get_subscription_id()
+    identity = (f'/subscriptions/{subscription_id}/resourceGroups/'
+                'skypilot-sig-test/providers/Microsoft.ManagedIdentity/'
+                'userAssignedIdentities/skypilot-ci-acr-pull')
+    task_yaml = textwrap.dedent(f"""\
+        resources:
+          infra: azure/eastus
+          image_id: docker:{registry}/skypilot-ci-test:latest
+        envs:
+          SKYPILOT_DOCKER_USERNAME: ""
+          SKYPILOT_DOCKER_PASSWORD: ""
+          SKYPILOT_DOCKER_SERVER: {registry}
+        run: |
+          echo hello-from-acr-image
+        """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'azure_acr_managed_identity_image',
+            [
+                f'sky launch -y -c {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config azure.remote_identity={identity} {f.name}',
+                f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+                f'sky logs {name} 1 | grep hello-from-acr-image',
+            ],
+            f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.aws
 def test_aws_image_id_dict():
     name = smoke_tests_utils.get_cluster_name()
