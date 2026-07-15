@@ -862,6 +862,122 @@ class TestWorkspaceManagement(unittest.TestCase):
         mock_check_resources.assert_called_once_with([('test-workspace',
                                                        'update')])
 
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_additive_allowed_clusters(
+            self, mock_get_users_for_role, mock_get_users):
+        """slurm.allowed_clusters-only changes are flagged additive or not."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # Sentinel for "allowed_clusters is absent from the slurm block".
+        absent = object()
+
+        def slurm_config(allowed_clusters):
+            slurm = {}
+            if allowed_clusters is not absent:
+                slurm['allowed_clusters'] = allowed_clusters
+            return {'slurm': slurm}
+
+        # (current_clusters, new_clusters, expected_additive)
+        cases = [
+            # The enrollment flow: deny-all -> first cluster.
+            ([], ['slurm-a'], True),
+            (['slurm-a'], ['slurm-a', 'slurm-b'], True),  # enroll second
+            (['slurm-a', 'slurm-b'], ['slurm-a'], False),  # revoke
+            (['slurm-a', 'slurm-b'], ['slurm-b', 'slurm-a'], True),  # reorder
+            (['slurm-a'], 'all', True),  # broaden to all
+            ('all', ['slurm-a'], False),  # narrow from all
+            (absent, ['slurm-a'], False),  # absent -> list
+            (['slurm-a'], absent, False),  # list -> absent
+        ]
+        for current_clusters, new_clusters, expected in cases:
+            with self.subTest(current=current_clusters, new=new_clusters):
+                result = core._compare_workspace_configs(
+                    slurm_config(current_clusters), slurm_config(new_clusters))
+                self.assertEqual(result.additive_allowed_clusters, expected)
+                # allowed_clusters changed, so never user-access-only.
+                self.assertFalse(result.only_user_access_changes)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_additive_clusters_with_other_changes(
+            self, mock_get_users_for_role, mock_get_users):
+        """Additive clusters alongside any other change is not additive."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # Additive clusters but a sibling slurm field also changed.
+        result = core._compare_workspace_configs(
+            {'slurm': {
+                'allowed_clusters': ['slurm-a'],
+                'disabled': False
+            }}, {
+                'slurm': {
+                    'allowed_clusters': ['slurm-a', 'slurm-b'],
+                    'disabled': True
+                }
+            })
+        self.assertFalse(result.additive_allowed_clusters)
+
+        # Additive clusters but a non-slurm field also changed.
+        result = core._compare_workspace_configs(
+            {
+                'slurm': {
+                    'allowed_clusters': ['slurm-a']
+                },
+                'gcp': {
+                    'project_id': 'p1'
+                }
+            }, {
+                'slurm': {
+                    'allowed_clusters': ['slurm-a', 'slurm-b']
+                },
+                'gcp': {
+                    'project_id': 'p2'
+                }
+            })
+        self.assertFalse(result.additive_allowed_clusters)
+
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    def test_compare_workspace_configs_slurm_block_is_none(
+            self, mock_get_users_for_role, mock_get_users):
+        """A null slurm block must not crash and is not additive."""
+        mock_get_users.return_value = []
+        mock_get_users_for_role.return_value = []
+
+        # `slurm: null` in YAML parses to None; must not raise TypeError.
+        result = core._compare_workspace_configs(
+            {'slurm': None}, {'slurm': {
+                'allowed_clusters': ['slurm-a']
+            }})
+        self.assertFalse(result.additive_allowed_clusters)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch('sky.workspaces.core._compare_workspace_configs')
+    def test_validate_workspace_config_changes_additive_clusters(
+            self, mock_compare_configs, mock_check_resources):
+        """Additive allowed_clusters changes skip the teardown check."""
+        mock_compare_configs.return_value = core.WorkspaceConfigComparison(
+            only_user_access_changes=False,
+            private_changed=False,
+            private_old=False,
+            private_new=False,
+            allowed_users_changed=False,
+            allowed_users_old=[],
+            allowed_users_new=[],
+            removed_users=[],
+            added_users=[],
+            additive_allowed_clusters=True)
+
+        # Should not raise any exception.
+        core._validate_workspace_config_changes('test-workspace', {}, {})
+
+        # Additive cluster changes do not require an empty workspace.
+        mock_check_resources.assert_not_called()
+
 
 class TestWorkspaceNameBackwardCompatibility(unittest.TestCase):
     """Tests that existing workspaces with non-conforming names still work."""

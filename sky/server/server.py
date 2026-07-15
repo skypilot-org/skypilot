@@ -57,6 +57,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import server as slurm_clusters_rest
 from sky.provision.slurm import utils as slurm_utils
 from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
@@ -1086,6 +1087,9 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+app.include_router(slurm_clusters_rest.router,
+                   prefix='/slurm_clusters',
+                   tags=['slurm_clusters'])
 app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)

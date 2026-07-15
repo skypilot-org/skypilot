@@ -1375,3 +1375,130 @@ class TestExpandPathVars:
         result = slurm_utils.expand_path_vars('/home/; rm -rf /',
                                               self.REMOTE_ENV)
         assert result == '/home/; rm -rf /'
+
+
+class TestWorkspaceAllowedClusters:
+    """Per-workspace slurm.allowed_clusters scoping.
+
+    Exercises the full enforcement chain: a workspace-level
+    ``slurm.allowed_clusters`` value (as stored by the workspace schema)
+    resolves through ``existing_allowed_clusters()`` and gates
+    ``regions_with_offering()``. The registered cluster set is mocked because
+    this layer only reads cluster *names* from ``~/.slurm/config`` -- no
+    connectivity is required.
+    """
+
+    def _reload_with(self, tmp_path, config_dict):
+        """Point config loading at a tmp file containing config_dict."""
+        from sky import skypilot_config
+        from sky.utils import yaml_utils
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text(yaml_utils.dump_yaml_str(config_dict))
+        skypilot_config._GLOBAL_CONFIG_PATH = str(config_path)
+        skypilot_config._PROJECT_CONFIG_PATH = str(tmp_path /
+                                                   'nonexistent.yaml')
+        skypilot_config._global_config_context = (
+            skypilot_config.ConfigContext())
+        skypilot_config.reload_config()
+
+    def _run(self, tmp_path, config_dict, workspace, fn):
+        from sky import skypilot_config
+        saved_global = skypilot_config._GLOBAL_CONFIG_PATH
+        saved_project = skypilot_config._PROJECT_CONFIG_PATH
+        saved_ctx = skypilot_config._global_config_context
+        try:
+            self._reload_with(tmp_path, config_dict)
+            with mock.patch(
+                    'sky.clouds.slurm.slurm_utils.get_all_slurm_cluster_names',
+                    return_value=['slurm-a', 'slurm-b']):
+                if workspace is not None:
+                    with skypilot_config.local_active_workspace_ctx(workspace):
+                        return fn()
+                return fn()
+        finally:
+            skypilot_config._GLOBAL_CONFIG_PATH = saved_global
+            skypilot_config._PROJECT_CONFIG_PATH = saved_project
+            skypilot_config._global_config_context = saved_ctx
+            skypilot_config.reload_config()
+
+    def test_workspace_allowlist_scopes_clusters(self, tmp_path):
+        """A workspace's allowed_clusters wins over the global list."""
+        config = {
+            'slurm': {
+                'allowed_clusters': 'all'
+            },
+            'workspaces': {
+                'tenant-a': {
+                    'slurm': {
+                        'allowed_clusters': ['slurm-a']
+                    }
+                },
+            },
+        }
+        cloud = slurm_cloud.Slurm()
+
+        # Inside tenant-a: only slurm-a is allowed.
+        allowed = self._run(tmp_path, config, 'tenant-a',
+                            cloud.existing_allowed_clusters)
+        assert allowed == ['slurm-a']
+
+        # slurm-b (another tenant's cluster) produces no offering.
+        regions_b = self._run(
+            tmp_path, config, 'tenant-a', lambda: cloud.regions_with_offering(
+                None, None, False, 'slurm-b', None))
+        assert regions_b == []
+
+        # slurm-a resolves to a region.
+        with mock.patch('sky.clouds.slurm.slurm_utils.get_partitions',
+                        return_value=[]):
+            regions_a = self._run(
+                tmp_path, config,
+                'tenant-a', lambda: cloud.regions_with_offering(
+                    None, None, False, 'slurm-a', None))
+        assert [r.name for r in regions_a] == ['slurm-a']
+
+    def test_workspace_deny_all(self, tmp_path):
+        """An empty allowed_clusters list is fail-closed deny-all."""
+        config = {
+            'slurm': {
+                'allowed_clusters': 'all'
+            },
+            'workspaces': {
+                'tenant-a': {
+                    'slurm': {
+                        'allowed_clusters': []
+                    }
+                },
+            },
+        }
+        cloud = slurm_cloud.Slurm()
+        allowed = self._run(tmp_path, config, 'tenant-a',
+                            cloud.existing_allowed_clusters)
+        assert allowed == []
+
+    def test_no_workspace_block_falls_back_to_global(self, tmp_path):
+        """No workspace slurm block -> global allowed_clusters applies."""
+        config = {
+            'slurm': {
+                'allowed_clusters': ['slurm-b']
+            },
+            'workspaces': {
+                'tenant-a': {},
+            },
+        }
+        cloud = slurm_cloud.Slurm()
+        allowed = self._run(tmp_path, config, 'tenant-a',
+                            cloud.existing_allowed_clusters)
+        assert allowed == ['slurm-b']
+
+    def test_global_default_all_when_unset(self, tmp_path):
+        """No workspace block and no global value -> all clusters."""
+        config = {
+            'workspaces': {
+                'tenant-a': {},
+            },
+        }
+        cloud = slurm_cloud.Slurm()
+        allowed = self._run(tmp_path, config, 'tenant-a',
+                            cloud.existing_allowed_clusters)
+        assert sorted(allowed) == ['slurm-a', 'slurm-b']

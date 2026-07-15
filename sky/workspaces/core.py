@@ -50,6 +50,9 @@ class WorkspaceConfigComparison:
         additive_allowed_contexts: True if the only non-user-access change is an
             additive kubernetes.allowed_contexts change (old contexts remain a
             subset of the new contexts)
+        additive_allowed_clusters: True if the only non-user-access change is an
+            additive slurm.allowed_clusters change (old clusters remain a
+            subset of the new clusters)
     """
     only_user_access_changes: bool
     private_changed: bool
@@ -61,6 +64,7 @@ class WorkspaceConfigComparison:
     removed_users: List[str]
     added_users: List[str]
     additive_allowed_contexts: bool = False
+    additive_allowed_clusters: bool = False
 
 
 # =========================
@@ -169,46 +173,56 @@ def _validate_workspace_config(workspace_name: str,
         raise ValueError(str(e)) from e
 
 
-def _extract_k8s_allowed_contexts(
-        config: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
-    """Split out kubernetes.allowed_contexts from a workspace config.
+def _extract_scoped_field(config: Dict[str, Any], cloud: str,
+                          field: str) -> Tuple[Dict[str, Any], Any]:
+    """Split out ``<cloud>.<field>`` from a workspace config.
 
-    Returns a tuple of (config_without_that_field, allowed_contexts_value). The
-    value is None when the field is absent. The input config is not mutated.
+    Returns a tuple of (config_without_that_field, field_value). The value is
+    None when the field is absent. The input config is not mutated.
     """
-    # The kubernetes block may be missing or explicitly null (e.g. a bare
+    # The cloud block may be missing or explicitly null (e.g. a bare
     # `kubernetes:` in YAML), so guard against non-dict values.
-    kubernetes_config = config.get('kubernetes')
-    if (not isinstance(kubernetes_config, dict) or
-            'allowed_contexts' not in kubernetes_config):
+    cloud_config = config.get(cloud)
+    if not isinstance(cloud_config, dict) or field not in cloud_config:
         return config, None
     remaining = dict(config)
-    remaining['kubernetes'] = {
-        k: v for k, v in kubernetes_config.items() if k != 'allowed_contexts'
-    }
-    return remaining, kubernetes_config['allowed_contexts']
+    remaining[cloud] = {k: v for k, v in cloud_config.items() if k != field}
+    return remaining, cloud_config[field]
 
 
-def _is_additive_contexts(current_allowed_contexts: Any,
-                          new_allowed_contexts: Any) -> bool:
-    """Return True if allowed_contexts only grew (no existing context dropped).
+def _extract_k8s_allowed_contexts(
+        config: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
+    """Split out kubernetes.allowed_contexts from a workspace config."""
+    return _extract_scoped_field(config, 'kubernetes', 'allowed_contexts')
+
+
+def _extract_slurm_allowed_clusters(
+        config: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
+    """Split out slurm.allowed_clusters from a workspace config."""
+    return _extract_scoped_field(config, 'slurm', 'allowed_clusters')
+
+
+def _is_additive_allowlist(current_value: Any, new_value: Any) -> bool:
+    """Return True if an allowlist only grew (no existing entry dropped).
+
+    Used for both ``kubernetes.allowed_contexts`` and
+    ``slurm.allowed_clusters``, which share the same list-or-``'all'`` shape.
 
     Additive cases:
-    - list -> list where the old contexts are a subset of the new contexts.
-    - list -> 'all' (broadening to every kubeconfig context).
+    - list -> list where the old entries are a subset of the new entries.
+    - list -> 'all' (broadening to every available entry).
 
     Everything else (no change, 'all' -> list, absent/None on either side,
-    removals, or reorders that drop a context) is not additive.
+    removals, or reorders that drop an entry) is not additive.
     """
-    if current_allowed_contexts == new_allowed_contexts:
+    if current_value == new_value:
         return False
     # list -> 'all' is broadening.
-    if new_allowed_contexts == 'all':
-        return isinstance(current_allowed_contexts, list)
+    if new_value == 'all':
+        return isinstance(current_value, list)
     # list -> list must keep old as a subset of new.
-    if (isinstance(current_allowed_contexts, list) and
-            isinstance(new_allowed_contexts, list)):
-        return set(current_allowed_contexts).issubset(set(new_allowed_contexts))
+    if isinstance(current_value, list) and isinstance(new_value, list):
+        return set(current_value).issubset(set(new_value))
     return False
 
 
@@ -281,7 +295,19 @@ def _compare_workspace_configs(
         _extract_k8s_allowed_contexts(new_without_access))
     additive_allowed_contexts = (
         current_without_contexts == new_without_contexts and
-        _is_additive_contexts(current_allowed_contexts, new_allowed_contexts))
+        _is_additive_allowlist(current_allowed_contexts, new_allowed_contexts))
+
+    # Same treatment for slurm.allowed_clusters: an additive change (e.g.
+    # enrolling a tenant's next cluster) keeps every already-allowed cluster
+    # allowed, so running jobs stay resolvable. Only fires when it is the sole
+    # non-user-access change (the stripped remainders must be equal).
+    current_without_clusters, current_allowed_clusters = (
+        _extract_slurm_allowed_clusters(current_without_access))
+    new_without_clusters, new_allowed_clusters = (
+        _extract_slurm_allowed_clusters(new_without_access))
+    additive_allowed_clusters = (
+        current_without_clusters == new_without_clusters and
+        _is_additive_allowlist(current_allowed_clusters, new_allowed_clusters))
 
     return WorkspaceConfigComparison(
         only_user_access_changes=only_user_access_changes,
@@ -293,7 +319,8 @@ def _compare_workspace_configs(
         allowed_users_new=allowed_users_new,
         removed_users=removed_users,
         added_users=added_users,
-        additive_allowed_contexts=additive_allowed_contexts)
+        additive_allowed_contexts=additive_allowed_contexts,
+        additive_allowed_clusters=additive_allowed_clusters)
 
 
 def _validate_workspace_config_changes_with_lock(
@@ -332,7 +359,8 @@ def _validate_workspace_config_changes(
 
     This function implements the logic:
     - If only allowed_users or private changed, or the only non-user-access
-      change is an additive kubernetes.allowed_contexts change:
+      change is an additive kubernetes.allowed_contexts or
+      slurm.allowed_clusters change:
       - If private changed from true to false: allow it
       - If private changed from false to true: check that all active resources
         belong to allowed_users
@@ -340,9 +368,10 @@ def _validate_workspace_config_changes(
         resources
     - Otherwise: check that workspace has no active resources
 
-    Additive kubernetes.allowed_contexts changes (old contexts remain a subset
-    of the new contexts) are safe because every existing context stays allowed,
-    so running clusters and jobs keep resolving to a still-allowed context.
+    Additive kubernetes.allowed_contexts / slurm.allowed_clusters changes (old
+    entries remain a subset of the new entries) are safe because every existing
+    entry stays allowed, so running clusters and jobs keep resolving to a
+    still-allowed context/cluster.
 
     Args:
         workspace_name: The name of the workspace.
@@ -365,14 +394,21 @@ def _validate_workspace_config_changes(
                                                    resolver=resolver)
 
     if (config_comparison.only_user_access_changes or
-            config_comparison.additive_allowed_contexts):
-        # Only user access settings changed, and/or allowed_contexts grew
-        # additively. Both are safe for active resources; still run the
-        # user-access validation below (a no-op when only contexts changed).
+            config_comparison.additive_allowed_contexts or
+            config_comparison.additive_allowed_clusters):
+        # Only user access settings changed, and/or an allowlist
+        # (allowed_contexts / allowed_clusters) grew additively. All are safe
+        # for active resources; still run the user-access validation below (a
+        # no-op when only the allowlist changed).
         if config_comparison.additive_allowed_contexts:
             logger.info(
                 f'Workspace {workspace_name!r} only adds Kubernetes '
                 'allowed_contexts; existing contexts remain allowed. Skipping '
+                'the active-resource check for this change.')
+        if config_comparison.additive_allowed_clusters:
+            logger.info(
+                f'Workspace {workspace_name!r} only adds Slurm '
+                'allowed_clusters; existing clusters remain allowed. Skipping '
                 'the active-resource check for this change.')
         if config_comparison.private_changed:
             if (config_comparison.private_old and

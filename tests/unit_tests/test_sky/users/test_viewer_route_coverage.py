@@ -122,6 +122,11 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/ssh_node_pools/deploy', 'POST'),
     ('/ssh_node_pools/{pool_name}/down', 'POST'),
     ('/ssh_node_pools/down', 'POST'),
+    # --- Slurm cluster registration (control-plane; GET too, since
+    # cluster names + hosts are cross-tenant metadata) ---
+    ('/slurm_clusters', 'GET'),
+    ('/slurm_clusters', 'POST'),
+    ('/slurm_clusters/{name}', 'DELETE'),
     # --- Debug ---
     # /debug/dump_create is intentionally on the viewer allowlist (see
     # _DEFAULT_VIEWER_ALLOWLIST) so viewers can capture support diagnostics;

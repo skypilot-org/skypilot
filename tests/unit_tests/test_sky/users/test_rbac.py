@@ -96,6 +96,18 @@ class TestGetRolePermissions:
         assert {'path': '/workspaces/config', 'method': 'GET'} in blocklist
         assert {'path': '/foo', 'method': 'POST'} in blocklist
 
+    def test_slurm_clusters_blocked_for_user(self):
+        # The whole /slurm_clusters registration surface (GET included, since
+        # cluster names + hosts are cross-tenant metadata) is control-plane and
+        # blocked for the user role.
+        blocklist = self._user_blocklist(False)
+        assert {'path': '/slurm_clusters', 'method': 'GET'} in blocklist
+        assert {'path': '/slurm_clusters', 'method': 'POST'} in blocklist
+        assert {
+            'path': '/slurm_clusters/:name',
+            'method': 'DELETE'
+        } in blocklist
+
 
 class TestGetViewerAllowlist:
     """rbac.get_viewer_allowlist composes defaults + config + plugin entries."""
