@@ -255,7 +255,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniconda3-Linux.sh script.
     # Download to /tmp to ensure write access for non-root users.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_26.5.3-1-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to

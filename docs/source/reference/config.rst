@@ -714,23 +714,26 @@ Default: ``10``.
 
 Whether to install conda on the remote cluster (optional).
 
-Skypilot clusters come with conda preinstalled for convenience.
-When set to ``false``, SkyPilot will not install conda on the cluster.
+When set to ``true``, SkyPilot installs conda on the cluster (if not already
+present) and makes its ``base`` environment the default Python environment for
+task commands. When ``false`` (the default), SkyPilot does not install conda;
+task commands use the image's own Python. The SkyPilot runtime itself does not
+depend on conda — it runs in a separate ``uv``-managed environment either way.
 
-Default: ``true``.
+Default: ``false``.
 
 Example:
 
 .. code-block:: yaml
 
   provision:
-    install_conda: false
+    install_conda: true
 
 .. note::
 
-  Default SkyPilot images often come with conda preinstalled.
-  To fully avoid installing conda, use a custom Docker image that does not have conda preinstalled
-  along with ``install_conda: false``.
+  The default SkyPilot Kubernetes images no longer bundle conda. If your tasks
+  rely on a conda environment, either set ``install_conda: true`` or use a
+  custom image that ships conda.
 
 .. _config-yaml-aws:
 

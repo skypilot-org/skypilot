@@ -981,7 +981,7 @@ def write_cluster_config(
         labels.update(to_provision.labels)
 
     install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
-                                               True)
+                                               False)
 
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.

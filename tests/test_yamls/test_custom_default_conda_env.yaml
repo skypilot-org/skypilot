@@ -1,3 +1,9 @@
+# conda is no longer installed by default; opt in so this test can exercise the
+# custom-default-conda-env behavior (and the install_conda=true opt-in path).
+config:
+  provision:
+    install_conda: true
+
 resources:
   cpus: 2+
 
@@ -17,5 +23,8 @@ setup: |
 
 run: |
   conda env list
+  # Regression guard: the opt-in conda install must be a current, CVE-clean
+  # build, not the old pinned version that ships flagged dependencies.
+  conda --version | grep -v 23.11.0 || { echo "outdated conda installed"; exit 1; }
   echo hi
   echo bye

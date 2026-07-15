@@ -492,6 +492,32 @@ def test_image_no_conda():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_default_image_no_conda():
+    """The default K8s image ships no conda, but tasks still get python/pip.
+
+    Regression guard: conda was removed from the default K8s images and
+    install_conda now defaults to false. A user task must find no conda on
+    PATH yet still have a usable system python3/pip. If conda is baked back
+    into the image, `which conda` succeeds and this test fails.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    check_cmd = (
+        'if which conda; then echo "conda unexpectedly present"; exit 1; fi; '
+        'python3 --version && pip3 --version && echo CONDA_FREE_OK')
+    test = smoke_tests_utils.Test(
+        'kubernetes_default_image_no_conda',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--infra kubernetes "{check_cmd}"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep CONDA_FREE_OK',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
