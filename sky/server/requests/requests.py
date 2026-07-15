@@ -1575,6 +1575,40 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                 logger.debug(f'End creating request {request.request_id}')
         return True if row else False
 
+    @asyncio_utils.shield
+    async def create_or_refresh_internal_daemon_async(self,
+                                                      request: Request) -> bool:
+        inserted = await self.create_if_not_exists_async(request)
+        if inserted:
+            return True
+        encoded_body = encoders.pickle_and_encode(request.request_body)
+        await self._execute_async(
+            f'UPDATE {REQUEST_TABLE} '
+            f'SET request_body=?, name=?, schedule_type=? '
+            f'WHERE request_id=?',
+            (encoded_body, request.name, request.schedule_type.value,
+             request.request_id))
+        return False
+
+    @asyncio_utils.shield
+    async def delete_orphan_internal_daemons_async(
+        self,
+        internal_daemons: List['daemons.InternalRequestDaemon'],
+    ) -> None:
+        keep_ids = {d.id for d in internal_daemons}
+        rows = await self._execute_async(
+            f'SELECT request_id FROM {REQUEST_TABLE} '
+            f'WHERE request_id LIKE ?', ('%-daemon',),
+            fetch=True)
+        stale_ids = [row[0] for row in rows if row[0] not in keep_ids]
+        if not stale_ids:
+            return
+        id_placeholders = ','.join(['?'] * len(stale_ids))
+        await self._execute_async(
+            f'DELETE FROM {REQUEST_TABLE} '
+            f'WHERE request_id IN ({id_placeholders})', tuple(stale_ids))
+        logger.info(f'Deleted orphan internal daemon rows: {stale_ids}')
+
     def query_requests(self, req_filter: RequestTaskFilter) -> List[Request]:
         rows = self._execute(*req_filter.build_query(), fetch=True)
         if req_filter.fields:
