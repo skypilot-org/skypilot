@@ -1968,7 +1968,13 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             'availability_zone': {
-                                'type': 'string',
+                                'anyOf': [{
+                                    'type': 'string',
+                                }, {
+                                    'type': 'integer',
+                                }, {
+                                    'type': 'null',
+                                }],
                             },
                         },
                     },

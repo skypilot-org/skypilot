@@ -302,16 +302,17 @@ class TestRegionAvailabilityZone:
             keys=('availability_zone',)) is None
 
     def test_schema_accepts_region_configs(self):
-        config = {
-            'azure': {
-                'region_configs': {
-                    'southcentralus': {
-                        'availability_zone': '2',
+        for zone in ('2', 2, None):
+            config = {
+                'azure': {
+                    'region_configs': {
+                        'southcentralus': {
+                            'availability_zone': zone,
+                        },
                     },
                 },
-            },
-        }
-        jsonschema.validate(config, schemas.get_config_schema())
+            }
+            jsonschema.validate(config, schemas.get_config_schema())
 
     def test_schema_rejects_cloud_level_availability_zone(self):
         config = {'azure': {'availability_zone': '2'}}
