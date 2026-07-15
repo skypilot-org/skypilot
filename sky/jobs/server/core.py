@@ -162,9 +162,9 @@ def _check_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
                                   False):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'{guidance} Alternatively, unset '
-                '`jobs.require_durable_file_mounts` in the SkyPilot config '
-                'to accept the job with a warning instead.')
+                f'{guidance} Alternatively, ask your administrator to unset '
+                '`jobs.require_durable_file_mounts` in the API server\'s '
+                'SkyPilot config to accept such jobs with a warning instead.')
     logger.warning(f'{colorama.Fore.YELLOW}WARNING: {guidance}'
                    f'{colorama.Style.RESET_ALL}')
 

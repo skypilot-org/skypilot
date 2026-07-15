@@ -586,6 +586,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     #   LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG (won't cause test failure,
     #   but the configs won't be applied)
     ('jobs', 'controller', 'consolidation_mode'),
+    # Whether non-durable file mounts are rejected describes the server
+    # deployment's durability, so a client must not weaken it.
+    ('jobs', 'require_durable_file_mounts'),
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),

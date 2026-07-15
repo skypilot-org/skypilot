@@ -2766,13 +2766,15 @@ def get_config_schema():
             'db': {
                 'type': 'string',
             },
-            'jobs': _get_controller_schema(extra_properties={
-                'require_durable_file_mounts': {
-                    'type': 'boolean',
-                    'default': False,
-                },
-                **_extra_jobs_properties,
-            },),
+            'jobs': _get_controller_schema(
+                extra_properties={
+                    **_extra_jobs_properties,
+                    # Built-in keys come last so a plugin cannot shadow them.
+                    'require_durable_file_mounts': {
+                        'type': 'boolean',
+                        'default': False,
+                    },
+                },),
             'serve': _get_controller_schema(),
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,

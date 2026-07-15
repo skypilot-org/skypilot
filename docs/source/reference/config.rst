@@ -41,6 +41,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
+    :ref:`require_durable_file_mounts <config-yaml-jobs-require-durable-file-mounts>`: false
     :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
     controller:
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
@@ -439,7 +440,7 @@ Supported bucket types:
 
 Whether to reject managed jobs whose local file mounts or workdir cannot survive an API server replacement (optional).
 
-When rolling update is enabled for a consolidation-mode API server without persistent storage or a :ref:`jobs.bucket <config-yaml-jobs-bucket>`, files uploaded from the local machine live only on the API server and cannot be restaged if the job recovers after the server is replaced. By default, SkyPilot warns at submission and accepts the job. Set this to ``true`` to reject the submission instead:
+When rolling update is enabled for a consolidation-mode API server without persistent storage or a :ref:`jobs.bucket <config-yaml-jobs-bucket>`, files uploaded from the local machine live only on the API server and cannot be restaged if the job recovers after the server is replaced. By default, SkyPilot warns at submission and accepts the job. Set this to ``true`` in the API server's config to reject the submission instead (the key is server-authoritative: client configs cannot override it):
 
 .. code-block:: yaml
 
