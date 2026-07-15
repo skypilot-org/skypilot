@@ -105,6 +105,17 @@ SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# Default user-facing Python environment, baked into the container image (see
+# Dockerfile_k8s{,_gpu}). It replaces the role conda's base env used to play:
+# user setup/run commands activate it so `pip`/`uv` install into a writable
+# location instead of a non-writable system site-packages. Kept separate from
+# the SkyPilot runtime env above. Only activated when conda is not active (an
+# opt-in conda base takes precedence). Keep the path in sync with the venv
+# created in the Dockerfiles.
+SKY_USER_ENV_PATH = '~/sky-user-env'
+ACTIVATE_SKY_USER_ENV = ('if [ -z "${CONDA_PREFIX:-}" ] && '
+                         f'[ -f {SKY_USER_ENV_PATH}/bin/activate ]; then '
+                         f'source {SKY_USER_ENV_PATH}/bin/activate; fi')
 # Place the conda root in the runtime directory, as installing to $HOME
 # on an NFS takes too long (1-2m slower).
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'

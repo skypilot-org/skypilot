@@ -505,12 +505,14 @@ def test_kubernetes_default_image_no_conda():
     hit `Permission denied` on /usr/local/lib/.../dist-packages and fails (2).
     """
     name = smoke_tests_utils.get_cluster_name()
+    # Use single quotes inside; the whole command is wrapped in double quotes
+    # by the launch string below.
     check_cmd = (
-        'if which conda; then echo "conda unexpectedly present"; exit 1; fi && '
+        "if which conda; then echo 'conda unexpectedly present'; exit 1; fi && "
         'python --version && '
         # Must install into a writable env, not system site-packages.
         'pip install --quiet requests && '
-        'python -c "import requests" && '
+        "python -c 'import requests' && "
         'echo CONDA_FREE_OK')
     test = smoke_tests_utils.Test(
         'kubernetes_default_image_no_conda',

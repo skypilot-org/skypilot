@@ -371,6 +371,11 @@ def make_task_bash_script(codegen: str,
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
+            # Activate the default user environment (replaces conda base) so
+            # user commands get a writable python/pip. DEACTIVATE above unsets
+            # VIRTUAL_ENV, so re-activate here to keep it consistent (a venv
+            # uses VIRTUAL_ENV, unlike conda which uses CONDA_PREFIX).
+            {constants.ACTIVATE_SKY_USER_ENV}
             export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]

@@ -18,7 +18,7 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git build-essential rsync sudo patch openssh-server \
-        python3 python3-pip python3-venv python-is-python3 \
+        python3 python3-pip python3-venv python-is-python3 sqlite3 \
         pciutils nano fuse unzip socat netcat-openbsd curl wget autossh jq && \
     apt-get install -y --no-install-recommends fuse3 && \
     rm -rf /var/lib/apt/lists/*
@@ -70,12 +70,13 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Create a default, user-writable Python environment for task commands. This
-# replaces the role conda's base env used to play: user setup/run commands
-# `source ~/.bashrc`, this venv activates, and `pip install` writes to a
-# user-writable location. SkyPilot's own runtime uses the separate
-# ~/skypilot-runtime venv (PATH-scrubbed at task time) and is unaffected.
-RUN python3 -m venv ~/sky-user-env && \
-    echo 'source ~/sky-user-env/bin/activate' >> ~/.bashrc
+# replaces the role conda's base env used to play, so user `pip install` writes
+# to a user-writable location. It is activated only for user setup/run commands
+# (by make_task_bash_script in skylet.log_lib), NOT via ~/.bashrc — a global
+# .bashrc activation would also apply to SkyPilot's own controller operations
+# and set VIRTUAL_ENV for them, which breaks serve/jobs. SkyPilot's own runtime
+# uses the separate ~/skypilot-runtime venv.
+RUN python3 -m venv ~/sky-user-env
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1
