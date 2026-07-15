@@ -53,15 +53,21 @@ class CloudStorage:
         raise NotImplementedError
 
 
+# Commands an S3-compatible store runs before its sync command to resolve the
+# AWS CLI: prefer a preinstalled `aws` on PATH, otherwise install awscli into
+# the SkyPilot runtime venv. Either way the sync command invokes the resolved
+# binary via `$awscli_path`.
+_AWSCLI_RESOLVE_CMDS = [
+    'awscli_path=$(command -v aws) || '
+    f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+    f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
+]
+
+
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'awscli_path=$(which aws) || '
-        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
-        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
-    ]
+    _GET_AWSCLI = _AWSCLI_RESOLVE_CMDS
 
     def is_directory(self, url: str) -> bool:
         """Returns whether S3 'url' is a directory.
@@ -364,12 +370,7 @@ class AzureBlobCloudStorage(CloudStorage):
 class R2CloudStorage(CloudStorage):
     """Cloudflare Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'awscli_path=$(which aws) || '
-        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
-        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
-    ]
+    _GET_AWSCLI = _AWSCLI_RESOLVE_CMDS
 
     def is_directory(self, url: str) -> bool:
         """Returns whether R2 'url' is a directory.
@@ -562,12 +563,7 @@ class OciS3CloudStorage(CloudStorage):
     native OCI credentials.
     """
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'awscli_path=$(which aws) || '
-        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
-        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
-    ]
+    _GET_AWSCLI = _AWSCLI_RESOLVE_CMDS
 
     def is_directory(self, url: str) -> bool:
         """Returns whether OCI 'url' is a directory.
@@ -641,12 +637,7 @@ class OciS3CloudStorage(CloudStorage):
 class NebiusCloudStorage(CloudStorage):
     """Nebius Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'awscli_path=$(which aws) || '
-        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
-        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
-    ]
+    _GET_AWSCLI = _AWSCLI_RESOLVE_CMDS
 
     def is_directory(self, url: str) -> bool:
         """Returns whether nebius 'url' is a directory.
@@ -702,12 +693,7 @@ class NebiusCloudStorage(CloudStorage):
 class CoreWeaveCloudStorage(CloudStorage):
     """CoreWeave Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'awscli_path=$(which aws) || '
-        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
-        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
-    ]
+    _GET_AWSCLI = _AWSCLI_RESOLVE_CMDS
 
     def is_directory(self, url: str) -> bool:
         """Checks if the coreweave object is a directory.
@@ -778,11 +764,7 @@ class VastDataCloudStorage(CloudStorage):
     (GPU compute).
     """
 
-    _GET_AWSCLI = [
-        'awscli_path=$(which aws) || '
-        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
-        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
-    ]
+    _GET_AWSCLI = _AWSCLI_RESOLVE_CMDS
 
     def is_directory(self, url: str) -> bool:
         """Returns whether VastData 'url' is a directory."""
