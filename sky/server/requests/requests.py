@@ -707,9 +707,8 @@ def _kill_requests(request_ids: Optional[List[str]] = None,
                    user_id: Optional[str] = None) -> List[str]:
     """Kill SkyPilot API requests and set their status to cancelled.
 
-    Delegates to the registered request backend, which handles local
-    process killing and (for multi-replica backends) cross-replica
-    cancellation.
+    Delegates to the registered request backend, which handles cancellation
+    semantics for that storage implementation.
     """
     return request_storage.get_request_backend().kill_requests(
         request_ids=request_ids, user_id=user_id)
@@ -1333,7 +1332,7 @@ atexit.register(_cleanup)
 
 
 class PostgresRequestBackend(request_storage.RequestBackend):
-    """Postgres-backed request backend for active-active API servers."""
+    """Postgres-backed request backend for shared request metadata."""
 
     def __init__(self):
         if not os.environ.get(skylet_constants.ENV_VAR_DB_CONNECTION_URI):
@@ -1645,7 +1644,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                 if request_record.pid is not None:
                     logger.warning(
                         'Postgres request backend cannot safely signal API '
-                        'worker pid %s across replicas; marking request %s '
+                        'worker pid %s from this process; marking request %s '
                         'cancelled in the request DB.',
                         request_record.pid,
                         request_id)
@@ -1663,7 +1662,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
             if request.pid is not None:
                 logger.warning(
                     'Postgres request backend cannot safely signal API worker '
-                    'pid %s across replicas; marking request %s cancelled in '
+                    'pid %s from this process; marking request %s cancelled in '
                     'the request DB.',
                     request.pid,
                     request_id)

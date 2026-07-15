@@ -649,8 +649,8 @@ ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 # skypilot server.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 
-# Backend for API request tracking. Defaults to SQLite. Set to "postgres" on
-# self-hosted API servers that need active-active replicas.
+# Backend for API request tracking. Defaults to SQLite. Set to "postgres" to
+# store API request metadata in the configured external database.
 ENV_VAR_API_REQUEST_DB_BACKEND = (
     f'{SKYPILOT_ENV_VAR_PREFIX}API_REQUEST_DB_BACKEND')
 

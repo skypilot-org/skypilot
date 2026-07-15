@@ -267,6 +267,38 @@ class TestGetEngine:
             assert callable(call_args[1].get('async_creator'))
             assert engine == mock_engine
 
+    def test_postgres_async_engine_normalizes_driver_prefixed_dsn(
+            self, monkeypatch):
+        """asyncpg receives a libpq DSN, not a SQLAlchemy driver URL."""
+        monkeypatch.setenv('IS_SKYPILOT_SERVER', 'true')
+        monkeypatch.setenv(
+            'SKYPILOT_DB_CONNECTION_URI',
+            'postgresql+psycopg://user:pass@localhost/db?sslmode=require')
+
+        captured = {}
+
+        def fake_asyncpg_creator(dsn):
+            captured['dsn'] = dsn
+
+            async def _connect():
+                return None
+
+            return _connect
+
+        with mock.patch.object(db_utils,
+                               '_make_asyncpg_creator',
+                               side_effect=fake_asyncpg_creator), \
+             mock.patch(
+                 'sqlalchemy.ext.asyncio.create_async_engine') as mock_create:
+            mock_engine = mock.MagicMock()
+            mock_create.return_value = mock_engine
+
+            engine = db_utils.get_engine(db_name='ignored', async_engine=True)
+
+        assert engine == mock_engine
+        assert captured['dsn'] == (
+            'postgresql://user:pass@localhost/db?sslmode=require')
+
     @pytest.mark.asyncio
     async def test_postgres_async_engine_does_not_leak_libpq_kwargs_to_asyncpg(
             self, monkeypatch):
