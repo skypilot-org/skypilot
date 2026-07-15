@@ -1975,7 +1975,7 @@ def get_config_schema():
                                         # strings; reject typos (and empty
                                         # strings) at validation instead of
                                         # at the Azure API.
-                                        'pattern': '^[0-9]+$',
+                                        'pattern': '^[0-9]+\\Z',
                                     },
                                     {
                                         'type': 'integer',
