@@ -735,11 +735,15 @@ class Kubernetes(clouds.Cloud):
                 if image_id.startswith('docker:'):
                     image_id = image_id[len('docker:'):]
             else:
-                # Select image based on whether we are using GPUs or not.
-                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-                # Get the container image ID from the service catalog.
-                image_id = catalog.get_image_id_from_tag(image_id,
-                                                         clouds='kubernetes')
+                # TEMP(local-test): use locally-built images instead of the
+                # published catalog images. Revert before committing.
+                _ = catalog  # keep import for the real path
+                repo = 'us-docker.pkg.dev/sky-dev-465/skypilotk8s'
+                tag = '202607150322'
+                if acc_count > 0:
+                    image_id = f'{repo}/skypilot-gpu:{tag}'
+                else:
+                    image_id = f'{repo}/skypilot:{tag}'
             return image_id
 
         image_id = _get_image_id(resources)
