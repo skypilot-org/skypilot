@@ -473,8 +473,12 @@ class Kubernetes(clouds.Cloud):
         for r in regions:
             context = r.name
             try:
+                ephemeral_storage_gb = (resources.ephemeral_storage
+                                        if resources is not None else None)
                 fits, reason = kubernetes_utils.check_instance_fits(
-                    context, instance_type)
+                    context,
+                    instance_type,
+                    ephemeral_storage_gb=ephemeral_storage_gb)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 continue
