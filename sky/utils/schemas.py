@@ -1971,9 +1971,10 @@ def get_config_schema():
                                 'anyOf': [
                                     {
                                         'type': 'string',
-                                        # Azure zone labels are numeric strings;
-                                        # reject typos (and empty strings) at
-                                        # validation instead of at the Azure API.
+                                        # Azure zone labels are numeric
+                                        # strings; reject typos (and empty
+                                        # strings) at validation instead of
+                                        # at the Azure API.
                                         'pattern': '^[0-9]+$',
                                     },
                                     {
