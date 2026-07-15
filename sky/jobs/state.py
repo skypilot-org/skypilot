@@ -3800,6 +3800,74 @@ def try_requeue_job_for_recovery(
     return None
 
 
+@db_retries.retry
+def charge_terminal_cleanup_attempt(job_id: int) -> Optional[str]:
+    """Charge one attempt of the shared recovery budget for a failed cleanup.
+
+    Used when a job whose controller died has already reached a terminal
+    status (e.g. SUCCEEDED), but the dead-controller cleanup of its
+    cluster(s) failed. This shares the one-budget-per-job semantics with
+    try_requeue_job_for_recovery and the controller's in-place emergency
+    retries: whichever layer spends attempts, they all draw down the same
+    per-job counter, so a job that keeps failing (whether via requeues,
+    in-place retries, or terminal cleanup failures) eventually exhausts its
+    budget and escalates.
+
+    Unlike try_requeue_job_for_recovery, this does not fence on the observed
+    (pid, pid_started_at): the row is already terminal with a dead recorded
+    pid, so there is no live owner to race with. A concurrent janitor
+    invocation double-charging the same attempt is a benign, bounded race -
+    it can only make the job exhaust its budget slightly earlier, never
+    later.
+
+    Returns:
+        None if the attempt was charged (or the job's row is gone, in which
+        case there is nothing to charge and the caller should just let the
+        next sweep retry). A short failure note (to be composed into the
+        caller's failure_reason) if the job's emergency-recovery budget is
+        exhausted; the caller should then escalate the job to
+        FAILED_CONTROLLER instead of retrying again.
+    """
+    now = time.time()
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        row = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.emergency_recovery_count,
+                job_info_table.c.last_emergency_recovery_at).where(
+                    job_info_table.c.spot_job_id ==
+                    job_id).with_for_update()).fetchone()
+        if row is None:
+            logger.info(f'Job {job_id} not found while charging a terminal '
+                        'cleanup attempt; nothing to charge.')
+            return None
+        recovery_count, last_recovery_at = row
+
+        # Decay-aware budget check, mirroring try_requeue_job_for_recovery: a
+        # job whose last recovery attempt is older than the reset window
+        # starts a new episode at attempt 1.
+        attempt = 1
+        if (last_recovery_at is not None and now - last_recovery_at <
+                managed_job_constants.EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS):
+            attempt = (recovery_count or 0) + 1
+        if attempt > managed_job_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS:
+            return (f'the job\'s recovery budget is exhausted '
+                    f'({attempt - 1} recovery attempts)')
+
+        session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values({
+                    job_info_table.c.emergency_recovery_count: attempt,
+                    job_info_table.c.last_emergency_recovery_at: now,
+                }))
+        session.commit()
+
+    max_attempts = managed_job_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+    logger.info(f'Cleanup attempt {attempt}/{max_attempts} charged for '
+                f'terminal job {job_id}.')
+    return None
+
+
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
     engine = _db_manager.get_engine()

@@ -777,11 +777,14 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 # succeeds. If cleanup fails, leave this row alone: since the
                 # job is not DONE and its recorded controller pid is dead,
                 # get_jobs_to_check_status will return it again on every
-                # future sweep, and this branch will retry the cleanup until
-                # it succeeds - at which point the terminal status is
-                # preserved and the job converges to DONE. A job must never
-                # be marked DONE without a successful cleanup, and its own
-                # terminal status must never be overridden.
+                # future sweep, and this branch will retry the cleanup. These
+                # retries are bounded by the same emergency-recovery budget
+                # shared with requeues and in-place retries; once it is
+                # exhausted, the job escalates to FAILED_CONTROLLER below,
+                # which doubles as the resources-may-have-leaked signal. A
+                # job must never be marked DONE without a successful cleanup,
+                # and its own terminal status must never be overridden
+                # except via that escalation.
                 logger.info(
                     f'Job {job_id} is already terminal '
                     f'({", ".join(task["status"].value for task in tasks)}); '
@@ -790,12 +793,23 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 if cleanup_error is None:
                     scheduler.job_done(job_id, idempotent=True)
                     continue
-                logger.error(
-                    f'Cleanup of job {job_id}\'s cluster(s) failed after '
-                    f'its controller process died: {cleanup_error}. Will '
-                    'retry on the next status refresh; the job is not '
-                    'marked done until its resources are cleaned up.')
-                continue
+                failure_note = (
+                    managed_job_state.charge_terminal_cleanup_attempt(job_id))
+                if failure_note is None:
+                    logger.error(
+                        f'Cleanup of job {job_id}\'s cluster(s) failed after '
+                        f'its controller process died: {cleanup_error}. '
+                        'Will retry on the next status refresh; the job is '
+                        'not marked done until its resources are cleaned '
+                        'up.')
+                    continue
+                statuses_str = ', '.join(task['status'].value for task in tasks)
+                failure_reason = (
+                    'cluster cleanup failed repeatedly after the '
+                    f'controller process died and {failure_note}: '
+                    f'{cleanup_error}. Resources may have leaked; please '
+                    'verify the job\'s cluster(s) are terminated. The job '
+                    f'itself had already finished (status: {statuses_str})')
             else:
                 # The controller process died with the job still in flight
                 # (e.g. OOM-killed or crashed). The job itself may well be
@@ -833,7 +847,11 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # otherwise), so this call only overrides non-terminal statuses -
         # except for the rare race where another janitor invocation
         # terminalized the job concurrently, in which case both invocations
-        # write FAILED_CONTROLLER anyway.
+        # write FAILED_CONTROLLER anyway. It is also intentionally overridden
+        # when the terminal-cleanup retry budget (charged above via
+        # charge_terminal_cleanup_attempt) is exhausted: at that point we
+        # give up preserving the original terminal status in favor of
+        # surfacing the resources-may-have-leaked signal.
         # Note: 2+ invocations of update_managed_jobs_statuses could be running
         # at the same time, so this could override the FAILED_CONTROLLER status
         # set by another invocation of update_managed_jobs_statuses. That should

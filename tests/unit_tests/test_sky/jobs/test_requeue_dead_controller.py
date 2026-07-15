@@ -112,6 +112,14 @@ def _task_statuses(engine, job_id: int = 1):
         return [row[0] for row in rows]
 
 
+def _failure_reason(engine, job_id: int = 1):
+    with engine.connect() as conn:
+        row = conn.execute(
+            sqlalchemy.select(state.spot_table.c.failure_reason).where(
+                state.spot_table.c.spot_job_id == job_id)).fetchone()
+        return row[0] if row is not None else None
+
+
 def _job_events(engine, job_id: int = 1):
     with engine.connect() as conn:
         return conn.execute(
@@ -222,6 +230,44 @@ class TestTryRequeueJobForRecovery:
 
     def test_missing_job_is_a_noop(self, _mock_managed_jobs_db_conn):
         result = state.try_requeue_job_for_recovery(42, _PID, _PID_STARTED_AT)
+        assert result is None
+
+
+class TestChargeTerminalCleanupAttempt:
+    """state.charge_terminal_cleanup_attempt: budget, decay, no fencing."""
+
+    def test_charge_on_fresh_job(self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine, status='SUCCEEDED')
+        result = state.charge_terminal_cleanup_attempt(1)
+        assert result is None
+        assert _job_info_row(engine).emergency_recovery_count == 1
+
+    def test_charge_with_exhausted_budget_writes_nothing(
+            self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine,
+                  status='SUCCEEDED',
+                  emergency_recovery_count=_MAX,
+                  last_emergency_recovery_at=time.time() - 60)
+        result = state.charge_terminal_cleanup_attempt(1)
+        assert result is not None
+        assert 'recovery budget is exhausted' in result
+        assert f'({_MAX} recovery attempts)' in result
+        assert _job_info_row(engine).emergency_recovery_count == _MAX
+
+    def test_decay_resets_the_count(self, _mock_managed_jobs_db_conn):
+        engine = _mock_managed_jobs_db_conn
+        _seed_job(engine,
+                  status='SUCCEEDED',
+                  emergency_recovery_count=_MAX,
+                  last_emergency_recovery_at=time.time() - _WINDOW - 1)
+        result = state.charge_terminal_cleanup_attempt(1)
+        assert result is None
+        assert _job_info_row(engine).emergency_recovery_count == 1
+
+    def test_missing_job_is_a_noop(self, _mock_managed_jobs_db_conn):
+        result = state.charge_terminal_cleanup_attempt(42)
         assert result is None
 
 
@@ -368,10 +414,11 @@ class TestUpdateManagedJobsStatusesRequeue:
             self, _janitor_env):
         # Controller died after writing SUCCEEDED but before marking the job
         # DONE, and cleanup fails: the terminal status must NOT be escalated
-        # to FAILED_CONTROLLER and the job must NOT be marked DONE. The row
-        # is left alone so the next sweep retries the cleanup; once it
+        # to FAILED_CONTROLLER and the job must NOT be marked DONE. The
+        # failure charges the shared recovery budget, but the row is
+        # otherwise left alone so the next sweep retries the cleanup; once it
         # succeeds, the job converges to DONE with its terminal status
-        # preserved.
+        # preserved (and the charged budget is not reset by success).
         engine = _janitor_env['engine']
         _seed_job(engine, status='SUCCEEDED')
         terminate_cluster = _janitor_env['terminate_cluster']
@@ -380,7 +427,7 @@ class TestUpdateManagedJobsStatusesRequeue:
         managed_job_utils.update_managed_jobs_statuses()
         assert _task_statuses(engine) == ['SUCCEEDED']
         assert _job_info_row(engine).schedule_state == 'ALIVE'
-        assert _job_info_row(engine).emergency_recovery_count is None
+        assert _job_info_row(engine).emergency_recovery_count == 1
         terminate_cluster.assert_called_once()
 
         # Cleanup now succeeds on the next sweep.
@@ -388,7 +435,31 @@ class TestUpdateManagedJobsStatusesRequeue:
         managed_job_utils.update_managed_jobs_statuses()
         assert _job_info_row(engine).schedule_state == 'DONE'
         assert _task_statuses(engine) == ['SUCCEEDED']
+        assert _job_info_row(engine).emergency_recovery_count == 1
         assert terminate_cluster.call_count == 2
+
+    def test_terminal_status_cleanup_exhaustion_escalates(self, _janitor_env):
+        # Controller died after writing SUCCEEDED, cleanup keeps failing, and
+        # the shared recovery budget is already exhausted: the job must
+        # escalate to FAILED_CONTROLLER instead of retrying forever, with a
+        # failure reason that flags the possible resource leak.
+        engine = _janitor_env['engine']
+        _seed_job(engine,
+                  status='SUCCEEDED',
+                  emergency_recovery_count=_MAX,
+                  last_emergency_recovery_at=time.time() - 60)
+        terminate_cluster = _janitor_env['terminate_cluster']
+        terminate_cluster.side_effect = RuntimeError('boom')
+
+        managed_job_utils.update_managed_jobs_statuses()
+
+        assert _task_statuses(engine) == ['FAILED_CONTROLLER']
+        assert _job_info_row(engine).schedule_state == 'DONE'
+        reason = _failure_reason(engine)
+        assert reason is not None
+        assert 'Resources may have leaked' in reason
+        assert 'recovery budget is exhausted' in reason
+        assert 'SUCCEEDED' in reason
 
     def test_alive_controller_is_untouched(self, _janitor_env, monkeypatch):
         engine = _janitor_env['engine']
