@@ -52,7 +52,7 @@ INSTALL_AWS_CLI_CMD = (
 # The Azure CLI is only needed when pulling a private ACR image with the
 # VM's managed identity, so keep the install lazy.
 INSTALL_AZURE_CLI_CMD = ('which az || '
-                         '(curl -sL https://aka.ms/InstallAzureCLIDeb | '
+                         '(curl -fsSL https://aka.ms/InstallAzureCLIDeb | '
                          'sudo bash)')
 
 # The documented username for `docker login` with an ACR access token. See:
@@ -372,7 +372,12 @@ class DockerInitializer:
                 identity_flag = ('' if identity is None else
                                  f' --resource-id {shlex.quote(identity)}')
                 registry_name = docker_login_config.server.split('.', 1)[0]
+                # An isolated, throwaway AZURE_CONFIG_DIR keeps the MSI
+                # login from clobbering any `az` account state of the SSH
+                # user (initialize() re-runs on every `sky start`).
                 self._run(
+                    'export AZURE_CONFIG_DIR=$(mktemp -d) && '
+                    'trap \'rm -rf "$AZURE_CONFIG_DIR"\' EXIT && '
                     f'az login --identity{identity_flag} '
                     '--allow-no-subscriptions --output none && '
                     f'az acr login --name {shlex.quote(registry_name)} '

@@ -54,6 +54,8 @@ def test_acr_empty_password_uses_managed_identity():
     login_cmds = [c for c in commands if 'az login --identity' in c]
     assert len(login_cmds) == 1
     login_cmd = login_cmds[0]
+    # The login must not touch the SSH user's persistent az profile.
+    assert 'export AZURE_CONFIG_DIR=$(mktemp -d)' in login_cmd
     assert f'--resource-id {_MSI_ID}' in login_cmd
     assert 'az acr login --name myregistry' in login_cmd
     assert (f'login {_ACR_SERVER} '
