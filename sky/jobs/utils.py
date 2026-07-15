@@ -108,8 +108,15 @@ _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 # the workload is perfectly healthy, and a recovery relaunch destroys it —
 # so operators running such workloads can extend the budget via the
 # environment on the jobs controller. See skypilot-org/skypilot#10123.
-JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = int(
-    os.environ.get('SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60))
+try:
+    JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = int(
+        os.environ.get('SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60))
+except ValueError:
+    logger.warning(
+        'Invalid SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS value '
+        f'{os.environ.get("SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS")!r}'
+        '; falling back to 60 seconds.')
+    JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by
