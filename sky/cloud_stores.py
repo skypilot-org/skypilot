@@ -54,11 +54,13 @@ class CloudStorage:
 
 
 # Commands an S3-compatible store runs before its sync command to resolve the
-# AWS CLI: prefer a preinstalled `aws` on PATH, otherwise install awscli into
-# the SkyPilot runtime venv. Either way the sync command invokes the resolved
-# binary via `$awscli_path`.
+# AWS CLI: prefer a preinstalled, working `aws` on PATH (the --version probe
+# rejects broken binaries and shell aliases, which `command -v` also
+# resolves), otherwise install awscli into the SkyPilot runtime venv. Either
+# way the sync command invokes the resolved binary via `$awscli_path`.
 _AWSCLI_RESOLVE_CMDS = [
-    'awscli_path=$(command -v aws) || '
+    'awscli_path=$(command -v aws) && '
+    '"$awscli_path" --version >/dev/null 2>&1 || '
     f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
     f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
 ]
@@ -96,7 +98,7 @@ class S3CloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        download_via_awscli = (f'$awscli_path s3 sync --no-follow-symlinks '
+        download_via_awscli = (f'"$awscli_path" s3 sync --no-follow-symlinks '
                                f'{source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
@@ -105,7 +107,7 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = (f'$awscli_path s3 cp {source} {destination}')
+        download_via_awscli = (f'"$awscli_path" s3 cp {source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -404,7 +406,7 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               '$awscli_path s3 '
+                               '"$awscli_path" s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
@@ -421,7 +423,7 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               '$awscli_path s3 '
+                               '"$awscli_path" s3 '
                                f'cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
@@ -603,7 +605,7 @@ class OciS3CloudStorage(CloudStorage):
             # upload path and OCI's S3 SDK guidance.
             'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
             'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required '
-            '$awscli_path s3 '
+            '"$awscli_path" s3 '
             'sync --no-follow-symlinks '
             f'{source} {destination} '
             f'--profile={oci_s3.OCI_S3_PROFILE_NAME}')
@@ -625,7 +627,7 @@ class OciS3CloudStorage(CloudStorage):
             # upload path and OCI's S3 SDK guidance.
             'AWS_REQUEST_CHECKSUM_CALCULATION=when_required '
             'AWS_RESPONSE_CHECKSUM_VALIDATION=when_required '
-            '$awscli_path s3 '
+            '"$awscli_path" s3 '
             f'cp {source} {destination} '
             f'--profile={oci_s3.OCI_S3_PROFILE_NAME}')
 
@@ -668,7 +670,7 @@ class NebiusCloudStorage(CloudStorage):
         # aws config file (Default path: ~/.aws/config).
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
-        download_via_awscli = ('$awscli_path s3 '
+        download_via_awscli = ('"$awscli_path" s3 '
                                'sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
@@ -681,7 +683,7 @@ class NebiusCloudStorage(CloudStorage):
         """Downloads a file using AWS CLI."""
         assert 'nebius://' in source, 'nebius:// is not in source'
         source = source.replace('nebius://', 's3://')
-        download_via_awscli = ('$awscli_path s3 '
+        download_via_awscli = ('"$awscli_path" s3 '
                                f'cp {source} {destination} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
@@ -731,7 +733,7 @@ class CoreWeaveCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
-            '$awscli_path s3 '
+            '"$awscli_path" s3 '
             'sync --no-follow-symlinks '
             f'{source} {destination} '
             f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
@@ -748,7 +750,7 @@ class CoreWeaveCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{coreweave.COREWEAVE_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={coreweave.COREWEAVE_CONFIG_PATH} '
-            '$awscli_path s3 '
+            '"$awscli_path" s3 '
             f'cp {source} {destination} '
             f'--profile={coreweave.COREWEAVE_PROFILE_NAME}')
 
@@ -791,7 +793,7 @@ class VastDataCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
-            '$awscli_path s3 '
+            '"$awscli_path" s3 '
             'sync --no-follow-symlinks '
             f'{source} {destination} '
             f'--endpoint {endpoint_url} '
@@ -810,7 +812,7 @@ class VastDataCloudStorage(CloudStorage):
             'AWS_SHARED_CREDENTIALS_FILE='
             f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
             f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
-            '$awscli_path s3 '
+            '"$awscli_path" s3 '
             f'cp {source} {destination} '
             f'--endpoint {endpoint_url} '
             f'--profile={vastdata.VASTDATA_PROFILE_NAME}')

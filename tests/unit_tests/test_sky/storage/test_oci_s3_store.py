@@ -152,7 +152,7 @@ class TestOciS3CloudStorageCommands(unittest.TestCase):
         # The CLI resolves to a preinstalled `aws` when present, or the
         # runtime-venv binary after a fallback install.
         self.assertIn('awscli_path=$(command -v aws)', cmd)
-        self.assertIn('$awscli_path s3 sync', cmd)
+        self.assertIn('"$awscli_path" s3 sync', cmd)
         self.assertIn('AWS_SHARED_CREDENTIALS_FILE=~/.oci/s3.credentials', cmd)
         self.assertIn('AWS_CONFIG_FILE=~/.oci/s3.config', cmd)
         self.assertIn('--profile=oci', cmd)
@@ -163,7 +163,7 @@ class TestOciS3CloudStorageCommands(unittest.TestCase):
         self.assertIn('s3://bucket/path/file', cmd)
         self.assertNotIn('oci://', cmd)
         self.assertIn('awscli_path=$(command -v aws)', cmd)
-        self.assertIn('$awscli_path s3 cp', cmd)
+        self.assertIn('"$awscli_path" s3 cp', cmd)
         self.assertIn('AWS_SHARED_CREDENTIALS_FILE=~/.oci/s3.credentials', cmd)
         self.assertIn('--profile=oci', cmd)
 
