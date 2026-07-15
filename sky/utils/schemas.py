@@ -1968,13 +1968,21 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             'availability_zone': {
-                                'anyOf': [{
-                                    'type': 'string',
-                                }, {
-                                    'type': 'integer',
-                                }, {
-                                    'type': 'null',
-                                }],
+                                'anyOf': [
+                                    {
+                                        'type': 'string',
+                                        # Azure zone labels are numeric strings;
+                                        # reject typos (and empty strings) at
+                                        # validation instead of at the Azure API.
+                                        'pattern': '^[0-9]+$',
+                                    },
+                                    {
+                                        'type': 'integer',
+                                    },
+                                    {
+                                        'type': 'null',
+                                    }
+                                ],
                             },
                         },
                     },

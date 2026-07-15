@@ -213,6 +213,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
     :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`region_configs <config-yaml-azure-region-configs>`:
+      southcentralus:
+        availability_zone: "2"
 
   :ref:`oci <config-yaml-oci>`:
     region_configs:

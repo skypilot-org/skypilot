@@ -314,6 +314,20 @@ class TestRegionAvailabilityZone:
             }
             jsonschema.validate(config, schemas.get_config_schema())
 
+    def test_schema_rejects_non_numeric_zone_strings(self):
+        for zone in ('', 'us-east-1a', ' 2'):
+            config = {
+                'azure': {
+                    'region_configs': {
+                        'southcentralus': {
+                            'availability_zone': zone,
+                        },
+                    },
+                },
+            }
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(config, schemas.get_config_schema())
+
     def test_schema_rejects_cloud_level_availability_zone(self):
         config = {'azure': {'availability_zone': '2'}}
         with pytest.raises(jsonschema.ValidationError):

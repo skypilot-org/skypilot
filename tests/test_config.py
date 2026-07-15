@@ -1231,7 +1231,7 @@ def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
 def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
     """Test that nested per-region standardized config works
 
-    Current clouds: Nebius, OCI"""
+    Current clouds: Azure, Nebius, OCI"""
     from sky.provision.kubernetes import utils as kubernetes_utils
     with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
@@ -1262,6 +1262,11 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
                 ap-seoul-1:
                     vcn_ocid: vcn_ocid1
                     vcn_subnet: vcn_subnet1
+
+        azure:
+            region_configs:
+                southcentralus:
+                    availability_zone: "2"
         """)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
                         tmp_path / 'region_configs.yaml')
@@ -1314,6 +1319,17 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
         keys=('filesystems',),
         default_value=[])
     assert len(filesystems) == 2
+
+    # azure: test availability_zone property
+    scus_zone = skypilot_config.get_effective_region_config(
+        cloud='azure', region='southcentralus', keys=('availability_zone',))
+    assert scus_zone == '2'
+    unpinned_zone = skypilot_config.get_effective_region_config(
+        cloud='azure',
+        region='eastus',
+        keys=('availability_zone',),
+        default_value=None)
+    assert unpinned_zone is None
 
     # oci: test general
     vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
