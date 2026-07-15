@@ -734,8 +734,7 @@ class Azure(clouds.Cloud):
         return azure_subscription_id
 
     @classmethod
-    def check_quota_available(cls,
-                              resources: 'resources.Resources') -> bool:
+    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
         """Check if Azure quota is available based on `resources`.
 
         Azure-specific implementation of check_quota_available. The

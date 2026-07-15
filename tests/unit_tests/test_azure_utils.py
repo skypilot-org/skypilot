@@ -281,13 +281,13 @@ class TestCheckQuotaAvailable:
                   family_by_sku=None,
                   arm64=frozenset(),
                   confidential=frozenset()):
-        return azure_utils.RegionQuotaCapacity(
-            family_headroom=family_headroom,
-            total_vcpu_headroom=total,
-            restricted_skus=restricted,
-            family_by_sku=family_by_sku or {},
-            arm64_skus=arm64,
-            confidential_skus=confidential)
+        return azure_utils.RegionQuotaCapacity(family_headroom=family_headroom,
+                                               total_vcpu_headroom=total,
+                                               restricted_skus=restricted,
+                                               family_by_sku=family_by_sku or
+                                               {},
+                                               arm64_skus=arm64,
+                                               confidential_skus=confidential)
 
     def test_restricted_sku_is_conclusively_unavailable(self, monkeypatch):
         capacity = self._capacity(
@@ -302,14 +302,15 @@ class TestCheckQuotaAvailable:
     def test_insufficient_family_headroom_blocks(self, monkeypatch):
         capacity = self._capacity(
             family_headroom={'standardncadsh100v5family': 20},
-            family_by_sku={'Standard_NC40ads_H100_v5':
-                               'StandardNCadsH100v5Family'})
+            family_by_sku={
+                'Standard_NC40ads_H100_v5': 'StandardNCadsH100v5Family'
+            })
         monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
                             lambda region: capacity)
         monkeypatch.setattr(azure_utils, '_instance_type_vcpus',
                             lambda instance_type: 40)
-        assert not azure_utils.check_quota_available(
-            'Standard_NC40ads_H100_v5', 'australiaeast', False)
+        assert not azure_utils.check_quota_available('Standard_NC40ads_H100_v5',
+                                                     'australiaeast', False)
 
     def test_sufficient_headroom_allows(self, monkeypatch):
         capacity = self._capacity(
@@ -367,8 +368,7 @@ class TestCheckQuotaAvailable:
         assert azure_utils.check_quota_available('Standard_HB120rs_v3',
                                                  'southcentralus', False)
 
-    def test_arm64_and_confidential_skus_are_unprovisionable(
-            self, monkeypatch):
+    def test_arm64_and_confidential_skus_are_unprovisionable(self, monkeypatch):
         # The provisioner deploys standard-security-type x64 VMs, so these
         # sizes always fail at create time regardless of quota headroom.
         capacity = self._capacity(
@@ -384,13 +384,12 @@ class TestCheckQuotaAvailable:
             confidential=frozenset({'Standard_EC20ads_v5'}))
         monkeypatch.setattr(azure_utils, 'get_region_quota_capacity',
                             lambda region: capacity)
-        assert not azure_utils.check_quota_available(
-            'Standard_D2ps_v5', 'southcentralus', False)
-        assert not azure_utils.check_quota_available(
-            'Standard_EC20ads_v5', 'southcentralus', False)
+        assert not azure_utils.check_quota_available('Standard_D2ps_v5',
+                                                     'southcentralus', False)
+        assert not azure_utils.check_quota_available('Standard_EC20ads_v5',
+                                                     'southcentralus', False)
 
-    def test_unknown_instance_size_blocks_only_on_zero_quota(
-            self, monkeypatch):
+    def test_unknown_instance_size_blocks_only_on_zero_quota(self, monkeypatch):
         # An unsized SKU degrades to a nonzero-quota check (needed=1).
         capacity = self._capacity(
             family_headroom={'standardhbv3family': 0},

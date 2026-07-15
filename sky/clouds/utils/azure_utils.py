@@ -249,8 +249,7 @@ def _fetch_region_quota_capacity(region: str) -> RegionQuotaCapacity:
         if usage.limit is None or usage.current_value is None:
             continue
         try:
-            headroom = int(float(usage.limit)) - int(
-                float(usage.current_value))
+            headroom = int(float(usage.limit)) - int(float(usage.current_value))
         except (TypeError, ValueError):
             continue
         name = _normalize_family(str(usage.name.value))
@@ -293,8 +292,8 @@ def get_region_quota_capacity(region: str) -> RegionQuotaCapacity:
     """Returns a TTL-cached quota snapshot for ``region``."""
     with _quota_snapshot_lock:
         cached = _quota_snapshots.get(region)
-        age = None if cached is None else time.monotonic() - cached.fetched_at
-        if age is not None and age < _QUOTA_SNAPSHOT_TTL_SECONDS:
+        if (cached is not None and time.monotonic() - cached.fetched_at <
+                _QUOTA_SNAPSHOT_TTL_SECONDS):
             return cached.capacity
     # Fetch outside the lock so slow Azure calls do not serialize
     # other regions; stamp the time after the fetch so a slow fetch does
