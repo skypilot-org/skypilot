@@ -556,6 +556,14 @@ def get_engine(
         # because we prefix the cache key in the async case,
         # so they would not overlap.
         cache_key = f'async:{conn_string}' if async_engine else conn_string
+        asyncpg_dsn = conn_string
+        if async_engine:
+            for sync_scheme in ('postgresql://', 'postgresql+psycopg://',
+                                'postgresql+psycopg2://'):
+                if asyncpg_dsn.startswith(sync_scheme):
+                    asyncpg_dsn = asyncpg_dsn.replace(sync_scheme,
+                                                      'postgresql://', 1)
+                    break
         with _db_creation_lock:
             if cache_key not in _postgres_engine_cache:
                 engine_type = 'sync' if not async_engine else 'async'
@@ -576,7 +584,7 @@ def get_engine(
                             # all connection params come from async_creator.
                             'postgresql+asyncpg://',
                             poolclass=sqlalchemy.NullPool,
-                            async_creator=_make_asyncpg_creator(conn_string)))
+                            async_creator=_make_asyncpg_creator(asyncpg_dsn)))
                 elif _max_connections == 0:
                     _postgres_engine_cache[cache_key] = (
                         sqlalchemy.create_engine(conn_string,
