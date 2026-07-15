@@ -2268,6 +2268,10 @@ def test_status_refresh_keeps_interrupted_launch_init(generic_cloud: str):
             f'sky status {name} | grep UP',
             f'sky exec {name} \'echo recovered\'',
             f'sky logs {name} 1 --status | grep SUCCEEDED',
+            # Direct ssh exercises the ssh config that `sky status` writes,
+            # which the bare handle used to break.
+            f's=$(ssh {name} \'echo ssh_works\' 2>&1) && '
+            f'echo "$s" | grep ssh_works',
         ],
         teardown=(f'req=$(cat {req_file} 2>/dev/null); '
                   f'sky api cancel "$req" -y 2>/dev/null || true; '
