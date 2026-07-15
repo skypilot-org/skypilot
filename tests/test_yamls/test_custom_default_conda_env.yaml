@@ -1,9 +1,3 @@
-# conda is no longer installed by default; opt in so this test can exercise the
-# custom-default-conda-env behavior (and the install_conda=true opt-in path).
-config:
-  provision:
-    install_conda: true
-
 resources:
   cpus: 2+
 

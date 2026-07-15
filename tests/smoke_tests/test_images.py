@@ -531,23 +531,31 @@ def test_custom_default_conda_env(generic_cloud: str):
     elif generic_cloud == 'nebius':
         timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
-    test = smoke_tests_utils.Test('custom_default_conda_env', [
-        f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky status -r {name} | grep "UP"',
-        f'sky logs {name} 1 --status',
-        f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
-        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky logs {name} 2 --status',
-        f'sky autostop -y -i 0 {name}',
-        smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-            cluster_name=name,
-            cluster_status=[sky.ClusterStatus.STOPPED],
-            timeout=timeout),
-        f'sky start -y {name}',
-        f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
-        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
-        f'sky logs {name} 3 --status',
-    ], f'sky down -y {name}')
+    test = smoke_tests_utils.Test(
+        'custom_default_conda_env',
+        [
+            # conda is not installed by default; opt in via a temporary config so
+            # this test can exercise the custom-default-conda-env behavior (and the
+            # install_conda=true opt-in path). install_conda is provisioning-time,
+            # and conda persists on disk across stop/start, so it is only needed at
+            # launch. `sky start` does not accept --config.
+            f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --config provision.install_conda=true --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky status -r {name} | grep "UP"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
+            f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky autostop -y -i 0 {name}',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=timeout),
+            f'sky start -y {name}',
+            f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
+            f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name}')
     smoke_tests_utils.run_one_test(test)
 
 
