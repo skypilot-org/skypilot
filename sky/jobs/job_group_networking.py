@@ -1006,7 +1006,9 @@ def _apply_mirrors_in_cluster(context: Optional[str], namespace: str,
                 raise
             existing = None
 
-        desired_key = sorted((address.get('ip'), address.get('hostname'))
+        # Normalize a missing hostname to '' so the sort key never mixes
+        # None and str (tuple comparison would raise TypeError on equal IPs).
+        desired_key = sorted((address.get('ip'), address.get('hostname') or '')
                              for address in addresses)
         if existing is None:
             endpoints_manifest = _mirror_endpoints_manifest(
@@ -1016,7 +1018,7 @@ def _apply_mirrors_in_cluster(context: Optional[str], namespace: str,
                                                  _request_timeout=10)
             continue
 
-        existing_key = sorted((address.ip, address.hostname)
+        existing_key = sorted((address.ip, address.hostname or '')
                               for subset in (existing.subsets or [])
                               for address in (subset.addresses or []))
         if desired_key != existing_key:

@@ -1356,12 +1356,27 @@ class JobController:
         own cluster DNS follows automatically, but mirrors in other member
         clusters must be re-pointed by the controller.
         """
+        tasks = [task for task, _ in all_tasks_handles]
         while True:
             await asyncio.sleep(
                 job_group_networking.MIRROR_RECONCILE_INTERVAL_SECONDS)
             try:
+                # Re-fetch handles every tick rather than using the ones
+                # captured at Phase 3: a recovered task has a fresh handle,
+                # and this keeps the loop correct if a recovery ever places
+                # a task on different infra.
+                tasks_handles = []
+                for task in tasks:
+                    assert task.name is not None
+                    cluster_name = (
+                        managed_job_utils.generate_managed_job_cluster_name(
+                            task.name, self._job_id))
+                    handle = await asyncio.to_thread(
+                        global_user_state.get_handle_from_cluster_name,
+                        cluster_name)
+                    tasks_handles.append((task, handle))
                 await job_group_networking.setup_cross_context_mirrors(
-                    job_group_name, self._job_id, all_tasks_handles, quiet=True)
+                    job_group_name, self._job_id, tasks_handles, quiet=True)
             except asyncio.CancelledError:  # pylint: disable=try-except-raise
                 raise
             except Exception as e:  # pylint: disable=broad-except

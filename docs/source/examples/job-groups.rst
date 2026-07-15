@@ -213,8 +213,13 @@ case above.
 Prerequisites
 ~~~~~~~~~~~~~
 
-Cross-cluster job groups require pod-to-pod network routability between the member
-clusters:
+These prerequisites only matter if the tasks need to **communicate with each
+other**. A job group whose tasks are independent can span clusters without any
+of the setup below — the tasks simply launch and run in their respective
+clusters (cross-cluster hostnames will not be reachable).
+
+For tasks to reach each other, pod-to-pod network routability is required
+between the member clusters:
 
 - The clusters' pod networks must be routable to each other (e.g., a shared or
   peered VPC, a flat network, or a cluster mesh) with non-overlapping pod CIDRs.
