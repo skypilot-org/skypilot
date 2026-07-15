@@ -2204,6 +2204,80 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Regression: a launch interrupted after its pods are Running but before the
+# SkyPilot runtime is set up leaves the DB with the bare pre-provision handle
+# (no cached IPs, has_ray=False). A status refresh used to see all pods up,
+# skip the ray health check, and promote the cluster to UP with that bare
+# handle -- wedging it in a state where `sky exec`/ssh fail with
+# ClusterNotUpError and plain `sky start` no-ops ("already up"). The refresh
+# must keep such a cluster INIT so `sky start` can recover it.
+# Kubernetes-only: pods report Running long before runtime setup finishes,
+# which is the window this race needs.
+@pytest.mark.kubernetes
+def test_status_refresh_keeps_interrupted_launch_init(generic_cloud: str):
+    del generic_cloud  # Kubernetes-specific.
+    name = smoke_tests_utils.get_cluster_name()
+    req_file = f'/tmp/{name}.req'
+    # Capture the async launch's request id so we can cancel it mid-flight.
+    launch = (f'req=$(sky launch -c {name} --infra kubernetes '
+              f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y --async '
+              f'| grep -oE \'request: [0-9a-f-]+\' | head -1 | '
+              f'awk \'{{print $2}}\'); '
+              f'echo "captured request id: $req"; test -n "$req"; '
+              f'echo "$req" > {req_file}')
+    # 'Pod is up.' is logged when provisioning finishes and runtime setup
+    # starts; from here until the completed handle is persisted, the DB holds
+    # the bare handle while the pod is Running.
+    wait_runtime_setup = (
+        f'req=$(cat {req_file}); start=$SECONDS; '
+        f'until sky api logs "$req" --no-follow 2>&1 | '
+        f'grep -q "Pod is up."; do '
+        f'  if [ $((SECONDS - start)) -gt 480 ]; then '
+        f'    echo "timed out waiting for runtime setup to start"; '
+        f'    sky api status -a "$req"; exit 1; '
+        f'  fi; '
+        f'  sleep 2; '
+        f'done; echo "runtime setup started"')
+    # Interrupt the launch and wait for the worker to actually die, so the
+    # per-cluster lock is released and the refresh below really evaluates
+    # (instead of timing out on the lock and returning the cached record).
+    cancel = (f'req=$(cat {req_file}); sky api cancel "$req" -y; '
+              f'start=$SECONDS; '
+              f'until sky api status -a "$req" | grep -qw CANCELLED; do '
+              f'  if [ $((SECONDS - start)) -gt 120 ]; then '
+              f'    echo "timed out waiting for cancellation"; '
+              f'    sky api status -a "$req"; exit 1; '
+              f'  fi; '
+              f'  sleep 2; '
+              f'done; echo "request cancelled"')
+    test = smoke_tests_utils.Test(
+        'status_refresh_keeps_interrupted_launch_init',
+        [
+            launch,
+            wait_runtime_setup,
+            cancel,
+            # Force a refresh (same code path as the status refresh daemon):
+            # the pod is Running but the handle has no cached IPs, so the
+            # cluster must stay INIT. Pre-fix, the row shows UP here.
+            f's=$(sky status -r {name}); echo "$s"; '
+            f'echo "$s" | grep {name} | grep INIT',
+            # INIT is recoverable with a plain `sky start` (the hint the CLI
+            # gives for INIT clusters); a false UP is not, since `sky start`
+            # no-ops on UP clusters.
+            f'sky start -y {name}',
+            f'sky status {name} | grep UP',
+            f'sky exec {name} \'echo recovered\'',
+            f'sky logs {name} 1 --status | grep SUCCEEDED',
+        ],
+        teardown=(f'req=$(cat {req_file} 2>/dev/null); '
+                  f'sky api cancel "$req" -y 2>/dev/null || true; '
+                  f'sky down -y {name} 2>/dev/null || true; '
+                  f'rm -f {req_file}'),
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing Exit Codes for CLI commands ----------
 def test_cli_exit_codes(generic_cloud: str):
     """Test that CLI commands properly return exit codes based on job success/failure."""
