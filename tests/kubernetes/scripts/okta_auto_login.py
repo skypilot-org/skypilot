@@ -121,44 +121,125 @@ class OktaAutoLogin:
         Returns:
             True if login and verification successful, False otherwise
         """
+        _trace = []
         try:
             self.driver = self.get_chrome_driver(headless=True)
             logger.info("✅ Chrome driver initialized")
 
             # Step 1: Navigate to the endpoint
             logger.info(f"Step 1: Navigating to endpoint: {self.endpoint}")
+            _t0 = time.monotonic()
             self.driver.get(self.endpoint)
+            logger.info("⏱️  navigate: %.2fs", time.monotonic() - _t0)
 
             # Step 2: Fill credentials using reusable method
+            _t1 = time.monotonic()
             if not self.fill_okta_credentials(self.driver):
                 return False
+            logger.info("⏱️  fill_credentials: %.2fs", time.monotonic() - _t1)
 
-            # Step 3: Wait for redirect to dashboard
+            # Step 3: Wait for redirect to dashboard. Read the URL via JS
+            # (document.location.href) as the primary signal: the Selenium
+            # current_url command returns None mid-navigation (full-page
+            # /dashboard/ -> /dashboard/clusters commit), which the stock
+            # EC.url_contains turns into a fatal TypeError. We record BOTH the
+            # JS href and current_url each poll so a slow step / a broken
+            # current_url is visible in CI logs.
             logger.info("Step 3: Waiting for redirect to dashboard...")
-            WebDriverWait(self.driver,
-                          60).until(EC.url_contains("/dashboard/clusters"))
+            _t2 = time.monotonic()
+
+            def _at_dashboard(driver):
+                try:
+                    href = driver.execute_script(
+                        'return document.location.href')
+                except Exception as exc:
+                    href = f'<jserr:{exc.__class__.__name__}>'
+                try:
+                    cur = driver.current_url
+                except Exception as exc:
+                    cur = f'<err:{exc.__class__.__name__}>'
+                _trace.append((round(time.monotonic() - _t2, 2), href, cur))
+                url = (href if isinstance(href, str) and
+                       not href.startswith('<jserr:') else cur)
+                return isinstance(url, str) and '/dashboard/clusters' in url
+
+            WebDriverWait(self.driver, 60,
+                          poll_frequency=0.25).until(_at_dashboard)
+            logger.info(
+                "⏱️  wait_for_dashboard: %.2fs poll_trace(t,href,cur)=%s",
+                time.monotonic() - _t2, _trace)
             logger.info("✅ Successfully redirected to dashboard")
 
             # Step 4: Verify SkyPilot logo is present
             logger.info("Step 4: Verifying SkyPilot logo...")
-            logo_element = WebDriverWait(self.driver, 30).until(
+            _t3 = time.monotonic()
+            WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located(
                     (By.CSS_SELECTOR, "img[alt='SkyPilot Logo']")))
+            logger.info("⏱️  verify_logo: %.2fs", time.monotonic() - _t3)
             logger.info("✅ SkyPilot logo found on page")
+
+            try:
+                res = self.driver.execute_script(
+                    "return (performance.getEntriesByType('resource')||[])"
+                    ".concat(performance.getEntriesByType('navigation')||[])"
+                    ".map(function(e){return [e.name, Math.round(e.duration) || 0];})"
+                )
+                res = sorted(res, key=lambda e: -e[1])[:8]
+                logger.info("⏱️  slowest requests (url, ms): %s", res)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.info("resource-timing unavailable: %s", exc)
 
             logger.info("🎉 Login verification completed successfully!")
             return True
 
         except TimeoutException as e:
             logger.error(f"❌ Timeout during login process: {str(e)}")
+            self._dump_login_diagnostics(_trace)
             return False
         except Exception as e:
             logger.error(f"❌ Authentication failed: {str(e)}")
+            self._dump_login_diagnostics(_trace)
             return False
         finally:
             if self.driver:
                 self.driver.quit()
                 logger.info("✅ Chrome driver closed")
+
+    def _dump_login_diagnostics(self, trace) -> None:
+        """On login failure, dump where the browser actually ended up so CI
+        logs reveal whether it reached the dashboard (broken current_url) or
+        got stuck elsewhere (real redirect/auth failure)."""
+        d = self.driver
+        if not d:
+            return
+        try:
+            logger.error("🔎 poll_trace(t,href,cur)=%s", trace[-12:])
+        except Exception:  # pylint: disable=broad-except
+            pass
+        for label, script in (('location.href',
+                               'return document.location.href'),
+                              ('document.title', 'return document.title'),
+                              ('readyState', 'return document.readyState')):
+            try:
+                logger.error("🔎 %s = %r", label, d.execute_script(script))
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error("🔎 %s unavailable: %s", label, exc)
+        try:
+            logger.error("🔎 current_url = %r", d.current_url)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("🔎 current_url unavailable: %s", exc)
+        try:
+            body = d.execute_script(
+                'return (document.body ? document.body.innerText : "")')
+            logger.error("🔎 body_text[:400] = %r", (body or '')[:400])
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("🔎 body_text unavailable: %s", exc)
+        try:
+            logs = d.get_log('browser')
+            logger.error("🔎 browser_console[-8:] = %s", logs[-8:])
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("🔎 browser_console unavailable: %s", exc)
 
     def _selenium_authorize_flow(self, url: str) -> None:
         """Run the Selenium authorize flow in a background thread.
@@ -204,7 +285,7 @@ class OktaAutoLogin:
                 # the authorize POST succeeded. The showMessage() JS function
                 # replaces document.body with an h2 containing this text.
                 WebDriverWait(self.driver, 30).until(
-                    lambda d: 'Authorization Complete' in d.page_source)
+                    lambda d: 'Authorization Complete' in (d.page_source or ''))
                 logger.info("✅ Authorization completed successfully")
 
             elif '/token?local_port=' in url:

@@ -3,8 +3,50 @@ from unittest import mock
 
 import pytest
 
+from sky.jobs import constants as managed_job_constants
 from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.client import sdk_async as jobs_sdk_async
+
+
+def _unwrap(fn):
+    """Strip all functools.wraps-based decorators."""
+    while hasattr(fn, '__wrapped__'):
+        fn = fn.__wrapped__
+    return fn
+
+
+def _call_raw_queue_v2(**kwargs):
+    """Call queue_v2 (decorators stripped) and return the request JSON body."""
+    raw_queue_v2 = _unwrap(jobs_sdk.queue_v2)
+    with mock.patch.object(jobs_sdk.versions,
+                           'get_remote_api_version',
+                           return_value=999), \
+         mock.patch.object(jobs_sdk.server_common,
+                           'make_authenticated_request',
+                           return_value='response') as mock_request, \
+         mock.patch.object(jobs_sdk.server_common,
+                           'get_request_id',
+                           return_value='request-id'):
+        raw_queue_v2(**kwargs)
+    _, request_kwargs = mock_request.call_args
+    return request_kwargs['json']
+
+
+def test_queue_v2_defaults_to_lightweight_fields():
+    # A high remote API version avoids the version-based field stripping so we
+    # can assert the full default field set is sent.
+    body = _call_raw_queue_v2(refresh=False)
+    assert body['fields'] == list(
+        managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
+    # The lightweight default must not pull heavy fields.
+    assert 'node_names' not in body['fields']
+    assert 'metadata' not in body['fields']
+
+
+def test_queue_v2_fields_none_requests_all_fields():
+    # fields=None is the explicit "give me everything" escape hatch.
+    body = _call_raw_queue_v2(refresh=False, fields=None)
+    assert body['fields'] is None
 
 
 def test_queue_version_2_dispatches_to_queue_v2():

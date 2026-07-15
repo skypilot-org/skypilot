@@ -166,6 +166,100 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _check_empty_config()
 
 
+def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
+    """A reload must never expose a transient empty config.
+
+    `reload_config` builds the new config fully and swaps it in with a single
+    assignment. A concurrent reader that hits `get_nested` while a reload is in
+    flight must observe the previously-loaded value, never the fallback. This
+    guards against the old blank-then-repopulate behavior, which let a reader
+    (e.g. `rbac.get_default_role()`) fall back to admin mid-reload.
+    """
+    config_file = tmp_path / 'config.yaml'
+    config_file.write_text('rbac:\n  default_role: user\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_file)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'does_not_exist')
+    _reload_config()
+    assert skypilot_config.get_nested(('rbac', 'default_role'),
+                                      'admin') == 'user'
+
+    # Spy on the file read that happens in the middle of a reload; while it runs,
+    # the not-yet-swapped config must still return the old value. With the old
+    # pre-blanking this observed 'admin' (the fallback); with the atomic swap it
+    # stays 'user'.
+    observed = []
+    real_get_config_from_path = skypilot_config._get_config_from_path
+
+    def spy_get_config_from_path(path):
+        observed.append(
+            skypilot_config.get_nested(('rbac', 'default_role'), 'admin'))
+        return real_get_config_from_path(path)
+
+    monkeypatch.setattr(skypilot_config, '_get_config_from_path',
+                        spy_get_config_from_path)
+    # Call reload_config directly (not `_reload_config`, which resets the loaded
+    # config first) so the previously-loaded config is what a mid-reload reader
+    # would see.
+    skypilot_config.reload_config()
+
+    assert observed, 'reload did not read the config file'
+    assert all(value == 'user' for value in observed), (
+        f'config was empty mid-reload (would fall back to admin): {observed}')
+
+
+class _DummyLock:
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_safe_reload_config_uses_shared_lock(monkeypatch) -> None:
+    """`safe_reload_config` (a pure read) must take the lock in SHARED mode so
+    concurrent reloads don't serialize. Reverting `shared_lock=True` fails this.
+    """
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+
+    skypilot_config.safe_reload_config()
+
+    assert captured.get('shared_lock') is True
+
+
+def test_get_skypilot_config_lock_defaults_to_exclusive(monkeypatch) -> None:
+    """Writers (the default) must take the lock EXCLUSIVELY."""
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+
+    skypilot_config.get_skypilot_config_lock()
+
+    assert captured.get('shared_lock') is False
+
+
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:
@@ -902,6 +996,78 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-project-config'), None) is None
 
 
+def test_config_save_validator(monkeypatch, tmp_path):
+    """Validators run before persisting and can veto the config save."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    # Isolate the validator registry so the test does not leak global state.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+
+    config_path = str(tmp_path / 'server_config.yaml')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                aws:
+                    labels:
+                        original: present
+                """))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    new_config.set_nested(('aws', 'labels', 'added'), 'yes')
+
+    # A validator that vetoes by raising blocks the save.
+    calls = []
+
+    def vetoing_validator(current, incoming):
+        calls.append((copy.deepcopy(current), copy.deepcopy(incoming)))
+        raise ValueError('rejected config change')
+
+    skypilot_config.register_config_save_validator(vetoing_validator)
+
+    with pytest.raises(ValueError, match='rejected config change'):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+
+    # The validator saw the currently-persisted config and the incoming
+    # config, and the on-disk config is unchanged.
+    assert len(calls) == 1
+    seen_current, seen_incoming = calls[0]
+    assert seen_current.get_nested(('aws', 'labels', 'added'), None) is None
+    assert seen_incoming.get_nested(('aws', 'labels', 'added'), None) == 'yes'
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present'
+            }
+        }
+    }
+
+    # A validator that passes lets the save through.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    passed = []
+
+    def passing_validator(current, incoming):
+        del current, incoming
+        passed.append(True)
+
+    skypilot_config.register_config_save_validator(passing_validator)
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert passed == [True]
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present',
+                'added': 'yes'
+            }
+        }
+    }
+
+    # Registration is idempotent.
+    skypilot_config.register_config_save_validator(passing_validator)
+    assert skypilot_config._CONFIG_SAVE_VALIDATORS.count(passing_validator) == 1
+
+
 def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
     """Test that the nested config works."""
     from sky.provision.kubernetes import utils as kubernetes_utils
@@ -1408,6 +1574,313 @@ def test_get_effective_queue_name_workspace_override(monkeypatch,
         cloud='kubernetes',
         workspace='nonexistent-ws',
         override_configs=cloud_level_override) == 'override-queue'
+
+
+def test_get_effective_namespace(monkeypatch, tmp_path) -> None:
+    """Full precedence matrix across all four resolver layers."""
+    with open(tmp_path / 'namespace.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            namespace: global-default-namespace
+            context_configs:
+                contextA:
+                    namespace: contextA-global-namespace
+                contextB:
+                    # No namespace set; falls through to `kubernetes.namespace`.
+                    kueue:
+                        local_queue_name: contextB-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    context_configs:
+                        contextA:
+                            namespace: workspaceA-contextA-namespace
+                        contextB:
+                            namespace: workspaceA-contextB-namespace
+            workspaceB:
+                kubernetes:
+                    # Workspace declared but sets no namespace overrides.
+                    allowed_contexts: ['contextA']
+            workspaceC:
+                kubernetes:
+                    # Workspace-level shorthand; no per-context override.
+                    namespace: workspaceC-shorthand-namespace
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'namespace.yaml')
+    skypilot_config.reload_config()
+
+    # Layer 1: workspace per-context wins over every lower layer.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceA') == 'workspaceA-contextA-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceA') == 'workspaceA-contextB-namespace'
+
+    # Layer 2: workspace cloud-level shorthand wins over the global
+    # per-context (layer 3) and global cloud-level (layer 4) layers, and
+    # applies regardless of which context the launch targets.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceC') == 'workspaceC-shorthand-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceC') == 'workspaceC-shorthand-namespace'
+
+    # Layer 3: global per-context wins when no workspace layer matches.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='workspaceB') == 'contextA-global-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA',
+        workspace='default') == 'contextA-global-namespace'
+
+    # Layer 4: global cloud-level when no per-context override exists.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextB',
+        workspace='workspaceB') == 'global-default-namespace'
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', workspace='default') == 'global-default-namespace'
+
+    # No layer matches: returns None (aws has no config in this fixture).
+    assert skypilot_config.get_effective_namespace(
+        cloud='aws', workspace='workspaceA') is None
+
+
+def test_get_effective_namespace_no_config(monkeypatch, tmp_path) -> None:
+    """Returns None when `namespace` is unset at every layer."""
+    with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            allowed_contexts: ['contextA']
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'empty.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes', region='contextA', workspace='default') is None
+    assert skypilot_config.get_effective_namespace(cloud='kubernetes',
+                                                   workspace='default') is None
+
+
+def test_get_effective_namespace_override_configs(monkeypatch,
+                                                  tmp_path) -> None:
+    """Cloud-level `override_configs` apply inside workspace scope.
+
+    Regression mirror of `test_get_effective_queue_name_workspace_override`.
+    """
+    with open(tmp_path / 'override.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            namespace: global-namespace
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    context_configs:
+                        contextA:
+                            namespace: workspaceA-contextA-namespace
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'override.yaml')
+    skypilot_config.reload_config()
+
+    cloud_level_override = {'kubernetes': {'namespace': 'override-namespace',}}
+
+    # Override replaces the global namespace when no per-context value exists.
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        workspace='default',
+        override_configs=cloud_level_override) == 'override-namespace'
+
+    # Per-context value wins over a cloud-level override (more specific).
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=cloud_level_override
+    ) == 'workspaceA-contextA-namespace'
+
+    # Override applies for an unknown workspace (falls through to global).
+    assert skypilot_config.get_effective_namespace(
+        cloud='kubernetes',
+        workspace='nonexistent-ws',
+        override_configs=cloud_level_override) == 'override-namespace'
+
+
+def test_get_effective_k8s_config_value_returns_none_when_unset(
+        monkeypatch, tmp_path) -> None:
+    """No matching key at any scope -> None."""
+    with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
+        f.write('kubernetes:\n  context_configs:\n    contextA: {}\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'empty.yaml')
+    skypilot_config.reload_config()
+
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=[('namespace',)],
+        region='contextA',
+        workspace='default') is None
+
+
+def test_get_effective_k8s_config_value_property_key_priority(
+        monkeypatch, tmp_path) -> None:
+    """Within a scope, ``property_keys`` order is priority (first hit wins).
+
+    Drives the queue-name semantics: ``quota.queue`` wins over
+    ``kueue.local_queue_name`` because it appears first in the list.
+    Generalised here so the contract is exercised independently of any
+    wrapper.
+    """
+    with open(tmp_path / 'priority.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            primary: from-primary
+            secondary: from-secondary
+            context_configs:
+                contextA:
+                    secondary: contextA-from-secondary
+                contextB:
+                    primary: contextB-from-primary
+                    secondary: contextB-from-secondary
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'priority.yaml')
+    skypilot_config.reload_config()
+
+    keys = [('primary',), ('secondary',)]
+
+    # Cloud-level: both set, `primary` wins.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        workspace='default') == 'from-primary'
+    # Per-context where only `secondary` is set: falls through to it.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='default') == 'contextA-from-secondary'
+    # Per-context where both are set: `primary` wins.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextB',
+        workspace='default') == 'contextB-from-primary'
+    # Reversed order changes the winner.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=[('secondary',), ('primary',)],
+        region='contextB',
+        workspace='default') == 'contextB-from-secondary'
+
+
+def test_get_effective_k8s_config_value_full_precedence_matrix(
+        monkeypatch, tmp_path) -> None:
+    """Full precedence: ws per-context > ws cloud > global per-context > global cloud.
+
+    Uses a custom property name to verify the precedence machinery lives in
+    the shared helper, not in the namespace/queue wrappers.
+    """
+    with open(tmp_path / 'matrix.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            myfield: global-cloud
+            context_configs:
+                contextA:
+                    myfield: global-context
+                contextB: {}
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    myfield: ws-cloud
+                    context_configs:
+                        contextA:
+                            myfield: ws-context
+            workspaceB:
+                kubernetes:
+                    myfield: wsB-cloud
+            workspaceC: {}
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'matrix.yaml')
+    skypilot_config.reload_config()
+
+    keys = [('myfield',)]
+
+    # Layer 1: ws per-context wins everything.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='workspaceA') == 'ws-context'
+    # Layer 2: ws cloud wins when ws has no per-context override.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextB',
+        workspace='workspaceA') == 'ws-cloud'
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        workspace='workspaceB') == 'wsB-cloud'
+    # Layer 3: global per-context when ws has no override at any layer.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='workspaceC') == 'global-context'
+    # Layer 4: global cloud as final fallback.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextB',
+        workspace='workspaceC') == 'global-cloud'
+
+
+def test_get_effective_k8s_config_value_override_configs_at_workspace_scope(
+        monkeypatch, tmp_path) -> None:
+    """Cloud-level ``override_configs`` apply inside the workspace scope.
+
+    Mirrors ``test_get_effective_queue_name_workspace_override`` but on the
+    shared helper directly: the override has no ``workspaces`` section, so
+    it must be merged at the *workspace* depth (replacing the workspace's
+    cloud-level value), not at config-root.
+    """
+    with open(tmp_path / 'override.yaml', 'w', encoding='utf-8') as f:
+        f.write("""\
+        kubernetes:
+            myfield: global-cloud
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    myfield: ws-cloud
+                    context_configs:
+                        contextA:
+                            myfield: ws-context
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'override.yaml')
+    skypilot_config.reload_config()
+
+    keys = [('myfield',)]
+    cloud_override = {'kubernetes': {'myfield': 'override-value'}}
+
+    # Cloud-level override replaces the workspace's cloud-level value.
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        workspace='workspaceA',
+        override_configs=cloud_override) == 'override-value'
+    # Per-context value at the workspace scope still wins (more specific).
+    assert skypilot_config._get_effective_k8s_config_value(  # pylint: disable=protected-access
+        cloud='kubernetes',
+        property_keys=keys,
+        region='contextA',
+        workspace='workspaceA',
+        override_configs=cloud_override) == 'ws-context'
 
 
 def _make_config(d: dict) -> config_utils.Config:

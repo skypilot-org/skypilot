@@ -30,6 +30,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import catalog
 from sky import skypilot_config
 from sky.skylet import constants
 
@@ -110,6 +111,44 @@ def test_aws_image_id_dict():
             f'sky logs {name} 3 --status',
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_image_id_dict_with_docker():
+    """Specify both a cloud VM image (AMI) and a Docker image (PR #9759).
+
+    Regression test for the old behavior where specifying a Docker image
+    caused a custom cloud VM image to be ignored. The motivating case is a
+    too-old default AMI driver for new GPUs: users want to boot a custom AMI
+    (correct NVIDIA driver) and still run their own container on top.
+
+    Asserts both halves are honored: the job runs inside the container, and
+    the VM booted from the requested AMI (read from instance metadata, which
+    is reachable because the container runs with --net=host).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'us-west-2'
+    # Resolve the AMI that the SkyPilot image tag maps to in this region, so
+    # we can assert the VM actually booted from the requested cloud image.
+    # Must match tests/test_yamls/test_aws_ami_and_docker.yaml.
+    expected_ami = catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004',
+                                                 region,
+                                                 clouds='aws')
+    test = smoke_tests_utils.Test(
+        'aws_image_id_dict_with_docker',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_aws_ami_and_docker.yaml',
+            f'sky logs {name} 1 --status',
+            # The job ran inside the Docker container.
+            f'sky logs {name} 1 --no-follow | grep "SKY_IN_CONTAINER=yes"',
+            # The VM booted from the requested AMI, not the default image.
+            f'sky logs {name} 1 --no-follow | grep "SKY_BOOTED_AMI={expected_ami}"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -455,7 +494,6 @@ def test_image_no_conda():
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
-@pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
@@ -464,6 +502,8 @@ def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
         timeout *= 3
+    elif generic_cloud == 'nebius':
+        timeout *= 6
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',

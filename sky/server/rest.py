@@ -37,9 +37,29 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 
 class RetryContext:
+    """State shared across retry attempts for a single decorated call.
+
+    A single ``RetryContext`` is created in ``retry_transient_errors`` at
+    the start of a decorated function call and persists across all retry
+    attempts within that call. ``stream_response`` reads/writes it to
+    coordinate skip-ahead (``line_processed``) and to report forward
+    progress to the decorator (``progress_count``).
+    """
 
     def __init__(self):
+        # `line_processed` tracks the high-water mark of line numbers that
+        # have been printed to the user, used by resumable streams to skip
+        # already-printed lines when the server replays from the beginning
+        # on retry.
         self.line_processed = 0
+        # `progress_count` is a monotonically increasing counter of lines
+        # streamed across all retry attempts. Used by retry_transient_errors
+        # to detect whether a retried function made forward progress
+        # (regardless of whether the stream is resumable). Without this,
+        # non-resumable streams (e.g. `sky jobs logs --controller` with the
+        # default --tail 1000) never reset the consecutive-failure counter
+        # when the server replays content on each retry.
+        self.progress_count = 0
 
 
 _RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
@@ -49,7 +69,12 @@ _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
 adapter = requests.adapters.HTTPAdapter(
     pool_connections=50,
-    pool_maxsize=200,
+    # Sized for the jobs controller, the heaviest single-process consumer: it
+    # can hold one long-lived log stream per job with an in-flight launch
+    # request (up to MAX_JOBS_PER_WORKER=200), plus short-lived status polls
+    # on top. The pool never blocks (pool_block defaults to False); this cap
+    # only bounds how many connections are kept for reuse.
+    pool_maxsize=256,
     # We handle retries by ourselves in SDK.
     max_retries=0,
 )
@@ -123,7 +148,12 @@ def retry_transient_errors(max_retries: int = 3,
             consecutive_failed_count = 0
 
             with _retry_in_context() as context:
-                previous_line_processed = context.line_processed  # should be 0
+                # Track progress across attempts. We use `progress_count`
+                # (lines streamed across all attempts) rather than
+                # `line_processed` (high-water mark of original line numbers)
+                # so non-resumable streams also reset the failure counter
+                # when they make forward progress.
+                previous_progress_count = context.progress_count  # should be 0
 
                 def _handle_exception():
                     # If the function made progress on a retry,
@@ -131,11 +161,11 @@ def retry_transient_errors(max_retries: int = 3,
                     # Otherwise, increments the failed retry count.
                     nonlocal backoff
                     nonlocal consecutive_failed_count
-                    nonlocal previous_line_processed
-                    if context.line_processed > previous_line_processed:
+                    nonlocal previous_progress_count
+                    if context.progress_count > previous_progress_count:
                         backoff = common_utils.Backoff(initial_backoff,
                                                        max_backoff_factor)
-                        previous_line_processed = context.line_processed
+                        previous_progress_count = context.progress_count
                         consecutive_failed_count = 0
                     else:
                         consecutive_failed_count += 1

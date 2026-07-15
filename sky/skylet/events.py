@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 import traceback
+from typing import Dict, List, Optional
 
 import psutil
 
@@ -18,6 +19,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import hook_executor
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -155,11 +157,120 @@ class UsageHeartbeatReportEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 600
 
     def _run(self):
-        usage_lib.send_heartbeat(interval_seconds=self.EVENT_INTERVAL_SECONDS)
+        # Cluster placement, accelerator, and provenance context are
+        # exported into skylet's environment by
+        # start_skylet_on_head_node at provisioning time. Forward
+        # whatever is set.
+        def _int_env(name: str) -> Optional[int]:
+            value = os.environ.get(name)
+            if value is None or value == '':
+                return None
+            try:
+                return int(value)
+            except ValueError:
+                return None
+
+        def _bool_env(name: str) -> Optional[bool]:
+            value = os.environ.get(name)
+            if value is None or value == '':
+                return None
+            return value not in ('0', 'false', 'False', 'FALSE')
+
+        usage_lib.send_heartbeat(
+            interval_seconds=self.EVENT_INTERVAL_SECONDS,
+            cloud=os.environ.get('SKYPILOT_HEARTBEAT_CLOUD'),
+            region=os.environ.get('SKYPILOT_HEARTBEAT_REGION'),
+            zone=os.environ.get('SKYPILOT_HEARTBEAT_ZONE'),
+            gpu_type=os.environ.get('SKYPILOT_HEARTBEAT_GPU_TYPE'),
+            num_nodes=_int_env('SKYPILOT_HEARTBEAT_NUM_NODES'),
+            gpus_per_node=_int_env('SKYPILOT_HEARTBEAT_GPUS_PER_NODE'),
+            user=os.environ.get('SKYPILOT_HEARTBEAT_USER'),
+            use_spot=_bool_env('SKYPILOT_HEARTBEAT_USE_SPOT'),
+            instance_type=os.environ.get('SKYPILOT_HEARTBEAT_INSTANCE_TYPE'),
+        )
 
 
-class AutostopEvent(SkyletEvent):
-    """Skylet event for autostop.
+class JobLogLinkScanEvent(SkyletEvent):
+    """Harvest candidate URLs from running jobs' logs into job metadata.
+
+    Scanning at the producer (this cluster) means an external link printed by a
+    task is captured into the local jobs.db ``metadata`` even if no one ever
+    streams the logs. The controller / API server read these candidates and
+    match them against the configured ``dashboard.external_links`` patterns;
+    matching deliberately does not happen here, so the worker needs no config.
+
+    Incremental and bounded: only newly written bytes are scanned each tick, up
+    to a per-job byte budget, and scanning stops once enough distinct URLs have
+    been harvested. The controller's terminal-state scan reads the complete log
+    as the definitive backstop, so anything missed here is still recovered.
+    """
+    EVENT_INTERVAL_SECONDS = 60
+
+    # Stop scanning a job's log past this many bytes; links of interest are
+    # printed early, and this bounds work for chatty multi-GB logs.
+    _MAX_SCAN_BYTES = 10 * 1024 * 1024
+
+    def __init__(self) -> None:
+        super().__init__()
+        # job_id -> byte offset already scanned in run.log.
+        self._offsets: Dict[int, int] = {}
+        # job_id -> distinct candidate URLs already harvested.
+        self._harvested: Dict[int, List[str]] = {}
+
+    def _run(self) -> None:
+        # Imported lazily so this stays cheap; only newer skylets register the
+        # event, so the import always resolves where it runs.
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import log_links
+        job_log_dirs = job_lib.get_nonterminal_job_log_dirs()
+        active_ids = set(job_log_dirs)
+        # Drop bookkeeping for jobs that are no longer active.
+        for job_id in [j for j in self._offsets if j not in active_ids]:
+            self._offsets.pop(job_id, None)
+            self._harvested.pop(job_id, None)
+        for job_id, log_dir in job_log_dirs.items():
+            if log_dir is None:
+                continue
+            harvested = self._harvested.get(job_id, [])
+            offset = self._offsets.get(job_id, 0)
+            # Stop once enough URLs are harvested, or once the remaining byte
+            # budget is tiny: a small trailing read may contain no newline,
+            # which would never advance the offset and would re-read the same
+            # bytes every tick.
+            if (len(harvested) >= log_links.DEFAULT_CANDIDATE_CAP or
+                    self._MAX_SCAN_BYTES - offset < 1024):
+                continue
+            run_log = os.path.join(os.path.expanduser(log_dir), 'run.log')
+            try:
+                with open(run_log, 'rb') as f:
+                    f.seek(offset)
+                    chunk = f.read(self._MAX_SCAN_BYTES - offset)
+            except OSError:
+                continue
+            # Only consume complete lines so a URL is never split across a chunk
+            # boundary (and thus skipped once we advance the offset).
+            last_newline = chunk.rfind(b'\n')
+            if last_newline == -1:
+                continue
+            consumed = last_newline + 1
+            self._offsets[job_id] = offset + consumed
+            lines = chunk[:consumed].decode('utf-8',
+                                            errors='replace').split('\n')
+            new_harvested = log_links.extract_candidate_urls(lines,
+                                                             existing=harvested)
+            self._harvested[job_id] = new_harvested
+            if len(new_harvested) != len(harvested):
+                job_lib.update_job_metadata(
+                    job_id,
+                    {log_links.EXTRACTED_URLS_METADATA_KEY: new_harvested})
+
+
+class StopEvent(SkyletEvent):
+    """Skylet event for the idle-timer-driven teardown path.
+
+    Fires either the ``stop`` hook (when ``autostop.down`` is false)
+    or the ``down`` hook (autodown, when ``autostop.down`` is true)
+    before issuing the actual cluster teardown.
 
     Idleness timer gets set to 0 whenever:
       - A first autostop setting is set. By "first", either there's never any
@@ -221,20 +332,29 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _execute_hook_if_present(self, autostop_config) -> None:
-        """Execute autostop hook if present in the config."""
-        hook = autostop_config.hook
-        hook_timeout = autostop_config.hook_timeout
-        if hook:
-            logger.info(f'Executing autostop hook before stopping cluster '
-                        f'(timeout: {hook_timeout}s)...')
-            hook_success = autostop_lib.execute_autostop_hook(
-                hook, hook_timeout)
-            if not hook_success:
-                logger.warning(
-                    'Autostop hook failed, but continuing with cluster stop. '
-                    'Check logs for details.')
-            else:
-                logger.info('Autostop hook completed successfully.')
+        """Run stored hooks via hook_executor under CAS.
+
+        Routes idle-timer-driven teardown to the right event:
+          - ``autostop.down=False`` (pause): fires ``stop`` hooks.
+          - ``autostop.down=True`` (autodown): fires ``down`` hooks
+            (same event as ``sky down`` — both are teardowns).
+
+        The CAS first-in-wins flag ensures we don't double-fire if
+        another teardown trigger (SIGTERM from preemption, etc.) has
+        already claimed this teardown.
+        """
+        event = (hook_executor.DOWN
+                 if autostop_config.down else hook_executor.STOP)
+        if not hook_executor.try_claim_teardown(event):
+            logger.info('Teardown already claimed by '
+                        f'{hook_executor.current_teardown_event()!r}; skipping '
+                        f'{event!r} hooks.')
+            return
+        hooks = autostop_lib.get_hooks()
+        if hooks:
+            logger.info(f'Executing {len(hooks)} stored lifecycle hook(s) for '
+                        f'{event!r}.')
+            hook_executor.run(event, hooks)
 
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
@@ -257,7 +377,9 @@ class AutostopEvent(SkyletEvent):
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
 
-            # Execute autostop hook if provided (for old provisioner path)
+            # Execute stop/down event hook if provided (for old provisioner
+            # path). The method claims the `stop` slot when autostop.down is
+            # false and the `down` slot for autodown.
             self._execute_hook_if_present(autostop_config)
 
             is_cluster_multinode = config['max_workers'] > 0
@@ -339,7 +461,9 @@ class AutostopEvent(SkyletEvent):
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
 
-        # Execute autostop hook if provided
+        # Execute stop/down event hook if provided. The method claims the
+        # `stop` slot when autostop.down is false and the `down` slot for
+        # autodown.
         self._execute_hook_if_present(autostop_config)
 
         cluster_name_on_cloud = cluster_config['cluster_name']
@@ -368,6 +492,17 @@ class AutostopEvent(SkyletEvent):
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:
             operation_fn = provision_lib.terminate_instances
+
+        # For Kubernetes autodown, leave a durable Event breadcrumb on the
+        # cluster before deleting the pods. The pod can finish autodowning
+        # between two server-side status refreshes, in which case the refresh
+        # never observes the AUTOSTOPPING state; the server reads this event
+        # back to still attribute the termination to autostop. Best-effort.
+        if autostop_config.down and isinstance(cloud, clouds.Kubernetes):
+            # pylint: disable=import-outside-toplevel
+            from sky.provision.kubernetes import instance as k8s_instance
+            k8s_instance.emit_autostop_event_best_effort(
+                cluster_config['provider'], cluster_name_on_cloud)
 
         if is_cluster_multinode:
             logger.info('Terminating worker nodes first.')

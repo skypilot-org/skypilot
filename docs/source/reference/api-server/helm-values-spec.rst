@@ -38,6 +38,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
+    :ref:`host <helm-values-apiService-host>`: "0.0.0.0"
     :ref:`enableUserManagement <helm-values-apiService-enableUserManagement>`: false
     :ref:`initialBasicAuthCredentials <helm-values-apiService-initialBasicAuthCredentials>`: "skypilot:$apr1$c1h4rNxt$2NnL7dIDUV0tWsnuNMGSr/"
     :ref:`initialBasicAuthSecret <helm-values-apiService-initialBasicAuthSecret>`: null
@@ -453,6 +454,24 @@ Default: ``1``
 
   apiService:
     replicas: 1
+
+.. _helm-values-apiService-host:
+
+``apiService.host``
+^^^^^^^^^^^^^^^^^^^
+
+Host/interface the API server binds to. Defaults to ``0.0.0.0`` (all IPv4 interfaces).
+
+Set to ``::`` to bind IPv6 dual-stack (accepts both IPv6 and IPv4 traffic on dual-stack hosts).
+
+Allowed values: ``0.0.0.0`` or ``::``.
+
+Default: ``"0.0.0.0"``
+
+.. code-block:: yaml
+
+  apiService:
+    host: "0.0.0.0"
 
 .. _helm-values-apiService-enableUserManagement:
 

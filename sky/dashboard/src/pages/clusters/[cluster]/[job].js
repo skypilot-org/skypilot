@@ -22,6 +22,11 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
+import {
+  normalizeUrl,
+  useLogLinkExtractor,
+  useTemplateLinks,
+} from '@/utils/externalLinks';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -128,6 +133,45 @@ export function JobDetailPage() {
     refreshTrigger: logsRefreshToken,
     onError: handleStreamError,
   });
+
+  // Scan streamed logs against built-in plus admin-configured URL patterns
+  // and surface matches in the Details card as an External Links row.
+  const { extractedLinks, scanLines } = useLogLinkExtractor();
+  useEffect(() => {
+    scanLines(displayLines);
+  }, [displayLines, scanLines]);
+
+  // Admin-configured url templates (dashboard.external_links entries with a
+  // `url` field) resolved against this job's metadata.
+  const jobRecord = useMemo(
+    () => clusterJobData?.find((j) => j.id == job),
+    [clusterJobData, job]
+  );
+  const templateLinkContext = useMemo(
+    () => ({
+      cluster_name: cluster,
+      job_id: job,
+      job_name: jobRecord?.job,
+      user: jobRecord?.user,
+      workspace: jobRecord?.workspace,
+    }),
+    [cluster, job, jobRecord?.job, jobRecord?.user, jobRecord?.workspace]
+  );
+  const templateLinks = useTemplateLinks(templateLinkContext);
+
+  // Merge order on label collision: template links are the base,
+  // server-computed links (extracted from the full log, authoritative)
+  // override them, and client-extracted links only fill gaps, so a link
+  // surfaces even if the user never streamed the line it appeared on.
+  const combinedExternalLinks = useMemo(() => {
+    const combined = { ...templateLinks, ...(jobRecord?.links || {}) };
+    for (const [label, url] of Object.entries(extractedLinks)) {
+      if (!(label in combined)) {
+        combined[label] = url;
+      }
+    }
+    return combined;
+  }, [templateLinks, jobRecord, extractedLinks]);
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
@@ -305,6 +349,33 @@ export function JobDetailPage() {
                         )}
                       </div>
                     </div>
+                    {Object.keys(combinedExternalLinks).length > 0 && (
+                      <div className="col-span-2">
+                        <div className="text-gray-600 font-medium text-base">
+                          External Links
+                        </div>
+                        <div className="text-base mt-1">
+                          <div className="flex flex-wrap gap-4">
+                            {Object.entries(combinedExternalLinks).map(
+                              ([label, url]) => {
+                                const normalizedUrl = normalizeUrl(url);
+                                return (
+                                  <a
+                                    key={label}
+                                    href={normalizedUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                                  >
+                                    {label}
+                                  </a>
+                                );
+                              }
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>

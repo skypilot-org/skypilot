@@ -4,6 +4,12 @@ server:
     size: 50Gi
   retention: "1000d"
   retentionSize: "43GB"
+  # scrape_timeout must be longer than the SkyPilot API server's
+  # _PER_CONTEXT_TIMEOUT_SECONDS (20s in sky/server/metrics.py),
+  # otherwise this Prometheus will time out scraping /gpu-metrics on
+  # large clusters and mark the api-server target as down.
+  global:
+    scrape_timeout: 30s
 kube-state-metrics:
   enabled: true
   metricLabelsAllowlist:

@@ -158,7 +158,22 @@ def load_chain_dag_from_yaml(
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
       trivial task).
     """
-    configs = yaml_utils.read_yaml_all(path)
+    try:
+        with open(os.path.expanduser(path), 'r', encoding='utf-8') as f:
+            yaml_str = f.read()
+    except UnicodeDecodeError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{path!r} is not a valid UTF-8 text file and cannot be '
+                'parsed as YAML.') from e
+    with ux_utils.print_exception_no_traceback():
+        yaml_utils.check_no_duplicate_keys(yaml_str)
+    configs = yaml_utils.read_yaml_all_str(yaml_str)
+    if not any(c for c in configs):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{path!r} is empty or contains no task definition. '
+                'Add at least a `run:` (or `setup:`) field.')
     dag = _load_chain_dag(configs, env_overrides, secret_overrides)
     # Capture git commit from the YAML file's directory for tasks that
     # don't already have one (e.g. from a workdir).

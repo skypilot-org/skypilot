@@ -21,9 +21,12 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report()
 
             # Should call with default 30 days
-            mock_get_history.assert_called_once_with(days=30,
-                                                     abbreviate_response=False,
-                                                     cluster_hashes=None)
+            mock_get_history.assert_called_once_with(
+                days=30,
+                abbreviate_response=False,
+                cluster_hashes=None,
+                cluster_names=None,
+                exclude_managed_clusters=False)
             self.assertEqual(result, [])
 
     def test_cost_report_custom_days(self):
@@ -35,9 +38,12 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report(days=7)
 
             # Should call with custom 7 days
-            mock_get_history.assert_called_once_with(days=7,
-                                                     abbreviate_response=False,
-                                                     cluster_hashes=None)
+            mock_get_history.assert_called_once_with(
+                days=7,
+                abbreviate_response=False,
+                cluster_hashes=None,
+                cluster_names=None,
+                exclude_managed_clusters=False)
             self.assertEqual(result, [])
 
     def test_cost_report_none_days(self):
@@ -49,10 +55,51 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report(days=None)
 
             # Should call with default 30 days when None is passed
-            mock_get_history.assert_called_once_with(days=30,
-                                                     abbreviate_response=False,
-                                                     cluster_hashes=None)
+            mock_get_history.assert_called_once_with(
+                days=30,
+                abbreviate_response=False,
+                cluster_hashes=None,
+                cluster_names=None,
+                exclude_managed_clusters=False)
             self.assertEqual(result, [])
+
+    def test_cost_report_with_cluster_names_filter(self):
+        """Test cost_report forwards cluster_names to history and disables
+        abbreviation when a name filter is provided."""
+        with mock.patch('sky.global_user_state.get_clusters_from_history'
+                       ) as mock_get_history:
+            mock_get_history.return_value = []
+
+            core.cost_report(dashboard_summary_response=True,
+                             cluster_names=['my-cluster'],
+                             exclude_managed_clusters=False)
+
+            # When filtering by name, abbreviate_response must be False so
+            # the dashboard receives full records (yaml/command fields).
+            mock_get_history.assert_called_once_with(
+                days=30,
+                abbreviate_response=False,
+                cluster_hashes=None,
+                cluster_names=['my-cluster'],
+                exclude_managed_clusters=False)
+
+    def test_cost_report_with_both_hash_and_name_filters(self):
+        """Test cost_report forwards both filters when both are given."""
+        with mock.patch('sky.global_user_state.get_clusters_from_history'
+                       ) as mock_get_history:
+            mock_get_history.return_value = []
+
+            core.cost_report(dashboard_summary_response=True,
+                             cluster_hashes=['abc'],
+                             cluster_names=['my-cluster'],
+                             exclude_managed_clusters=False)
+
+            mock_get_history.assert_called_once_with(
+                days=30,
+                abbreviate_response=False,
+                cluster_hashes=['abc'],
+                cluster_names=['my-cluster'],
+                exclude_managed_clusters=False)
 
     def test_cost_report_with_pickle_errors(self):
         """Test cost_report handles pickle errors gracefully when loading historical data."""
@@ -68,9 +115,12 @@ class TestCostReportCore(unittest.TestCase):
             result = core.cost_report(days=30)
 
             self.assertEqual(result, [])
-            mock_get_history.assert_called_once_with(days=30,
-                                                     abbreviate_response=False,
-                                                     cluster_hashes=None)
+            mock_get_history.assert_called_once_with(
+                days=30,
+                abbreviate_response=False,
+                cluster_hashes=None,
+                cluster_names=None,
+                exclude_managed_clusters=False)
 
 
 class TestCostReportStatusUtils(unittest.TestCase):

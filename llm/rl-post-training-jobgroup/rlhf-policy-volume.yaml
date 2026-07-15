@@ -1,0 +1,17 @@
+# Volume definition for rl-post-training-jobgroup shared policy weights.
+#
+# This volume is mounted by both the rollout-server and ppo-trainer so the
+# trainer can push freshly-updated policy weights back to the rollout-server
+# every N steps. Create this volume before launching the job group:
+#
+#   sky volume apply llm/rl-post-training-jobgroup/rlhf-policy-volume.yaml
+#
+# Then launch the job group:
+#   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup.yaml
+
+name: rlhf-policy
+type: k8s-pvc
+size: 50Gi
+infra: kubernetes
+config:
+  access_mode: ReadWriteMany

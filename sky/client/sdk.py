@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -56,6 +57,7 @@ from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import env_options
+from sky.utils import hooks_deprecation
 from sky.utils import infra_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -112,7 +114,8 @@ def stream_response(request_id: None,
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> None:
+                    get_result: bool = True,
+                    relay_rich_status: bool = False) -> None:
     ...
 
 
@@ -121,7 +124,8 @@ def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: Literal[True] = True) -> T:
+                    get_result: Literal[True] = True,
+                    relay_rich_status: bool = False) -> T:
     ...
 
 
@@ -130,7 +134,8 @@ def stream_response(request_id: server_common.RequestId[T],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> Optional[T]:
+                    get_result: bool = True,
+                    relay_rich_status: bool = False) -> Optional[T]:
     ...
 
 
@@ -138,7 +143,8 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None,
                     resumable: bool = False,
-                    get_result: bool = True) -> Optional[T]:
+                    get_result: bool = True,
+                    relay_rich_status: bool = False) -> Optional[T]:
     """Streams the response to the console.
 
     Args:
@@ -154,15 +160,33 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
         get_result: Whether to get the result of the request. This will
             typically be set to False for `--no-follow` flags as requests may
             continue to run for long periods of time without further streaming.
+        relay_rich_status: If True, forward encoded rich-status control payloads
+            verbatim to the output instead of rendering a local spinner. See
+            :func:`sky.utils.rich_utils.decode_rich_status`.
     """
 
-    retry_context: Optional[rest.RetryContext] = None
-    if resumable:
-        retry_context = rest.get_retry_context()
+    # Always fetch the retry context (if any) so we can report progress to
+    # the retry decorator across all stream types. `resumable` only controls
+    # whether already-printed lines are skipped on retry.
+    retry_context = rest.get_retry_context()
     try:
         line_count = 0
 
-        for line in rich_utils.decode_rich_status(response):
+        for line in rich_utils.decode_rich_status(
+                response, relay_rich_status=relay_rich_status):
+            # Report forward progress to the retry decorator for every
+            # message received from the wire, including None control
+            # messages (e.g. heartbeats). Receiving any message
+            # indicates the underlying connection is healthy, so the
+            # consecutive-failure counter should reset. Without this,
+            # resumable streams that spend a full retry window only
+            # replaying already-printed lines (or receiving only
+            # heartbeats) never advance `progress_count` and can
+            # exhaust their retry budget even though the stream is
+            # actively making progress over the network.
+            if retry_context is not None:
+                retry_context.progress_count += 1
+
             if line is not None:
                 line_count += 1
 
@@ -171,10 +195,17 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
                     # Line was consumed by interactive auth handler
                     continue
 
-                if retry_context is None:
-                    print(line, flush=True, end='', file=output_stream)
-                elif line_count > retry_context.line_processed:
-                    print(line, flush=True, end='', file=output_stream)
+                if (resumable and retry_context is not None and
+                        line_count <= retry_context.line_processed):
+                    # Already printed on a previous attempt; skip.
+                    continue
+
+                print(line, flush=True, end='', file=output_stream)
+
+                if retry_context is not None and resumable:
+                    # Reaching here implies line_count > line_processed
+                    # (otherwise the resumable skip above would have
+                    # `continue`'d). Advance the high-water mark.
                     retry_context.line_processed = line_count
         if request_id is not None and get_result:
             return get(request_id)
@@ -250,10 +281,21 @@ def enabled_clouds(workspace: Optional[str] = None,
     Request Returns:
         A list of enabled clouds in string format.
     """
-    if workspace is None:
+    # Only stamp an explicit workspace into the request when the user
+    # actually configured one (thread-local, project `.sky.yaml`, or
+    # user `~/.sky/config.yaml`). Falling back to the literal 'default'
+    # here would be sent on the wire as an explicit intent — the
+    # server-side workspace resolver gate (c) respects explicit names
+    # and refuses to substitute a workspace the user has access to.
+    # When `workspace is None`, let the server resolver run and pick
+    # based on the user's accessible workspaces / preferred default.
+    if workspace is None and skypilot_config.is_active_workspace_set():
         workspace = skypilot_config.get_active_workspace()
-    response = server_common.make_authenticated_request(
-        'GET', f'/enabled_clouds?workspace={workspace}&expand={expand}')
+    if workspace is None:
+        url = f'/enabled_clouds?expand={expand}'
+    else:
+        url = f'/enabled_clouds?workspace={workspace}&expand={expand}'
+    response = server_common.make_authenticated_request('GET', url)
     return server_common.get_request_id(response)
 
 
@@ -428,6 +470,85 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     return server_common.get_request_id(response)
 
 
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(
+    server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION)
+@annotations.client_api
+def set_preferred_workspace(preferred: Optional[str]) -> Dict[str, Any]:
+    """Sets (or clears with None) the user's preferred workspace.
+
+    Args:
+        preferred: workspace name to set as default, or None to clear.
+
+    Returns:
+        ``{'preferred': <new value>}`` echoing what was set. Callers that
+        need the resolved workspace + accessible list should follow up
+        with :func:`get_user_workspace`. Raises if the server rejects
+        the change (workspace does not exist, or user lacks permission
+        to it).
+    """
+    response = server_common.make_authenticated_request(
+        'POST', '/users/me/workspace', json={'preferred': preferred})
+    response.raise_for_status()
+    return response.json()
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(
+    server_constants.MIN_PREFERRED_WORKSPACE_API_VERSION)
+@annotations.client_api
+def get_user_workspace(requested: Optional[str] = None) -> Dict[str, Any]:
+    """Returns workspace state for the calling user.
+
+    Mirrors the launch-path precedence — if the caller has an explicit
+    ``active_workspace``, the server returns that with ``source='explicit'``;
+    otherwise the resolver runs (preferred / default-fallback /
+    single-membership).
+
+    Args:
+        requested: explicit active workspace to ask about. ``None`` (the
+            default) — the SDK reads your locally-configured
+            ``active_workspace`` (the value `skypilot_config` merges
+            from ``~/.sky/config.yaml`` + ``./.sky.yaml`` + any
+            ``--config active_workspace=X`` override) and forwards it
+            on the wire as ``?requested=``. Pass a non-None value to
+            query the resolver as if ``active_workspace`` were that
+            value, without changing your local config — useful for
+            previewing "what would land if I switched to X".
+
+    Returns:
+        ``{workspace, source, note, preferred, accessible}``.
+
+        * ``workspace``: the workspace the launch path would pick. Can
+          be ``None`` when the resolver couldn't pick (no access /
+          ambiguous / explicit ``requested`` rejected by RBAC); the
+          reason is then in ``note``.
+        * ``source``: one of ``WORKSPACE_SOURCE_*`` on success, ``None``
+          when ``workspace`` is ``None``.
+        * ``note``: optional message — drift on success
+          (``preferred 'team-x' not accessible``) or the resolver error
+          when ``workspace`` is ``None``.
+        * ``preferred``: the persisted preferred workspace (``None`` if
+          unset).
+        * ``accessible``: sorted list of workspaces the user can launch
+          into.
+    """
+    # Same fallback the launch path uses: only stamp `requested` when
+    # the user actually set `active_workspace` somewhere. Sending the
+    # default 'default' literal as `requested` would change the
+    # resolver's precedence and reject users without 'default' access.
+    if requested is None and skypilot_config.is_active_workspace_set():
+        requested = skypilot_config.get_active_workspace()
+    url = '/users/me/workspace'
+    if requested is not None:
+        url += f'?requested={urlparse.quote(requested)}'
+    response = server_common.make_authenticated_request('GET', url)
+    response.raise_for_status()
+    return response.json()
+
+
 def _raise_exception_object_on_client(e: BaseException) -> None:
     """Raise the exception object on the client."""
     if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -557,6 +678,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -564,6 +686,8 @@ def launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a cluster or task.
@@ -628,6 +752,11 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        resize: if True, resize the existing cluster to the ``num_nodes``
+          specified in the task. Supports both scaling up (adding workers)
+          and scaling down (removing workers). Scale-down requires no
+          running jobs on the cluster. If True, requires ``cluster_name``
+          to be set.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -665,6 +794,11 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if resize and cluster_name is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'resize=True requires cluster_name to be set to an existing '
+                'cluster.')
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -679,6 +813,12 @@ def launch(
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
+    if resize and (remote_api_version is None or remote_api_version < 56):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Cluster resize (--resize / resize=True) is not supported by '
+                'your API server. Please upgrade the API server to a version '
+                'that supports API_VERSION >= 56.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
@@ -724,11 +864,14 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            resize,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
             _disable_controller_check,
             _file_mounts_blob_id,
+            _extra_launch_context,
+            _include_credentials,
         )
 
 
@@ -745,6 +888,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -752,6 +896,8 @@ def _launch(
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
     _file_mounts_blob_id: Optional[str] = None,
+    _extra_launch_context: Optional[Dict[str, Any]] = None,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
     """Auxiliary function for launch(), refer to launch() for details."""
@@ -789,13 +935,54 @@ def _launch(
                 cluster_user_hash_str = f' (hash: {cluster_user_hash})'
 
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
+        # it exists but is STOPPED, or (4) resize is requested and would
+        # change the node count.
         prompt = None
         if cluster_status is None:
-            prompt = (
-                f'Launching a new cluster {cluster_name!r}. '
-                # '{clone_source_str}. '
-                'Proceed?')
+            suffix = ''
+            if resize:
+                suffix = (f' (--resize will be ignored since {cluster_name!r} '
+                          f'does not exist)')
+            prompt = (f'Launching a new cluster {cluster_name!r}.{suffix} '
+                      'Proceed?')
+        elif resize:
+            # Check resize before STOPPED: a --resize on a stopped cluster
+            # should show a resize-aware prompt (and note the restart), not
+            # the generic "Restarting the stopped cluster" message.
+            current_nodes = cluster_record.get('nodes')
+            target_nodes = dag.tasks[0].num_nodes
+            user_name_str = ''
+            if cluster_user_hash != common_utils.get_user_hash():
+                user_name_str = (f' (created by another user '
+                                 f'{cluster_user_name!r}'
+                                 f'{cluster_user_hash_str})')
+            # A stopped cluster is restarted as part of the resize.
+            resume_str = ''
+            if cluster_status == status_lib.ClusterStatus.STOPPED:
+                resume_str = ' The stopped cluster will be restarted.'
+            if current_nodes is None:
+                # Record is missing the 'nodes' field (e.g. older server or
+                # partial status response). Avoid TypeError from comparing
+                # int to None; show a generic resize prompt without the
+                # delta.
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'to {target_nodes} node(s).{resume_str} Proceed?')
+            elif current_nodes == target_nodes:
+                prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
+                          f'has {current_nodes} node(s); --resize is a '
+                          f'no-op.{resume_str} Proceed?')
+            elif target_nodes > current_nodes:
+                delta = target_nodes - current_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(+{delta} worker(s), scale up).{resume_str} '
+                          f'Proceed?')
+            else:
+                delta = current_nodes - target_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(-{delta} worker(s), scale down). Excess '
+                          f'workers will be terminated.{resume_str} Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
@@ -828,6 +1015,18 @@ def _launch(
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
+    # Only request credential bundling when the remote server advertises
+    # support for it. Old servers ignore the field via Pydantic
+    # ``extra='ignore'`` so this is also safe to send unconditionally,
+    # but checking up-front lets us skip the work on servers that would
+    # discard it anyway and makes the gating intent explicit.
+    include_credentials = _include_credentials
+    if include_credentials:
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is None or remote_api_version <
+                server_constants.MIN_LAUNCH_CREDENTIALS_API_VERSION):
+            include_credentials = False
+
     body = payloads.LaunchBody(
         task=dag_str,
         cluster_name=cluster_name,
@@ -845,6 +1044,9 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        resize=resize,
+        extra_launch_context=_extra_launch_context or {},
+        include_credentials=include_credentials,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1116,40 +1318,52 @@ def tail_provision_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(52)
 @annotations.client_api
-def tail_autostop_logs(cluster_name: str,
-                       follow: bool = True,
-                       tail: int = 0) -> int:
-    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+def tail_hook_logs(cluster_name: str,
+                   event: Optional[str] = None,
+                   follow: bool = True,
+                   tail: int = 0) -> int:
+    """Tails a per-event lifecycle-hook log on the cluster.
 
     Args:
         cluster_name: name of the cluster.
+        event: one of ``stop``, ``preemption``, ``down``. When None,
+            auto-selects whichever log exists on the cluster.
         follow: whether to follow the logs.
         tail: number of lines to display from the end of the log file.
 
     Returns:
         Exit code 0 on streaming success; non-zero on failure.
-
-    Request Raises:
-        ValueError: if arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
-        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
-        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
     """
-    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
-                                     follow=follow,
-                                     tail=tail)
-
+    body = payloads.HookLogsBody(cluster_name=cluster_name,
+                                 event=event,
+                                 follow=follow,
+                                 tail=tail)
     response = server_common.make_authenticated_request(
-        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+        'POST', '/hook_logs', json=json.loads(body.model_dump_json()))
     request_id: server_common.RequestId[int] = server_common.get_request_id(
         response)
     return stream_and_get(request_id)
+
+
+# TODO(zpoint): drop the tail_autostop_logs deprecation alias after
+# v0.15.0. Replacement: tail_hook_logs(cluster_name, event='stop', ...).
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """[DEPRECATED] Master-era alias for tail_hook_logs(event='stop').
+
+    The autostop event was renamed to ``stop`` in the generalized
+    lifecycle-hooks framework. This shim emits a one-line stderr
+    deprecation warning and delegates to :func:`tail_hook_logs` so
+    master-version code keeps working through the v0.15.0 grace window.
+    """
+    sys.stderr.write(hooks_deprecation.TAIL_AUTOSTOP_LOGS_SDK)
+    return tail_hook_logs(cluster_name=cluster_name,
+                          event='stop',
+                          follow=follow,
+                          tail=tail)
 
 
 @usage_lib.entrypoint
@@ -1453,7 +1667,7 @@ def autostop(
             hook fails, autostop will still proceed but a warning will be
             logged.
         hook_timeout: timeout in seconds for hook execution. If None, uses
-            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            DEFAULT_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
             be terminated if it exceeds this timeout.
 
     Returns:
@@ -2216,7 +2430,8 @@ def stream_and_get(request_id: server_common.RequestId[T],
                    log_path: Optional[str] = None,
                    tail: Optional[int] = None,
                    follow: bool = True,
-                   output_stream: Optional['io.TextIOBase'] = None) -> T:
+                   output_stream: Optional['io.TextIOBase'] = None,
+                   relay_rich_status: bool = False) -> T:
     ...
 
 
@@ -2225,7 +2440,8 @@ def stream_and_get(request_id: None = None,
                    log_path: Optional[str] = None,
                    tail: Optional[int] = None,
                    follow: bool = True,
-                   output_stream: Optional['io.TextIOBase'] = None) -> None:
+                   output_stream: Optional['io.TextIOBase'] = None,
+                   relay_rich_status: bool = False) -> None:
     ...
 
 
@@ -2239,6 +2455,7 @@ def stream_and_get(
     tail: Optional[int] = None,
     follow: bool = True,
     output_stream: Optional['io.TextIOBase'] = None,
+    relay_rich_status: bool = False,
 ) -> Optional[T]:
     """Streams the logs of a request or a log file and gets the final result.
 
@@ -2256,6 +2473,11 @@ def stream_and_get(
         follow: Whether to follow the logs.
         output_stream: The output stream to write to. If None, print to the
             console.
+        relay_rich_status: If True, forward encoded rich-status control payloads
+            verbatim to the output instead of rendering a local spinner. Used by
+            the managed jobs controller to preserve provisioning spinner codes
+            in its per-job log. See
+            :func:`sky.utils.rich_utils.decode_rich_status`.
 
     Returns:
         The ``Request Returns`` of the specified request. See the documentation
@@ -2303,7 +2525,8 @@ def stream_and_get(
                            response,
                            output_stream,
                            resumable=True,
-                           get_result=follow)
+                           get_result=follow,
+                           relay_rich_status=relay_rich_status)
 
 
 @usage_lib.entrypoint
@@ -2476,8 +2699,10 @@ def api_start(
     Args:
         deploy: Whether to deploy the API server, i.e. fully utilize the
             resources of the machine.
-        host: The host to deploy the API server. It will be set to 0.0.0.0
-            if deploy is True, to allow remote access.
+        host: The host to bind the API server to. Under deploy, the server
+            always binds a wildcard address for remote access: ``::`` when an
+            IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+            is used as-is.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
         metrics: Whether to export metrics of the API server.
@@ -2488,7 +2713,9 @@ def api_start(
         None
     """
     if deploy:
-        host = '0.0.0.0'
+        # Deploy mode is for remote access, so always bind a wildcard of the
+        # requested host's address family.
+        host = '::' if server_common.is_ipv6_host(host) else '0.0.0.0'
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
@@ -2668,24 +2895,36 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
                                'clear the environment variable.')
 
 
-def _try_polling_auth(endpoint: str) -> Optional[str]:
+def _try_polling_auth(endpoint: str, no_browser: bool = False) -> Optional[str]:
     """Try the polling-based authentication flow."""
     try:
         # Generate code verifier (random secret) and challenge (hash)
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
-        # Open browser to authorization page
+        # Open browser to authorization page. The polling flow does not
+        # require the browser to be on this machine, so if --no-browser was
+        # passed or we cannot open one locally, just ask the user to visit
+        # the URL themselves.
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
-        if not common_utils.open_browser(auth_url):
-            logger.debug('Failed to open browser.')
-            return None
-
-        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
-                   f'{colorama.Style.RESET_ALL}\n'
-                   f'Please click "Authorize" to complete login.\n'
-                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
-                   f'auth method.{colorama.Style.RESET_ALL}')
+        browser_opened = False
+        if not no_browser:
+            browser_opened = common_utils.open_browser(auth_url)
+            if not browser_opened:
+                logger.debug('Failed to open browser.')
+        if browser_opened:
+            click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
+                       f'{colorama.Style.RESET_ALL}\n'
+                       f'Please click "Authorize" to complete login.\n'
+                       f'{colorama.Style.DIM}Press ctrl+c to fall back to '
+                       f'legacy auth method.{colorama.Style.RESET_ALL}')
+        else:
+            click.echo(f'{colorama.Fore.GREEN}Open this URL to complete '
+                       f'login:{colorama.Style.RESET_ALL}\n\n'
+                       f'{colorama.Style.BRIGHT}{auth_url}'
+                       f'{colorama.Style.RESET_ALL}\n\n'
+                       f'{colorama.Style.DIM}Press ctrl+c to fall back to '
+                       f'legacy auth method.{colorama.Style.RESET_ALL}')
 
         # Poll for token
         start_time = time.time()
@@ -2718,8 +2957,14 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         return None
 
 
-def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
+def _try_localhost_callback_auth(endpoint: str,
+                                 no_browser: bool = False) -> Optional[str]:
     """Try the localhost callback authentication flow (legacy)."""
+    if no_browser:
+        # This flow requires the browser to redirect back to a localhost port
+        # on this machine, so it cannot work without a local browser.
+        logger.debug('Skipping localhost callback flow: --no-browser is set.')
+        return None
     server: Optional[oauth_lib.HTTPServer] = None
     try:
         callback_port = common_utils.find_free_port(8000)
@@ -2783,7 +3028,8 @@ def _try_manual_token_entry(endpoint: str) -> Optional[str]:
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
               relogin: bool = False,
-              service_account_token: Optional[str] = None) -> None:
+              service_account_token: Optional[str] = None,
+              no_browser: bool = False) -> None:
     """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
@@ -2797,6 +3043,9 @@ def api_login(endpoint: Optional[str] = None,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
         relogin: Whether to force relogin with OAuth2 when enabled.
         service_account_token: Service account token for authentication.
+        no_browser: If True, do not attempt to open a browser locally; print
+            the auth URL and let the user open it themselves. Skips the
+            localhost-callback flow, which requires a local browser.
 
     Returns:
         None
@@ -2892,11 +3141,12 @@ def api_login(endpoint: Optional[str] = None,
         # 3. Manual token entry
         remote_api_version = versions.get_remote_api_version()
         if remote_api_version is not None and remote_api_version >= 30:
-            token = _try_polling_auth(endpoint)
+            token = _try_polling_auth(endpoint, no_browser=no_browser)
 
         if token is None:
             # Polling auth not available or failed, try localhost callback
-            token = _try_localhost_callback_auth(endpoint)
+            token = _try_localhost_callback_auth(endpoint,
+                                                 no_browser=no_browser)
 
         if token is None:
             # All automatic methods failed, fall back to manual entry

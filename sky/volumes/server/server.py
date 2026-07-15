@@ -9,6 +9,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.server.requests import role_filter
 from sky.utils import registry
 from sky.utils import volume as volume_utils
 from sky.volumes.server import core
@@ -19,12 +20,17 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
+async def volume_list(
+    request: fastapi.Request,
+    refresh: bool = fastapi.Depends(role_filter.force_viewer_volume_refresh),
+) -> None:
     """Gets the volumes.
 
     Args:
         refresh: If True, refresh volume state from cloud APIs before returning.
             If False (default), return cached data from the database.
+            For viewer-role callers this is forced to False by
+            `role_filter.force_viewer_volume_refresh`.
     """
     request_body = payloads.VolumeListBody(refresh=refresh)
     await executor.schedule_request_async(

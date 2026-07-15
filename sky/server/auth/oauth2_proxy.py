@@ -23,6 +23,17 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+HOP_BY_HOP_HEADERS = frozenset({
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+})
+
 
 @middleware_utils.websocket_aware
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -71,10 +82,15 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         allow_redirects=False,
                 ) as response:
                     response_body = await response.read()
+                    response_headers = {
+                        name: value
+                        for name, value in response.headers.items()
+                        if name.lower() not in HOP_BY_HOP_HEADERS
+                    }
                     fastapi_response = fastapi.responses.Response(
                         content=response_body,
                         status_code=response.status,
-                        headers=dict(response.headers),
+                        headers=response_headers,
                     )
                     # Forward cookies from OAuth2 proxy response to client
                     for cookie_name, cookie in response.cookies.items():
@@ -145,8 +161,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         })
                 newly_added = global_user_state.add_or_update_user(auth_user)
                 if newly_added:
-                    permission.permission_service.add_user_if_not_exists(
-                        auth_user.id)
+                    # Offload the blocking config reload + role seed to a
+                    # worker thread so this async middleware doesn't block the
+                    # event loop. The reload lets a runtime `rbac.default_role`
+                    # change take effect for this new user without a restart.
+                    await asyncio.to_thread(permission.seed_new_user_role,
+                                            auth_user.id)
                 request.state.auth_user = auth_user
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
@@ -188,8 +208,11 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         """Extract user info from OAuth2 proxy response headers."""
         email_header = response.headers.get('X-Auth-Request-Email')
         if email_header:
-            user_hash = hashlib.md5(email_header.encode()).hexdigest(
-            )[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user id from the (non-secret) SSO
+            # email; auth itself is done by oauth2-proxy. Not a security use.
+            email_hash = hashlib.md5(email_header.encode(),
+                                     usedforsecurity=False).hexdigest()
+            user_hash = email_hash[:common_utils.USER_HASH_LENGTH]
             return models.User(id=user_hash,
                                name=email_header,
                                user_type=models.UserType.SSO.value)

@@ -261,12 +261,14 @@ def _create_template_for_docker_login(
     container_registry_auth_name = f'{cluster_name}-registry-auth'
     container_template_name = _construct_docker_login_template_name(
         cluster_name)
-    # The `name` argument is only for display purpose and the registry server
-    # will be splitted from the docker image name (Tested with AWS ECR).
-    # Here we only need the username and password to create the registry auth.
+    # Compute the fully-qualified image name (e.g. ghcr.io/org/image:tag)
+    # before creating the template. Passing image_name=None caused Python to
+    # serialize None as the literal string "None" in the GraphQL mutation
+    # (imageName: "None"), which the RunPod API now rejects as invalid.
     # TODO(tian): Now we create a template and a registry auth for each cluster.
     # Consider create one for each server and reuse them. Challenges including
     # calculate the reference count and delete them when no longer needed.
+    formatted_image = login_config.format_image(image_name)
     create_auth_resp = runpod.runpod.create_container_registry_auth(
         name=container_registry_auth_name,
         username=login_config.username,
@@ -275,10 +277,10 @@ def _create_template_for_docker_login(
     registry_auth_id = create_auth_resp['id']
     create_template_resp = runpod.runpod.create_template(
         name=container_template_name,
-        image_name=None,
+        image_name=formatted_image,
         registry_auth_id=registry_auth_id,
     )
-    return login_config.format_image(image_name), create_template_resp['id']
+    return formatted_image, create_template_resp['id']
 
 
 def launch(

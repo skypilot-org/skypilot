@@ -2,7 +2,6 @@
 
 import asyncio
 from enum import IntEnum
-import os
 import struct
 from typing import Awaitable, Callable, Optional
 
@@ -93,8 +92,8 @@ async def run_websocket_proxy(
                             '!Q',
                             message[type_size:type_size + latency_size])[0]
                         latency_seconds = avg_latency_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # pylint: disable=line-too-long
-                            pid=os.getpid()).observe(latency_seconds)
+                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.observe(  # pylint: disable=line-too-long
+                            latency_seconds)
                         continue
                     else:
                         raise ValueError(

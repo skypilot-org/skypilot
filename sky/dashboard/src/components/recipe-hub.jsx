@@ -30,7 +30,10 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { sortData } from '@/data/utils';
 import {
   Dialog,
@@ -389,17 +392,21 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedAndFilteredTemplates.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    {recipes.length === 0
-                      ? 'No recipes available.'
-                      : 'No recipes match your filter criteria.'}
-                  </TableCell>
-                </TableRow>
+              {sortedAndFilteredTemplates.length === 0 || isForceEmpty() ? (
+                <EmptyTableState
+                  colSpan={7}
+                  icon={<FileCode className="w-5 h-5" />}
+                  title={
+                    recipes.length === 0
+                      ? 'No recipes available'
+                      : 'No recipes match your filter criteria'
+                  }
+                  description={
+                    recipes.length === 0
+                      ? 'Create a recipe to get started'
+                      : undefined
+                  }
+                />
               ) : (
                 sortedAndFilteredTemplates.map((recipe) => {
                   const typeInfo = getRecipeTypeInfo(
@@ -1108,7 +1115,7 @@ function CreateRecipeModal({
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-sky-600 hover:bg-sky-700 text-white"
+              className="bg-[#1668e0] hover:bg-[#1257bd] text-white"
             >
               {isSubmitting ? (
                 <>
@@ -1256,20 +1263,6 @@ export function RecipeHub() {
     }
   };
 
-  // Empty state
-  const EmptyState = () => (
-    <div className="text-center py-12">
-      <p className="text-gray-500 mb-4">No recipes yet</p>
-      <button
-        onClick={() => setIsCreateModalOpen(true)}
-        className="bg-sky-600 hover:bg-sky-700 text-white flex items-center justify-center mx-auto rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200"
-      >
-        <PlusIcon className="h-4 w-4 mr-2" />
-        Create Your First Template
-      </button>
-    </div>
-  );
-
   if (loading && allRecipes.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -1303,14 +1296,14 @@ export function RecipeHub() {
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+            className="text-[#1668e0] hover:text-[#1257bd] flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
             <span>Refresh</span>
           </button>
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="ml-4 bg-sky-600 hover:bg-sky-700 text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
+            className="ml-4 bg-[#1668e0] hover:bg-[#1257bd] text-white flex items-center rounded-md px-3 py-1 text-sm font-medium transition-colors duration-200"
             title="New Recipe"
           >
             <PlusIcon className="h-4 w-4 mr-2" />
@@ -1321,7 +1314,21 @@ export function RecipeHub() {
 
       {allRecipes.length === 0 ? (
         <Card>
-          <EmptyState />
+          <EmptyState
+            icon={<FileCode size={20} strokeWidth={1.75} />}
+            title="No recipes yet"
+            description="Create a reusable recipe for clusters, jobs, and more"
+            action={
+              <Button
+                size="sm"
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-[#1668e0] hover:bg-[#1257bd] text-white"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                Add Recipe
+              </Button>
+            }
+          />
         </Card>
       ) : (
         <div>
