@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import abc
 import contextlib
+import os
 from typing import (AsyncGenerator, Generator, List, Optional, Set, Tuple,
                     TYPE_CHECKING)
+
+from sky.skylet import constants
 
 if TYPE_CHECKING:
     from sky.server import daemons as daemons_lib
@@ -204,9 +207,14 @@ def get_request_backend() -> RequestBackend:
     global _storage_backend
     if _storage_backend is None:
         # pylint: disable=import-outside-toplevel
-        from sky.server.requests.requests import SqliteRequestBackend
+        from sky.server.requests.requests import (PostgresRequestBackend,
+                                                  SqliteRequestBackend)
 
-        _storage_backend = SqliteRequestBackend()
+        backend = os.environ.get(constants.ENV_VAR_API_REQUEST_DB_BACKEND, '')
+        if backend.lower() == 'postgres':
+            _storage_backend = PostgresRequestBackend()
+        else:
+            _storage_backend = SqliteRequestBackend()
     return _storage_backend
 
 
