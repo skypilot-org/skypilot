@@ -2365,7 +2365,7 @@ def stream_logs(job_id: Optional[int],
                     # Flush.
                     print(end='', flush=True)
 
-                    if (time.time() - last_status_check >=
+                    if (time.monotonic() - last_status_check >=
                             JOB_STATUS_CHECK_GAP_SECONDS):
                         # Check if the job if finished.
                         # TODO(cooperc): The controller can still be
@@ -2376,7 +2376,7 @@ def stream_logs(job_id: Optional[int],
                         assert job_status is not None, (job_id, job_name)
                         if job_status.is_terminal():
                             break
-                        last_status_check = time.time()
+                        last_status_check = time.monotonic()
 
                     time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
