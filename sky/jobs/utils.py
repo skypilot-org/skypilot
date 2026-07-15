@@ -108,15 +108,34 @@ _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 # the workload is perfectly healthy, and a recovery relaunch destroys it —
 # so operators running such workloads can extend the budget via the
 # environment on the jobs controller. See skypilot-org/skypilot#10123.
-try:
-    JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = int(
-        os.environ.get('SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60))
-except ValueError:
-    logger.warning(
-        'Invalid SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS value '
-        f'{os.environ.get("SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS")!r}'
-        '; falling back to 60 seconds.')
-    JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
+_JOB_STATUS_FETCH_TOTAL_TIMEOUT_ENV_VAR = (
+    'SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS')
+_JOB_STATUS_FETCH_TOTAL_TIMEOUT_DEFAULT_SECONDS = 60
+
+
+def _job_status_fetch_total_timeout_seconds() -> int:
+    """Parses the timeout override, falling back on invalid values."""
+    raw = os.environ.get(_JOB_STATUS_FETCH_TOTAL_TIMEOUT_ENV_VAR)
+    if raw is None:
+        return _JOB_STATUS_FETCH_TOTAL_TIMEOUT_DEFAULT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value <= 0:
+        # A non-positive timeout would disable the retry budget entirely
+        # and recover (relaunch) a healthy job on the first transient
+        # error - the exact failure this knob exists to prevent.
+        logger.warning(
+            f'Invalid {_JOB_STATUS_FETCH_TOTAL_TIMEOUT_ENV_VAR} value '
+            f'{raw!r}; must be a positive integer. Falling back to '
+            f'{_JOB_STATUS_FETCH_TOTAL_TIMEOUT_DEFAULT_SECONDS} seconds.')
+        return _JOB_STATUS_FETCH_TOTAL_TIMEOUT_DEFAULT_SECONDS
+    return value
+
+
+JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = (
+    _job_status_fetch_total_timeout_seconds())
 
 # Pattern matching the "From controller <UUID>" line that the controller
 # emits at job-claim time (see sky/jobs/controller.py: run_job). Used by

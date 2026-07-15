@@ -1305,3 +1305,24 @@ class TestCleanupExpiredApiAccessTokens:
     def test_no_expired_tokens_is_noop(self, mock_get_expired):
         mock_get_expired.return_value = []
         assert utils.cleanup_expired_api_access_tokens() == 0
+
+
+class TestJobStatusFetchTotalTimeoutOverride:
+    """Tests for the SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS knob."""
+
+    _ENV_VAR = 'SKYPILOT_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS'
+
+    def test_unset_returns_default(self, monkeypatch):
+        monkeypatch.delenv(self._ENV_VAR, raising=False)
+        assert utils._job_status_fetch_total_timeout_seconds() == 60
+
+    def test_valid_override(self, monkeypatch):
+        monkeypatch.setenv(self._ENV_VAR, '600')
+        assert utils._job_status_fetch_total_timeout_seconds() == 600
+
+    @pytest.mark.parametrize('raw', ['120s', ' 60 x', '', '0', '-30'])
+    def test_invalid_or_non_positive_falls_back(self, raw, monkeypatch):
+        monkeypatch.setenv(self._ENV_VAR, raw)
+        with mock.patch.object(utils.logger, 'warning') as mock_warning:
+            assert utils._job_status_fetch_total_timeout_seconds() == 60
+        assert mock_warning.call_count == 1
