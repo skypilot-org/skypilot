@@ -4,7 +4,7 @@ from unittest import mock
 from sky.provision import docker_utils
 
 
-def _make_initializer(docker_config, runs):
+def _make_initializer(docker_config, runs, stream_pull_logs=True):
     """Returns a DockerInitializer whose runner records every command."""
 
     def _fake_run(cmd, **kwargs):
@@ -15,11 +15,16 @@ def _make_initializer(docker_config, runs):
             return (0, '/root', '')
         if 'SKYPILOT_DOCKER_USER' in cmd:
             return (0, 'SKYPILOT_DOCKER_USER: root', '')
+        if '/proc/meminfo' in cmd:
+            return (0, 'MemAvailable:    8388608 kB', '')
         return (0, '', '')
 
     runner = mock.MagicMock()
     runner.run.side_effect = _fake_run
-    return docker_utils.DockerInitializer(docker_config, runner, '/dev/null')
+    return docker_utils.DockerInitializer(docker_config,
+                                          runner,
+                                          '/dev/null',
+                                          stream_pull_logs=stream_pull_logs)
 
 
 def test_run_does_not_stream_by_default():
@@ -86,3 +91,18 @@ def test_initialize_streams_conditional_pull():
     docker_user = initializer.initialize()
     assert docker_user == 'root'
     _assert_only_pulls_streamed(runs)
+
+
+def test_worker_initializer_keeps_pull_quiet():
+    runs = []
+    initializer = _make_initializer(
+        {
+            'container_name': 'sky_container',
+            'image': 'myimage:latest',
+            'pull_before_run': True,
+        },
+        runs,
+        stream_pull_logs=False)
+    docker_user = initializer.initialize()
+    assert docker_user == 'root'
+    assert all(not kwargs['stream_logs'] for _, kwargs in runs)

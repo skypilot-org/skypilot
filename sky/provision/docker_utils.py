@@ -197,11 +197,20 @@ def _redact_docker_password(cmd: str) -> str:
 class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
-    def __init__(self, docker_config: Dict[str, Any],
-                 runner: 'command_runner.CommandRunner', log_path: str):
+    def __init__(self,
+                 docker_config: Dict[str, Any],
+                 runner: 'command_runner.CommandRunner',
+                 log_path: str,
+                 stream_pull_logs: bool = False):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
+        # Whether to stream `docker pull` progress to the process stream
+        # (and thus the API server request log that `sky launch` clients
+        # render). Callers enable this for one node only: every node's
+        # initializer shares the same process stdout, so streaming all of
+        # them would interleave unlabeled copies of the pull output.
+        self.stream_pull_logs = stream_pull_logs
         self.home_dir: Optional[str] = None
         self.initialized = False
         # podman is not fully tested yet.
@@ -358,23 +367,23 @@ class DockerInitializer:
 
         # Stream the pull: it is the one docker setup step whose duration
         # scales with image size (a multi-GB image can pull for many
-        # minutes), and without streaming the whole 'Initializing docker
-        # container' phase is silent for `sky launch` clients tailing the
-        # provision log.
+        # minutes). Its output already lands in this node's log file
+        # either way; streaming additionally echoes it to the process
+        # stream, which is what reaches the API server request log and
+        # `sky launch` clients live.
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
                                     'pull_before_run is specified')
-            logger.info(f'Pulling docker image {specific_image}')
             self._run(f'{self.docker_cmd} pull {specific_image}',
                       wait_for_docker_daemon=True,
-                      stream_logs=True)
+                      stream_logs=self.stream_pull_logs)
         else:
             self._run(
                 f'{self.docker_cmd} image inspect {specific_image} '
                 '1> /dev/null  2>&1 || '
                 f'{self.docker_cmd} pull {specific_image}',
                 wait_for_docker_daemon=True,
-                stream_logs=True)
+                stream_logs=self.stream_pull_logs)
 
         logger.info(f'Starting container {self.container_name} with image '
                     f'{specific_image}')
