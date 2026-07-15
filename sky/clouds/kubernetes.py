@@ -1,5 +1,6 @@
 """Kubernetes."""
 import concurrent.futures
+import fnmatch
 import math
 import os
 import re
@@ -20,6 +21,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -43,10 +45,6 @@ logger = sky_logging.init_logger(__name__)
 # same cluster (even if they might be running in different namespaces).
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
-
-# Shared directory to communicate with fusermount-server, refer to
-# addons/fuse-proxy/README.md for more details.
-_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
 AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
@@ -800,9 +798,13 @@ class Kubernetes(clouds.Cloud):
             override_configs=resources.cluster_config_overrides)
 
         if isinstance(remote_identity, dict):
-            # If remote_identity is a dict, use the service account for the
-            # current context
-            k8s_service_account_name = remote_identity.get(context, None)
+            # If remote_identity is a dict, match the current context against
+            # patterns using fnmatch (consistent with AWS/GCP behavior).
+            k8s_service_account_name = None
+            for pattern, sa_name in remote_identity.items():
+                if fnmatch.fnmatchcase(context, str(pattern)):
+                    k8s_service_account_name = sa_name
+                    break
             if k8s_service_account_name is None:
                 err_msg = (f'Context {context!r} not found in '
                            'remote identities from config.yaml')
@@ -831,11 +833,16 @@ class Kubernetes(clouds.Cloud):
         # Configure spot labels, if requested and supported
         spot_label_key, spot_label_value = None, None
         if resources.use_spot:
-            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+            # Pass the provisioning context so get_spot_label() can resolve the
+            # autoscaler type per-context. Without it, only a global
+            # kubernetes.autoscaler setting is honored, and per-context configs
+            # (context_configs.<ctx>.autoscaler) never inject the spot label.
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label(
+                context)
 
         network_type, metadata = self._detect_network_type(
             context, resources.network_tier, k8s_acc_label_key,
-            k8s_resource_key, acc_count)
+            k8s_resource_key, acc_count, acc_type)
 
         k8s_efa_count = None
         if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
@@ -845,6 +852,19 @@ class Kubernetes(clouds.Cloud):
                 logger.warning(
                     f'No EFA interfaces detected on AWS nodes with '
                     f'accelerator {k8s_acc_label_key}, skipping enabling EFA.')
+
+        # Multi-node EFA jobs must co-locate every replica in a single AZ: an
+        # AWS EFA placement group is single-AZ, so pods that scatter across AZs
+        # cannot form the fabric (NCCL degrades or fails to init). SkyPilot
+        # schedules each pod independently with no cross-pod topology
+        # constraint, so on a multi-AZ cluster they can scatter. For a
+        # multi-node network_tier: best job on AWS EFA, tell the template to
+        # inject a required same-zone podAffinity keyed on the per-job label so
+        # every replica follows the first into whatever AZ it lands in (the user
+        # names no zone). network_type is only AWS_EFA when network_tier is
+        # BEST, so this stays off for every other tier and cloud.
+        k8s_efa_same_az = (num_nodes > 1 and network_type
+                           == KubernetesHighPerformanceNetworkType.AWS_EFA)
 
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
@@ -971,6 +991,7 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(timeout),
             'k8s_efa_count': str(k8s_efa_count)
                              if k8s_efa_count is not None else None,
+            'k8s_efa_same_az': k8s_efa_same_az,
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
@@ -980,7 +1001,11 @@ class Kubernetes(clouds.Cloud):
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
-            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
+            'k8s_fusermount_shared_dir': kubernetes_fuse.FUSERMOUNT_SHARED_DIR,
+            'k8s_fusermount_setup_command':
+                kubernetes_fuse.get_fusermount_shim_setup_command(
+                    sudo_cmd='$(prefix_cmd)',
+                    shared_dir=kubernetes_fuse.FUSERMOUNT_SHARED_DIR),
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,
@@ -1514,6 +1539,29 @@ class Kubernetes(clouds.Cloud):
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 
+    @staticmethod
+    def _derive_efa_count_from_catalog(acc_type: str,
+                                       acc_count: int) -> Optional[int]:
+        """EFA interfaces to request for ``acc_type:acc_count``, or None.
+
+        Delegates to the AWS instance-type catalog, which sizes from the lowest
+        EFA-per-accelerator ratio among the variants that can host the request
+        -- so the count is satisfiable on whatever variant a cold cluster's
+        autoscaler provisions and never strands GPUs. Returns None -- leaving
+        EFA unset, i.e. today's behavior -- whenever the catalog can't answer
+        (no MaximumEfaInterfaces column yet, or no hosting-capable variant).
+        Generic and autoscaler-agnostic.
+        """
+        # Local import: keeps the AWS-specific catalog off non-AWS import paths.
+        # pylint: disable-next=import-outside-toplevel
+        from sky.catalog import aws_catalog
+        try:
+            return aws_catalog.get_efa_count_for_accelerator(
+                acc_type, acc_count)
+        except (ValueError, KeyError, ImportError):
+            # Any catalog miss/parse issue -> degrade to no EFA (today's path).
+            return None
+
     @classmethod
     def _detect_network_type(
         cls,
@@ -1522,6 +1570,7 @@ class Kubernetes(clouds.Cloud):
         k8s_acc_label_key: Optional[str] = None,
         k8s_resource_key: Optional[str] = None,
         acc_count: Optional[int] = None,
+        acc_type: Optional[str] = None,
     ) -> Tuple[KubernetesHighPerformanceNetworkType, Optional[Dict[str, Any]]]:
         """Detect the type of Kubernetes network based on node labels.
 
@@ -1532,6 +1581,9 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key: The key of the Kubernetes accelerator label.
             k8s_resource_key: The key of the Kubernetes resource.
             acc_count: The number of accelerators requested.
+            acc_type: The accelerator type requested (e.g. 'H100'). Used to
+                derive the EFA interface count on AWS scale-from-zero clusters
+                where no GPU+EFA node is running to scan.
 
         Returns:
             A tuple of (network_type, metadata).
@@ -1543,6 +1595,12 @@ class Kubernetes(clouds.Cloud):
         if (network_tier is None or
                 network_tier != resources_utils.NetworkTier.BEST):
             return KubernetesHighPerformanceNetworkType.NONE, None
+
+        # Whether we saw at least one AWS node (even a non-GPU system node).
+        # AWS EKS nodes always carry the cloud-provider/topology labels below,
+        # so this stays True on a scale-from-zero cluster where only system
+        # nodes are up -- letting the fallback below still derive an EFA count.
+        saw_aws_efa_node = False
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1575,6 +1633,7 @@ class Kubernetes(clouds.Cloud):
                              'topology.ebs.csi.aws.com')):
                             network_type = (
                                 KubernetesHighPerformanceNetworkType.AWS_EFA)
+                            saw_aws_efa_node = True
                             metadata: Optional[Dict[str, Any]] = None
                             # Only check for AWS EFA count if GPU is specified
                             if (not k8s_acc_label_key or not k8s_resource_key or
@@ -1672,14 +1731,41 @@ class Kubernetes(clouds.Cloud):
             # If we can't reach the cluster, assume no high perf networking
             pass
 
-        # If we cannot determine the network type based on nodes
-        # Check if the cluster has any node pools with autoscaling enabled
-        # with machine types that support high perf networking for GKE.
+        # Autoscaler configured for this context (karpenter/generic/gke), or
+        # None on a static cluster. Both cold-start fallbacks below require it:
+        # on a cluster that can't scale up a GPU node, deriving a count would
+        # request a fabric for a pod that can never be scheduled -- it would
+        # just pend to provision_timeout.
         autoscaler_type = skypilot_config.get_effective_region_config(
             cloud=cls._REPR.lower(),
             region=context,
             keys=('autoscaler',),
             default_value=None)
+
+        # AWS EFA scale-from-zero fallback: the node scan above can only read an
+        # EFA count off an already-running GPU+EFA node. On a cold cluster
+        # (Karpenter / cluster-autoscaler at min=0) it finds none, so derive the
+        # count from the requested accelerator via the instance-type catalog --
+        # otherwise network_tier: best omits the EFA request and NCCL silently
+        # falls back to TCP. Mirrors the GKE machine-type fallback below. Gated
+        # on having seen an AWS node (any EKS node carries the cloud-provider
+        # labels, even a system node) and on an autoscaler being configured, so
+        # it never fires on non-AWS or static clusters. Degrades to today's
+        # behavior (no EFA metadata) whenever the catalog can't answer -- e.g. a
+        # hosted catalog predating the MaximumEfaInterfaces column, or an
+        # accelerator/instance it can't resolve -- rather than reporting an EFA
+        # fabric it can't size.
+        if (saw_aws_efa_node and autoscaler_type is not None and
+                acc_type is not None and acc_count):
+            derived_efa = cls._derive_efa_count_from_catalog(
+                acc_type, acc_count)
+            if derived_efa is not None:
+                return (KubernetesHighPerformanceNetworkType.AWS_EFA, {
+                    'efa_count': derived_efa
+                })
+
+        # GKE machine-type cold-start fallback: check autoscaling node pools for
+        # high-perf-networking machine types.
         if (autoscaler_type !=
                 kubernetes_enums.KubernetesAutoscalerType.GKE.value):
             return KubernetesHighPerformanceNetworkType.NONE, None

@@ -17,7 +17,7 @@ result = sky.get(request_id)
 ### `sky.launch`
 
 ```python
-sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
+sky.launch(task: Union['sky.Task', 'sky.Dag'], cluster_name: Optional[str] = None, retry_until_up: bool = False, idle_minutes_to_autostop: Optional[int] = None, wait_for: Optional[autostop_lib.AutostopWaitFor] = None, dryrun: bool = False, down: bool = False, backend: Optional['backends.Backend'] = None, optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST, no_setup: bool = False, clone_disk_from: Optional[str] = None, fast: bool = False, resize: bool = False, _need_confirmation: bool = False, _is_launched_by_jobs_controller: bool = False, _is_launched_by_sky_serve_controller: bool = False, _disable_controller_check: bool = False, _file_mounts_blob_id: Optional[str] = None, _extra_launch_context: Optional[Dict[str, Any]] = None, _include_credentials: bool = False) -> server_common.RequestId[Tuple[Optional[int], Optional['backends.ResourceHandle']]]
 ```
 
 Launches a cluster or task.
@@ -82,6 +82,11 @@ task; support for pipelines/general DAGs are in experimental branches.
       different availability zone or region.
     fast: [Experimental] If the cluster is already up and available,
       skip provisioning and setup steps.
+    resize: if True, resize the existing cluster to the ``num_nodes``
+      specified in the task. Supports both scaling up (adding workers)
+      and scaling down (removing workers). Scale-down requires no
+      running jobs on the cluster. If True, requires ``cluster_name``
+      to be set.
     _need_confirmation: (Internal only) If True, show the confirmation
         prompt.
 
@@ -982,8 +987,10 @@ exist.
 **Args:**
     deploy: Whether to deploy the API server, i.e. fully utilize the
         resources of the machine.
-    host: The host to deploy the API server. It will be set to 0.0.0.0
-        if deploy is True, to allow remote access.
+    host: The host to bind the API server to. Under deploy, the server
+        always binds a wildcard address for remote access: ``::`` when an
+        IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+        is used as-is.
     foreground: Whether to run the API server in the foreground (run in
         the current process).
     metrics: Whether to export metrics of the API server.

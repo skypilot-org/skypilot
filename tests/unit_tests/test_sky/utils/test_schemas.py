@@ -169,6 +169,40 @@ class TestResourcesSchema(unittest.TestCase):
                 jsonschema.validate(instance=config, schema=resources_schema)
 
 
+class TestRbacSchema(unittest.TestCase):
+    """Tests for rbac.restrict_config_to_admins in the config schema."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self._saved_plugins_loaded = plugins._plugins_loaded
+        # Enable strict validation so additionalProperties is enforced.
+        plugins._plugins_loaded = True
+        self._env_patcher = mock.patch.dict(
+            'os.environ', {constants.ENV_VAR_IS_SKYPILOT_SERVER: 'true'})
+        self._env_patcher.start()
+        self.config_schema = schemas.get_config_schema()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        plugins._plugins_loaded = self._saved_plugins_loaded
+
+    def test_restrict_config_to_admins_accepts_bool(self):
+        for value in (True, False):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': value
+                }},
+                schema=self.config_schema)
+
+    def test_restrict_config_to_admins_rejects_non_bool(self):
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(
+                instance={'rbac': {
+                    'restrict_config_to_admins': 'yes'
+                }},
+                schema=self.config_schema)
+
+
 class TestWorkspaceSchema(unittest.TestCase):
     """Tests for the workspace schema in schemas.py"""
 
@@ -1342,6 +1376,59 @@ class TestDashboardSchema(unittest.TestCase):
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(instance=config, schema=self._get_schema())
 
+    def test_accepts_url_template_entry(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_accepts_mixed_regex_and_url_entries(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                    },
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_entry_with_both_regex_and_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'regex': r'https://example\.com/.*',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_url(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': '',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
 
 class TestDashboardConfigRegexValidation(unittest.TestCase):
     """Tests for the runtime regex-compile validation in skypilot_config."""
@@ -1370,6 +1457,61 @@ class TestDashboardConfigRegexValidation(unittest.TestCase):
                 'external_links': [{
                     'label': 'Good',
                     'regex': r'https://example\.com/.*',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+
+class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
+    """Tests for the url-template validation in skypilot_config."""
+
+    def test_unknown_template_variable_raises_value_error(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${clustername}',
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+                config, 'test_config')
+        self.assertIn('dashboard.external_links[0].url', str(ctx.exception))
+        self.assertIn('clustername', str(ctx.exception))
+        self.assertIn('cluster_name', str(ctx.exception))
+
+    def test_known_template_variables_pass(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        variables = '/'.join(
+            f'${{{v}}}'
+            for v in sorted(skypilot_config.DASHBOARD_LINK_TEMPLATE_VARIABLES))
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'All variables',
+                    'url': f'https://example.com/{variables}',
+                }],
+            },
+        }
+        # Should not raise.
+        skypilot_config._validate_dashboard_external_links(  # pylint: disable=protected-access
+            config, 'test_config')
+
+    def test_static_url_without_variables_passes(self):
+        # pylint: disable-next=import-outside-toplevel
+        from sky import skypilot_config
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Static',
+                    'url': 'https://example.com/dashboard',
                 }],
             },
         }

@@ -310,3 +310,65 @@ async def test_api_login(mock_to_thread, mock_sdk_functions):
     assert result is None
     mock_sdk_functions['api_login'].assert_called_once_with(
         'http://test-endpoint', True)
+
+
+@pytest.mark.asyncio
+async def test_get_raises_typed_error_from_500_detail():
+    """get() must unwrap the 'detail'-nested payload of a 500 response.
+
+    A failed request is returned by /api/get as a 500 whose body nests the
+    request payload under 'detail' (FastAPI convention; mirrored by the sync
+    sdk.get). Regression: the async get() passed the whole body to
+    RequestPayload(**...), failed validation, and degraded the request's
+    typed exception into a generic RuntimeError - breaking callers that
+    dispatch on exception type.
+    """
+    detail = {
+        'request_id': 'req-1',
+        'name': 'launch',
+        'entrypoint': '',
+        'request_body': '',
+        'status': 'FAILED',
+        'created_at': 0.0,
+        'user_id': 'user',
+        'return_value': 'null',
+        'error': 'null',
+        'pid': None,
+        'schedule_type': 'long',
+    }
+
+    class _FakeResponse:
+        status = 500
+
+        async def json(self):
+            return {'detail': detail}
+
+        async def text(self):
+            return 'error body'
+
+        def close(self):
+            pass
+
+    async def fake_request(session, method, path, **kwargs):
+        return _FakeResponse()
+
+    decoded = mock.MagicMock()
+    decoded.get_error.return_value = {
+        'object': exceptions.StorageSpecError('bad storage spec')
+    }
+
+    with mock.patch(
+            'sky.client.sdk_async.server_common.'
+            'make_authenticated_request_async',
+            side_effect=fake_request), \
+         mock.patch(
+            'sky.client.sdk_async.requests_lib.Request.decode',
+            return_value=decoded) as mock_decode:
+        with pytest.raises(exceptions.StorageSpecError, match='bad storage'):
+            await sdk_async.get('req-1')
+
+    # The payload passed to decode must have been built from the nested
+    # 'detail' dict, not the whole body.
+    decoded_payload = mock_decode.call_args[0][0]
+    assert decoded_payload.request_id == 'req-1'
+    assert decoded_payload.status == 'FAILED'

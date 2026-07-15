@@ -2,6 +2,7 @@
 import ast
 import difflib
 import hashlib
+import math
 import os
 import tempfile
 import time
@@ -291,7 +292,9 @@ def read_catalog(filename: str,
                         tmp_path = f.name
                     os.rename(tmp_path, catalog_path)
                     with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
-                        f.write(hashlib.md5(r.text.encode()).hexdigest())
+                        f.write(
+                            hashlib.md5(r.text.encode(),
+                                        usedforsecurity=False).hexdigest())
             logger.debug(f'Updated {cloud} catalog {filename}.')
         return True
 
@@ -669,6 +672,48 @@ def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
         mode = 'nvme'
 
     return f'{mode}:{int(total_size)}'
+
+
+def get_efa_count_for_accelerator_impl(
+    df: 'pd.DataFrame',
+    acc_name: str,
+    acc_count: Union[int, float],
+) -> Optional[int]:
+    """EFA interfaces to request for ``acc_count`` of ``acc_name``, or None.
+
+    On a scale-from-zero cluster we can't know which instance variant of the
+    accelerator the autoscaler will provision, so we size from the LOWEST
+    EFA-per-accelerator ratio among the EFA-capable variants that can host the
+    request (``AcceleratorCount >= acc_count``). This makes the request
+    satisfiable on whatever variant is chosen and never strands GPUs (the
+    per-accelerator EFA ask never exceeds any variant's per-accelerator supply,
+    so the accelerator stays the binding resource).
+
+    Sizing from the max-EFA variant instead over-requests on a leaner
+    same-accelerator variant, in two ways seen in the catalog today:
+      * Unschedulable -- H100:1 sized from p5.48xlarge (32 EFA / 8 GPU) asks for
+        4, but p5.4xlarge (1 EFA) can't satisfy it.
+      * Stranded GPUs -- H200:1 sized from p5e (32 EFA / 8 GPU) asks for 4, so
+        only 4 of p5en's (16 EFA / 8 GPU) 8 GPUs are usable (correct: 2).
+    Restricting to hosting-capable variants keeps a full-node request rich
+    (H100:8 -> 32 on p5.48xlarge) while a partial request drops to the leanest
+    variant's ratio (H100:1 -> 1).
+
+    Returns None (degrade to no EFA, i.e. today's behavior) when the catalog has
+    no ``MaximumEfaInterfaces`` column (older/hosted catalog) or no EFA-capable
+    variant of the accelerator can host the request.
+    """
+    if 'MaximumEfaInterfaces' not in df.columns:
+        return None
+    matches = df[
+        df['AcceleratorName'].str.fullmatch(acc_name, case=False, na=False) &
+        df['MaximumEfaInterfaces'].notna() & (df['MaximumEfaInterfaces'] > 0) &
+        df['AcceleratorCount'].notna() & (df['AcceleratorCount'] >= acc_count)]
+    if matches.empty:
+        return None
+    min_efa_per_acc = (matches['MaximumEfaInterfaces'] /
+                       matches['AcceleratorCount']).min()
+    return max(1, math.floor(acc_count * min_efa_per_acc))
 
 
 def get_instance_type_for_accelerator_impl(

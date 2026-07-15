@@ -12,6 +12,17 @@ JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
+# Default fields returned by the managed jobs queue when the caller does not
+# specify `fields`. This intentionally excludes heavy fields (e.g. the task
+# YAML) so the default queue payload stays small even with many jobs. Callers
+# that need every field must pass `fields=None` explicitly.
+# Defined as a tuple so it is immutable and safe to use as a default argument.
+DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
+                              'task_name', 'resources', 'submitted_at',
+                              'end_at', 'job_duration', 'recovery_count',
+                              'status', 'pool', 'is_primary_in_job_group',
+                              'batch_total_batches', 'batch_completed_batches')
+
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
@@ -72,7 +83,53 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 21  # add tail_offset to stream_logs
+MANAGED_JOBS_VERSION = 22  # add submitted_after/submitted_before to job table
+
+# Emergency recovery: when the job controller hits an unexpected internal
+# error (e.g. external mutation of the job state, or an unhandled exception
+# in the controller's job loop), it retries managing the job in place
+# instead of failing the job terminally. These constants bound that retry.
+#
+# Max attempts in one episode before giving up and marking the job
+# FAILED_CONTROLLER (with full resource cleanup).
+EMERGENCY_RECOVERY_MAX_ATTEMPTS = 10
+# Nominal backoff before attempt N is
+# min(BASE * 2^(N-1), CAP) = 1m, 2m, 4m, 8m, 16m, then 30m (capped) —
+# ~3h of total backoff across a full episode. The actual sleep is jittered
+# +/-50% around this nominal value (so the average is unchanged): a systemic
+# incident pushes many jobs into emergency recovery at once, and a
+# deterministic backoff would resynchronize their retries into DB-load waves
+# (worst under consolidation mode's shared DB). The controller logs both the
+# nominal and the jittered sleep. The backoff may exceed the
+# jobs-controller's 10-minute idle autostop window: that is safe because
+# the job's schedule_state stays ALIVE throughout the backoff (the
+# emergency bookkeeping resets launch-adjacent states back to ALIVE, which
+# also keeps the job out of the scheduler's blocking-priority set), and
+# the skylet autostop check (sky/skylet/events.py::AutostopEvent, via
+# managed_job_state.get_num_alive_jobs) does not consider the controller
+# idle while any such job exists. Nor does a backing-off job hold one of
+# the LAUNCHES_PER_WORKER launching slots (the in-memory `starting` set):
+# scheduled_launch's finally releases the slot only when the error escapes
+# from inside the launch context, so the emergency bookkeeping explicitly
+# discards the job from `starting` (JobController._release_launch_slot) to
+# cover the cases it does not — an error in pre/post-launch bookkeeping, or
+# a pool job (which never enters scheduled_launch's slot accounting). The
+# retry re-adds it when it actually relaunches. (The job's own cluster may
+# be reaped by the 10-minute autodown backstop during a long backoff; that
+# is fine — the retry always relaunches from scratch.)
+EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS = 60
+EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS = 30 * 60
+# If the previous emergency recovery attempt is older than this window, the
+# attempt counter restarts at 1: a long-running job that hits a rare
+# incident every few days should recover every time, while a tight crash
+# loop exhausts the budget in a few hours. A successful recovery does NOT
+# reset the counter — only an emergency-free gap longer than this window
+# does. An error that keeps recurring inside the window (even with healthy
+# runs in between) is deliberately charged as one escalating episode: a
+# recovery alone doesn't prove the underlying problem is gone, and
+# resetting on success would let a recurring-but-recoverable error relaunch
+# the cluster forever.
+EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS = 6 * 60 * 60
 
 # Prefix used for service-account tokens issued to managed jobs that opt in
 # to api_server_access. The expired-token-cleanup daemon uses this prefix to

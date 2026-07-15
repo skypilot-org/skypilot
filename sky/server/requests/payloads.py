@@ -307,6 +307,9 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    # When True, resize the existing cluster to the num_nodes specified in
+    # the task instead of performing a normal launch.
+    resize: bool = False
     extra_launch_context: Dict[str, Any] = {}
     # When True and the server supports it (API_VERSION >=
     # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
@@ -502,6 +505,9 @@ class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
     expires_in_days: Optional[int] = None
+    # Optional role for the new service account (e.g. 'admin'). When omitted,
+    # the account is seeded with the default role.
+    role: Optional[str] = None
 
 
 class ServiceAccountTokenDeleteBody(RequestBody):
@@ -642,6 +648,9 @@ class JobsQueueV2Body(RequestBody):
     # Sorting parameters, added in ManagedJobsService v14.
     sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
     sort_order: Optional[str] = None  # 'asc' or 'desc'
+    # Time-range filter on submitted_at (epoch seconds).
+    submitted_after: Optional[float] = None
+    submitted_before: Optional[float] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -980,6 +989,10 @@ class CostReportBody(RequestBody):
     # Only return fields that are needed for the dashboard
     # summary page
     dashboard_summary_response: bool = False
+    # Exclude clusters launched by a controller (managed jobs and services).
+    # Used by the dashboard so that clusters backing managed jobs do not show
+    # up in the cluster history view.
+    exclude_managed_clusters: bool = False
 
 
 class CreateDebugDumpBody(RequestBody):

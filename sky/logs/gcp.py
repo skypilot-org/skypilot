@@ -1,12 +1,21 @@
 """GCP logging agent."""
 
+import os
 from typing import Any, Dict, Optional
 
 import pydantic
 
 from sky.clouds import gcp
 from sky.logs.agent import FluentbitAgent
+from sky.skylet import constants
 from sky.utils import resources_utils
+
+# Remote path where a user-provided service-account key (logs.gcp.
+# credentials_file) is delivered. Fixed and home-relative so it is readable by
+# the cluster's runtime user regardless of where the key lives on the API
+# server (e.g. under another user's home, or behind a symlink).
+_REMOTE_CREDENTIAL_PATH = os.path.join(constants.LOGGING_CONFIG_DIR,
+                                       'gcp_credentials.json')
 
 
 class _GCPLoggingConfig(pydantic.BaseModel):
@@ -45,7 +54,7 @@ class GCPLoggingAgent(FluentbitAgent):
                           cluster_name: resources_utils.ClusterName) -> str:
         credential_path = gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
         if self.config.credentials_file:
-            credential_path = self.config.credentials_file
+            credential_path = _REMOTE_CREDENTIAL_PATH
         # Set GOOGLE_APPLICATION_CREDENTIALS and check whether credentials
         # is valid.
         # Stackdriver only support service account credentials or credentials
@@ -87,6 +96,14 @@ class GCPLoggingAgent(FluentbitAgent):
         ).to_dict()
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        if self.config.credentials_file:
-            return {self.config.credentials_file: self.config.credentials_file}
-        return {}
+        if not self.config.credentials_file:
+            return {}
+        # Resolve to a concrete local file before upload: expanduser handles
+        # '~', and realpath resolves symlinks (e.g. a Kubernetes Secret mounted
+        # as a volume, which exposes the key through a symlink chain) and
+        # relative paths. Delivered to a fixed home-relative path so the
+        # cluster's runtime user can read it even when the source lives under
+        # another user's home (e.g. /root) on the API server.
+        local_path = os.path.realpath(
+            os.path.expanduser(self.config.credentials_file))
+        return {_REMOTE_CREDENTIAL_PATH: local_path}

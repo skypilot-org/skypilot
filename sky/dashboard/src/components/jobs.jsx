@@ -3,9 +3,11 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import { PaginationControls } from '@/components/elements/PaginationControls';
+import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -16,7 +18,15 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
+import { BriefcaseIcon } from '@/components/elements/icons';
 import {
   formatDuration,
   REFRESH_INTERVAL,
@@ -47,6 +57,7 @@ import {
   ChevronRightIcon,
   CheckIcon,
   InfoIcon,
+  Layers,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -76,6 +87,11 @@ import {
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
 import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
+
+// Page-size ("rows per page") options for the managed jobs queue, and the
+// localStorage key used to remember the user's last choice across reloads.
+const JOBS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-jobs-page-size';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -363,6 +379,28 @@ export function ManagedJobs() {
     trackFilterUsed('job', { property, value });
   };
 
+  // Clicking a user in the table adds (or replaces) a "User" filter rather
+  // than navigating to the users page. Replace-not-stack is intentional:
+  // two AND'd user filters would yield zero results.
+  const handleUserFilterClick = React.useCallback(
+    (username) => {
+      if (!username) return;
+      setFilters((prevFilters) => {
+        const withoutUser = prevFilters.filter(
+          (f) => (f.property || '').toLowerCase() !== 'user'
+        );
+        const updatedFilters = [
+          ...withoutUser,
+          { property: 'User', operator: ':', value: username },
+        ];
+        sharedUpdateURLParams(router, updatedFilters);
+        return updatedFilters;
+      });
+      trackFilterUsed('job', { property: 'User', value: username });
+    },
+    [router]
+  );
+
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
@@ -397,6 +435,12 @@ export function ManagedJobs() {
             Managed Jobs
           </Link>
         </div>
+        {/* Extension point for a small summary badge next to the page
+            title. Renders nothing when no plugin fills it. */}
+        <PluginSlot
+          name="jobs.header.badge"
+          wrapperClassName="flex items-center"
+        />
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
@@ -420,6 +464,7 @@ export function ManagedJobs() {
         setLoading={setLoading}
         refreshDataRef={jobsRefreshRef}
         filters={filters}
+        onUserFilter={handleUserFilterClick}
         onRefresh={handleRefresh}
         poolsData={poolsData}
         poolsLoading={poolsLoading}
@@ -463,11 +508,25 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+function JobNameLink({ href, name }) {
+  return (
+    <NonCapitalizedTooltip content={name}>
+      <Link
+        href={href}
+        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
+      >
+        {name}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
   filters,
+  onUserFilter,
   onRefresh,
   poolsData,
   poolsLoading,
@@ -481,8 +540,32 @@ export function ManagedJobsTable({
   });
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const p = parseInt(params.get('page'), 10);
+      return p > 0 ? p : 1;
+    }
+    return 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      // An explicit URL query param wins (e.g. a shared/bookmarked link);
+      // otherwise fall back to the last choice persisted in localStorage,
+      // and finally to the default of 10.
+      const params = new URLSearchParams(window.location.search);
+      const ps = parseInt(params.get('pageSize'), 10);
+      if (JOBS_PAGE_SIZE_OPTIONS.includes(ps)) {
+        return ps;
+      }
+      return getPersistedPageSize(
+        JOBS_PAGE_SIZE_STORAGE_KEY,
+        JOBS_PAGE_SIZE_OPTIONS,
+        10
+      );
+    }
+    return 10;
+  });
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
   const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
@@ -515,6 +598,27 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Sync page/pageSize to URL query params.
+  // Use window.history.replaceState instead of router.replace to avoid
+  // triggering Next.js re-renders that cascade into filter resets.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (currentPage > 1) {
+      url.searchParams.set('page', String(currentPage));
+    } else {
+      url.searchParams.delete('page');
+    }
+    if (pageSize !== 10) {
+      url.searchParams.set('pageSize', String(pageSize));
+    } else {
+      url.searchParams.delete('pageSize');
+    }
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url.toString());
+    }
+  }, [currentPage, pageSize]);
 
   // Local state for jobs data (replacing useJobsData hook)
   const [data, setData] = useState([]);
@@ -872,20 +976,14 @@ export function ManagedJobsTable({
     };
   }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
-  // Reset to first page when activeTab changes
+  // Reset to first page when activeTab, filters, pageSize, or sort changes.
+  // Guard with isInitialFetch so the page number read from the URL isn't
+  // overwritten during initialization (filter hydration from URL params
+  // triggers setFilters which would otherwise reset the page).
   useEffect(() => {
+    if (isInitialFetch.current) return;
     setCurrentPage(1);
-  }, [activeTab]);
-
-  // Reset to first page when filters or page size changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filters, pageSize]);
-
-  // Reset to first page when sort config changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [sortConfig]);
+  }, [activeTab, filters, pageSize, sortConfig]);
 
   // Reset status filter when activeTab changes
   useEffect(() => {
@@ -1328,6 +1426,8 @@ export function ManagedJobsTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(JOBS_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
@@ -1433,9 +1533,7 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
-                    {item.name}
-                  </Link>
+                  <JobNameLink href={`/jobs/${jobId}`} name={item.name} />
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
@@ -1474,9 +1572,7 @@ export function ManagedJobsTable({
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                  {item.name}
-                </Link>
+                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -1496,7 +1592,11 @@ export function ManagedJobsTable({
         ),
         renderCell: (item) => (
           <TableCell>
-            <UserDisplay username={item.user} userHash={item.user_hash} />
+            <UserDisplay
+              username={item.user}
+              userHash={item.user_hash}
+              onUserClick={onUserFilter}
+            />
           </TableCell>
         ),
       },
@@ -1850,6 +1950,7 @@ export function ManagedJobsTable({
       expandedRowId,
       poolsLoading,
       poolsData,
+      onUserFilter,
     ]
   );
 
@@ -1933,7 +2034,7 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex items-center justify-between text-sm mb-1">
+        <div className="flex items-center justify-between text-sm mb-4">
           <div className="flex flex-wrap items-center min-w-0">
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
@@ -2079,54 +2180,32 @@ export function ManagedJobsTable({
                   or whose Mine view was empty — they had no easy way
                   back. The toggle is harmless when the table is empty
                   and indispensable as soon as anything else changes. */}
-              {!isInitialLoad &&
-                (() => {
-                  const selectTab = (tab) => {
-                    React.startTransition(() => {
-                      setActiveTab(tab);
-                      setSelectedStatuses([]);
-                      setShowAllMode(true);
-                      setCurrentPage(1);
-                    });
-                  };
-                  const isActive = activeTab === 'active' && showAllMode;
-                  const isAll = activeTab === 'all' && showAllMode;
-                  return (
-                    <div
-                      role="tablist"
-                      aria-label="Filter jobs by activity"
-                      className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                    >
-                      <button
-                        role="tab"
-                        aria-selected={isActive}
-                        onClick={() => selectTab('active')}
-                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                          isActive
-                            ? 'bg-white text-gray-900 shadow-sm'
-                            : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                      >
-                        Active
-                      </button>
-                      <button
-                        role="tab"
-                        aria-selected={isAll}
-                        onClick={() => selectTab('all')}
-                        className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                          isAll
-                            ? 'bg-white text-gray-900 shadow-sm'
-                            : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                      >
-                        All
-                      </button>
-                    </div>
-                  );
-                })()}
+              {(() => {
+                const selectTab = (tab) => {
+                  React.startTransition(() => {
+                    setActiveTab(tab);
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                    setCurrentPage(1);
+                  });
+                };
+                // Neither segment is highlighted while a status chip
+                // narrows the view (showAllMode=false).
+                const activityValue = showAllMode ? activeTab : null;
+                return (
+                  <SegmentedToggle
+                    ariaLabel="Filter jobs by activity"
+                    options={[
+                      { value: 'active', label: 'Active' },
+                      { value: 'all', label: 'All' },
+                    ]}
+                    value={activityValue}
+                    onChange={selectTab}
+                  />
+                );
+              })()}
               {(() => {
                 if (!currentUser) return null;
-                if (isInitialLoad) return null;
                 const explicitUserFilter = (filters || []).find(
                   (f) => (f.property || '').toLowerCase() === 'user' && f.value
                 );
@@ -2136,36 +2215,15 @@ export function ManagedJobsTable({
                   : userScope === 'mine';
                 const isEveryone = !explicitUserFilter && userScope === 'all';
                 return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by owner"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isMine}
-                      onClick={() => selectScope('mine')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isMine
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      My Jobs
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isEveryone}
-                      onClick={() => selectScope('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isEveryone
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All Jobs
-                    </button>
-                  </div>
+                  <SegmentedToggle
+                    ariaLabel="Filter jobs by owner"
+                    options={[
+                      { value: 'mine', label: 'My Jobs' },
+                      { value: 'all', label: 'All Jobs' },
+                    ]}
+                    value={isMine ? 'mine' : isEveryone ? 'all' : null}
+                    onChange={selectScope}
+                  />
                 );
               })()}
               {/* Scope hint: when filtered to the current user's jobs,
@@ -2313,7 +2371,7 @@ export function ManagedJobsTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 <>
                   {Array.from(groupedJobs.entries()).map(([jobId, tasks]) => {
                     const isMultiTask = tasks.length > 1;
@@ -2413,12 +2471,12 @@ export function ManagedJobsTable({
                   })}
                 </>
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6"
-                  >
-                    <div className="flex flex-col items-center space-y-4">
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={totalColSpan} className="p-0">
+                    <div
+                      className="flex flex-col items-center justify-center space-y-4 px-6"
+                      style={{ minHeight: 280 }}
+                    >
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
                           <p className="text-gray-700">
@@ -2464,7 +2522,12 @@ export function ManagedJobsTable({
                             </Button>
                           </div>
                         ) : (
-                          <p className="text-gray-500">No active jobs</p>
+                          <EmptyState
+                            icon={<BriefcaseIcon className="w-5 h-5" />}
+                            title="No active jobs"
+                            description="Launch a managed job to run it with automatic recovery"
+                            minHeight={0}
+                          />
                         ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
@@ -2503,100 +2566,30 @@ export function ManagedJobsTable({
         </div>
       </Card>
 
-      {/* Pagination controls - always show for visual separation */}
-      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center">
-            <span className="mr-2">Jobs per page:</span>
-            <div className="relative inline-block">
-              <select
-                value={pageSize}
-                onChange={handlePageSizeChange}
-                className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                style={{ minWidth: '40px' }}
-              >
-                <option value={10}>10</option>
-                <option value={30}>30</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-                <option value={200}>200</option>
-              </select>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </div>
-          </div>
-          <div>
-            {totalCount > 0
-              ? `${startIndex + 1} – ${Math.min(startIndex + groupedJobs.size, totalCount)} of ${totalCount}`
-              : '0 – 0 of 0'}
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToPreviousPage}
-              disabled={
-                currentPage === 1 || !sortedData || sortedData.length === 0
-              }
-              className="text-gray-500 h-8 w-8 p-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="chevron-left"
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToNextPage}
-              disabled={
-                totalPages === 0 ||
-                currentPage >= totalPages ||
-                !sortedData ||
-                sortedData.length === 0
-              }
-              className="text-gray-500 h-8 w-8 p-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="chevron-right"
-              >
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </Button>
-          </div>
-        </div>
-      </div>
+      {/* Pagination controls */}
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        startIndex={startIndex}
+        endIndex={startIndex + groupedJobs.size}
+        onPageChange={setCurrentPage}
+        onPreviousPage={goToPreviousPage}
+        onNextPage={goToNextPage}
+        isPrevDisabled={
+          currentPage === 1 || !sortedData || sortedData.length === 0
+        }
+        isNextDisabled={
+          totalPages === 0 ||
+          currentPage >= totalPages ||
+          !sortedData ||
+          sortedData.length === 0
+        }
+        pageSize={pageSize}
+        onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={JOBS_PAGE_SIZE_OPTIONS}
+        itemLabel="Jobs"
+      />
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -2882,7 +2875,7 @@ export function ClusterJobs({
                   </div>
                 </TableCell>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
+            ) : paginatedData.length > 0 && !isForceEmpty() ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -2942,104 +2935,33 @@ export function ClusterJobs({
                 </React.Fragment>
               ))
             ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No jobs found
-                </TableCell>
-              </TableRow>
+              <EmptyTableState
+                colSpan={8}
+                icon={<BriefcaseIcon className="w-5 h-5" />}
+                title="No jobs found"
+                description="Submit a job to run it on this cluster"
+              />
             )}
           </TableBody>
         </Table>
       </Card>
 
       {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center">
-              <span className="mr-2">Rows per page:</span>
-              <div className="relative inline-block">
-                <select
-                  value={pageSize}
-                  onChange={handlePageSizeChange}
-                  className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
-                  style={{ minWidth: '40px' }}
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div>
-              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToPreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-left"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="chevron-right"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </Button>
-            </div>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={sortedData.length}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setCurrentPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={currentPage === 1}
+          isNextDisabled={currentPage === totalPages || totalPages === 0}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={[5, 10, 20, 50]}
+        />
       )}
     </div>
   );
@@ -3231,6 +3153,10 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
+  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Worker Details, Worker Resources) — used for the empty-state colSpan.
+  const poolColumnCount = 5;
+
   return (
     <Card>
       <div className="overflow-x-auto rounded-lg">
@@ -3277,7 +3203,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   </div>
                 </TableCell>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
+            ) : paginatedData.length > 0 && !isForceEmpty() ? (
               paginatedData.map((pool) => (
                 <TableRow key={pool.name}>
                   <TableCell>
@@ -3307,14 +3233,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 </TableRow>
               ))
             ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={5}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No pools found
-                </TableCell>
-              </TableRow>
+              <EmptyTableState
+                colSpan={poolColumnCount}
+                icon={<Layers size={20} strokeWidth={1.75} />}
+                title="No pools found"
+                description="Create a pool to share workers across jobs"
+              />
             )}
           </TableBody>
         </Table>
@@ -3322,41 +3246,21 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
 
       {/* Pagination */}
       {paginatedData.length > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">Rows per page:</span>
-            <select
-              value={pageSize}
-              onChange={handlePageSizeChange}
-              className="border border-gray-300 rounded px-2 py-1 text-sm"
-            >
-              <option value={5}>5</option>
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">
-              {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
-              {sortedData.length}
-            </span>
-            <button
-              onClick={goToPreviousPage}
-              disabled={currentPage === 1}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <button
-              onClick={goToNextPage}
-              disabled={currentPage === totalPages}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={sortedData.length}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setCurrentPage}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          isPrevDisabled={currentPage === 1}
+          isNextDisabled={currentPage === totalPages}
+          pageSize={pageSize}
+          onPageSizeChange={handlePageSizeChange}
+          pageSizeOptions={[5, 10, 25, 50]}
+        />
       )}
     </Card>
   );

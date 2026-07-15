@@ -1,6 +1,7 @@
 """Unit tests for sky.jobs.utils functions."""
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -105,11 +106,14 @@ class TestUpdateFields:
         updated_fields, _ = jobs_utils._update_fields(fields)
         # These are _NON_DB_FIELDS and should be removed
         assert 'cluster_resources' not in updated_fields
-        assert 'cloud' not in updated_fields
         assert 'user_name' not in updated_fields
         assert 'details' not in updated_fields
         # But job_id should remain
         assert 'job_id' in updated_fields
+        # 'cloud' is a non-DB handle field, but because a cluster handle is
+        # required here it is re-added as a DB column for the cached infra
+        # fallback (see _update_fields).
+        assert 'cloud' in updated_fields
 
     def test_cluster_handle_required_false_when_no_handle_fields(self):
         """Test that cluster_handle_required is False when no cluster handle fields."""
@@ -161,10 +165,38 @@ class TestUpdateFields:
         # Always added
         assert 'status' in updated_fields
         assert 'job_id' in updated_fields
-        # Cloud should be removed (non-DB field)
-        assert 'cloud' not in updated_fields
+        # 'cloud' is re-added as a DB column for the cached infra fallback
+        # since a cluster handle is required.
+        assert 'cloud' in updated_fields
         # Should be true due to cloud
         assert cluster_handle_required is True
+
+    def test_adds_cached_infra_fields_when_handle_required(self):
+        """Cached infra/resources fields are re-added for the fallback.
+
+        When a cluster handle is required, the last-cached infra columns
+        ('cloud'/'region'/'zone') and the requested 'resources' string must be
+        selected from the DB so get_managed_job_queue can fall back to them for
+        finished jobs whose cluster handle is gone.
+        """
+        fields = ['job_id', 'cluster_resources']
+        updated_fields, cluster_handle_required = jobs_utils._update_fields(
+            fields)
+        assert cluster_handle_required is True
+        # cluster_resources itself is a non-DB field and is removed.
+        assert 'cluster_resources' not in updated_fields
+        # The DB-backed fallback fields are present.
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            assert field in updated_fields
+
+    def test_does_not_add_cached_infra_fields_when_handle_not_required(self):
+        """Fallback fields are not force-added when no handle is required."""
+        fields = ['job_id', 'status']
+        updated_fields, cluster_handle_required = jobs_utils._update_fields(
+            fields)
+        assert cluster_handle_required is False
+        for field in ('cloud', 'region', 'zone', 'resources'):
+            assert field not in updated_fields
 
 
 class TestGetManagedJobQueue:
@@ -312,6 +344,80 @@ class TestGetManagedJobQueue:
         # For finished job: duration = end_at - (last_recovered_at - job_duration)
         expected_duration = (current_time - 50) - (current_time - 200 - 50)
         assert job['job_duration'] == expected_duration
+
+    def test_finished_job_falls_back_to_cached_infra(self, monkeypatch):
+        """A finished job with no live handle shows last-cached infra/resources.
+
+        When the cluster handle is gone (e.g. the job finished and the cluster
+        was torn down), infra/resources should fall back to the values
+        persisted in the jobs DB instead of a bare '-'.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.SUCCEEDED,
+                cloud='AWS',
+                region='us-east-1',
+                zone='us-east-1a',
+                resources='1x[Spot]A100:8',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cloud'] == 'AWS'
+        assert job['region'] == 'us-east-1'
+        assert job['zone'] == 'us-east-1a'
+        assert job['infra'] == 'AWS (us-east-1a)'
+        assert job['cluster_resources'] == '1x[Spot]A100:8'
+        assert job['cluster_resources_full'] == '1x[Spot]A100:8'
+
+    def test_finished_job_without_cached_infra_shows_dash(self, monkeypatch):
+        """Legacy finished jobs without persisted infra still show '-'."""
+        jobs = [
+            self._make_test_job(
+                1, status=managed_job_state.ManagedJobStatus.SUCCEEDED)
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cloud'] == '-'
+        assert job['region'] == '-'
+        assert job['zone'] == '-'
+        assert job['infra'] == '-'
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+
+    def test_unlaunched_job_does_not_show_requested_resources(
+            self, monkeypatch):
+        """A job that never launched does not show requested resources.
+
+        The cached resources fallback only applies when the job was actually
+        launched (infra persisted); a PENDING job with a requested resources
+        string should still show '-' for cluster resources.
+        """
+        jobs = [
+            self._make_test_job(
+                1,
+                status=managed_job_state.ManagedJobStatus.PENDING,
+                resources='1x[CPU:1+]',
+            )
+        ]
+        self._patch_managed_job_state(monkeypatch, jobs)
+        self._patch_global_user_state(monkeypatch)  # empty handle map
+
+        result = jobs_utils.get_managed_job_queue()
+
+        job = result['jobs'][0]
+        assert job['cluster_resources'] == '-'
+        assert job['cluster_resources_full'] == '-'
+        assert job['infra'] == '-'
 
     def test_status_converted_to_string(self, monkeypatch):
         """Test that status is converted from enum to string."""
@@ -991,6 +1097,7 @@ class TestFormatJobDetails:
                  failure_reason=None,
                  status='RECOVERING',
                  recovery_reason=None,
+                 pending_reason=None,
                  cloud=None):
         job = {
             'schedule_state': schedule_state,
@@ -1000,7 +1107,8 @@ class TestFormatJobDetails:
         }
         jobs_utils._format_job_details(job=job,
                                        highest_blocking_priority=0,
-                                       recovery_reason=recovery_reason)
+                                       recovery_reason=recovery_reason,
+                                       pending_reason=pending_reason)
         return job['details']
 
     def test_recovery_reason_surfaced(self):
@@ -1057,6 +1165,38 @@ class TestFormatJobDetails:
         # No cloud info -> surface the reason without a (possibly wrong) hint.
         result = self._details(recovery_reason='podX OOMKilled (exit code 137)')
         assert result == 'Recovering: podX OOMKilled (exit code 137)'
+
+    def test_pending_reason_surfaced(self):
+        # A PENDING reason is surfaced in details when nothing else applies.
+        assert self._details(
+            schedule_state='INACTIVE',
+            status='PENDING',
+            pending_reason='Job submitted to queue') == 'Job submitted to queue'
+
+    def test_pending_reason_multiline_collapsed(self):
+        result = self._details(schedule_state='INACTIVE',
+                               status='PENDING',
+                               pending_reason='Rate limited.\nRetrying soon.')
+        assert '\n' not in result
+        assert result == 'Rate limited. Retrying soon.'
+
+    def test_no_pending_reason_is_none(self):
+        assert self._details(schedule_state='INACTIVE',
+                             status='PENDING',
+                             pending_reason=None) is None
+
+    def test_failure_reason_takes_precedence_over_pending(self):
+        assert self._details(status='PENDING',
+                             failure_reason='boom',
+                             pending_reason='ignored') == 'Failure: boom'
+
+    def test_backoff_state_takes_precedence_over_pending(self):
+        # The schedule-state-derived message is more informative than the raw
+        # PENDING event reason, so it wins.
+        assert self._details(
+            schedule_state='ALIVE_BACKOFF',
+            status='PENDING',
+            pending_reason='ignored') == 'In backoff, waiting for resources'
 
 
 class TestReadProvisionStatusFromLog:
@@ -1216,3 +1356,204 @@ class TestIsRelayedStatusPayloadLine:
     def test_plain_log_line_not_detected(self):
         assert jobs_utils._is_relayed_status_payload_line(
             'Preparing SkyPilot runtime (1/3)\n') is False
+
+
+class TestStreamLogsByIdExternalStoreFallback:
+    """stream_logs_by_id falls back to the external log reader for terminal jobs.
+
+    The read source is decided per task by the presence of a local log file
+    (local_log_file), not by the current logging-agent config: a task with no
+    local copy had its logs forwarded to an external store, so we stream them
+    back via the registered log reader. A registered reader is the only read-
+    side gate -- read-back keeps working even after the logging agent is
+    disconnected.
+    """
+
+    def _patch_terminal_job(self, monkeypatch, task_info):
+        """Stub managed_job_state so stream_logs_by_id hits the terminal branch.
+
+        task_info: list of (task_id, task_name, task_status, log_file,
+            logs_cleaned_at) tuples.
+        """
+        status = managed_job_state.ManagedJobStatus.SUCCEEDED
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = len(task_info)
+        mock_state.get_status.return_value = status
+        mock_state.get_all_task_ids_names_statuses_logs.return_value = task_info
+        mock_state.get_pool_from_job_id.return_value = None
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        return mock_state
+
+    def _patch_logs(self, monkeypatch, reader):
+        mock_logs = MagicMock()
+        mock_logs.get_log_reader.return_value = reader
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        return mock_logs
+
+    def test_reads_from_external_store_when_local_file_absent(
+            self, monkeypatch):
+        # local_log_file is None -> logs went to the external store.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_called_once_with(
+            'sky-managed-5-mytask', None, follow=False, tail=0)
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_local_file_takes_precedence_over_reader(self, monkeypatch,
+                                                     tmp_path):
+        # A local log file exists -> read it, never consult the reader (even
+        # when one is registered).
+        log_file = tmp_path / 'run.log'
+        log_file.write_text('hello\n', encoding='utf-8')
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      str(log_file), None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        self._patch_logs(monkeypatch, fake_reader)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_not_called()
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_no_reader_falls_to_terminal_message(self, monkeypatch):
+        # No external logging integration (no reader registered) and no local
+        # file -> the original terminal-state message, reader never consulted.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+        self._patch_logs(monkeypatch, None)
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        assert 'already in terminal state' in msg
+
+    def test_falls_through_when_reader_returns_none(self, monkeypatch):
+        # Reader registered but returns None (logs not in the store, e.g. aged
+        # out) -> the external-store fall-through message.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = None
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_called_once()
+        assert 'external log store' in msg
+
+    def test_reader_exception_is_logged_and_falls_through(self, monkeypatch):
+        # A reader error must not crash sky jobs logs; it falls through to the
+        # external-store message.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.side_effect = RuntimeError('boom')
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        assert 'external log store' in msg
+
+    def test_none_task_name_does_not_crash(self, monkeypatch):
+        # Guard removed: a null task name that breaks cluster-name derivation is
+        # caught and logged, not raised.
+        task_info = [(0, None, managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        self._patch_logs(monkeypatch, fake_reader)
+
+        def _raise_on_none(name, jid):
+            if not name:
+                raise TypeError('task name is None')
+            return f'sky-managed-{jid}-{name}'
+
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            _raise_on_none)
+
+        # Should not raise.
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+        assert 'external log store' in msg
+
+
+class TestTryToGetJobEndTime:
+    """Tests for try_to_get_job_end_time's best-effort fallback."""
+
+    def _disable_runtime(self, monkeypatch):
+        # Skip the managed-job runtime fast path so the test exercises the
+        # get_job_timestamp probe.
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+
+    def test_returns_timestamp_on_success(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp',
+                            lambda *args, **kwargs: 12345.0)
+        assert jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster',
+                                                  1) == 12345.0
+
+    def test_ssh_connection_failure_falls_back(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise exceptions.CommandError(returncode=255,
+                                          command='cmd',
+                                          error_msg='ssh failed',
+                                          detailed_reason='connection refused')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        result = jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+        assert isinstance(result, float)
+        assert result == pytest.approx(time.time(), abs=5)
+
+    def test_deleted_kubernetes_pod_falls_back(self, monkeypatch):
+        # On Kubernetes the pod can be deleted between the job-status check and
+        # the end-time fetch, which fails with returncode 1 rather than 255.
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise exceptions.CommandError(
+                returncode=1,
+                command='cmd',
+                error_msg='exec failed',
+                detailed_reason='Error from server (NotFound): pods '
+                '"my-pod" not found')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        result = jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+        assert isinstance(result, float)
+        assert result == pytest.approx(time.time(), abs=5)
+
+    def test_non_command_error_reraises(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise ValueError('unexpected')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        with pytest.raises(ValueError):
+            jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)

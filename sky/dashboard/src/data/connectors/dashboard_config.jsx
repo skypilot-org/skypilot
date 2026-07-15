@@ -13,9 +13,12 @@ const EMPTY_CONFIG = { externalLinks: [] };
 /**
  * Fetch the admin-configured dashboard settings from the server.
  *
- * Returns an object of the shape { externalLinks: [{ label, regex }] }. On
- * network or parse failure, returns an empty config rather than throwing so
- * the dashboard stays usable when the endpoint is unavailable.
+ * Returns an object of the shape
+ * { externalLinks: [{ label, regex } | { label, url }] }, where `regex`
+ * entries are matched against logs and `url` entries are templates resolved
+ * against cluster/job metadata. On network or parse failure, returns an
+ * empty config rather than throwing so the dashboard stays usable when the
+ * endpoint is unavailable.
  */
 export const getDashboardConfig = async () => {
   if (dashboardConfigCache !== null) {
@@ -41,11 +44,15 @@ export const getDashboardConfig = async () => {
           (entry) =>
             entry &&
             typeof entry.label === 'string' &&
-            typeof entry.regex === 'string' &&
             entry.label.length > 0 &&
-            entry.regex.length > 0
+            ((typeof entry.regex === 'string' && entry.regex.length > 0) ||
+              (typeof entry.url === 'string' && entry.url.length > 0))
         )
-        .map((entry) => ({ label: entry.label, regex: entry.regex }));
+        .map((entry) =>
+          typeof entry.regex === 'string' && entry.regex.length > 0
+            ? { label: entry.label, regex: entry.regex }
+            : { label: entry.label, url: entry.url }
+        );
       dashboardConfigCache = { externalLinks };
       return dashboardConfigCache;
     } catch (error) {

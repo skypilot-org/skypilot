@@ -40,6 +40,7 @@ import {
   extractLinksFromLogs,
   normalizeUrl,
   useCustomUrlPatterns,
+  useTemplateLinks,
 } from '@/utils/externalLinks';
 import {
   SSHInstructionsModal,
@@ -49,7 +50,7 @@ import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
-import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { YamlCodeBlock } from '@/components/ui/yaml-code-block';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
@@ -320,19 +321,32 @@ function ActiveTab({
     });
   }, []);
 
-  // Persisted DB-backed links take priority over the live-scanned ones, same
-  // merge semantics the managed-job page uses (sky/dashboard/src/pages/jobs/
-  // [job].js: combinedLinks). DB links currently come from
+  // Admin-configured url templates (dashboard.external_links entries with a
+  // `url` field) resolved against this cluster's metadata.
+  const templateLinkContext = useMemo(
+    () => ({
+      cluster_name: clusterData?.cluster,
+      user: clusterData?.user,
+      workspace: clusterData?.workspace,
+    }),
+    [clusterData?.cluster, clusterData?.user, clusterData?.workspace]
+  );
+  const templateLinks = useTemplateLinks(templateLinkContext);
+
+  // Merge order on label collision: template links are the base, persisted
+  // DB-backed links override them, and live-scanned links only fill gaps,
+  // same merge semantics the managed-job page uses (sky/dashboard/src/pages/
+  // jobs/[job].js: combinedLinks). DB links currently come from
   // instance_links.generate_instance_links() at launch time.
   const combinedClusterLinks = useMemo(() => {
-    const combined = { ...(clusterData?.links || {}) };
+    const combined = { ...templateLinks, ...(clusterData?.links || {}) };
     for (const [label, url] of Object.entries(clusterExtractedLinks)) {
       if (!(label in combined)) {
         combined[label] = url;
       }
     }
     return combined;
-  }, [clusterData?.links, clusterExtractedLinks]);
+  }, [templateLinks, clusterData?.links, clusterExtractedLinks]);
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
@@ -576,8 +590,9 @@ function ActiveTab({
                 </div>
               )}
 
-              {/* External Links section: persisted DB links (e.g., cloud
-                  instance console URLs from
+              {/* External Links section: admin-configured url templates
+                  resolved against cluster metadata, persisted DB links
+                  (e.g., cloud instance console URLs from
                   instance_links.generate_instance_links() at launch time)
                   plus live regex matches against the admin-configured
                   `dashboard.external_links` allowlist and built-in patterns
@@ -712,14 +727,13 @@ function ActiveTab({
                           </div>
 
                           {isYamlExpanded && (
-                            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
-                              <YamlHighlighter className="whitespace-pre-wrap">
-                                {formatYaml(
-                                  clusterData.task_yaml ||
-                                    clusterData.last_creation_yaml
-                                )}
-                              </YamlHighlighter>
-                            </div>
+                            <YamlCodeBlock
+                              value={formatYaml(
+                                clusterData.task_yaml ||
+                                  clusterData.last_creation_yaml
+                              )}
+                              readOnly
+                            />
                           )}
                         </div>
                       )}

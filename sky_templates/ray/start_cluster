@@ -68,7 +68,15 @@ fi
 # See: https://github.com/ray-project/ray/issues/56747
 # TODO(kevin): Remove this once the issue is fixed in a future click release
 RAY_INSTALL_SPEC="ray[default]${VERSION_SPEC} click<8.3.0"
-uv pip install ${RAY_INSTALL_SPEC} || uv pip install --system ${RAY_INSTALL_SPEC}
+# On bring-your-own images without a virtualenv, the first `uv pip install`
+# fails and we fall back to `--system`. If the system Python is externally
+# managed (PEP 668, e.g. Ubuntu 24.04+), uv refuses to modify it unless
+# UV_BREAK_SYSTEM_PACKAGES is set, which would otherwise crash the cluster
+# startup even when the required Ray version is already present in the image.
+# Setting it lets the `--system` fallback succeed (Ray stays at the image
+# version when already installed).
+uv pip install ${RAY_INSTALL_SPEC} || \
+    UV_BREAK_SYSTEM_PACKAGES=true uv pip install --system ${RAY_INSTALL_SPEC}
 
 # Verify Ray is working
 if ! run_ray --version > /dev/null; then

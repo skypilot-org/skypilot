@@ -419,6 +419,26 @@ class TestHfMountCommands:
         with pytest.raises(ValueError, match='hf-mount mode'):
             mounting_utils.get_hf_mount_cmd('x/y', '/mnt', mode='invalid')
 
+    def test_mount_cmd_extra_args(self):
+        cmd = mounting_utils.get_hf_mount_cmd(
+            'user/bucket',
+            '/mnt/data',
+            extra_args=['--cache-dir', '/mnt/nvme/hf', '--advanced-writes'])
+        assert '--cache-dir /mnt/nvme/hf' in cmd
+        assert '--advanced-writes' in cmd
+        # Extra args are backend-passthrough options and must come before the
+        # ``bucket``/``repo`` subcommand, like ``--token-file``/``--read-only``.
+        assert cmd.find('--advanced-writes') < cmd.find('bucket user/bucket')
+
+    def test_mount_cmd_extra_args_quoted(self):
+        # Tokens with spaces/metacharacters are quoted individually so they
+        # survive the shell.
+        cmd = mounting_utils.get_hf_mount_cmd(
+            'user/bucket',
+            '/mnt/data',
+            extra_args=['--cache-dir', '/mnt/my cache'])
+        assert "'/mnt/my cache'" in cmd
+
 
 class TestStorageIntegration:
     """Tests for public Storage/Task integration paths."""

@@ -200,13 +200,12 @@ def _create_network_interface(
         provider_config: Dict[str,
                               Any]) -> 'azure_network_models.NetworkInterface':
     network = azure.azure_mgmt_models('network')
-    compute = azure.azure_mgmt_models('compute')
     logger.info(f'Start creating network interface for {vm_name}...')
     if provider_config.get('use_internal_ips', False):
         name = f'{vm_name}-nic-private'
         ip_config = network.IPConfiguration(
             name=f'ip-config-private-{vm_name}',
-            subnet=compute.SubResource(id=provider_config['subnet']),
+            subnet=network.Subnet(id=provider_config['subnet']),
             private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC)
     else:
         name = f'{vm_name}-nic-public'
@@ -223,7 +222,7 @@ def _create_network_interface(
                     f'with address {ip_poller.result().ip_address}.')
         ip_config = network.IPConfiguration(
             name=f'ip-config-public-{vm_name}',
-            subnet=compute.SubResource(id=provider_config['subnet']),
+            subnet=network.Subnet(id=provider_config['subnet']),
             private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC,
             public_ip_address=network.PublicIPAddress(id=ip_poller.result().id))
 

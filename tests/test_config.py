@@ -166,6 +166,100 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _check_empty_config()
 
 
+def test_reload_config_no_empty_window(monkeypatch, tmp_path) -> None:
+    """A reload must never expose a transient empty config.
+
+    `reload_config` builds the new config fully and swaps it in with a single
+    assignment. A concurrent reader that hits `get_nested` while a reload is in
+    flight must observe the previously-loaded value, never the fallback. This
+    guards against the old blank-then-repopulate behavior, which let a reader
+    (e.g. `rbac.get_default_role()`) fall back to admin mid-reload.
+    """
+    config_file = tmp_path / 'config.yaml'
+    config_file.write_text('rbac:\n  default_role: user\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_file)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'does_not_exist')
+    _reload_config()
+    assert skypilot_config.get_nested(('rbac', 'default_role'),
+                                      'admin') == 'user'
+
+    # Spy on the file read that happens in the middle of a reload; while it runs,
+    # the not-yet-swapped config must still return the old value. With the old
+    # pre-blanking this observed 'admin' (the fallback); with the atomic swap it
+    # stays 'user'.
+    observed = []
+    real_get_config_from_path = skypilot_config._get_config_from_path
+
+    def spy_get_config_from_path(path):
+        observed.append(
+            skypilot_config.get_nested(('rbac', 'default_role'), 'admin'))
+        return real_get_config_from_path(path)
+
+    monkeypatch.setattr(skypilot_config, '_get_config_from_path',
+                        spy_get_config_from_path)
+    # Call reload_config directly (not `_reload_config`, which resets the loaded
+    # config first) so the previously-loaded config is what a mid-reload reader
+    # would see.
+    skypilot_config.reload_config()
+
+    assert observed, 'reload did not read the config file'
+    assert all(value == 'user' for value in observed), (
+        f'config was empty mid-reload (would fall back to admin): {observed}')
+
+
+class _DummyLock:
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_safe_reload_config_uses_shared_lock(monkeypatch) -> None:
+    """`safe_reload_config` (a pure read) must take the lock in SHARED mode so
+    concurrent reloads don't serialize. Reverting `shared_lock=True` fails this.
+    """
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+    monkeypatch.setattr(skypilot_config, 'reload_config', lambda: None)
+
+    skypilot_config.safe_reload_config()
+
+    assert captured.get('shared_lock') is True
+
+
+def test_get_skypilot_config_lock_defaults_to_exclusive(monkeypatch) -> None:
+    """Writers (the default) must take the lock EXCLUSIVELY."""
+    from sky.utils import locks
+    captured = {}
+
+    def fake_get_lock(lock_id,
+                      timeout=None,
+                      lock_type=None,
+                      poll_interval=None,
+                      shared_lock=False):
+        captured['shared_lock'] = shared_lock
+        return _DummyLock()
+
+    monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+
+    skypilot_config.get_skypilot_config_lock()
+
+    assert captured.get('shared_lock') is False
+
+
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:
@@ -900,6 +994,78 @@ def test_hierarchical_server_config(monkeypatch, tmp_path):
         ('gcp', 'labels', 'env-user-config'), None) is None
     assert skypilot_config.get_nested(
         ('gcp', 'labels', 'env-project-config'), None) is None
+
+
+def test_config_save_validator(monkeypatch, tmp_path):
+    """Validators run before persisting and can veto the config save."""
+    monkeypatch.delenv(skypilot_config.ENV_VAR_GLOBAL_CONFIG, raising=False)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG, raising=False)
+    # Isolate the validator registry so the test does not leak global state.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+
+    config_path = str(tmp_path / 'server_config.yaml')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        f.write(
+            textwrap.dedent("""\
+                aws:
+                    labels:
+                        original: present
+                """))
+    skypilot_config.reload_config()
+
+    new_config = skypilot_config.to_dict()
+    new_config.set_nested(('aws', 'labels', 'added'), 'yes')
+
+    # A validator that vetoes by raising blocks the save.
+    calls = []
+
+    def vetoing_validator(current, incoming):
+        calls.append((copy.deepcopy(current), copy.deepcopy(incoming)))
+        raise ValueError('rejected config change')
+
+    skypilot_config.register_config_save_validator(vetoing_validator)
+
+    with pytest.raises(ValueError, match='rejected config change'):
+        skypilot_config.update_api_server_config_no_lock(new_config)
+
+    # The validator saw the currently-persisted config and the incoming
+    # config, and the on-disk config is unchanged.
+    assert len(calls) == 1
+    seen_current, seen_incoming = calls[0]
+    assert seen_current.get_nested(('aws', 'labels', 'added'), None) is None
+    assert seen_incoming.get_nested(('aws', 'labels', 'added'), None) == 'yes'
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present'
+            }
+        }
+    }
+
+    # A validator that passes lets the save through.
+    monkeypatch.setattr(skypilot_config, '_CONFIG_SAVE_VALIDATORS', [])
+    passed = []
+
+    def passing_validator(current, incoming):
+        del current, incoming
+        passed.append(True)
+
+    skypilot_config.register_config_save_validator(passing_validator)
+    skypilot_config.update_api_server_config_no_lock(new_config)
+    assert passed == [True]
+    assert yaml_utils.read_yaml(config_path) == {
+        'aws': {
+            'labels': {
+                'original': 'present',
+                'added': 'yes'
+            }
+        }
+    }
+
+    # Registration is idempotent.
+    skypilot_config.register_config_save_validator(passing_validator)
+    assert skypilot_config._CONFIG_SAVE_VALIDATORS.count(passing_validator) == 1
 
 
 def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:

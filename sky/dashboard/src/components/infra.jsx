@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { ServerIcon } from '@/components/elements/icons';
 import {
   AlertTriangleIcon,
   RotateCwIcon,
@@ -30,6 +32,7 @@ import {
 } from '@/utils/resourceUtils';
 import { buildContextStatsKey } from '@/utils/infraUtils';
 import { canonicalizeGpuName } from '@/utils/gpuUtils';
+import { getPersistedPageSize, persistPageSize } from '@/lib/utils';
 import {
   getWorkspaceInfrastructure,
   getWorkspaceContexts,
@@ -85,6 +88,10 @@ import {
   NonCapitalizedTooltip,
   LastUpdatedTimestamp,
 } from '@/components/utils';
+import {
+  AllowedNodesHint,
+  AllowedNodesRowBadge,
+} from '@/components/AllowedNodesHint';
 import { Card } from '@/components/ui/card';
 import {
   Select,
@@ -97,6 +104,9 @@ import {
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+const INFRA_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const INFRA_PAGE_SIZE_STORAGE_KEY = 'skypilot-infra-page-size';
 const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
@@ -501,9 +511,15 @@ export function InfrastructureSection({
                             {!hasGpuData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                {totalGpus}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                  {totalGpus}
+                                </span>
+                                <AllowedNodesRowBadge
+                                  id={rowId}
+                                  kind={rowKind}
+                                />
+                              </div>
                             )}
                           </td>
                           <td className="p-3 text-right">
@@ -751,6 +767,7 @@ export function ContextDetails({
         name="infra.contextDetail.statusPanel"
         context={{ contextName, isSlurm }}
       />
+      <AllowedNodesHint contextName={contextName} isSlurm={isSlurm} />
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
@@ -789,6 +806,16 @@ export function ContextDetails({
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {nodesInContext.length === 0 && (
+            <div className="rounded-md border border-gray-200 shadow-sm">
+              <EmptyState
+                icon={<ServerIcon className="w-5 h-5" />}
+                title="No nodes found"
+                description="No nodes are available in this context"
+              />
             </div>
           )}
 
@@ -2017,7 +2044,6 @@ export function GPUs() {
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
-  const [enabledClouds, setEnabledClouds] = useState(0);
   // Separate cluster/job counts for Cloud panel (for progressive loading)
   const [cloudClusterCounts, setCloudClusterCounts] = useState({});
   const [cloudJobCounts, setCloudJobCounts] = useState({});
@@ -2082,19 +2108,26 @@ export function GPUs() {
       }
 
       try {
-        // Run sky check in parallel with data fetches (not blocking)
-        // Sky check refreshes cloud credentials but shouldn't delay data display
-        const skyCheckPromise = forceRefresh
-          ? runSkyCheck().catch((error) => {
-              console.error('Error during sky check refresh:', error);
-            })
-          : Promise.resolve();
+        // On a manual refresh (forceRefresh), run sky check and wait for it to
+        // finish *before* fetching the data. sky check (POST /check) is the only
+        // thing that refreshes the cached per-workspace enabled_clouds verdict,
+        // and the data fetches below read that cache. If the check runs
+        // concurrently with the fetches (as it used to), the fetches return the
+        // pre-check cache and the freshly-checked results only appear on the
+        // next poll/refresh, so a single Refresh click looks like it did nothing
+        // after a credential / allowed_contexts change. Awaiting the check first
+        // makes the manual refresh slower but correct. The periodic
+        // auto-refresh (!forceRefresh) never runs a check and just reads the cache.
+        if (forceRefresh) {
+          await runSkyCheck().catch((error) => {
+            console.error('Error during sky check refresh:', error);
+          });
+        }
 
-        // Fetch all data in parallel (including sky check)
+        // Fetch all data in parallel.
         // SSH Node Pools are fetched independently - they don't depend on Kubernetes data.
         // The SSH GPU info comes from getWorkspaceInfrastructure() which handles both K8s and SSH contexts.
         await Promise.all([
-          skyCheckPromise,
           fetchKubernetesData(forceRefresh, showLoadingIndicators),
           fetchSSHNodePools(forceRefresh),
           fetchCloudData(forceRefresh),
@@ -2126,7 +2159,6 @@ export function GPUs() {
         setClusterDataLoading(false);
         setCloudInfraData([]);
         setTotalClouds(0);
-        setEnabledClouds(0);
         setCloudClusterCounts({});
         setCloudJobCounts({});
         setCloudDataLoaded(true);
@@ -2398,13 +2430,11 @@ export function GPUs() {
       if (cloudData) {
         setCloudInfraData(cloudData.clouds || []);
         setTotalClouds(cloudData.totalClouds || 0);
-        setEnabledClouds(cloudData.enabledClouds || 0);
         setCloudDataLoaded(true);
       } else if (cloudData === null) {
         // Data was explicitly null (not just missing)
         setCloudInfraData([]);
         setTotalClouds(0);
-        setEnabledClouds(0);
         setCloudDataLoaded(true);
       }
       // Clear loading state as soon as Cloud list is ready
@@ -2413,7 +2443,6 @@ export function GPUs() {
       console.error('Error in fetchCloudData:', error);
       setCloudInfraData([]);
       setTotalClouds(0);
-      setEnabledClouds(0);
       setCloudDataLoaded(true);
       setCloudLoading(false);
     }
@@ -2851,12 +2880,20 @@ export function GPUs() {
   // Check if all infrastructure is disabled
   const allInfrastructureDisabled = (() => {
     // Ensure all data has been loaded
-    if (!cloudDataLoaded || !kubeDataLoaded || kubeLoading || cloudLoading) {
+    if (
+      !cloudDataLoaded ||
+      !kubeDataLoaded ||
+      !slurmDataLoaded ||
+      kubeLoading ||
+      cloudLoading ||
+      slurmLoading ||
+      pluginInfraLoading
+    ) {
       return false; // Still loading, don't show hint
     }
 
     // Check all infrastructure types
-    const noCloud = enabledClouds === 0;
+    const noCloud = filteredEnabledCloudsCount === 0;
     const noSSH = sshContexts.length === 0;
     const noKubernetes = kubeContexts.length === 0;
     const noSlurm = slurmClusters.length === 0;
@@ -3276,8 +3313,9 @@ export function GPUs() {
       });
 
       // Add Cloud section (always show)
-      // Cloud section is active if there are any enabled clouds
-      const cloudHasActivity = enabledClouds > 0;
+      // Cloud section is active if there are any enabled clouds or
+      // storage-only cloud rows.
+      const cloudHasActivity = filteredEnabledCloudsCount > 0;
       sections.push({
         name: 'Cloud',
         render: renderCloudInfrastructure,
@@ -3505,7 +3543,15 @@ function ProviderInfraRowsLoader({ providerId, useHook, onResult }) {
 // Helper table component for cloud GPUs
 function CloudGpuTable({ data, title }) {
   const [currentPage, setCurrentPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(10);
+  // Restore the last "rows per page" choice persisted in localStorage,
+  // falling back to the default of 10.
+  const [pageSize, setPageSize] = React.useState(() =>
+    getPersistedPageSize(
+      INFRA_PAGE_SIZE_STORAGE_KEY,
+      INFRA_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
 
   // Add defensive check for data
   const safeData = data || [];
@@ -3535,6 +3581,8 @@ function CloudGpuTable({ data, title }) {
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(INFRA_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when page size changes
   };
 

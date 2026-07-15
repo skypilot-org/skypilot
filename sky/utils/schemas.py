@@ -812,6 +812,15 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            # Hugging Face stores only: extra ``hf-mount``
+                            # flags forwarded verbatim to the daemon. Each
+                            # element is one shell token.
+                            'hf_mount_args': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            },
                         },
                     },
                 },
@@ -2306,6 +2315,9 @@ def get_config_schema():
             'requests_retention_hours': {
                 'type': 'integer',
             },
+            'logs_retention_hours': {
+                'type': 'integer',
+            },
             'cluster_event_retention_hours': {
                 'type': 'number',
             },
@@ -2330,6 +2342,11 @@ def get_config_schema():
             'default_role': {
                 'type': 'string',
                 'case_insensitive_enum': ['admin', 'user', 'viewer']
+            },
+            # When true, GET /workspaces/config is restricted to admins (the
+            # config payload includes admin-only secrets). Defaults to true.
+            'restrict_config_to_admins': {
+                'type': 'boolean',
             },
             # Per-role permission overrides. Schema is intentionally
             # permissive (additionalProperties: True on
@@ -2672,7 +2689,7 @@ def get_config_schema():
                 'type': 'array',
                 'items': {
                     'type': 'object',
-                    'required': ['label', 'regex'],
+                    'required': ['label'],
                     'additionalProperties': False,
                     'properties': {
                         'label': {
@@ -2683,7 +2700,21 @@ def get_config_schema():
                             'type': 'string',
                             'minLength': 1,
                         },
+                        'url': {
+                            'type': 'string',
+                            'minLength': 1,
+                        },
                     },
+                    # Each entry is either a log-scanning pattern (regex) or
+                    # a templated link (url), never both.
+                    'oneOf': [
+                        {
+                            'required': ['regex']
+                        },
+                        {
+                            'required': ['url']
+                        },
+                    ],
                 },
             },
         },

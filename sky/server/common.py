@@ -5,6 +5,7 @@ import enum
 import functools
 from http.cookiejar import CookieJar
 from http.cookiejar import MozillaCookieJar
+import ipaddress
 import os
 import pathlib
 import re
@@ -59,9 +60,28 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
-AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
+
+
+def _host_to_url_host(host: str) -> str:
+    """Formats a host for use in a URL, bracketing IPv6 literals.
+
+    IPv6 addresses must be wrapped in square brackets when used in a URL
+    (RFC 3986), e.g. ``http://[::1]:46580``. IPv4 addresses and hostnames are
+    returned unchanged.
+    """
+    if ':' in host and not host.startswith('['):
+        return f'[{host}]'
+    return host
+
+
+# Hosts that the API server can bind to when running locally. ``::`` (and its
+# loopback ``::1``) enable IPv6 / dual-stack binding.
+AVAILBLE_LOCAL_API_SERVER_HOSTS = [
+    '0.0.0.0', 'localhost', '127.0.0.1', '::', '::1'
+]
 AVAILABLE_LOCAL_API_SERVER_URLS = [
-    f'http://{host}:46580' for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
+    f'http://{_host_to_url_host(host)}:46580'
+    for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
 ]
 
 API_SERVER_CMD = '-m sky.server.server'
@@ -433,12 +453,42 @@ async def make_authenticated_request_async(
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = DEFAULT_SERVER_URL
     if host is not None:
-        endpoint = f'http://{host}:46580'
+        endpoint = f'http://{_host_to_url_host(host)}:46580'
 
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'), endpoint))
     return url.rstrip('/')
+
+
+# Wildcard bind addresses (0.0.0.0 / ::) are valid to *bind* but are not
+# reliable *connect* targets (Windows rejects them; macOS rejects :: with
+# bindv6only=1). When dialing a server we just started locally, translate the
+# wildcard to the loopback of the same family. Loopback/hostname inputs pass
+# through unchanged.
+_BIND_HOST_TO_LOOPBACK = {'0.0.0.0': '127.0.0.1', '::': '::1'}
+
+
+def _reachable_local_host(host: str) -> str:
+    return _BIND_HOST_TO_LOOPBACK.get(host, host)
+
+
+def is_ipv6_host(host: str) -> bool:
+    """True if ``host`` is an IPv6 literal."""
+    try:
+        return ipaddress.ip_address(host).version == 6
+    except ValueError:
+        return False
+
+
+def get_local_server_dial_url(host: str) -> str:
+    """URL to connect to a locally-started server bound to ``host``.
+
+    Wildcard bind hosts are mapped to loopback so the URL is a valid connect
+    target on all platforms. Honors env/config endpoint overrides via
+    ``get_server_url``.
+    """
+    return get_server_url(_reachable_local_host(host))
 
 
 @annotations.lru_cache(scope='global')
@@ -654,6 +704,10 @@ def _start_api_server(deploy: bool = False,
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
+    # URL to *dial* the server we are about to start. Differs from server_url
+    # for wildcard bind hosts (0.0.0.0 / ::), which are not valid connect
+    # targets on all platforms; see get_local_server_dial_url.
+    health_url = get_local_server_dial_url(host)
 
     with rich_utils.client_status('Starting SkyPilot API server, '
                                   f'view logs at {constants.API_SERVER_LOGS}'):
@@ -752,7 +806,7 @@ def _start_api_server(deploy: bool = False,
             try:
                 # Clear the cache to ensure fresh checks during startup
                 get_api_server_status_response.cache_clear()  # type: ignore
-                check_server_healthy()
+                check_server_healthy(health_url)
             except exceptions.APIVersionMismatchError:
                 raise
             except Exception as e:  # pylint: disable=broad-except
@@ -767,9 +821,8 @@ def _start_api_server(deploy: bool = False,
             else:
                 break
 
-        server_url = get_server_url(host)
         dashboard_msg = ''
-        api_server_info = get_api_server_status(server_url)
+        api_server_info = get_api_server_status(health_url)
         if api_server_info.version == versions.DEV_VERSION:
             dashboard_msg += (
                 f'\n{colorama.Style.RESET_ALL}{ux_utils.INDENT_SYMBOL}'
@@ -898,15 +951,16 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
     # This function will set remote api version and remote version
     # on the current thread's ContextVars.
     api_server_status = None
+    # Probe on the same address family as --host; an IPv6-only server
+    # isn't visible on the 127.0.0.1 default and would be double-started.
+    endpoint = get_local_server_dial_url(host)
     try:
-        api_server_status, _ = check_server_healthy()
+        api_server_status, _ = check_server_healthy(endpoint)
         if api_server_status == ApiServerStatus.NEEDS_AUTH:
-            endpoint = get_server_url()
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerAuthenticationError(endpoint)
     except exceptions.ApiServerConnectionError as exc:
-        endpoint = get_server_url()
-        if not is_api_server_local():
+        if not is_api_server_local(endpoint):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
         # Lock to prevent multiple processes from starting the server at the

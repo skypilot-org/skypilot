@@ -1,4 +1,10 @@
 {{- $fullName := include "skypilot.fullname" . -}}
+{{- /* Persistent state storage is active either when the chart provisions a PVC
+       (storage.enabled) or when an out-of-band PVC is attached
+       (storage.existingClaim). Both back the same `state-volume`, so the
+       storage mounts / ephemeral ~/.sky / env below key off this rather than
+       storage.enabled alone. */ -}}
+{{- $statePersist := or .Values.storage.enabled .Values.storage.existingClaim -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,14 +17,17 @@ spec:
   {{- if and (not .Values.apiService.dbConnectionSecretName) (not .Values.apiService.dbConnectionString) }}
   {{- fail "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy" }}
   {{- end }}
-  {{- if and .Values.storage.enabled (ne .Values.storage.accessMode "ReadWriteMany") }}
+  {{- if and .Values.storage.enabled (not .Values.storage.existingClaim) (ne .Values.storage.accessMode "ReadWriteMany") }}
   {{- fail "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)." }}
   {{- end }}
+  {{- $rollingUpdate := .Values.apiService.rollingUpdate | default (dict) }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      {{- /* dig (not `default`) so an explicit 0 is honored — Go templates treat
+             0 as empty, which would silently fall back to the default. */}}
+      maxSurge: {{ dig "maxSurge" 1 $rollingUpdate }}
+      maxUnavailable: {{ dig "maxUnavailable" 0 $rollingUpdate }}
   {{- else }}
   strategy:
     type: Recreate
@@ -159,7 +168,7 @@ spec:
         - name: SKYPILOT_ROLLING_UPDATE_ENABLED
           value: "true"
         {{- end }}
-        {{- if .Values.storage.enabled }}
+        {{- if $statePersist }}
         - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
           value: "true"
         {{- end }}
@@ -339,7 +348,7 @@ spec:
         {{- end }}
         {{- end }}
         volumeMounts:
-        {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+        {{- if and $statePersist (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
         # running SQLite on NFS. Only persist the clients directory for file mounts.
         # An ephemeral volume is still required since we have to share ~/.sky between
@@ -348,16 +357,18 @@ spec:
           mountPath: /root/.sky
         - name: state-volume
           mountPath: /root/.sky/api_server/clients
-          subPath: api_server/clients
+          subPath: {{ .Values.storage.clientsSubPath | default "api_server/clients" | quote }}
         {{- else }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
         {{- end }}
-        {{- if .Values.storage.enabled }}
+        {{- if $statePersist }}
+        {{- if ne .Values.apiService.persistSSHConfig false }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        {{- end }}
         # Mount the entire sky_logs folder because the request
         # logs have been moved out of this directory
         - name: state-volume
@@ -483,7 +494,7 @@ spec:
             sleep 60;
           done
         volumeMounts:
-        {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+        {{- if and $statePersist (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         - name: sky-ephemeral
           mountPath: /root/.sky
         {{- else }}
@@ -770,14 +781,20 @@ spec:
       {{- end }}
 
       volumes:
-      {{- if .Values.storage.enabled }}
+      {{- if $statePersist }}
       - name: state-volume
         persistentVolumeClaim:
+          {{- if .Values.storage.existingClaim }}
+          # Attach a pre-existing, out-of-band PVC (pvc.yaml skips provisioning
+          # the chart-managed PVC when existingClaim is set).
+          claimName: {{ .Values.storage.existingClaim }}
+          {{- else }}
           claimName: {{ $fullName }}-state
+          {{- end }}
       {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
-      # When using RollingUpdate with storage enabled, use a separate emptyDir
+      # When using RollingUpdate with persistent storage, use a separate emptyDir
       # for ~/.sky to avoid running SQLite on NFS. Only specific subdirectories
-      # like api_server/clients are persisted to the PVC.
+      # like api_server/clients are persisted to the state volume.
       - name: sky-ephemeral
         emptyDir: {}
       {{- end }}

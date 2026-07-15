@@ -4129,5 +4129,442 @@ class TestKubernetesCheckSingleContextForwardsCloud(unittest.TestCase):
                                                        cloud='kubernetes')
 
 
+class TestKubernetesRemoteIdentityFnmatch(unittest.TestCase):
+    """Test fnmatch pattern matching for K8s remote_identity dict.
+
+    Tests exercise the matching logic from sky/clouds/kubernetes.py which
+    uses fnmatch.fnmatchcase(context, str(pattern)) to resolve SA names.
+    """
+
+    def _match_remote_identity(self, remote_identity, context):
+        """Reproduce the production matching logic from kubernetes.py:793."""
+        import fnmatch as fnmatch_mod
+        for pattern, sa_name in remote_identity.items():
+            if fnmatch_mod.fnmatchcase(context, str(pattern)):
+                return sa_name
+        return None
+
+    def test_exact_match(self):
+        result = self._match_remote_identity(
+            {
+                'my-cluster': 'my-sa',
+                'other-cluster': 'other-sa'
+            }, 'my-cluster')
+        self.assertEqual(result, 'my-sa')
+
+    def test_glob_pattern(self):
+        result = self._match_remote_identity(
+            {
+                '*-prod': 'prod-sa',
+                '*-dev': 'dev-sa'
+            }, 'eks-dev')
+        self.assertEqual(result, 'dev-sa')
+
+    def test_wildcard_fallback(self):
+        result = self._match_remote_identity(
+            {
+                'special-cluster': 'special-sa',
+                '*': 'default-sa'
+            }, 'some-random-cluster')
+        self.assertEqual(result, 'default-sa')
+
+    def test_no_match_returns_none(self):
+        result = self._match_remote_identity(
+            {
+                'prod-*': 'prod-sa',
+                'staging-*': 'staging-sa'
+            }, 'dev-cluster')
+        self.assertIsNone(result)
+
+    def test_first_match_wins(self):
+        result = self._match_remote_identity(
+            {
+                '*-cluster': 'first-sa',
+                '*': 'fallback-sa'
+            }, 'my-cluster')
+        self.assertEqual(result, 'first-sa')
+
+    def test_non_string_key_coerced(self):
+        """Non-string keys (e.g., YAML int) are coerced via str()."""
+        result = self._match_remote_identity(
+            {
+                12345: 'numeric-sa',
+                '*': 'default-sa'
+            }, '12345')
+        self.assertEqual(result, 'numeric-sa')
+
+
+class TestDetectNetworkTypeEfaScaleFromZero(unittest.TestCase):
+    """Scale-from-zero EFA wiring in _detect_network_type.
+
+    On an AWS cluster with GPU pools at min=0, only non-GPU system nodes are up
+    at schedule time, so scanning nodes for vpc.amazonaws.com/efa finds nothing
+    and network_tier: best would omit the EFA request (NCCL -> TCP). The fix
+    falls back to a catalog-derived count. These tests drive
+    _detect_network_type against a cold node set and mock the derivation
+    (_derive_efa_count_from_catalog); the derivation math is covered directly by
+    TestDeriveEfaCountFromCatalog below. Cold cases fail without the fix.
+    """
+
+    # An AWS EKS system node carries the cloud-provider label even with no GPU.
+    _AWS_SYSTEM_NODE_LABELS = {
+        'k8s.io/cloud-provider-aws': 'abc123',
+        'topology.kubernetes.io/zone': 'us-east-2a',
+        'node.kubernetes.io/instance-type': 'm6i.large',
+    }
+
+    def _node(self, labels, allocatable):
+        node = mock.MagicMock()
+        node.metadata.labels = dict(labels)
+        node.status.allocatable = dict(allocatable)
+        return node
+
+    def _cold_aws_nodes(self):
+        # Scale-from-zero: only a non-GPU AWS system node is up.
+        return [self._node(self._AWS_SYSTEM_NODE_LABELS, {'cpu': '2'})]
+
+    def _detect(self,
+                nodes,
+                acc_count,
+                acc_type,
+                derived_efa=None,
+                tier=None,
+                autoscaler='karpenter'):
+        # autoscaler defaults to a configured value: the scale-from-zero EFA
+        # fallback only fires on a cluster that can actually scale up a GPU
+        # node. Pass autoscaler=None to model a static cluster.
+        tier = tier if tier is not None else resources_utils.NetworkTier.BEST
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=nodes), \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=autoscaler), \
+             patch.object(kubernetes.Kubernetes,
+                          '_derive_efa_count_from_catalog',
+                          return_value=derived_efa):
+            return kubernetes.Kubernetes._detect_network_type(
+                'ctx',
+                tier,
+                k8s_acc_label_key='nvidia.com/gpu.product',
+                k8s_resource_key='nvidia.com/gpu',
+                acc_count=acc_count,
+                acc_type=acc_type)
+
+    def test_cold_aws_node_requests_catalog_derived_efa(self):
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32)
+        self.assertEqual(
+            net, kubernetes.KubernetesHighPerformanceNetworkType.AWS_EFA)
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta['efa_count'], 32)
+
+    def test_cold_aws_node_no_autoscaler_gets_no_efa(self):
+        # A static cluster (no autoscaler) with no GPU node can never schedule
+        # the pod, so the fallback must NOT request EFA even if a count is
+        # derivable -- otherwise the pod pends to provision_timeout.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 autoscaler=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_cold_aws_node_no_derivable_count_falls_through(self):
+        # Catalog can't size it (e.g. column absent) -> no EFA metadata,
+        # today's behavior. Safe no-op, no regression.
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=None)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_warm_node_scan_wins_over_catalog(self):
+        # A running GPU+EFA node advertises the count directly; the live scan
+        # must win and the catalog derivation must not be consulted.
+        warm = self._node(
+            {
+                **self._AWS_SYSTEM_NODE_LABELS,
+                'nvidia.com/gpu.product': 'H100',
+            }, {
+                'nvidia.com/gpu': '8',
+                'vpc.amazonaws.com/efa': '16',
+            })
+        _net, meta = self._detect([warm], 8, 'H100', derived_efa=999)
+        self.assertEqual(meta['efa_count'], 16)  # from the node, not 999
+
+    def test_non_aws_cold_cluster_gets_no_efa(self):
+        # A cold non-AWS node (no cloud-provider-aws label) must not trigger the
+        # AWS fallback even if a count could be derived.
+        node = self._node({'kubernetes.io/hostname': 'n1'}, {'cpu': '2'})
+        net, meta = self._detect([node], 8, 'H100', derived_efa=32)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+    def test_not_best_tier_returns_none(self):
+        net, meta = self._detect(self._cold_aws_nodes(),
+                                 8,
+                                 'H100',
+                                 derived_efa=32,
+                                 tier=resources_utils.NetworkTier.STANDARD)
+        self.assertEqual(net,
+                         kubernetes.KubernetesHighPerformanceNetworkType.NONE)
+        self.assertIsNone(meta)
+
+
+class TestDeriveEfaCountFromCatalog(unittest.TestCase):
+    """_derive_efa_count_from_catalog delegates to the AWS catalog sizing
+    helper (which sizes from the lowest EFA-per-accelerator ratio among
+    hosting-capable variants) and degrades to None on any catalog miss. The
+    sizing math itself is covered at the DataFrame level in test_catalog.py."""
+
+    def _derive(self, acc_type, acc_count, efa_count=None, raises=None):
+        with patch('sky.catalog.aws_catalog.get_efa_count_for_accelerator',
+                   side_effect=raises,
+                   return_value=efa_count) as m:
+            result = kubernetes.Kubernetes._derive_efa_count_from_catalog(
+                acc_type, acc_count)
+        return result, m
+
+    def test_passes_through_catalog_count(self):
+        result, m = self._derive('H100', 8, efa_count=32)
+        self.assertEqual(result, 32)
+        m.assert_called_once_with('H100', 8)
+
+    def test_none_when_catalog_returns_none(self):
+        # No hosting-capable EFA variant / no MaximumEfaInterfaces column.
+        result, _ = self._derive('H100', 8, efa_count=None)
+        self.assertIsNone(result)
+
+    def test_degrades_on_catalog_error(self):
+        # A catalog parse/lookup error must degrade to None, not propagate.
+        result, _ = self._derive('H100', 8, raises=KeyError('boom'))
+        self.assertIsNone(result)
+
+
+class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
+    """Multi-node network_tier: best on AWS EFA sets k8s_efa_same_az so the pod
+    template injects a required same-zone podAffinity (EFA is single-AZ).
+    Single-node and non-EFA network types must not set it. Fails without the
+    fix (the deploy var does not exist).
+    """
+
+    def _deploy_vars(self, num_nodes, network_type):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        gpu_resources = mock.MagicMock()
+        gpu_resources.instance_type = '8CPU--32GB--H100:8'
+        gpu_resources.accelerators = {'H100': 8}
+        gpu_resources.use_spot = False
+        gpu_resources.region = 'eks-context'
+        gpu_resources.zone = None
+        gpu_resources.cluster_config_overrides = {}
+        gpu_resources.image_id = None
+        setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
+        gpu_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        meta = ({
+            'efa_count': 32
+        } if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA else
+                None)
+
+        with patch('sky.provision.kubernetes.utils.get_kubernetes_nodes'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_current_kube_config_context_name',
+                   return_value='eks-context'), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_kube_config_context_namespace',
+                   return_value='default'), \
+             patch('sky.provision.kubernetes.utils.get_accelerator_label_keys',
+                   return_value=[]), \
+             patch('sky.provision.kubernetes.utils.'
+                   'get_accelerator_label_key_values',
+                   return_value=('accelerator', ['H100'], None, None)), \
+             patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'), \
+             patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+                   return_value=(False, None)), \
+             patch('sky.skypilot_config.get_workspace_cloud') as mock_ws, \
+             patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=lambda cloud, keys, region, default_value=None,
+                   override_configs=None: {
+                       ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                       ('kubernetes', 'provision_timeout'): 10,
+                       ('kubernetes', 'high_availability',
+                        'storage_class_name'): None,
+                   }.get((cloud,) + keys, default_value)), \
+             patch('sky.provision.kubernetes.network_utils.get_port_mode'
+                  ) as mock_pm, \
+             patch('sky.catalog.get_image_id_from_tag',
+                   return_value='img:latest'), \
+             patch('sky.clouds.kubernetes.Kubernetes._detect_network_type',
+                   return_value=(network_type, meta)):
+            mock_ws.return_value.get.return_value = None
+            mock_pm.return_value.value = 'portforward'
+            k8s_cloud = kubernetes.Kubernetes()
+            return k8s_cloud.make_deploy_resources_variables(
+                resources=gpu_resources,
+                cluster_name=resources_utils.ClusterName(display_name='c',
+                                                         name_on_cloud='c'),
+                region=mock.MagicMock(name='eks-context'),
+                zones=None,
+                num_nodes=num_nodes,
+                dryrun=False)
+
+    def test_multinode_aws_efa_best_sets_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertTrue(self._deploy_vars(2, N.AWS_EFA)['k8s_efa_same_az'])
+
+    def test_single_node_aws_efa_does_not_set_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertFalse(self._deploy_vars(1, N.AWS_EFA)['k8s_efa_same_az'])
+
+    def test_multinode_non_efa_does_not_set_same_az(self):
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        self.assertFalse(self._deploy_vars(2, N.NONE)['k8s_efa_same_az'])
+
+    def _render_same_az_affinity(self, same_az):
+        """Render just the k8s_efa_same_az podAffinity block from the live
+        template, so a wrong label or topologyKey is caught -- not only the
+        deploy var. Keeps the assertion coupled to the real template file."""
+        import jinja2
+
+        import sky
+        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
+                                     'kubernetes-ray.yml.j2')
+        with open(template_path, 'r', encoding='utf-8') as fin:
+            full = fin.read()
+        begin_marker = '{% if k8s_efa_same_az %}'
+        end_marker = '{% endif %}'
+        begin = full.index(begin_marker)
+        end = full.index(end_marker, begin) + len(end_marker)
+        snippet = full[begin:end]
+        return jinja2.Template(snippet).render(
+            k8s_efa_same_az=same_az, cluster_name_on_cloud='my-cluster')
+
+    def test_same_az_affinity_renders_cluster_name_label_and_zone(self):
+        # When the flag is set the rendered podAffinity must carry the
+        # (non-deprecated) cluster-name label and the single-AZ topology key.
+        rendered = self._render_same_az_affinity(same_az=True)
+        self.assertIn('requiredDuringSchedulingIgnoredDuringExecution',
+                      rendered)
+        self.assertIn('skypilot-cluster-name: my-cluster', rendered)
+        self.assertIn('topologyKey: topology.kubernetes.io/zone', rendered)
+        # Must not use the deprecated skypilot-cluster label.
+        self.assertNotIn('skypilot-cluster:', rendered)
+
+    def test_same_az_affinity_absent_when_flag_unset(self):
+        # When the flag is unset the same-AZ affinity must not be rendered.
+        rendered = self._render_same_az_affinity(same_az=False)
+        self.assertNotIn('topology.kubernetes.io/zone', rendered)
+        self.assertNotIn('skypilot-cluster-name', rendered)
+
+
+class TestKubernetesSpotLabelContext(unittest.TestCase):
+    """Regression test for TICKET-034.
+
+    make_deploy_resources_variables must pass the provisioning context to
+    get_spot_label(). get_spot_label resolves the autoscaler type per-context
+    (get_effective_region_config keyed on the context name), so without the
+    context argument only a *global* kubernetes.autoscaler is honored and a
+    per-context setting (context_configs.<ctx>.autoscaler: karpenter) never
+    injects the spot node label. This test fails if the call site drops the
+    context (the original bug: get_spot_label() with no args).
+    """
+
+    def setUp(self):
+        self.resources = mock.MagicMock()
+        self.resources.instance_type = "2CPU--4GB"
+        self.resources.accelerators = None
+        self.resources.use_spot = True
+        self.resources.region = "test-context"
+        self.resources.zone = None
+        self.resources.cluster_config_overrides = {}
+        self.resources.image_id = None
+        setattr(self.resources, 'assert_launchable', lambda: self.resources)
+        self.resources.network_tier = resources_utils.NetworkTier.BEST
+        self.cluster_name = "test-cluster"
+        self.region = mock.MagicMock()
+        self.region.name = "test-context"
+
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_spot_label_uses_provisioning_context(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes,
+            mock_get_spot_label):
+        mock_cluster_type = mock.MagicMock()
+        mock_cluster_type.supports_high_performance_networking.return_value = (
+            False)
+        mock_cluster_type.requires_ipc_lock_capability.return_value = False
+        mock_detect_network_type.return_value = (mock_cluster_type, None)
+
+        mock_get_current_context.return_value = "test-context"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = "test-image:latest"
+        # Simulate a Karpenter context: get_spot_label returns the label only
+        # when it can resolve the (per-context) autoscaler.
+        mock_get_spot_label.return_value = ('karpenter.sh/capacity-type',
+                                            'spot')
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # The heart of the regression: NO call to get_spot_label may drop the
+        # provisioning context. get_spot_label runs at more than one site during
+        # deploy-var construction; every one must forward the context, or the
+        # per-context autoscaler config is silently ignored. A bare call()
+        # (the original bug) must never appear.
+        self.assertGreaterEqual(mock_get_spot_label.call_count, 1)
+        self.assertNotIn(mock.call(), mock_get_spot_label.call_args_list)
+        for call_args in mock_get_spot_label.call_args_list:
+            self.assertEqual(call_args, mock.call('test-context'))
+        # ...and the resolved label must flow into the pod template vars.
+        self.assertEqual(deploy_vars['k8s_spot_label_key'],
+                         'karpenter.sh/capacity-type')
+        self.assertEqual(deploy_vars['k8s_spot_label_value'], 'spot')
+
+
 if __name__ == '__main__':
     unittest.main()

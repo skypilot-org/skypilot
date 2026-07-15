@@ -5,11 +5,12 @@ External Links
 
 External links are URLs associated with managed jobs and clusters that are displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources.
 
-SkyPilot automatically detects and displays three types of links:
+SkyPilot automatically detects and displays four types of links:
 
 1. **Instance links**: For jobs running on AWS, GCP, or Azure, SkyPilot automatically adds links to the cloud console for the underlying instance.
 2. **Log-detected links (built-in)**: The dashboard automatically parses job logs to detect URLs from supported services (currently Weights & Biases) and displays them as external links.
 3. **Admin-configured custom URLs**: Administrators can register a list of labeled regex patterns in the SkyPilot config. Matching URLs that appear in job logs (job detail page) or cluster provision logs (cluster detail page) are rendered as clickable, labeled links.
+4. **Admin-configured URL templates**: Administrators can register labeled URL templates that are built from cluster/job metadata (e.g., ``https://ray.internal.example.com/dashboard/${cluster_name}``) and rendered on every cluster and job detail page, without needing the URL to appear in logs.
 
 .. image:: ../images/examples/external-links/job-page-wandb.png
   :width: 800
@@ -113,3 +114,61 @@ Custom URL matches appear on:
 
 Regexes that fail to compile are rejected at config load time with a clear
 error, so a malformed entry does not silently disable other entries.
+
+
+Admin-configured URL templates
+------------------------------
+
+For services with stable, predictable URLs (a Ray dashboard behind a reverse
+proxy, Grafana dashboards keyed by cluster name, an internal experiment
+platform keyed by job ID, etc.), scanning logs is unnecessary: the link can
+be constructed directly from cluster or job metadata. Configure these as
+``{label, url}`` entries in the same ``dashboard.external_links`` list:
+
+.. code-block:: yaml
+
+  dashboard:
+    external_links:
+      - label: "Ray Dashboard"
+        url: 'https://ray.internal.example.com/dashboard/${cluster_name}'
+      - label: "Grafana"
+        url: 'https://grafana.internal.example.com/d/gpu?var-cluster=${cluster_name}'
+      - label: "Experiment Platform"
+        url: 'https://exp.internal.example.com/jobs/${job_id}'
+
+Each entry takes:
+
+- ``label``: The text shown to users in the External Links section.
+- ``url``: A URL template. ``${variable}`` placeholders are substituted
+  with URI-encoded values from the page being viewed. An entry must have
+  either ``url`` or ``regex``, never both.
+
+Supported template variables:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Variable
+     - Cluster page
+     - Job pages
+   * - ``${cluster_name}``
+     - The cluster's name
+     - The job's backing cluster
+   * - ``${job_id}``
+     - Not available
+     - The job's ID
+   * - ``${job_name}``
+     - Not available
+     - The job's name
+   * - ``${user}``
+     - The cluster's owner
+     - The job's owner
+   * - ``${workspace}``
+     - The cluster's workspace
+     - The job's workspace
+
+A link is only rendered on pages where all of its variables resolve: an
+entry referencing ``${job_id}`` appears on job detail pages but not on
+cluster detail pages, while an entry referencing only ``${cluster_name}``
+appears on both. Templates referencing unknown variables are rejected at
+config load time.
