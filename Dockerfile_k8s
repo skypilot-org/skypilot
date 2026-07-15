@@ -18,7 +18,7 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git build-essential rsync sudo patch openssh-server \
-        python3 python3-pip python-is-python3 \
+        python3 python3-pip python3-venv python-is-python3 \
         pciutils nano fuse unzip socat netcat-openbsd curl wget autossh jq && \
     apt-get install -y --no-install-recommends fuse3 && \
     rm -rf /var/lib/apt/lists/*
