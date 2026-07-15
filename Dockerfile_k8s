@@ -69,5 +69,13 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
     mv kubectl $HOME/.local/bin/ && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
+# Create a default, user-writable Python environment for task commands. This
+# replaces the role conda's base env used to play: user setup/run commands
+# `source ~/.bashrc`, this venv activates, and `pip install` writes to a
+# user-writable location. SkyPilot's own runtime uses the separate
+# ~/skypilot-runtime venv (PATH-scrubbed at task time) and is unaffected.
+RUN python3 -m venv ~/sky-user-env && \
+    echo 'source ~/sky-user-env/bin/activate' >> ~/.bashrc
+
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

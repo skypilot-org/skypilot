@@ -243,19 +243,23 @@ SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
                            f'mkdir -p ~/.sky/sky_app && '
                            f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
 
-# Install conda on the remote cluster if it is not already installed.
-# We use conda with python 3.10 to be consistent across multiple clouds with
-# best effort.
+# Install conda on the remote cluster if it is not already installed. This is
+# only used when the user opts in with `provision.install_conda: true` (conda is
+# not installed by default). We use Miniforge (conda-forge as the default and
+# only channel) rather than Miniconda: it avoids the Anaconda `defaults` channel
+# Terms-of-Service gate that makes non-interactive `conda create`/`install`
+# fail on recent conda.
+# The base python version (Miniforge ships a recent 3.x) does not matter here:
+# the SkyPilot runtime lives in a separate uv venv, and conda is user-facing.
 # https://github.com/ray-project/ray/issues/31606
-# We use python 3.10 to be consistent with the python version of the
-# AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ '
     # Use uname -m to get the architecture of the machine and download the
-    # corresponding Miniconda3-Linux.sh script.
-    # Download to /tmp to ensure write access for non-root users.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_26.5.3-1-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
+    # corresponding Miniforge installer. `-L` is required to follow the GitHub
+    # release redirect. Download to /tmp to ensure write access for non-root
+    # users.
+    'curl -L https://github.com/conda-forge/miniforge/releases/download/26.3.2-3/Miniforge3-26.3.2-3-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to

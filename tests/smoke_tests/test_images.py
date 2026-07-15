@@ -494,17 +494,24 @@ def test_image_no_conda():
 
 @pytest.mark.kubernetes
 def test_kubernetes_default_image_no_conda():
-    """The default K8s image ships no conda, but tasks still get python/pip.
+    """The default K8s image ships no conda, but tasks get a writable py env.
 
-    Regression guard: conda was removed from the default K8s images and
-    install_conda now defaults to false. A user task must find no conda on
-    PATH yet still have a usable system python3/pip. If conda is baked back
-    into the image, `which conda` succeeds and this test fails.
+    Regression guard for SKY-6032: conda was removed from the default K8s
+    images and install_conda now defaults to false. A user task must:
+      1. find no conda on PATH (fails if conda is baked back in), and
+      2. still `pip install` successfully — i.e. land in the auto-activated,
+         user-writable venv rather than a non-writable system site-packages.
+    Dropping the default venv (or its .bashrc activation) makes `pip install`
+    hit `Permission denied` on /usr/local/lib/.../dist-packages and fails (2).
     """
     name = smoke_tests_utils.get_cluster_name()
     check_cmd = (
-        'if which conda; then echo "conda unexpectedly present"; exit 1; fi; '
-        'python3 --version && pip3 --version && echo CONDA_FREE_OK')
+        'if which conda; then echo "conda unexpectedly present"; exit 1; fi && '
+        'python --version && '
+        # Must install into a writable env, not system site-packages.
+        'pip install --quiet requests && '
+        'python -c "import requests" && '
+        'echo CONDA_FREE_OK')
     test = smoke_tests_utils.Test(
         'kubernetes_default_image_no_conda',
         [
