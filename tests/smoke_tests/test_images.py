@@ -794,6 +794,30 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
+def test_docker_pull_progress_streaming(generic_cloud: str):
+    """Docker pull progress must stream into the launch output.
+
+    A fresh VM has no cached layers, so the pull emits per-layer progress;
+    with head-node streaming (DockerInitializer stream_pull_logs) those
+    lines must reach the client's captured launch output instead of only
+    the per-node provision log.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'docker_pull_progress_streaming',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} '
+            f'--image-id docker:ubuntu:20.04 --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/minimal.yaml) && echo "$s" && echo "$s" | '
+            'grep -E "Pull complete|Status: Downloaded newer image"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 def test_docker_nonroot_user(generic_cloud: str):
     """Test Docker image with non-root default user and ENV HOME override.
 
