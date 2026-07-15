@@ -7824,7 +7824,7 @@ def local():
     'Used without ip list.')
 @click.option(
     '--num-nodes',
-    type=int,
+    type=click.IntRange(min=1),
     default=1,
     show_default=True,
     required=False,

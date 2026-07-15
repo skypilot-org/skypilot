@@ -115,6 +115,8 @@ def deploy_local_cluster(name: Optional[str],
                          port_start: Optional[int],
                          gpus: bool,
                          num_nodes: int = 1):
+    if num_nodes < 1:
+        raise ValueError(f'num_nodes must be at least 1, got {num_nodes}')
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
     port_start, port_end = _get_port_range(name, port_start)
     context_name = f'kind-{name}'
