@@ -49,6 +49,16 @@ INSTALL_AWS_CLI_CMD = (
     'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
     '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
 
+# The Azure CLI is only needed when pulling a private ACR image with the
+# VM's managed identity, so keep the install lazy.
+INSTALL_AZURE_CLI_CMD = ('which az || '
+                         '(curl -sL https://aka.ms/InstallAzureCLIDeb | '
+                         'sudo bash)')
+
+# The documented username for `docker login` with an ACR access token. See:
+# https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication#az-acr-login-with---expose-token  # pylint: disable=line-too-long
+ACR_TOKEN_USERNAME = '00000000-0000-0000-0000-000000000000'
+
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _DOCKER_USER_PATTERN = re.compile(r'SKYPILOT_DOCKER_USER: ([^\s\n]+)')
 
@@ -346,6 +356,32 @@ class DockerInitializer:
                 self._run('sudo gcloud auth configure-docker '
                           f'{shlex.quote(docker_login_config.server)} '
                           '--quiet || true')
+            elif docker_login_config.server.endswith('.azurecr.io'):
+                # Azure ACR: an empty password means the VM's managed
+                # identity is the credential, mirroring the ECR branch
+                # above. Feed the minted token to `{docker_cmd} login` so
+                # the credential lands in the docker config the sudo'd
+                # docker commands read (plain `az acr login` writes the SSH
+                # user's ~/.docker/config.json instead — see #8906).
+                self._run(INSTALL_AZURE_CLI_CMD, wait_for_docker_daemon=False)
+                identity = self.docker_config.get('azure_managed_identity',
+                                                  None)
+                # With no explicit identity, `az login --identity` uses the
+                # VM's only identity; the resource ID disambiguates when the
+                # VM has more than one.
+                identity_flag = ('' if identity is None else
+                                 f' --resource-id {shlex.quote(identity)}')
+                registry_name = docker_login_config.server.split('.', 1)[0]
+                self._run(
+                    f'az login --identity{identity_flag} '
+                    '--allow-no-subscriptions --output none && '
+                    f'az acr login --name {shlex.quote(registry_name)} '
+                    '--expose-token --output tsv --query accessToken | '
+                    f'{self.docker_cmd} login '
+                    f'{shlex.quote(docker_login_config.server)} '
+                    f'--username {ACR_TOKEN_USERNAME} '
+                    '--password-stdin',
+                    wait_for_docker_daemon=True)
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
