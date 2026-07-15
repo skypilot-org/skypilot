@@ -106,3 +106,63 @@ def test_worker_initializer_keeps_pull_quiet():
     docker_user = initializer.initialize()
     assert docker_user == 'root'
     assert all(not kwargs['stream_logs'] for _, kwargs in runs)
+
+
+def test_initialize_docker_streams_head_only(monkeypatch):
+    """Head detection must survive the SSH pool's worker threads.
+
+    The provision-logging context is a threading.local set up in the
+    provisioning thread; resolving it inside the pool-dispatched closure
+    would see the /dev/null default and never stream.
+    """
+    from concurrent import futures
+    import pathlib
+
+    from sky.provision import instance_setup
+    from sky.provision import logging as provision_logging
+
+    head_log_path = '/logs/provision.log'
+    worker_log_path = '/logs/instance/worker.log'
+    monkeypatch.setattr(provision_logging.config,
+                        'log_path',
+                        pathlib.Path(head_log_path),
+                        raising=False)
+
+    constructed = {}
+
+    class _FakeInitializer:
+
+        def __init__(self, docker_config, runner, log_path, stream_pull_logs):
+            del docker_config, runner
+            constructed[log_path] = stream_pull_logs
+
+        def initialize(self):
+            return 'root'
+
+    monkeypatch.setattr(instance_setup.docker_utils, 'DockerInitializer',
+                        _FakeInitializer)
+
+    def _fake_parallel_ssh_with_cache(func, cluster_name, stage_name, digest,
+                                      cluster_info, ssh_credentials):
+        # Mirror the real dispatch: the closure runs in pool threads,
+        # head first with the provision log, workers with instance logs.
+        with futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = [
+                pool.submit(func, mock.MagicMock(), head_log_path),
+                pool.submit(func, mock.MagicMock(), worker_log_path),
+            ]
+            return [future.result() for future in results]
+
+    monkeypatch.setattr(instance_setup, '_parallel_ssh_with_cache',
+                        _fake_parallel_ssh_with_cache)
+
+    instance_setup.initialize_docker(
+        'test-cluster',
+        docker_config={
+            'container_name': 'c',
+            'image': 'img'
+        },
+        cluster_info=mock.MagicMock(num_instances=2),
+        ssh_credentials={})
+
+    assert constructed == {head_log_path: True, worker_log_path: False}
