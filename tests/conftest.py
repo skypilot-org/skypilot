@@ -529,8 +529,13 @@ def pytest_collection_modifyitems(config, items):
                 # Surface the argument of a concurrency_group(name) marker so
                 # the pipeline generator can read the group name (all other
                 # markers are matched by name only, so keep them name-only).
-                if mark.name == 'concurrency_group' and mark.args:
-                    marks.append(f'{mark.name}({mark.args[0]})')
+                # Accept both positional (concurrency_group('x')) and keyword
+                # (concurrency_group(name='x')) forms.
+                if mark.name == 'concurrency_group':
+                    group_name = (mark.args[0]
+                                  if mark.args else mark.kwargs.get('name'))
+                    marks.append(f'{mark.name}({group_name})'
+                                 if group_name else mark.name)
                 else:
                     marks.append(mark.name)
             print(f"Collected {full_name} with marks: {marks}")

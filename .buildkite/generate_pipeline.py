@@ -245,7 +245,7 @@ def _extract_marked_tests(
     extra_args: List[str],
     exclusive_run: bool = False
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[List[str]],
-                     List[bool]]]:
+                     List[bool], List[Optional[str]]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
