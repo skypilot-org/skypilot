@@ -29,7 +29,7 @@ def get_all_workers():
             print(e)
             if i == 4:
                 return []
-    nodes = data.get('workers', data.get('nodes', []))
+    nodes = data['workers']
     return sorted(nodes, key=lambda n: n['rank'])
 
 

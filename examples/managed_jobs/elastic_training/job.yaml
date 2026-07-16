@@ -4,9 +4,7 @@
 # The controller discovers workers via /nodes and pushes training state.
 #
 # Launch:
-#   # Add to ~/.sky/config.yaml: jobs: {use_v1: true}
-#   sky api start --deploy
-#   sky jobs launch -n elastic-train --infra kubernetes job.yaml
+#   sky jobs launch job.yaml
 #
 # Test recovery (kill workers while training runs):
 #   kubectl delete pod <workers-pod-name>-{3..5} --force --grace-period=0

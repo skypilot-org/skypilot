@@ -13,7 +13,7 @@ via `/nodes` and redistributes work.
 |------|-------------|
 | **controller.py** | Discovers workers, sends training state, collects results |
 | **worker.py** | Signals readiness, receives state, runs training |
-| **job.yaml** | SkyPilot job definition (scripts inlined for V1 fast path) |
+| **job.yaml** | SkyPilot job definition |
 
 ## How it works
 
@@ -24,8 +24,8 @@ it to find all nodes and their status:
 
 ```python
 data = json.loads(urllib.request.urlopen('http://localhost:9876/nodes').read())
-# Single task: {"nodes": [{"rank": 0, ...}, {"rank": 1, ...}, ...]}
-# Job group:   {"controller": [...], "workers": [{"rank": 0, ...}, ...]}
+# Single task: {"trainer": [{"rank": 0, ...}, {"rank": 1, ...}, ...]}
+# Job group:   {"controller": [{"rank": 0, ...}, ...], "workers": [...]}
 ```
 
 ### 2. App status: `$SKYPILOT_APP_STATUS`
@@ -39,8 +39,7 @@ with open(os.environ['SKYPILOT_APP_STATUS'], 'w') as f:
     f.write('ready')
 
 # Controller finds ready workers
-ready = [n for n in data['nodes']
-         if n['rank'] != 0 and n.get('app_status') == 'ready']
+ready = [n for n in data['workers'] if n.get('app_status') == 'ready']
 ```
 
 ### 3. Controller pushes training state
@@ -65,9 +64,7 @@ the controller catches the error, refreshes the worker list, and continues.
 ## Usage
 
 ```bash
-# Add to ~/.sky/config.yaml: jobs: {use_v1: true}
-sky api start --deploy
-sky jobs launch -n elastic-train --infra kubernetes job.yaml
+sky jobs launch job.yaml
 ```
 
 ## Test recovery
