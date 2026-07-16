@@ -473,8 +473,13 @@ class Kubernetes(clouds.Cloud):
         for r in regions:
             context = r.name
             try:
-                ephemeral_storage_gb = (resources.ephemeral_storage
-                                        if resources is not None else None)
+                # On Kubernetes, disk_size maps to ephemeral-storage requests,
+                # but only when the user explicitly set it (see
+                # `make_deploy_resources_variables`). Only then do we check
+                # that a node can fit the requested ephemeral storage.
+                ephemeral_storage_gb = (resources.disk_size
+                                        if resources is not None and
+                                        resources.disk_size_specified else None)
                 fits, reason = kubernetes_utils.check_instance_fits(
                     context,
                     instance_type,
