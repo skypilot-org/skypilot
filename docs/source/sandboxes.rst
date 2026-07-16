@@ -47,6 +47,19 @@ Why sandboxes with SkyPilot
 * **Runs on your infra:** sandboxes live on your own Kubernetes clusters, so your
   code and data never leave your environment, and capacity is simply your
   existing cluster.
+* **Snapshot & restore:** capture a sandbox's whole filesystem into a snapshot
+  image and restore a fresh sandbox from it later, so expensive setup is done
+  once and resumed instead of re-run.
+* **Sandbox-to-sandbox networking:** sandboxes can't reach each other unless a
+  sandbox explicitly exposes ports with ``ports=``, which peers then dial via
+  stable endpoints that survive pod replacement.
+* **Docker-in-Docker:** pass ``enable_docker=True`` to run ``docker build``,
+  ``docker run``, and ``docker compose`` inside a sandbox, with any base image;
+  the daemon runs in a privileged sidecar while the container your code runs in
+  stays unprivileged.
+* **Stronger isolation with gVisor:** on GKE, run sandbox pods on the gVisor
+  runtime to add a kernel-level isolation boundary around untrusted code, on
+  top of the per-pod isolation you get by default.
 
 Use cases
 ---------
@@ -95,10 +108,11 @@ loop:
             # Create a sandbox from the built-in `default` pool.
             sb = sky.sandbox.create(name='dev')
 
-            # Run a command (argv tokens, no implicit shell); get
-            # stdout / stderr / exit_code back.
-            result = sb.exec('python', '-c', 'print(2 ** 10)')
-            print(result['stdout'])  # 1024
+            # Run a command (argv tokens, no implicit shell). exec returns a
+            # handle: wait() for the exit code, then read stdout / stderr.
+            proc = sb.exec('python', '-c', 'print(2 ** 10)')
+            proc.wait()
+            print(proc.stdout.read())  # 1024
 
             # Tear it down.
             sb.terminate()
@@ -107,6 +121,10 @@ loop:
         For shell features like pipes, globs, or env-var expansion, invoke a
         shell explicitly: ``sb.exec('sh', '-c', 'echo $HOME | wc -c')``.
 
+        Pass ``env`` to set environment variables for a single command
+        (overriding any create-time env, and not persisted to later execs):
+        ``sb.exec('printenv', 'STAGE', env={'STAGE': 'ci'})``.
+
         Or use the context manager to terminate automatically:
 
         .. code-block:: python
@@ -114,14 +132,15 @@ loop:
             import sky.sandbox
 
             with sky.sandbox.create(name='dev') as sb:
-                sb.exec('python', 'train.py')
+                sb.exec('python', 'train.py').wait()
             # Sandbox is terminated on exit.
 
 Working with the SDK
 --------------------
 
 Beyond create / exec / terminate, the ``sky.sandbox`` SDK covers batch and async
-fan-out, and secret / volume injection:
+fan-out, secret / volume injection, sandbox-to-sandbox networking, and
+filesystem snapshot & restore:
 
 .. tab-set::
 
@@ -178,77 +197,183 @@ fan-out, and secret / volume injection:
                 # Plain (non-secret) env vars.
                 env={'PROJECT': 'demo'},
                 # Mount existing volumes, keyed by mount path (create them with
-                # `sky volumes apply`).
-                volumes={'/data': 'shared-data'},
+                # `sky volumes apply`). A value is a volume name (whole volume)
+                # or a VolumeMount for a sub-directory / read-only mount.
+                volumes={
+                    '/data': 'shared-data',
+                    '/work': sky.sandbox.VolumeMount('team-fs',
+                                                     sub_path='job-123'),
+                },
             )
 
-The SDK exposes ``create``, ``exec``, ``terminate``, ``ls``, ``create_pool``,
-``set_pool_size``, and ``delete_pool``. Every per-call entrypoint has an async
-sibling on a ``.aio`` attribute (``sky.sandbox.create.aio(...)``,
-``sb.exec.aio(...)``), so the same names work in event-loop code. See the
-dashboard's **Sandboxes** page to manage pools and running sandboxes in the UI.
+    .. tab-item:: Sandbox networking
 
-Example: Running AI coding agents
----------------------------------
+        Sandboxes can't reach each other by default. A *server* declares the
+        ports it exposes with ``ports=``; each one shows up in its
+        ``endpoints`` map as a stable address a *peer* can dial.
 
-The common pattern is **not** to run a coding agent *inside* a sandbox. Instead,
-the agent runs wherever your application does and is given a *tool* to provision
-a sandbox on demand and run its generated code there, isolated from everything
-else. Below, `Claude <https://www.anthropic.com/claude>`_ drives the
-``sky.sandbox`` SDK through two tools: one to start a sandbox, one to run a
-command in it.
+        .. code-block:: python
 
-.. code-block:: python
+            import sky.sandbox
 
-   import anthropic
-   import sky.sandbox
+            # Server: expose port 8080 to peer sandboxes.
+            server = sky.sandbox.create(name='api', image='python:3.12',
+                                        ports=[8080])
+            print(server.endpoints[8080])  # 'api.default.svc.cluster.local:8080'
 
-   # Claude runs outside the sandbox and calls these tools to create one on
-   # demand and run code in it. A chat that never runs code never makes a pod.
-   sb = None
+            # Client: exposes nothing (so peers can't reach it), but can reach
+            # the server on its exposed port.
+            worker = sky.sandbox.create(name='worker', image='python:3.12')
+            worker.exec('curl', '-sf',
+                        f'http://{server.endpoints[8080]}/healthz')
 
-   tools = [
-       {'name': 'start_skypilot_sandbox',
-        'description': 'Provision a fresh sandbox. Call the first time you '
-                       'need to run code.',
-        'input_schema': {'type': 'object', 'properties': {}}},
-       {'name': 'run_shell',
-        'description': 'Run a shell command in the sandbox. State persists '
-                       'across calls.',
-        'input_schema': {'type': 'object',
-                         'properties': {'command': {'type': 'string'}},
-                         'required': ['command']}},
-   ]
+        The address survives pod replacement, and un-exposed ports stay
+        blocked on NetworkPolicy-enforcing clusters.
 
-   def dispatch(name, args):
-       global sb
-       if name == 'start_skypilot_sandbox':
-           sb = sky.sandbox.create(name='chat')  # claims a warm pod from the pool
-           return 'Sandbox ready.'
-       result = sb.exec('sh', '-c', args['command'])  # run_shell
-       return result['stdout'] or result['stderr']
+    .. tab-item:: Snapshot & restore
 
-   client = anthropic.Anthropic()
-   messages = [{'role': 'user',
-                'content': 'Compute the 100th Fibonacci number with Python.'}]
-   while True:
-       resp = client.messages.create(model='claude-opus-4-8', max_tokens=4096,
-                                      tools=tools, messages=messages)
-       messages.append({'role': 'assistant', 'content': resp.content})
-       tool_uses = [b for b in resp.content if b.type == 'tool_use']
-       if not tool_uses:
-           break
-       messages.append({'role': 'user', 'content': [
-           {'type': 'tool_result', 'tool_use_id': tu.id,
-            'content': dispatch(tu.name, tu.input)} for tu in tool_uses]})
+        Snapshot a sandbox's filesystem into a container image, then restore a
+        fresh sandbox from it later: pause expensive setup and resume it
+        without re-running it.
 
-   if sb is not None:
-       sb.terminate()
+        .. code-block:: python
 
-Each agent gets its own pod, so many can work in parallel without sharing a
-filesystem or stepping on each other. Inject per-agent credentials at
-``create`` time with ``secrets=[...]`` so tokens never appear in the commands
-the agent runs.
+            import sky.sandbox
+
+            # Set up a sandbox, then snapshot its filesystem.
+            sb = sky.sandbox.create(name='dev', image='python:3.12')
+            sb.exec('pip', 'install', 'numpy', 'pandas').wait()
+            image = sb.snapshot()
+
+            # Later: restore a fresh sandbox -- numpy/pandas already installed.
+            restored = sky.sandbox.create(name='dev2', image=image)
+
+        Requires a container registry configured in the dashboard's
+        **Sandboxes** install dialog.
+
+The SDK exposes ``create``, ``exec``, ``terminate``, ``snapshot``, ``ls``,
+``create_pool``, ``set_pool_size``, and ``delete_pool``. Every per-call
+entrypoint has an async sibling on a ``.aio`` attribute
+(``sky.sandbox.create.aio(...)``, ``sb.exec.aio(...)``), so the same names work
+in event-loop code. See the dashboard's **Sandboxes** page to manage pools and
+running sandboxes in the UI.
+
+Examples
+--------
+
+.. tab-set::
+
+    .. tab-item:: RL training
+
+        `RL code-execution training with sandbox rewards
+        <https://github.com/skypilot-org/skypilot/tree/master/llm/rl-code-execution-sandbox>`_
+        is a complete end-to-end example: a trainer fans out thousands of
+        sandboxes to run untrusted model-generated code against hidden tests,
+        scoring each rollout by whether its code passes. Every rollout is
+        isolated in its own pod, so crashing, looping, or malicious code can't
+        touch the trainer or other rollouts.
+
+        The reward server claims a batch of sandboxes from a warm pool, scores
+        each rollout concurrently, and tears them all down:
+
+        .. code-block:: python
+
+            async def score_batch(items):
+                sandboxes = await sky.sandbox.create.aio(
+                    name='reward', num_sandboxes=len(items), pool=POOL_NAME)
+                try:
+                    return await asyncio.gather(
+                        *(score_one(sb, item)
+                          for sb, item in zip(sandboxes, items)))
+                finally:
+                    await asyncio.gather(
+                        *(sb.terminate.aio() for sb in sandboxes),
+                        return_exceptions=True)
+
+            async def score_one(sb, item):
+                # Reward = did the model-generated code pass? exec returns a
+                # handle; timeout_seconds bounds the command server-side (an
+                # overrun is killed in the pod and reports a non-zero exit, so
+                # it scores 0 without the client holding a long connection).
+                proc = await sb.exec.aio('python', '-c', item.script,
+                                         timeout_seconds=EXEC_TIMEOUT_SECONDS)
+                code = await proc.wait()
+                return 1.0 if code == 0 else 0.0
+
+    .. tab-item:: AI coding agents
+
+        The common pattern is **not** to run a coding agent *inside* a
+        sandbox. Instead, the agent runs wherever your application does and is
+        given a *tool* to provision a sandbox on demand and run its generated
+        code there, isolated from everything else. Below, `Claude
+        <https://www.anthropic.com/claude>`_ drives the ``sky.sandbox`` SDK
+        through two tools: one to start a sandbox, one to run a command in it.
+
+        .. code-block:: python
+
+            import anthropic
+            import sky.sandbox
+
+            # Claude runs outside the sandbox and calls these tools to create
+            # one on demand and run code in it. A chat that never runs code
+            # never makes a pod.
+            sb = None
+
+            tools = [
+                {'name': 'start_skypilot_sandbox',
+                 'description': 'Provision a fresh sandbox. Call the first '
+                                'time you need to run code.',
+                 'input_schema': {'type': 'object', 'properties': {}}},
+                {'name': 'run_shell',
+                 'description': 'Run a shell command in the sandbox. State '
+                                'persists across calls.',
+                 'input_schema': {'type': 'object',
+                                  'properties': {'command': {'type': 'string'}},
+                                  'required': ['command']}},
+            ]
+
+            def dispatch(name, args):
+                global sb
+                if name == 'start_skypilot_sandbox':
+                    # Claims a warm pod from the pool.
+                    sb = sky.sandbox.create(name='chat')
+                    return 'Sandbox ready.'
+                # run_shell. exec returns a handle, so the connection is held
+                # only for the launch + each poll, not for the command's whole
+                # runtime: a long agent command (a build, a test suite, a
+                # training run) completes instead of tripping an edge timeout.
+                # timeout_seconds is the server-side budget after which the
+                # command is killed in the pod -- size it to your longest tool
+                # call rather than leaving the 60s default.
+                proc = sb.exec('sh', '-c', args['command'],
+                               timeout_seconds=3600)
+                proc.wait()
+                return proc.stdout.read() or proc.stderr.read()
+
+            client = anthropic.Anthropic()
+            messages = [
+                {'role': 'user',
+                 'content': 'Compute the 100th Fibonacci number with Python.'}]
+            while True:
+                resp = client.messages.create(model='claude-opus-4-8',
+                                              max_tokens=4096, tools=tools,
+                                              messages=messages)
+                messages.append({'role': 'assistant', 'content': resp.content})
+                tool_uses = [b for b in resp.content if b.type == 'tool_use']
+                if not tool_uses:
+                    break
+                messages.append({'role': 'user', 'content': [
+                    {'type': 'tool_result', 'tool_use_id': tu.id,
+                     'content': dispatch(tu.name, tu.input)}
+                    for tu in tool_uses]})
+
+            if sb is not None:
+                sb.terminate()
+
+        Each agent gets its own pod, so many can work in parallel without
+        sharing a filesystem or stepping on each other. Inject per-agent
+        credentials at ``create`` time with ``secrets=[...]`` so tokens never
+        appear in the commands the agent runs.
 
 Advanced: Warm pools for fast provisioning
 ------------------------------------------
@@ -321,6 +446,94 @@ Create a pool, and resize it at any time:
 
    # Launch a sandbox from the pool.
    sb = sky.sandbox.create(name='train', pool='ml-gpu')
+
+Docker-in-Docker
+----------------
+
+Run ``docker build``, ``docker run``, and ``docker compose`` **inside** a
+sandbox, with any base image. It is a one-flag opt-in: pass
+``enable_docker=True``. The Docker daemon runs in a separate privileged
+sidecar and the ``docker`` CLI is injected automatically, so the container
+your code runs in stays unprivileged and your image needs no changes.
+
+.. code-block:: python
+
+   import sky.sandbox
+
+   # Ad-hoc launch (fresh pod, cold start).
+   sb = sky.sandbox.create(name='dev', image='ubuntu:22.04',
+                           enable_docker=True)
+   sb.exec('docker', 'run', '--rm', 'hello-world').wait()
+   sb.exec('docker', 'build', '-t', 'app', '/src').wait()
+
+   # Or bake Docker into a warm pool to keep sub-second launches.
+   sky.sandbox.create_pool(name='docker-pool', image='ubuntu:22.04',
+                           replicas=3, enable_docker=True)
+   sky.sandbox.create(name='dev2', pool='docker-pool')
+
+``enable_docker`` on ``create()`` applies to ad-hoc launches only (pass
+``image=``); a warm pool's Docker support is fixed at pool creation, so pass
+``enable_docker=True`` to ``create_pool`` instead.
+
+.. note::
+
+   The target cluster must admit privileged pods (for the Docker daemon
+   sidecar). Clusters that enforce a no-privileged policy, such as GKE
+   Autopilot, reject the launch.
+
+Stronger isolation with gVisor on GKE
+-------------------------------------
+
+On GKE you can further harden sandbox pods by using `gVisor
+<https://gvisor.dev/>`_. gVisor is officially supported by GKE, and in order to
+make use of it through SkyPilot Sandboxes, the following two steps can be
+performed:
+
+1. **Create a GKE Sandbox node pool** with ``--sandbox type=gvisor``:
+
+   .. code-block:: bash
+
+      gcloud container node-pools create sandbox-pool \
+        --cluster <cluster-name> \
+        --sandbox type=gvisor
+
+   Note that an existing node pool can't be converted to support gVisor, a new
+   one must be created. Please see the `GKE Sandbox documentation
+   <https://docs.cloud.google.com/kubernetes-engine/docs/how-to/sandbox-pods>`_
+   for more details.
+
+2. **Point sandboxes at that runtime class** by adding ``runtimeClassName:
+   gvisor`` under ``kubernetes.pod_config`` in ``~/.sky/config.yaml``. SkyPilot
+   uses this to ensure that sandboxes are created using gVisor:
+
+   .. code-block:: yaml
+
+      # ~/.sky/config.yaml
+      kubernetes:
+        pod_config:
+          spec:
+            runtimeClassName: gvisor
+
+To enable gVisor for only some clusters, nest the same ``pod_config`` under
+that context in ``kubernetes.context_configs.<context>`` instead:
+
+.. code-block:: yaml
+
+   # ~/.sky/config.yaml
+   kubernetes:
+     context_configs:
+       gke_my-project_us-central1_my-cluster:
+         pod_config:
+           spec:
+             runtimeClassName: gvisor
+
+.. note::
+
+   If you are using warm pools to speed up startup latencies of sandboxes and
+   enable gVisor functionality after that, all subsequent sandbox launches
+   from the warm pool will *not* respect using gVisor. Please re-create a warm
+   pool for this to take effect. Snapshot & restore is currently not supported
+   on the gVisor runtime.
 
 .. seealso::
 

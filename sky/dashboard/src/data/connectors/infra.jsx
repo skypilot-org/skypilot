@@ -207,6 +207,25 @@ export async function getGPUs() {
   return await getWorkspaceInfrastructure();
 }
 
+/**
+ * Whether a Kubernetes context's node list is filtered by an `allowed_nodes`
+ * config. Drives the infra-page hint/badge that warn not all nodes in the
+ * context are shown, so a missing node isn't mistaken for a bug. Falls back to
+ * `{ configured: false }` on any error so the hint fails closed (no banner)
+ * rather than showing a misleading one.
+ */
+export async function getAllowedNodesConfig(context) {
+  try {
+    const response = await apiClient.get(
+      `/kubernetes/allowed_nodes?k8s_context=${encodeURIComponent(context)}`
+    );
+    if (!response.ok) return { configured: false };
+    return await response.json();
+  } catch {
+    return { configured: false };
+  }
+}
+
 // New workspace-aware infrastructure fetching function
 export async function getWorkspaceInfrastructure() {
   try {

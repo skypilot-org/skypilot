@@ -2683,14 +2683,14 @@ def test_aws_zero_quota_failover():
     if not region:
         pytest.xfail(
             'Unable to test zero quota failover optimization — quotas '
-            'for EC2 P3 instances were found on all AWS regions. Is this '
-            'expected for your account?')
+            'for EC2 P4d (A100) instances were found on all AWS regions. Is '
+            'this expected for your account?')
         return
 
     test = smoke_tests_utils.Test(
         'aws-zero-quota-failover',
         [
-            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus V100:8 --use-spot | grep "Found no quota"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus A100:8 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )

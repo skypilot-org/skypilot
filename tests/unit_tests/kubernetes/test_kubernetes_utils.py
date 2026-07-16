@@ -5305,7 +5305,7 @@ def test_match_kubernetes_failure_hint_text_realistic_eviction_reason():
     event (see backend_utils._update_cluster_status), exercising the display
     (`_text`) variant end to end. The reason contains both 'ephemeral' and
     'Evicted'; the 'ephemeral' entry must win, so the resolved hint points at
-    `resources.ephemeral_storage`.
+    `resources.disk_size`.
     """
     reason = ('Evicted: The node was low on resource: ephemeral-storage. '
               'Threshold quantity: 380764701840, available: 13249836Ki. '
@@ -5313,4 +5313,4 @@ def test_match_kubernetes_failure_hint_text_realistic_eviction_reason():
               'larger consumption of ephemeral-storage.')
     hint = utils.match_kubernetes_failure_hint_text(reason)
     assert hint is not None
-    assert 'resources.ephemeral_storage' in hint
+    assert 'resources.disk_size' in hint

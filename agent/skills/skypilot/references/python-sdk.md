@@ -987,8 +987,10 @@ exist.
 **Args:**
     deploy: Whether to deploy the API server, i.e. fully utilize the
         resources of the machine.
-    host: The host to deploy the API server. It will be set to 0.0.0.0
-        if deploy is True, to allow remote access.
+    host: The host to bind the API server to. Under deploy, the server
+        always binds a wildcard address for remote access: ``::`` when an
+        IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+        is used as-is.
     foreground: Whether to run the API server in the foreground (run in
         the current process).
     metrics: Whether to export metrics of the API server.
@@ -1373,7 +1375,7 @@ Tears down the Kubernetes cluster started by local_up.
 ### `sky.local_up`
 
 ```python
-sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None) -> server_common.RequestId[None]
+sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None, num_nodes: int = 1) -> server_common.RequestId[None]
 ```
 
 Launches a Kubernetes cluster on local machines.

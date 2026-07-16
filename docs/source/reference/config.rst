@@ -256,7 +256,6 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
-    :ref:`restrict_config_to_admins <config-yaml-rbac-restrict-config-to-admins>`: false
 
   :ref:`db <config-yaml-db>`: postgresql://postgres@localhost/skypilot
 
@@ -2751,26 +2750,6 @@ If not specified, the default role is ``admin``.
 
 Note: RBAC is only functional when :ref:`OAuth <api-server-oauth>` is configured.
 
-.. _config-yaml-rbac-restrict-config-to-admins:
-
-``rbac.restrict_config_to_admins``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Restrict reading the API server config to admins (optional, default ``false``).
-
-The API server config (returned by ``GET /workspaces/config``) includes
-admin-only secrets such as cloud provider tokens. When this is set to ``true``,
-the ``user`` role is blocked from reading it (returns ``403``) and the dashboard
-hides the configuration page for non-admin users. Writing the config
-(``POST /workspaces/config``) is admin-only regardless of this setting.
-
-Defaults to ``false`` to preserve backward-compatible behavior.
-
-.. code-block:: yaml
-
-  rbac:
-    restrict_config_to_admins: true
-
 .. _config-yaml-db:
 
 ``db``
@@ -2867,3 +2846,40 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+
+.. _config-yaml-metrics:
+
+``metrics``
+~~~~~~~~~~~
+
+GPU metrics federation configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-metrics-prometheus:
+
+``metrics.prometheus``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Prometheus deployment that ``/gpu-metrics`` federates from in each Kubernetes context (optional).
+
+By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm chart: service ``skypilot-prometheus-server`` in namespace ``skypilot``, port ``80``. Set these fields if your Prometheus lives in a different namespace or under a different service name.
+
+``namespace``
+    Namespace the Prometheus service is deployed in. Default: ``skypilot``.
+
+``service``
+    Name of the Prometheus service. Default: ``skypilot-prometheus-server``.
+
+``port``
+    Port of the Prometheus service. Default: ``80``.
+
+.. code-block:: yaml
+
+  metrics:
+    prometheus:
+      namespace: monitoring
+      service: prometheus-server
+      port: 80
+
+.. note::
+
+    When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the ``kube-system`` namespace as seen through the context's credentials with the UID seen through the in-cluster credentials) and skips that context during federation: the central Prometheus (the one deployed next to the API server, e.g. by the SkyPilot Helm chart) already scrapes the local cluster's exporters directly, so federating it again would only duplicate the series. The dashboard queries the local cluster's series by their missing ``cluster`` label instead of a context name. If detection fails (e.g. the context's credentials cannot ``get`` the ``kube-system`` namespace), the context is treated as remote and federated over port-forward — the previous behavior for every context.

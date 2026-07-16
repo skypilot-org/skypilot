@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import posixpath
+import threading
 import time
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
@@ -17,12 +18,24 @@ from sky import exceptions
 from sky.adaptors import kubernetes as adaptors_kubernetes
 from sky.jobs import utils as managed_job_utils
 from sky.server import constants as server_constants
+from sky.server.requests import log_provider as log_provider_lib
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.utils import common
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 from sky.utils import status_lib
+
+
+class _StubReachability:
+    """Reachability checker stubbed to a fixed answer -- no network probe."""
+
+    def __init__(self, reachable: bool = True) -> None:
+        self._reachable = reachable
+
+    def __call__(self, context: Optional[str]) -> bool:
+        del context  # unused
+        return self._reachable
 
 
 def _make_context(
@@ -199,7 +212,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-j1' in ctx['request_ids']
 
@@ -215,7 +228,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={20})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-j2' in ctx['request_ids']
 
@@ -231,7 +244,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert ctx['request_ids'] == set()
 
@@ -240,7 +253,7 @@ class TestGetRequestsFromManagedJobs:
         """Empty managed_job_ids should not trigger any DB call."""
         ctx = _make_context(managed_job_ids=set())
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         mock_get_tasks.assert_not_called()
         assert ctx['request_ids'] == set()
@@ -256,7 +269,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert ctx['request_ids'] == set()
 
@@ -268,7 +281,7 @@ class TestGetRequestsFromManagedJobs:
         ctx = _make_context(managed_job_ids={42})
 
         # Should not raise
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert ctx['request_ids'] == set()
 
@@ -280,7 +293,7 @@ class TestGetRequestsFromManagedJobs:
         mock_get_tasks.return_value = []
         ctx = _make_context(managed_job_ids={1})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         call_args = mock_get_tasks.call_args
         task_filter = call_args[0][0]
@@ -312,7 +325,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-cancel-name' in ctx['request_ids']
 
@@ -337,7 +350,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-cancel-all-users' in ctx['request_ids']
 
@@ -363,7 +376,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-cancel-all' in ctx['request_ids']
 
@@ -389,7 +402,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-cancel-other' not in ctx['request_ids']
 
@@ -406,7 +419,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={42})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-rv' in ctx['request_ids']
 
@@ -424,7 +437,7 @@ class TestGetRequestsFromManagedJobs:
         ]
         ctx = _make_context(managed_job_ids={43})
 
-        debug_utils._get_requests_from_managed_jobs(ctx)
+        debug_utils._get_requests_from_managed_jobs(ctx, _StubReachability())
 
         assert 'req-rv-list' in ctx['request_ids']
 
@@ -608,7 +621,7 @@ class TestGetManagedJobsFromClusters:
         name = managed_job_utils.generate_managed_job_cluster_name('train', 7)
         ctx = _make_context(cluster_names={name})
 
-        debug_utils._get_managed_jobs_from_clusters(ctx)
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
 
         assert ctx['managed_job_ids'] == {7}
 
@@ -638,7 +651,7 @@ class TestGetManagedJobsFromClusters:
         ], 0, {}, 0)
         ctx = _make_context(cluster_names={'worker-1'})
 
-        debug_utils._get_managed_jobs_from_clusters(ctx)
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
 
         assert ctx['managed_job_ids'] == {1, 2}
 
@@ -654,7 +667,7 @@ class TestGetManagedJobsFromClusters:
         """
         ctx = _make_context()
 
-        debug_utils._get_managed_jobs_from_clusters(ctx)
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
 
         assert ctx['managed_job_ids'] == set()
         mock_queue.assert_not_called()
@@ -665,7 +678,7 @@ class TestGetManagedJobsFromClusters:
         errors: List[Dict[str, str]] = []
         ctx = _make_context(cluster_names={'c1'}, errors=errors)
 
-        debug_utils._get_managed_jobs_from_clusters(ctx)
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
 
         assert ctx['managed_job_ids'] == set()
         assert len(errors) == 1
@@ -936,7 +949,9 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert 'req-recent' in ctx['request_ids']
 
@@ -951,7 +966,9 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=120.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=120.0,
+                                             reachability=_StubReachability())
 
         call_args = mock_get_tasks.call_args
         task_filter = call_args[0][0]
@@ -983,7 +1000,9 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert 'active-cluster' in ctx['cluster_names']
         assert 'old-cluster' not in ctx['cluster_names']
@@ -1020,7 +1039,9 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert ctx['cluster_names'] == {'active-cluster'}
 
@@ -1047,7 +1068,9 @@ class TestPopulateRecentContext:
         ], 2, {}, 2)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert 1 in ctx['managed_job_ids']
         assert 2 not in ctx['managed_job_ids']
@@ -1066,7 +1089,9 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert 'req-running' in ctx['request_ids']
 
@@ -1082,7 +1107,9 @@ class TestPopulateRecentContext:
 
         ctx = _make_context()
         # Should not raise
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert ctx['request_ids'] == set()
         assert ctx['cluster_names'] == set()
@@ -1106,7 +1133,9 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, minutes=60.0)
+        debug_utils._populate_recent_context(ctx,
+                                             minutes=60.0,
+                                             reachability=_StubReachability())
 
         assert 'newly-launched' in ctx['cluster_names']
 
@@ -1211,7 +1240,8 @@ class TestCrossLinkCycleBreak:
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
                         return_value=([], 0, {}, 0)):
             ctx = _make_context(managed_job_ids={42})
-            debug_utils._get_requests_from_managed_jobs(ctx)
+            debug_utils._get_requests_from_managed_jobs(ctx,
+                                                        _StubReachability())
 
         assert 'req-1' in ctx['request_ids']
         assert 'req-1' in ctx['request_ids_via_job']
@@ -1271,7 +1301,8 @@ class TestCrossLinkCycleBreak:
             # 'user-seeded' was already in request_ids before the helper ran.
             ctx = _make_context(managed_job_ids={42},
                                 request_ids={'user-seeded'})
-            debug_utils._get_requests_from_managed_jobs(ctx)
+            debug_utils._get_requests_from_managed_jobs(ctx,
+                                                        _StubReachability())
 
         assert 'user-seeded' in ctx['request_ids']
         # Pre-existing request was not tagged → still expandable downstream.
@@ -1304,7 +1335,8 @@ class TestCrossLinkCycleBreak:
         with mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
                         return_value=([], 0, {}, 0)):
             ctx = _make_context(managed_job_ids={1})
-            debug_utils._get_requests_from_managed_jobs(ctx)
+            debug_utils._get_requests_from_managed_jobs(ctx,
+                                                        _StubReachability())
 
         assert 'cancel-req' in ctx['request_ids']
         assert 'cancel-req' in ctx['request_ids_via_job']
@@ -2161,6 +2193,60 @@ class TestSensitiveEnvVarRedaction:
         # Sensitive var should be redacted to bool
         assert env['SKYPILOT_DB_CONNECTION_URI'] is True
 
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                return_value=None)
+    def test_dump_server_info_check_timeout_does_not_hang(
+            self, mock_req, tmp_path, monkeypatch):
+        """A slow sky_check.check() is bounded; the dump records a timeout error
+        and moves on instead of hanging (the ~20s-per-dead-context probe)."""
+        del mock_req  # required by mock.patch
+        # Tighten the deadline so the test is fast.
+        monkeypatch.setattr(debug_utils, '_SKY_CHECK_TIMEOUT', 0.2)
+        started = threading.Event()
+
+        def _slow_check(*_args, **_kwargs):
+            started.set()
+            time.sleep(5)  # Longer than the (patched) deadline.
+            return {}
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.utils.debug_utils.sky_check.check',
+                        side_effect=_slow_check):
+            start = time.time()
+            debug_utils._dump_server_info(str(tmp_path), errors=errors)
+            elapsed = time.time() - start
+
+        assert started.is_set()
+        # Returned well before the slow check would have finished.
+        assert elapsed < 3
+        with open(os.path.join(str(tmp_path), 'server_info.json')) as f:
+            info = json.load(f)
+        assert 'enabled_clouds' not in info
+        assert 'cloud_status_error' in info
+        assert any(e['resource'] == 'cloud_status' for e in errors)
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                return_value=None)
+    @mock.patch('sky.utils.debug_utils.sky_check.check',
+                return_value={'default': {
+                    'kubernetes': ['compute']
+                }})
+    def test_dump_server_info_check_result_recorded(self, mock_check, mock_req,
+                                                    tmp_path):
+        """A fast check result is recorded as enabled_clouds (no timeout)."""
+        del mock_check, mock_req  # required by mock.patch
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_server_info(str(tmp_path), errors=errors)
+
+        with open(os.path.join(str(tmp_path), 'server_info.json')) as f:
+            info = json.load(f)
+        assert info['enabled_clouds'] == {
+            'default': {
+                'kubernetes': ['compute']
+            }
+        }
+        assert 'cloud_status_error' not in info
+
 
 # ---------------------------------------------------------------------------
 # Tests for serialize_cluster_record
@@ -2557,6 +2643,7 @@ class TestDumpClusterInfo:
         errors: List[Dict[str, str]] = []
         debug_utils._dump_cluster_info({'gone-cluster'},
                                        str(tmp_path),
+                                       _StubReachability(),
                                        errors=errors)
 
         cluster_dir = tmp_path / 'clusters' / 'gone-cluster'
@@ -2580,7 +2667,10 @@ class TestDumpClusterInfo:
         mock_get_tasks.return_value = []
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'c1'}, str(tmp_path), errors=errors)
+        debug_utils._dump_cluster_info({'c1'},
+                                       str(tmp_path),
+                                       _StubReachability(),
+                                       errors=errors)
 
         assert len(errors) == 1
         assert errors[0]['component'] == 'clusters'
@@ -2903,20 +2993,25 @@ class TestDumpRequestIdInfo:
         assert not errors
         assert not (tmp_path / 'requests').exists()
 
-    @mock.patch('sky.utils.debug_utils.shutil.copy2')
+    @mock.patch('sky.utils.debug_utils.log_provider.get_log_provider')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
-    def test_copies_log_file_when_exists(self, mock_get_request, mock_copy2,
-                                         tmp_path):
-        """Should copy request log when it exists."""
+    def test_copies_log_file_when_exists(self, mock_get_request,
+                                         mock_get_provider, tmp_path):
+        """Should copy request log via the LogProvider."""
         mock_get_request.return_value = _make_request(request_id='req-log')
+        provider = mock.MagicMock()
+        provider.copy_log_file.return_value = True
+        mock_get_provider.return_value = provider
 
-        with mock.patch('pathlib.Path.exists', return_value=True):
-            errors: List[Dict[str, str]] = []
-            debug_utils._dump_request_id_info({'req-log'}, str(tmp_path),
-                                              errors)
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-log'}, str(tmp_path), errors)
 
-        # copy2 should be called at least once (for the log file)
-        assert mock_copy2.called
+        # copy_log_file should be called for the request log
+        assert provider.copy_log_file.called
+        dest_paths = [
+            call.args[2] for call in provider.copy_log_file.call_args_list
+        ]
+        assert any(p.name == 'request.log' for p in dest_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -2945,7 +3040,8 @@ class TestDumpClusterInfo:
         }
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'my-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'my-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         info_path = (tmp_path / 'clusters' / 'my-cluster' / 'cluster_info.json')
         assert info_path.exists()
@@ -2965,7 +3061,8 @@ class TestDumpClusterInfo:
         mock_get_cluster.return_value = None
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'gone-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'gone-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         assert not errors
         info_path = (tmp_path / 'clusters' / 'gone-cluster' /
@@ -2979,7 +3076,8 @@ class TestDumpClusterInfo:
         mock_get_cluster.side_effect = RuntimeError('DB error')
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'fail-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'fail-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         assert len(errors) >= 1
         assert any(e['component'] == 'clusters' for e in errors)
@@ -2987,7 +3085,8 @@ class TestDumpClusterInfo:
     def test_empty_cluster_names_is_noop(self, tmp_path):
         """Empty cluster_names should not create any files."""
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info(set(), str(tmp_path), errors)
+        debug_utils._dump_cluster_info(set(), str(tmp_path),
+                                       _StubReachability(), errors)
 
         assert not errors
         assert not (tmp_path / 'clusters').exists()
@@ -3016,7 +3115,8 @@ class TestDumpClusterInfo:
         }]
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'ev-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'ev-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         event_path = (tmp_path / 'clusters' / 'ev-cluster' /
                       'events_provision.json')
@@ -3042,7 +3142,8 @@ class TestDumpClusterInfo:
         ]
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'assoc-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'assoc-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         assoc_path = (tmp_path / 'clusters' / 'assoc-cluster' /
                       'associated_requests.json')
@@ -3076,7 +3177,8 @@ class TestDumpClusterInfo:
         }
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'live-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'live-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         # Pulled the skylet log off the head node (runners[0]) into the
         # cluster dump dir, using the remotely-resolved source path.
@@ -3110,7 +3212,7 @@ class TestDumpClusterInfo:
 
         errors: List[Dict[str, str]] = []
         debug_utils._dump_cluster_info({'stopped-cluster'}, str(tmp_path),
-                                       errors)
+                                       _StubReachability(), errors)
 
         handle.get_command_runners.assert_not_called()
         assert not errors
@@ -3139,17 +3241,388 @@ class TestDumpClusterInfo:
         }
 
         errors: List[Dict[str, str]] = []
-        debug_utils._dump_cluster_info({'init-cluster'}, str(tmp_path), errors)
+        debug_utils._dump_cluster_info({'init-cluster'}, str(tmp_path),
+                                       _StubReachability(), errors)
 
         runner.rsync.assert_called_once()
         assert not errors
+
+    @mock.patch('sky.utils.debug_utils.kubernetes_debug.context_reachable',
+                return_value=False)
+    @mock.patch('sky.utils.debug_utils._kube_coordinates_for_handle',
+                return_value=('defunct-ctx', 'ns'))
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_unreachable_kube_context_skips_skylet_log(
+            self, mock_get_cluster, mock_events, mock_requests, mock_coords,
+            mock_reachable, tmp_path):
+        """A k8s cluster on a defunct context must NOT attempt the (would-hang)
+        skylet collection -- it's gated on the bounded reachability probe."""
+        del mock_events, mock_requests, mock_coords  # required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'k8s-dead',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.UP,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.utils.debug_utils._collect_cluster_kubernetes'
+                        '_resources'):
+            debug_utils._dump_cluster_info({'k8s-dead'}, str(tmp_path),
+                                           debug_utils._kube_context_reachable,
+                                           errors)
+
+        mock_reachable.assert_called_once_with('defunct-ctx')
+        # Skylet collection was skipped: the head runner's remote command (the
+        # ~2min-hang path) was never invoked.
+        runner.run.assert_not_called()
+        runner.rsync.assert_not_called()
+
+    @mock.patch('sky.utils.debug_utils.kubernetes_debug.context_reachable',
+                return_value=True)
+    @mock.patch('sky.utils.debug_utils._kube_coordinates_for_handle',
+                return_value=('live-ctx', 'ns'))
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_reachable_kube_context_collects_skylet_log(
+            self, mock_get_cluster, mock_events, mock_requests, mock_coords,
+            mock_reachable, tmp_path):
+        """Reachable k8s context still collects the skylet log."""
+        del mock_events, mock_requests, mock_coords  # required by mock.patch
+        handle = mock.Mock()
+        runner = mock.Mock()
+        runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
+        handle.get_command_runners.return_value = [runner]
+        mock_get_cluster.return_value = {
+            'name': 'k8s-live',
+            'cluster_hash': 'abc',
+            'status': status_lib.ClusterStatus.UP,
+            'handle': handle,
+        }
+
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.utils.debug_utils._collect_cluster_kubernetes'
+                        '_resources'):
+            debug_utils._dump_cluster_info({'k8s-live'}, str(tmp_path),
+                                           debug_utils._kube_context_reachable,
+                                           errors)
+
+        mock_reachable.assert_called_once_with('live-ctx')
+        runner.rsync.assert_called_once()
+
+
+class TestKubeContextReachability:
+    """Tests for _kube_context_reachable (per-dump memoized kube probes)."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_reachability_cache(self):
+        debug_utils._kube_context_reachable.cache_clear()
+        yield
+        debug_utils._kube_context_reachable.cache_clear()
+
+    @mock.patch('sky.utils.debug_utils.kubernetes_debug.context_reachable')
+    def test_probes_each_context_once(self, mock_reachable):
+        """Repeated lookups of the same context probe only once."""
+        mock_reachable.return_value = True
+
+        assert debug_utils._kube_context_reachable('ctx-a') is True
+        assert debug_utils._kube_context_reachable('ctx-a') is True
+        assert debug_utils._kube_context_reachable('ctx-a') is True
+        mock_reachable.assert_called_once_with('ctx-a')
+
+    @mock.patch('sky.utils.debug_utils.kubernetes_debug.context_reachable')
+    def test_distinct_contexts_probed_separately(self, mock_reachable):
+        mock_reachable.side_effect = lambda ctx: ctx == 'live'
+
+        assert debug_utils._kube_context_reachable('live') is True
+        assert debug_utils._kube_context_reachable('dead') is False
+        assert debug_utils._kube_context_reachable('live') is True
+        assert mock_reachable.call_count == 2
+
+    @mock.patch('sky.utils.debug_utils.kubernetes_debug.context_reachable',
+                return_value=True)
+    def test_none_in_cluster_context_is_cached(self, mock_reachable):
+        """None (in-cluster auth) is a valid, cacheable key."""
+        assert debug_utils._kube_context_reachable(None) is True
+        assert debug_utils._kube_context_reachable(None) is True
+        mock_reachable.assert_called_once_with(None)
+
+
+class TestDumpRequestIdInfoLogCollection:
+    """_dump_request_id_info collects logs via the LogProvider."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_get_request(self):
+        with mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                        return_value=None):
+            yield
+
+    def test_logs_collected_via_log_provider(self, tmp_path):
+        provider = mock.MagicMock()
+
+        def _fake_copy(request_id, log_type, dest_path):
+            del request_id  # unused
+            if log_type == log_provider_lib.RequestLogType.REQUEST:
+                dest_path.write_text('request log content')
+                return True
+            return False
+
+        provider.copy_log_file.side_effect = _fake_copy
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        request_dir = tmp_path / 'requests' / 'req-1'
+        assert (request_dir / 'request.log').exists()
+        assert (request_dir /
+                'request.log').read_text() == 'request log content'
+        # Debug log copy returned False -> no file, and that is not an
+        # error.
+        assert not (request_dir / 'request_debug.log').exists()
+        assert not errors
+
+        # Both log types were requested from the provider.
+        log_types = [
+            call.args[1] for call in provider.copy_log_file.call_args_list
+        ]
+        assert log_provider_lib.RequestLogType.REQUEST in log_types
+        assert log_provider_lib.RequestLogType.DEBUG in log_types
+
+    def test_provider_failure_is_recorded(self, tmp_path):
+        provider = mock.MagicMock()
+        provider.copy_log_file.side_effect = OSError('fetch failed')
+        with mock.patch('sky.utils.debug_utils.log_provider.get_log_provider',
+                        return_value=provider):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        # Failures are recorded in the errors manifest but do not abort
+        # the dump.
+        assert any(e['resource'] == 'req-1/log' for e in errors)
+
+    def test_default_provider_copies_local_files(self, tmp_path):
+        src = tmp_path / 'src.log'
+        src.write_text('local content')
+        with mock.patch('sky.server.requests.log_provider.local_log_path',
+                        return_value=src):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-2'}, str(tmp_path), errors)
+
+        request_dir = tmp_path / 'requests' / 'req-2'
+        assert (request_dir / 'request.log').read_text() == 'local content'
+        assert not errors
+
+
+class TestJobsControllerUnreachableGate:
+    """Tests for _jobs_controller_unreachable_context and its call sites.
+
+    The gate must only skip on positive evidence of the one hang mode
+    (k8s controller behind a dead context) and fail open otherwise.
+    """
+
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=True)
+    def test_consolidation_mode_never_skips(self, _):
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=False))
+        assert result is None
+
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_from_name',
+                return_value=None)
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=False)
+    def test_no_controller_record_never_skips(self, _, __):
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=False))
+        assert result is None
+
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_from_name',
+                return_value={'handle': None})
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=False)
+    def test_no_handle_never_skips(self, _, __):
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=False))
+        assert result is None
+
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_from_name')
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=False)
+    def test_non_k8s_controller_never_skips(self, _, mock_get_cluster):
+        resources = SimpleNamespace(cloud=clouds.AWS(),
+                                    region='us-east-1',
+                                    zone=None)
+        handle = SimpleNamespace(launched_resources=resources,
+                                 cluster_name_on_cloud='ctrl-on-cloud')
+        mock_get_cluster.return_value = {'handle': handle}
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=False))
+        assert result is None
+
+    @mock.patch('sky.utils.debug_utils._kube_coordinates_for_handle',
+                return_value=('ctrl-ctx', 'ns'))
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_from_name',
+                return_value={'handle': mock.Mock()})
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=False)
+    def test_reachable_k8s_context_never_skips(self, _, __, ___):
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=True))
+        assert result is None
+
+    @mock.patch('sky.utils.debug_utils._kube_coordinates_for_handle',
+                return_value=('ctrl-ctx', 'ns'))
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_from_name',
+                return_value={'handle': mock.Mock()})
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=False)
+    def test_unreachable_k8s_context_skips(self, _, __, ___):
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=False))
+        assert result == 'ctrl-ctx'
+
+    @mock.patch('sky.utils.debug_utils.global_user_state.'
+                'get_cluster_from_name',
+                side_effect=RuntimeError('db exploded'))
+    @mock.patch('sky.utils.debug_utils.managed_job_utils.'
+                'is_consolidation_mode',
+                return_value=False)
+    def test_resolution_error_fails_open(self, _, __):
+        result = debug_utils._jobs_controller_unreachable_context(
+            _StubReachability(reachable=False))
+        assert result is None
+
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context',
+                return_value='dead-ctx')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_recent_context_skips_jobs_scan_on_dead_controller(
+            self, mock_queue, mock_gate):
+        """queue_v2 must not run; a skip record lands in errors."""
+        ctx = _make_context()
+        with mock.patch('sky.utils.debug_utils.requests_lib.'
+                        'get_request_tasks',
+                        return_value=[]), \
+             mock.patch('sky.utils.debug_utils.global_user_state.'
+                        'get_clusters',
+                        return_value=[]):
+            debug_utils._populate_recent_context(
+                ctx, minutes=60.0, reachability=_StubReachability())
+
+        mock_queue.assert_not_called()
+        assert any(e['component'] == 'recent_context' and
+                   e['resource'] == 'managed_jobs' and 'fast-fail' in e['error']
+                   for e in ctx['errors'])
+
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context',
+                return_value='dead-ctx')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_dump_managed_job_info_skips_on_dead_controller(
+            self, mock_queue, mock_gate, tmp_path):
+        """Neither queue_v2 nor controller collection runs; skip recorded."""
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.utils.debug_utils.'
+                        '_collect_controller_debug_data') as mock_collect:
+            debug_utils._dump_managed_job_info({1, 2},
+                                               str(tmp_path),
+                                               _StubReachability(),
+                                               errors=errors)
+
+        mock_queue.assert_not_called()
+        mock_collect.assert_not_called()
+        assert any(
+            e['component'] == 'managed_jobs' and
+            e['resource'] == 'controller_access' and 'fast-fail' in e['error']
+            for e in errors)
+
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context',
+                return_value=None)
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2',
+                return_value=([], None, None, None))
+    def test_dump_managed_job_info_proceeds_on_reachable_controller(
+            self, mock_queue, mock_gate, tmp_path):
+        errors: List[Dict[str, str]] = []
+        with mock.patch('sky.utils.debug_utils.'
+                        '_collect_controller_debug_data') as mock_collect:
+            debug_utils._dump_managed_job_info({1},
+                                               str(tmp_path),
+                                               _StubReachability(),
+                                               errors=errors)
+
+        mock_queue.assert_called_once()
+        mock_collect.assert_called_once()
+
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context',
+                return_value='dead-ctx')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_cluster_to_job_expansion_skips_on_dead_controller(
+            self, mock_queue, mock_gate):
+        ctx = _make_context(cluster_names={'c1'})
+        debug_utils._get_managed_jobs_from_clusters(ctx, _StubReachability())
+
+        mock_queue.assert_not_called()
+        assert not ctx['managed_job_ids']
+        assert any(e['resource'] == 'managed_jobs_from_clusters' and
+                   'fast-fail' in e['error'] for e in ctx['errors'])
+
+    @mock.patch('sky.utils.debug_utils._jobs_controller_unreachable_context',
+                return_value='dead-ctx')
+    @mock.patch('sky.utils.debug_utils.managed_jobs_core.queue_v2')
+    def test_request_matching_degrades_but_still_runs_on_dead_controller(
+            self, mock_queue, mock_gate):
+        """Name/user matching is skipped, body matching still runs."""
+        request = _make_request(
+            request_id='req-1',
+            name=(server_constants.REQUEST_NAME_PREFIX +
+                  request_names.RequestName.JOBS_CANCEL.value),
+            request_body=SimpleNamespace(job_id=42),
+        )
+        ctx = _make_context(managed_job_ids={42})
+        with mock.patch(
+                'sky.utils.debug_utils.requests_lib.'
+                'get_request_tasks',
+                return_value=[request]):
+            debug_utils._get_requests_from_managed_jobs(ctx,
+                                                        _StubReachability())
+
+        mock_queue.assert_not_called()
+        # Body matching (local) still linked the request.
+        assert 'req-1' in ctx['request_ids']
+        assert any(
+            e['resource'] == 'managed_job_details' and 'fast-fail' in e['error']
+            for e in ctx['errors'])
 
 
 class TestCollectClusterSkyletLog:
     """Tests for the _collect_cluster_skylet_log helper."""
 
     def test_rsyncs_skylet_log_from_head(self, tmp_path):
-        """Pulls the remotely-resolved skylet log off the first (head) runner."""
+        """Pulls the remotely-resolved skylet log off the head runner."""
         runner = mock.Mock()
         runner.run.return_value = (0, '/home/sky/.sky/skylet.log\n', '')
         handle = mock.Mock()

@@ -346,10 +346,6 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
                 f'{ux_utils.BOLD}sky api logs {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
-                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
-                'visit: '
-                f'{server_common.get_server_url()}/api/stream?'
-                f'request_id={short_request_id}'
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
                 'the request, run: '
                 f'{ux_utils.BOLD}sky api cancel {short_request_id}'
@@ -363,10 +359,7 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
             f'{ux_utils.BOLD}sky api logs {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n'
-            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
-            f'{server_common.get_server_url()}/api/stream?'
-            f'request_id={short_request_id}'
-            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
+            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
             'the request, run: '
             f'{ux_utils.BOLD}sky api cancel {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n')
@@ -6152,7 +6145,9 @@ def jobs_queue(verbose: bool,
 
     - ``RUNNING``: Job is running.
 
-    - ``RECOVERING``: The cluster of the job is recovering from a preemption.
+    - ``RECOVERING``: The job is recovering — from a cluster preemption or
+      failure, or from a controller-side issue (the controller restarted or
+      hit an unexpected internal error and is restarting job management).
 
     - ``SUCCEEDED``: Job succeeded.
 
@@ -7829,14 +7824,23 @@ def local():
     help='Starting port range for the local kind cluster. Needs to be a '
     'multiple of 100. If not given, a random range will be used. '
     'Used without ip list.')
+@click.option(
+    '--num-nodes',
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    required=False,
+    help='Number of nodes in the local kind cluster. A value greater than 1 '
+    'adds worker nodes, useful for testing multi-node scheduling locally. '
+    'Used without ip list.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
-             async_call: bool):
+             num_nodes: int, async_call: bool):
     """Creates a local cluster."""
-    request_id = sdk.local_up(gpus, name, port_start)
+    request_id = sdk.local_up(gpus, name, port_start, num_nodes)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -7869,14 +7873,16 @@ def api():
               help=('Deploy the SkyPilot API server. When set to True, '
                     'SkyPilot API server will use all resources on the host '
                     'machine assuming the machine is dedicated to SkyPilot API '
-                    'server; host will also be set to 0.0.0.0 to allow remote '
-                    'access.'))
+                    'server; host will also be set to a wildcard address '
+                    '(0.0.0.0, or :: when an IPv6 --host is given) '
+                    'to allow remote access.'))
 @click.option('--host',
               default='127.0.0.1',
               type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
               required=False,
-              help=('The host to deploy the SkyPilot API server. To allow '
-                    'remote access, set this to 0.0.0.0'))
+              help=('The host to bind the SkyPilot API server to. To allow '
+                    'remote access, set this to 0.0.0.0; use :: for IPv6 '
+                    'dual-stack.'))
 @click.option('--foreground',
               is_flag=True,
               default=False,
@@ -7900,7 +7906,10 @@ def api_start(deploy: bool, host: str, foreground: bool,
                   foreground=foreground,
                   enable_basic_auth=enable_basic_auth)
     api_server_url = server_common.get_server_url(host)
-    api_server_info = server_common.get_api_server_status(api_server_url)
+    # Dial via a reachable loopback URL: wildcard bind hosts (0.0.0.0 / ::) are
+    # not valid connect targets on all platforms.
+    api_server_info = server_common.get_api_server_status(
+        server_common.get_local_server_dial_url(host))
     server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 

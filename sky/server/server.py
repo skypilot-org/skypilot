@@ -2677,13 +2677,56 @@ async def api_status(
         return encoded_request_tasks
 
 
+def _get_local_contexts() -> List[str]:
+    """Kubeconfig contexts that point at the API server's own cluster.
+
+    Uses the same detection as the metrics federation routes, so the
+    dashboard and the federation always agree on which contexts are
+    local (their series are queried with cluster="" instead of a
+    context name).
+    """
+    local_contexts, _ = metrics_utils.split_local_remote_contexts(
+        core.get_all_contexts())
+    return local_contexts
+
+
+@app.get('/kubernetes/allowed_nodes')
+async def kubernetes_allowed_nodes(k8s_context: str) -> Dict[str, Any]:
+    """Whether a K8s context's node list is filtered by ``allowed_nodes``.
+
+    Drives the infra-page hint that tells users the node list for this
+    context is filtered by an ``allowed_nodes`` config — so a node they
+    expect to see but is missing isn't mistaken for a bug. Reads the loaded
+    config directly (a cheap in-memory lookup with the same context-override
+    resolution the provisioner uses), so it runs in the event loop without
+    the request-id machinery.
+
+    Fails closed: any error resolving the config yields ``configured: False``
+    so the dashboard never shows a misleading banner.
+    """
+    try:
+        allowed_nodes = kubernetes_utils.get_allowed_nodes_config(
+            context=k8s_context)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Failed to resolve allowed_nodes for context %r',
+                     k8s_context,
+                     exc_info=True)
+        return {'configured': False}
+    return {'configured': bool(allowed_nodes)}
+
+
 @app.get('/dashboard_config')
 async def dashboard_config() -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
-    Currently exposes the optional `external_links` allowlist that the dashboard
-    matches against streamed logs to render labeled external links on cluster
-    and job detail pages.
+    Exposes the optional `external_links` entries: `regex` entries that
+    the dashboard matches against streamed logs, and `url` template
+    entries that the dashboard resolves against cluster/job metadata to
+    render labeled external links on cluster and job detail pages. Also
+    exposes `local_contexts` (contexts pointing at the API server's own
+    cluster); the field is omitted when detection raises, so the
+    dashboard falls back to its ['in-cluster'] default instead of
+    treating an error as "no local contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
@@ -2693,10 +2736,26 @@ async def dashboard_config() -> Dict[str, Any]:
             if not isinstance(entry, dict):
                 continue
             label = entry.get('label')
+            if not isinstance(label, str):
+                continue
             regex = entry.get('regex')
-            if isinstance(label, str) and isinstance(regex, str):
+            if isinstance(regex, str):
                 sanitized.append({'label': label, 'regex': regex})
-    return {'external_links': sanitized}
+                continue
+            url = entry.get('url')
+            if isinstance(url, str):
+                sanitized.append({'label': label, 'url': url})
+    dashboard_settings: Dict[str, Any] = {'external_links': sanitized}
+    try:
+        # May probe each uncached context once (blocking k8s API calls);
+        # keep it off the event loop. Failures must not break the rest of
+        # the dashboard config.
+        dashboard_settings['local_contexts'] = await asyncio.to_thread(
+            _get_local_contexts)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to determine local Kubernetes contexts for '
+                       f'the dashboard: {common_utils.format_exception(e)}')
+    return dashboard_settings
 
 
 @app.get('/api/plugins')

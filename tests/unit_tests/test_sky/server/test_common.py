@@ -303,6 +303,135 @@ def test_get_dashboard_url():
         server_url='http://example.com') == 'http://example.com/dashboard'
 
 
+def _isolate_server_url(monkeypatch):
+    """Neutralize env/config endpoint overrides so the host arg is honored."""
+    monkeypatch.delenv(common.constants.SKY_API_SERVER_URL_ENV_VAR,
+                       raising=False)
+    # get_server_url() falls back to the constructed endpoint when the config
+    # has no api_server.endpoint set; force that fallback path.
+    monkeypatch.setattr(
+        common.skypilot_config,
+        'get_nested',
+        lambda keys, default_value=None, *args, **kwargs: default_value)
+    common.get_server_url.cache_clear()
+
+
+def test_host_to_url_host_brackets_ipv6():
+    """IPv6 literals are bracketed for URLs; IPv4/hostnames are unchanged."""
+    assert common._host_to_url_host('::') == '[::]'
+    assert common._host_to_url_host('::1') == '[::1]'
+    # Already-bracketed input is left as-is (not double-bracketed).
+    assert common._host_to_url_host('[::1]') == '[::1]'
+    assert common._host_to_url_host('127.0.0.1') == '127.0.0.1'
+    assert common._host_to_url_host('0.0.0.0') == '0.0.0.0'
+    assert common._host_to_url_host('localhost') == 'localhost'
+
+
+def test_get_server_url_ipv6(monkeypatch):
+    """get_server_url brackets IPv6 hosts and leaves IPv4/hostnames alone."""
+    _isolate_server_url(monkeypatch)
+    assert common.get_server_url('::') == 'http://[::]:46580'
+    common.get_server_url.cache_clear()
+    assert common.get_server_url('::1') == 'http://[::1]:46580'
+    common.get_server_url.cache_clear()
+    assert common.get_server_url('127.0.0.1') == 'http://127.0.0.1:46580'
+    common.get_server_url.cache_clear()
+    assert common.get_server_url('0.0.0.0') == 'http://0.0.0.0:46580'
+    common.get_server_url.cache_clear()
+    assert common.get_server_url('localhost') == 'http://localhost:46580'
+
+
+def test_available_local_api_server_urls_are_wellformed():
+    """The precomputed local URLs bracket IPv6 and parse correctly."""
+    from urllib.parse import urlparse
+
+    # IPv6 hosts are present and bracketed; IPv4 hosts are plain.
+    assert 'http://[::]:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
+    assert 'http://[::1]:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
+    assert 'http://127.0.0.1:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
+    # Every entry is a well-formed URL that urlparse can decompose.
+    for url in common.AVAILABLE_LOCAL_API_SERVER_URLS:
+        parsed = urlparse(url)
+        assert parsed.scheme == 'http'
+        assert parsed.port == 46580
+        assert parsed.hostname
+
+
+def test_is_ipv6_host():
+    assert common.is_ipv6_host('::')
+    assert common.is_ipv6_host('::1')
+    assert common.is_ipv6_host('2001:db8:0:0:0:0:0:1')
+    assert not common.is_ipv6_host('127.0.0.1')
+    assert not common.is_ipv6_host('0.0.0.0')
+    assert not common.is_ipv6_host('localhost')
+    assert not common.is_ipv6_host('example.org')
+
+
+def test_reachable_local_host():
+    """Wildcard bind hosts map to loopback; others pass through."""
+    assert common._reachable_local_host('0.0.0.0') == '127.0.0.1'
+    assert common._reachable_local_host('::') == '::1'
+    # Loopback and hostname inputs are unchanged.
+    assert common._reachable_local_host('::1') == '::1'
+    assert common._reachable_local_host('127.0.0.1') == '127.0.0.1'
+    assert common._reachable_local_host('localhost') == 'localhost'
+
+
+def test_get_local_server_dial_url(monkeypatch):
+    """Dial URL maps wildcard hosts to loopback and brackets IPv6."""
+    _isolate_server_url(monkeypatch)
+    # IPv6 wildcard is dialed via the bracketed IPv6 loopback.
+    assert common.get_local_server_dial_url('::') == 'http://[::1]:46580'
+    common.get_server_url.cache_clear()
+    # IPv4 wildcard is dialed via IPv4 loopback (a valid connect target).
+    assert common.get_local_server_dial_url(
+        '0.0.0.0') == 'http://127.0.0.1:46580'
+    common.get_server_url.cache_clear()
+    assert common.get_local_server_dial_url('::1') == 'http://[::1]:46580'
+    common.get_server_url.cache_clear()
+    assert common.get_local_server_dial_url(
+        '127.0.0.1') == 'http://127.0.0.1:46580'
+
+
+@pytest.mark.parametrize('host,expected_dial_url', [
+    ('::', 'http://[::1]:46580'),
+    ('::1', 'http://[::1]:46580'),
+    ('0.0.0.0', 'http://127.0.0.1:46580'),
+    ('127.0.0.1', 'http://127.0.0.1:46580'),
+])
+def test_start_api_server_polls_reachable_host(monkeypatch, host,
+                                               expected_dial_url):
+    """The startup poll dials the reachable loopback, not the bind host.
+
+    Regression test: a server bound to ``::1`` does not listen on 127.0.0.1,
+    so polling the hard-coded loopback would time out and orphan the server.
+    """
+    _isolate_server_url(monkeypatch)
+
+    proc = mock.Mock()
+    proc.poll.return_value = None  # Process stays alive.
+    # Server reports a non-dev version so the dashboard-staleness branch is
+    # skipped; only .version is read there.
+    status_info = mock.Mock(version='1.0.0')
+
+    monkeypatch.setattr(common, 'is_api_server_local', lambda *a, **k: True)
+    monkeypatch.setattr(common.subprocess, 'Popen', lambda *a, **k: proc)
+    monkeypatch.setattr(common.os, 'makedirs', lambda *a, **k: None)
+    # Avoid probing real host memory (psutil raises KeyError: b'MemTotal:' on
+    # some sandboxed CI runners); the value only drives a warning message.
+    monkeypatch.setattr(common.common_utils, 'get_mem_size_gb', lambda: 16.0)
+    monkeypatch.setattr(common, 'get_api_server_status',
+                        lambda url: status_info)
+    mock_health = mock.Mock(return_value=(ApiServerStatus.HEALTHY, status_info))
+    monkeypatch.setattr(common, 'check_server_healthy', mock_health)
+
+    with mock.patch('builtins.open', mock.mock_open()):
+        common._start_api_server(deploy=False, host=host)
+
+    # The poll dials the reachable loopback URL for the bind host.
+    mock_health.assert_called_once_with(expected_dial_url)
+
+
 def test_cookies_get_no_file(monkeypatch):
     """Test getting cookies from local file."""
 

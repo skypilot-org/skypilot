@@ -2129,7 +2129,8 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @annotations.client_api
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -2143,7 +2144,10 @@ def local_up(gpus: bool,
             raise ValueError('`sky local up` is only supported when '
                              'running SkyPilot locally.')
 
-    body = payloads.LocalUpBody(gpus=gpus, name=name, port_start=port_start)
+    body = payloads.LocalUpBody(gpus=gpus,
+                                name=name,
+                                port_start=port_start,
+                                num_nodes=num_nodes)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -2713,8 +2717,10 @@ def api_start(
     Args:
         deploy: Whether to deploy the API server, i.e. fully utilize the
             resources of the machine.
-        host: The host to deploy the API server. It will be set to 0.0.0.0
-            if deploy is True, to allow remote access.
+        host: The host to bind the API server to. Under deploy, the server
+            always binds a wildcard address for remote access: ``::`` when an
+            IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+            is used as-is.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
         metrics: Whether to export metrics of the API server.
@@ -2725,7 +2731,9 @@ def api_start(
         None
     """
     if deploy:
-        host = '0.0.0.0'
+        # Deploy mode is for remote access, so always bind a wildcard of the
+        # requested host's address family.
+        host = '::' if server_common.is_ipv6_host(host) else '0.0.0.0'
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')

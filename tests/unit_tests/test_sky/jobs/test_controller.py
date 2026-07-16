@@ -9,13 +9,17 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import runpy
+import sys
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
+import warnings
 
 import pytest
 
+from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
@@ -1082,6 +1086,60 @@ class TestDownloadLogsForCancelledJob:
                 1, mock_handle_1, None)
 
 
+class TestDownloadLogAndStreamLoggingAgentGate:
+    """download_log_and_stream skips the local copy only when logs are both
+    forwarded externally AND readable back.
+
+    The controller skips downloading a local copy only when a logging agent
+    forwards the logs AND a log reader is registered to stream them back. If the
+    store has no read-back path (no reader), it must keep the local copy so
+    sky jobs logs can still serve a finished job.
+    """
+
+    def _make_controller(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = (
+            JobController.download_log_and_stream.__get__(
+                controller, JobController))
+        return controller
+
+    def _run(self, agent_configured, reader):
+        controller = self._make_controller()
+        handle = MagicMock()
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=agent_configured), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=reader), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            mock_cutils.download_and_stream_job_log.return_value = (
+                '/tmp/run.log')
+            controller.download_log_and_stream(0, handle, None)
+            return mock_state, mock_runtime, mock_cutils
+
+    def test_skips_download_when_agent_and_reader_configured(self):
+        # Logs are forwarded and readable back -> skip the local copy.
+        mock_state, mock_runtime, mock_cutils = self._run(agent_configured=True,
+                                                          reader=MagicMock())
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_downloads_when_agent_but_no_reader(self):
+        # Forwarded to a write-only store (no reader) -> keep the local copy so
+        # sky jobs logs still works for a finished job.
+        _, _, mock_cutils = self._run(agent_configured=True, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_no_logging_agent(self):
+        _, _, mock_cutils = self._run(agent_configured=False, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+
 class TestJobGroupResumeDoesNotReissueStarting:
     """Regression: a resumed JobGroup task must not be re-issued STARTING.
 
@@ -1241,3 +1299,64 @@ class TestUserJobStatusClassification:
 
         failure_type = mock_set_failed.call_args.kwargs['failure_type']
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
+
+
+class TestDunderMainDispatchesToImportedModule:
+    """Regression: running this file as `__main__` must dispatch into the
+    IMPORTED `sky.jobs.controller` module, not into a second copy of it.
+
+    The controller process is launched as
+    `python -u -m sky.jobs.controller <uuid>`. Under `python -m pkg.mod`,
+    Python's `runpy` executes the module's source a SECOND time into a
+    fresh `__main__` namespace, in addition to the normal import of
+    `sky.jobs.controller`. That leaves the process with two distinct copies
+    of every class and module-level function defined in this file -- the
+    imported `sky.jobs.controller.JobController` and a separate
+    `__main__.JobController` -- and whichever `main()` actually runs
+    determines which copy every subsequently constructed object belongs to.
+    If the `__main__` guard called the LOCAL `main` (the `__main__` copy),
+    `mock.patch('sky.jobs.controller.JobController...')`, `isinstance`
+    checks, and `pickle` would all silently operate on the wrong class.
+
+    This test exercises the real `__main__` guard via `runpy` (it does not
+    reimplement the dispatch logic) and asserts that the imported module's
+    `main` -- addressed as `sky.jobs.controller.main` -- is the one that
+    gets called.
+    """
+
+    def test_run_as_main_calls_imported_module_main(self):
+        started = []
+
+        def _close_without_running(coro, *args, **kwargs):
+            # The `__main__` guard builds a coroutine and hands it to
+            # `asyncio.run`. Close it rather than run it: a coroutine does
+            # not execute any of its body until it is awaited, so this keeps
+            # a REGRESSION cheap and loud. Without this, a regression makes
+            # the `__main__` copy's own (unmocked) `main` coroutine run the
+            # real controller loop forever, and the test would hang CI
+            # instead of failing it. `asyncio.run` is resolved on the shared
+            # `asyncio` module at call time, so patching it here reaches the
+            # `__main__` copy too.
+            coro.close()
+            started.append(coro)
+
+        with warnings.catch_warnings():
+            # runpy warns that 'sky.jobs.controller' is already present in
+            # sys.modules (it was imported normally when this test module
+            # was collected). That is expected and is exactly the scenario
+            # under test, so it is suppressed rather than worked around.
+            warnings.filterwarnings('ignore',
+                                    message=r'.*found in sys\.modules.*',
+                                    category=RuntimeWarning)
+            with patch.object(controller_module, 'main',
+                              new_callable=AsyncMock) as mock_main, \
+                 patch.object(asyncio, 'run',
+                              side_effect=_close_without_running), \
+                 patch.object(sys, 'argv',
+                              ['sky.jobs.controller', 'test-uuid']):
+                runpy.run_module('sky.jobs.controller', run_name='__main__')
+
+        assert started, 'the __main__ guard never called asyncio.run'
+        # The imported module's `main` -- not the `__main__` copy's -- must be
+        # the one that was called.
+        mock_main.assert_called_once_with('test-uuid')
