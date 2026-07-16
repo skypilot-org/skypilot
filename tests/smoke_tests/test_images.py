@@ -496,8 +496,8 @@ def test_image_no_conda():
 def test_kubernetes_default_image_no_conda():
     """The default K8s image ships no conda, but tasks get a writable py env.
 
-    Regression guard for SKY-6032: conda was removed from the default K8s
-    images and install_conda now defaults to false. A user task must:
+    Regression guard: conda was removed from the default K8s images and
+    install_conda now defaults to false. A user task must:
       1. find no conda on PATH (fails if conda is baked back in), and
       2. still `pip install` successfully — i.e. land in the auto-activated,
          user-writable venv rather than a non-writable system site-packages.

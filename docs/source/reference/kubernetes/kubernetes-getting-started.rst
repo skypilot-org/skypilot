@@ -445,9 +445,9 @@ FAQs
 
     FROM <your base image>
 
-    # Install system dependencies (including python3 for the SkyPilot runtime)
+    # Install system dependencies
     RUN apt update -y && \
-        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl python3 python3-pip python3-venv -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install SkyPilot python dependencies into a dedicated runtime venv.
