@@ -233,8 +233,21 @@ class Kubernetes(clouds.Cloud):
             (f'Local disk is not supported on {_REPR}'),
     }
 
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204'
+    # Default images. The `-vN` suffix is the *image contract version*: it is
+    # resolved to a concrete, immutable image via the service catalog
+    # (kubernetes/images.csv), so a given tag always maps to one built image.
+    #
+    # When to bump `-vN` (e.g. -v1 -> -v2): ONLY for a breaking image change
+    # that an older API server cannot use correctly (e.g. removing conda, which
+    # older servers assume is present). Bumping keeps the old tag frozen to the
+    # old image, so old servers keep working while new servers get the new one.
+    #
+    # When NOT to bump (most cases): routine / CVE rebuilds that keep the
+    # same contract. Do not change this string; instead repoint the same tag to
+    # the new image (a new concrete datetag) in the catalog, so existing servers
+    # pick up the update.
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v1'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v1'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -735,15 +748,11 @@ class Kubernetes(clouds.Cloud):
                 if image_id.startswith('docker:'):
                     image_id = image_id[len('docker:'):]
             else:
-                # TEMP(local-test): use locally-built images instead of the
-                # published catalog images. Revert before committing.
-                _ = catalog  # keep import for the real path
-                repo = 'us-docker.pkg.dev/sky-dev-465/skypilotk8s'
-                tag = '202607160213'
-                if acc_count > 0:
-                    image_id = f'{repo}/skypilot-gpu:{tag}'
-                else:
-                    image_id = f'{repo}/skypilot:{tag}'
+                # Select image based on whether we are using GPUs or not.
+                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+                # Get the container image ID from the service catalog.
+                image_id = catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
             return image_id
 
         image_id = _get_image_id(resources)
