@@ -1,14 +1,15 @@
 """Unit tests for sky.jobs.recovery_strategy helpers."""
-
 import asyncio
+import types
+from unittest import mock
+
+import pytest
 
 from sky import clouds
 from sky import dag as dag_lib
+from sky import exceptions
 from sky import resources as resources_lib
 from sky import task as task_lib
-import pytest
-
-from sky import exceptions
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler as scheduler_module
 
