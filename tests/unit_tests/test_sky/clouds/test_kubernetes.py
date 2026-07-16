@@ -3067,7 +3067,9 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         """Test that unreachable contexts are excluded."""
         mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
 
-        def check_instance_side_effect(context, instance_type):
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
             if context == 'ctx1':
                 from sky import exceptions as sky_exceptions
                 raise sky_exceptions.KubeAPIUnreachableError('API unreachable')
@@ -3136,7 +3138,9 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         mock_check_features.side_effect = check_features_side_effect
 
         # ctx3 doesn't have enough resources
-        def check_instance_side_effect(context, instance_type):
+        def check_instance_side_effect(context,
+                                       instance_type,
+                                       ephemeral_storage_gb=None):
             if context == 'ctx3':
                 return (False, 'Not enough resources')
             return (True, None)
