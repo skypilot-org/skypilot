@@ -739,7 +739,7 @@ class Kubernetes(clouds.Cloud):
                 # published catalog images. Revert before committing.
                 _ = catalog  # keep import for the real path
                 repo = 'us-docker.pkg.dev/sky-dev-465/skypilotk8s'
-                tag = '202607151006'
+                tag = '202607160156'
                 if acc_count > 0:
                     image_id = f'{repo}/skypilot-gpu:{tag}'
                 else:
