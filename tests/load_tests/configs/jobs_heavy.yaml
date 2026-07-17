@@ -1,0 +1,76 @@
+# Managed-jobs-biased load config for benchmark_ctl.py / benchmark_worker.py.
+#
+# Builds a standing population of managed jobs (workloads/jobs.sh) and sustains
+# concurrent `sky jobs queue` reads, to watch for controller/queue degradation
+# (submit-latency creep, RSS growth, throttling) under a jobs-heavy load —
+# rather than the cluster-lifecycle mix in configs/mixed.yaml.
+#
+# Distributed run (worker VMs launched by the controller):
+#   python tests/load_tests/benchmark_ctl.py \
+#       --config tests/load_tests/configs/jobs_heavy.yaml \
+#       --target-endpoint http://user:pass@<api-server>     # or --service-account-token
+#
+# Single-worker run (no worker VMs; drives the target from this host):
+#   python tests/load_tests/benchmark_worker.py \
+#       --config tests/load_tests/configs/jobs_heavy.yaml \
+#       -w 0 --num-workers 1 -o /tmp/jobs_heavy_results
+#
+# SIZING. Offered concurrent managed jobs is approximately
+#     workers x shell.threads_per_worker x BENCHMARK_JOBS_PER_THREAD
+# = 4 x 8 x 2 = ~64 distributed, or 1 x 8 x 2 = ~16 single-worker.
+#
+# Two independent capacity limits — size BOTH before raising the load:
+#  * TARGET API SERVER: managed-jobs capacity is memory-bound (~400 running
+#    jobs @ 8 GiB, +~200 per +3.6 GiB) and launch-slot-bound (8 slots per
+#    controller, memory-gated). cpu=N sets num_server_workers=N, which bounds
+#    the launch burst + read load.
+#  * LAUNCH TARGET (data plane): each managed job provisions its OWN cluster,
+#    and a stock cluster runs Ray, which needs a FULL CPU — so
+#    BENCHMARK_JOB_CPUS can't go below 1. N concurrent jobs therefore needs
+#    ~N schedulable CPUs (plus ~2 GiB each) on the launch target. This is
+#    usually the binding limit, not the API server: 64 jobs = ~64 CPU of
+#    data plane. Make sure the target autoscales or start smaller.
+#
+# jobs.sh knobs (BENCHMARK_JOBS_PER_THREAD / _JOB_DURATION_S / _JOBS_POLLS /
+# _JOB_CPUS / _JOB_MEM_GB) are read from the worker environment, not this file.
+
+target:
+  endpoint: "http://CHANGE_ME"
+  service_account_token: null
+  cloud: kubernetes
+
+workers:
+  count: 4
+  cloud: aws
+  cpus: 8
+  memory: 16
+  reuse: false
+  cleanup: false
+
+# Wall-clock fence for the (non-driver) qps reader. The shell generator drives
+# termination; duration_s only matters if the shell run finishes faster.
+duration_s: 1200
+
+# No victim clusters: the shell workload launches its own managed jobs and the
+# qps reader only calls `sky jobs queue` (no per-cluster ops).
+victim_pool:
+  enabled: false
+
+generators:
+  # Managed-jobs lifecycle: build a population + poll the read paths.
+  - name: mjob-lifecycle
+    type: shell
+    workload: workloads/jobs.sh
+    threads_per_worker: 8
+    repeats: 3
+    phases: [jobs]          # unused by jobs.sh (self-contained); kept for clarity
+    timeout_per_run_s: 1800
+
+  # Concurrent `sky jobs queue` read pressure — the path that degrades first.
+  - name: jobs-queue-reads
+    type: qps
+    target_qps: 20          # GLOBAL, split across workers
+    max_inflight_per_worker: 20
+    operations:
+      - op: jobs_queue
+        weight: 1
