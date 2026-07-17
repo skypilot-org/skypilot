@@ -260,11 +260,10 @@ export function Config() {
     );
   }
 
-  return (
-    <>
-      {header}
-
-      {/* Main Content */}
+  // The default editor card. Plugins can replace it (e.g. with a
+  // version-aware editor) via the `settings.config.editor` slot below; this
+  // card renders when nothing is registered for the slot.
+  const editorCard = (
       <Card className="w-full">
         <CardHeader>
           <CardTitle className="text-base font-normal flex items-center justify-between">
@@ -377,6 +376,15 @@ export function Config() {
           </div>
         </CardContent>
       </Card>
+  );
+
+  return (
+    <>
+      {header}
+
+      {/* Main Content */}
+      <PluginSlot name="settings.config.editor" fallback={editorCard} />
+      <PluginSlot name="settings.config.history" />
     </>
   );
 }
