@@ -353,6 +353,31 @@ def _log_pod_scheduling_summary(pods, unscheduled_reasons) -> str:
     return headline
 
 
+def _read_pods_for_nodes(namespace, context, new_nodes) -> List[Any]:
+    """Fetch the current pod object for each of the given nodes.
+
+    Prefers a single label-selector list call — one round-trip instead of N
+    sequential reads, which matters for large launches (e.g. 96 pods) — and
+    falls back to per-pod reads if the list fails or comes back incomplete,
+    so this error path degrades to the previous behavior rather than
+    masking the scheduling failure it is trying to report.
+    """
+    try:
+        cluster_name_on_cloud = new_nodes[0].metadata.labels[
+            constants.TAG_SKYPILOT_CLUSTER_NAME]
+        all_pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                            f'{cluster_name_on_cloud}')).items
+        pods_by_name = {pod.metadata.name: pod for pod in all_pods}
+        return [pods_by_name[node.metadata.name] for node in new_nodes]
+    except Exception:  # pylint: disable=broad-except
+        return [
+            kubernetes.core_api(context).read_namespaced_pod(
+                node.metadata.name, namespace) for node in new_nodes
+        ]
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -365,10 +390,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     # only surfaces one pod's reason, and post-hoc debugging (e.g. from a
     # debug dump) needs to know how many of the requested pods had actually
     # been placed when provisioning gave up.
-    pods = [
-        kubernetes.core_api(context).read_namespaced_pod(
-            new_node.metadata.name, namespace) for new_node in new_nodes
-    ]
+    pods = _read_pods_for_nodes(namespace, context, new_nodes)
     unscheduled_reasons: Dict[str, Optional[str]] = {}
     for pod in pods:
         if not _pod_is_scheduled(pod):

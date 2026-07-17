@@ -11,6 +11,7 @@ from sky import resources
 from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -3578,11 +3579,18 @@ def test_scheduling_summary_counts_scheduled_vs_pending(monkeypatch):
     for name in pods:
         node = mock.MagicMock()
         node.metadata.name = name
+        node.metadata.labels = {
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME: 'job'
+        }
         new_nodes.append(node)
 
     core_api_mock = mock.MagicMock()
-    core_api_mock.read_namespaced_pod.side_effect = (
-        lambda name, _namespace: pods[name])
+    # Pod state comes from a single label-selector list call, not N
+    # sequential per-pod reads (which would be a bottleneck on a large
+    # launch); the per-pod read path is exercised by the fallback test
+    # below.
+    core_api_mock.list_namespaced_pod.return_value = mock.MagicMock(
+        items=list(pods.values()))
     events_mock = mock.MagicMock()
     events_mock.items = [_failed_scheduling_event(reason)]
     core_api_mock.list_namespaced_event.return_value = events_mock
@@ -3595,6 +3603,12 @@ def test_scheduling_summary_counts_scheduled_vs_pending(monkeypatch):
 
     with pytest.raises(config_lib.KubernetesError) as e:
         instance._raise_pod_scheduling_errors('ns', 'ctx', new_nodes)
+
+    # Pods were fetched via the batched list call, not per-pod reads.
+    core_api_mock.read_namespaced_pod.assert_not_called()
+    _, kwargs = core_api_mock.list_namespaced_pod.call_args
+    assert kwargs['label_selector'] == (
+        f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}=job')
 
     # The X/N count is in the raised error, so it survives into failover
     # handling and the job's failure reason.
@@ -3610,7 +3624,11 @@ def test_scheduling_summary_counts_scheduled_vs_pending(monkeypatch):
 
 def test_scheduling_summary_handles_no_failed_scheduling_event(monkeypatch):
     """An unscheduled pod without a FailedScheduling event yet must still be
-    counted, with a placeholder reason."""
+    counted, with a placeholder reason.
+
+    This test's loose mocks (MagicMock labels, no list_namespaced_pod setup)
+    also exercise _read_pods_for_nodes' per-pod-read fallback path.
+    """
     pods = {'job-head': _summary_pod('job-head', scheduled=False)}
     node = mock.MagicMock()
     node.metadata.name = 'job-head'
