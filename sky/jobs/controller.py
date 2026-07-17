@@ -1444,6 +1444,16 @@ class JobController:
 
             logger.info(f'Task {task.name} recovered, continuing monitoring')
 
+            # Recovery relaunches the cluster, so any pending
+            # status-fetch-failure window belongs to the previous cluster and
+            # must not carry over. If it did, the first status-fetch failure
+            # after recovery would measure `elapsed` from before the recovery,
+            # exceed JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS immediately, and
+            # trigger another recovery with no retries. One transient
+            # control-plane error would then become an unbounded recovery loop.
+            transient_job_check_error_start_time = None
+            job_check_backoff = None
+
             # Reset force flag after first recovery
             force_transit_to_recovering = False
 
