@@ -308,6 +308,23 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
         os.unlink(config_file)
 
 
+def test_get_api_client_requests_gzip(monkeypatch):
+    """The API client advertises gzip so the server compresses responses.
+
+    Requesting ``Accept-Encoding: gzip`` lets the API server compress large
+    LIST responses (e.g. nodes/pods on big clusters); urllib3 transparently
+    decompresses them. This substantially cuts transfer time on high-latency
+    or low-bandwidth connections to the API server.
+    """
+    config_file = _create_test_kubeconfig(num_contexts=1)
+    try:
+        monkeypatch.setattr(kubernetes, '_get_config_file', lambda: config_file)
+        client = kubernetes._get_api_client('context-0')  # pylint: disable=protected-access
+        assert client.default_headers.get('Accept-Encoding') == 'gzip'
+    finally:
+        os.unlink(config_file)
+
+
 def test_urllib3_log_suppression_survives_client_construction(monkeypatch):
     """API getters suppress urllib3 warnings with rare setLevel() calls.
 
