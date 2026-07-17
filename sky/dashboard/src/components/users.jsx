@@ -76,6 +76,7 @@ import {
   BatchRemoveFromWorkspacesDialog,
 } from '@/components/users-batch-dialogs';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import { statusGroups } from '@/components/jobs';
 import {
   FilterDropdown,
@@ -2073,6 +2074,15 @@ function UsersTable({
     return '';
   };
 
+  // Columns contributed via useTableColumns() are rendered after the built-in
+  // Jobs column and sorted among themselves by header.order. Brings the Users
+  // table to parity with the clusters/jobs/volumes tables, which already render
+  // these dynamically-registered columns.
+  const extraColumns = useTableColumns('users', {});
+  const sortedExtraColumns = [...extraColumns].sort(
+    (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
+  );
+
   const handleEditClick = async (userId, currentRole) => {
     await checkPermissionAndAct('cannot edit user role', () => {
       setEditingUserId(userId);
@@ -2452,6 +2462,23 @@ function UsersTable({
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
+                {sortedExtraColumns.map((col) => {
+                  const sortKey = col.header?.sortKey;
+                  return (
+                    <TableHead
+                      key={col.id}
+                      onClick={sortKey ? () => requestSort(sortKey) : undefined}
+                      className={`whitespace-nowrap w-1/6${
+                        sortKey
+                          ? ' sortable cursor-pointer hover:bg-gray-50'
+                          : ''
+                      }${col.header?.className ? ' ' + col.header.className : ''}`}
+                    >
+                      {col.header?.label}
+                      {sortKey ? getSortDirection(sortKey) : ''}
+                    </TableHead>
+                  );
+                })}
                 {/* Show Actions column if basicAuthEnabled and not deduplicating */}
                 {!deduplicateUsers &&
                   (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -2639,6 +2666,14 @@ function UsersTable({
                         </Link>
                       )}
                     </TableCell>
+                    {sortedExtraColumns.map((col) => (
+                      <TableCell
+                        key={col.id}
+                        className={col.cell?.className || ''}
+                      >
+                        {col.cell?.render?.(user, { item: user })}
+                      </TableCell>
+                    ))}
                     {/* Actions cell logic - hide when deduplicating */}
                     {!deduplicateUsers &&
                       (basicAuthEnabled || currentUserRole === 'admin') && (
