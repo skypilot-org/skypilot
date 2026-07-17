@@ -1233,6 +1233,12 @@ class RetryingVmProvisioner(object):
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
 
+                # Capture the task YAML.
+                user_specified_task_config = None
+                if task is not None:
+                    user_specified_task_config = task.to_yaml_config(
+                        use_user_specified_yaml=True)
+
                 # This sets the status to INIT (even for a normal, UP cluster).
                 global_user_state.add_or_update_cluster(
                     cluster_name,
@@ -1241,6 +1247,7 @@ class RetryingVmProvisioner(object):
                     ready=False,
                     is_managed=self._is_managed,
                     provision_log_path=log_abs_path,
+                    task_config=user_specified_task_config,
                 )
 
                 # Add cluster event for actual provisioning start.
