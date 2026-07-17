@@ -5,6 +5,7 @@ import io
 import json
 import os
 import pathlib
+import random
 import resource
 import shutil
 import sys
@@ -12,7 +13,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import dotenv
 import filelock
@@ -43,7 +44,6 @@ from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import annotations
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
@@ -95,9 +95,14 @@ async def create_background_task(coro: typing.Coroutine) -> None:
         task.add_done_callback(_background_tasks.discard)
 
 
-# Make sure to limit the size as we don't want to cache too many DAGs in memory.
-@annotations.lru_cache(scope='global', maxsize=50)
 def _get_dag(job_id: int) -> 'sky.Dag':
+    """Parse a fresh Dag from the job's stored YAML.
+
+    Deliberately not cached: the controller mutates the in-memory task
+    objects while running the job (e.g. StrategyExecutor.make strips
+    job_recovery from the task's resources), so every caller must get its
+    own freshly parsed DAG rather than a shared mutable object.
+    """
     dag_content = file_content_utils.get_job_dag_content(job_id)
     if dag_content is None:
         raise RuntimeError('Managed job DAG YAML content is unavailable for '
@@ -156,6 +161,13 @@ def _build_task_specs(
                          f'keys: {overlap}')
     base_specs.update(strategy_specs)
     return base_specs
+
+
+# How many times to retry the emergency-recovery bookkeeping itself (each
+# individual DB call inside it additionally retries transient errors via
+# sky.utils.db.retries). Only when both layers are exhausted do we fall
+# back to failing the job.
+_EMERGENCY_BOOKKEEPING_ROUNDS = 5
 
 
 class JobController:
@@ -221,18 +233,33 @@ class JobController:
         self.starting = starting
         self.starting_lock = starting_lock
         self.starting_signal = starting_signal
+        # Armed by _handle_unexpected_error; slept at the top of the next
+        # retry attempt in run() (inside its `try`, so that a task.cancel()
+        # during the sleep is handled by the normal cancellation path).
+        self._emergency_backoff_seconds: Optional[float] = None
 
         logger.info('Initializing JobsController for job_id=%s', job_id)
 
         self._job_id = job_id
-        self._dag = _get_dag(job_id)
-        self._dag_name = self._dag.name
-        logger.info(f'Loaded DAG: {self._dag}')
-
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
         self._pool = pool
         self._rank = rank
         logger.info(f'Rank for job {self._job_id}: {self._rank}')
+
+        self._load_dag()
+
+    def _load_dag(self) -> None:
+        """(Re)load the job's DAG and set up per-task environment variables.
+
+        Called at init and again before each emergency-recovery retry. Each
+        call parses a fresh DAG: parts of the job loop mutate the in-memory
+        task objects (e.g. StrategyExecutor.make strips job_recovery from
+        the task's resources), so a retry must start from a freshly parsed
+        DAG rather than the state the failed attempt left behind.
+        """
+        self._dag = _get_dag(self._job_id)
+        self._dag_name = self._dag.name
+        logger.info(f'Loaded DAG: {self._dag}')
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -708,6 +735,13 @@ class JobController:
                                 're-raising cancellation')
                     raise asyncio.CancelledError()
             if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+                # Force recovery (cleanup + relaunch). This covers both an
+                # interrupted in-flight recovery and an emergency retry: an
+                # emergency always relaunches the cluster, even if the task
+                # was RUNNING when the error hit — the error may be caused
+                # by the cluster's own state, so re-attaching could just
+                # keep hitting it. Relaunching is always safe (managed jobs
+                # are idempotent); it only costs time.
                 force_transit_to_recovering = True
 
             await self._strategy_executor.on_resume(cluster_name)
@@ -768,6 +802,25 @@ class JobController:
             if prev_status == managed_job_state.ManagedJobStatus.CANCELLING:
                 raise asyncio.CancelledError(
                     'Batch coordinator resuming into CANCELLING state')
+            if prev_status == managed_job_state.ManagedJobStatus.RECOVERING:
+                # An emergency recovery (or a controller restart resuming an
+                # interrupted emergency) marked the coordinator RECOVERING.
+                # The coordinator runs inline and finishes via
+                # set_succeeded_async, which only transitions from
+                # RUNNING/WINDING_DOWN — so a RECOVERING row would make a
+                # fully successful run end FAILED. Restore RUNNING first,
+                # completing the episode. count_recovery=False: a controller
+                # error is not a failure recovery (and an emergency episode
+                # carries no failure credit anyway, so it would not count).
+                logger.info(f'Batch task {task_id} resuming from RECOVERING; '
+                            'restoring RUNNING before re-running the '
+                            'coordinator.')
+                await managed_job_state.set_recovered_async(
+                    self._job_id,
+                    task_id,
+                    recovered_time=time.time(),
+                    callback_func=callback_func,
+                    count_recovery=False)
 
         metadata = task.metadata
 
@@ -1272,14 +1325,77 @@ class JobController:
             # failed or the job status is failed to be fetched.
             logger.info(f'Starting recovery for task {task_id}, '
                         f'it is currently {job_status}')
-            await managed_job_state.set_recovering_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                force_transit_to_recovering=force_transit_to_recovering,
-                callback_func=callback_func,
-                external_failures=external_failures,
-                cluster_event_reason=cluster_event_reason,
-            )
+            # How to announce this recovery. The forced first post-resume
+            # iteration derives it from the task's current status:
+            # - RECOVERING: a recovery episode is already open (an
+            #   interrupted preemption recovery, or an emergency retry whose
+            #   exception handler already announced it with the specific
+            #   reason) — re-announcing would only emit a duplicate, less
+            #   informative event, and would overwrite the episode's
+            #   failure credit (spot.recovering_from_failure).
+            # - STARTING: the task never reached RUNNING; keep it STARTING
+            #   through the relaunch (it is starting, not recovering) — no
+            #   RECOVERING event at all.
+            # - anything else: this recovery exists only because the
+            #   controller restarted — open a RESTART-sourced episode.
+            # Any later (non-forced) recovery in this loop is a real
+            # preemption/failure. In all cases the cleanup + recover() run.
+            keep_starting = False
+            if force_transit_to_recovering:
+                cur_status = await (
+                    managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id))
+                keep_starting = (
+                    cur_status == managed_job_state.ManagedJobStatus.STARTING)
+                already_recovering = (
+                    cur_status == managed_job_state.ManagedJobStatus.RECOVERING)
+                if not (keep_starting or already_recovering):
+                    await managed_job_state.set_recovering_async(
+                        job_id=self._job_id,
+                        task_id=task_id,
+                        force_transit_to_recovering=True,
+                        callback_func=callback_func,
+                        external_failures=external_failures,
+                        cluster_event_reason=cluster_event_reason,
+                        recovery_source=managed_job_state.RecoverySource.
+                        RESTART,
+                    )
+            else:
+                await managed_job_state.set_recovering_async(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    force_transit_to_recovering=False,
+                    callback_func=callback_func,
+                    external_failures=external_failures,
+                    cluster_event_reason=cluster_event_reason,
+                    recovery_source=managed_job_state.RecoverySource.FAILURE,
+                )
+
+            # On a forced (emergency / controller-restart) recovery of a pool
+            # job, the previous submission may still be running on the shared
+            # pool cluster: recover() resubmits via sdk.exec and overwrites
+            # job_id_on_pool_cluster without cancelling the old one, which
+            # would run two copies of the user code concurrently against the
+            # same outputs. Cancel the stale submission first (best-effort,
+            # mirrors task_cleanup). Only on the forced path — a normal
+            # preemption recovery's old submission is gone with its cluster,
+            # and _try_cancel_jobs already no-ops for pools.
+            if (force_transit_to_recovering and self._pool is not None and
+                    job_id_on_pool_cluster is not None):
+                logger.info('Cancelling stale pool submission '
+                            f'{job_id_on_pool_cluster} on {cluster_name} '
+                            'before the forced relaunch.')
+                try:
+                    await asyncio.to_thread(core.cancel,
+                                            cluster_name=cluster_name,
+                                            job_ids=[job_id_on_pool_cluster],
+                                            _try_cancel_if_cluster_is_init=True)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Failed to cancel the stale pool submission before '
+                        'the forced relaunch (continuing; the duplicate may '
+                        'run to completion): '
+                        f'{common_utils.format_exception(e)}')
 
             recovered_time = await executor.recover()
 
@@ -1291,11 +1407,36 @@ class JobController:
                 assert pool_cluster_name is not None
                 cluster_name = pool_cluster_name
 
-            await managed_job_state.set_recovered_async(
-                self._job_id,
-                task_id,
-                recovered_time=recovered_time,
-                callback_func=callback_func)
+            if keep_starting:
+                # The task stayed STARTING (kept-starting resume). Reaching
+                # RUNNING is its first start -> set_started. If the relaunch
+                # itself had to retry, set_restarting_async will have moved it
+                # to RECOVERING; complete via set_recovered but don't count it
+                # toward recovery_count — a launch retry is not a recovery
+                # (fresh launches that retry don't count either).
+                cur_status = await (
+                    managed_job_state.get_job_status_with_task_id_async(
+                        job_id=self._job_id, task_id=task_id))
+                if (cur_status == managed_job_state.ManagedJobStatus.RECOVERING
+                   ):
+                    await managed_job_state.set_recovered_async(
+                        self._job_id,
+                        task_id,
+                        recovered_time=recovered_time,
+                        callback_func=callback_func,
+                        count_recovery=False)
+                else:
+                    await managed_job_state.set_started_async(
+                        self._job_id,
+                        task_id,
+                        start_time=recovered_time,
+                        callback_func=callback_func)
+            else:
+                await managed_job_state.set_recovered_async(
+                    self._job_id,
+                    task_id,
+                    recovered_time=recovered_time,
+                    callback_func=callback_func)
 
             # Call recovery callback if provided
             if on_recovery is not None:
@@ -1585,8 +1726,14 @@ class JobController:
                     strategy_executors.append(None)  # type: ignore[arg-type]
                     continue
 
-                # Get list of other job names (excluding current task)
-                other_job_names = [t.name for t in tasks if t.name != task.name]
+                # Get list of other job names (excluding current task).
+                # Job-group tasks are always named (filled by
+                # dag_utils.maybe_infer_and_fill_dag_and_task_names).
+                other_job_names = [
+                    t.name
+                    for t in tasks
+                    if t.name is not None and t.name != task.name
+                ]
                 # Only set STARTING for fresh launches (None/PENDING). Resumed
                 # tasks (STARTING/RUNNING/RECOVERING) are already past PENDING;
                 # re-issuing STARTING would fail the group as FAILED_CONTROLLER.
@@ -1922,8 +2069,10 @@ class JobController:
         termination_coros = []
         for task_id, async_task in list(monitor_async_tasks.items()):
             if all_primary_succeeded:
-                delay_secs = self._dag.get_termination_delay_secs(
-                    tasks[task_id].name)
+                # Job-group tasks are always named.
+                task_name = tasks[task_id].name
+                assert task_name is not None, tasks[task_id]
+                delay_secs = self._dag.get_termination_delay_secs(task_name)
             else:
                 # Primary job failed - terminate immediately
                 delay_secs = 0
@@ -1944,85 +2093,131 @@ class JobController:
                     logger.warning(f'Failed to cleanup {cluster_name}: {e}')
 
     async def run(self):
-        """Run controller logic and handle exceptions."""
+        """Run controller logic and handle exceptions.
+
+        Unexpected errors do not immediately fail the job: the body runs in
+        a retry loop, and _handle_unexpected_error decides per error whether
+        to retry managing the job in place (emergency recovery, bounded by a
+        per-job budget with exponential backoff) or fail the job as before.
+        """
         logger.info(f'Starting JobsController run for job {self._job_id}')
         task_id = 0
         cancelled = False
 
         try:
-            succeeded = True
+            attempt_done = False
+            while not attempt_done:
+                try:
+                    if self._emergency_backoff_seconds is not None:
+                        backoff = self._emergency_backoff_seconds
+                        self._emergency_backoff_seconds = None
+                        logger.info(
+                            f'Sleeping {backoff:.0f}s (jittered) before '
+                            'emergency recovery attempt for job '
+                            f'{self._job_id}')
+                        await asyncio.sleep(backoff)
 
-            # Check if this is a JobGroup (parallel execution)
-            if self._dag.is_job_group():
-                logger.info(f'Running as JobGroup with {len(self._dag.tasks)} '
+                    succeeded = True
+
+                    # Check if this is a JobGroup (parallel execution)
+                    if self._dag.is_job_group():
+                        logger.info(
+                            f'Running as JobGroup with {len(self._dag.tasks)} '
                             f'parallel jobs')
-                succeeded = await self._run_job_group()
-            else:
-                # Traditional chain DAG: serial execution
-                for task_id, task in enumerate(self._dag.tasks):
-                    logger.info(
-                        f'Processing task {task_id}/{len(self._dag.tasks)-1}: '
-                        f'{task.name}')
-                    task_start = time.time()
-                    succeeded = await self._run_one_task(task_id, task)
-                    task_time = time.time() - task_start
-                    logger.info(f'Task {task_id} completed in {task_time:.2f}s '
+                        succeeded = await self._run_job_group()
+                    else:
+                        # Traditional chain DAG: serial execution
+                        for task_id, task in enumerate(self._dag.tasks):
+                            logger.info(f'Processing task {task_id}/'
+                                        f'{len(self._dag.tasks)-1}: '
+                                        f'{task.name}')
+                            task_start = time.time()
+                            succeeded = await self._run_one_task(task_id, task)
+                            task_time = time.time() - task_start
+                            logger.info(
+                                f'Task {task_id} completed in {task_time:.2f}s '
                                 f'with success={succeeded}')
 
-                    if not succeeded:
-                        logger.info(
-                            f'Task {task_id} failed, stopping execution')
-                        break
+                            if not succeeded:
+                                logger.info(f'Task {task_id} failed, '
+                                            'stopping execution')
+                                break
+                    attempt_done = True
 
-        except exceptions.ProvisionPrechecksError as e:
-            # Please refer to the docstring of self._run for the cases when
-            # this exception can occur.
-            logger.error(f'Provision prechecks failed for task {task_id}')
-            failure_reason = ('; '.join(
-                common_utils.format_exception(reason, use_bracket=True)
-                for reason in e.reasons))
-            logger.error(failure_reason)
-            await self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
-                failure_reason)
-        except exceptions.ManagedJobReachedMaxRetriesError as e:
-            # Please refer to the docstring of self._run for the cases when
-            # this exception can occur.
-            logger.error(f'Managed job reached max retries for task {task_id}')
-            failure_reason = common_utils.format_exception(e)
-            logger.error(failure_reason)
-            # The managed job should be marked as FAILED_NO_RESOURCE, as the
-            # managed job may be able to launch next time.
-            await self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
-                failure_reason)
-        except exceptions.ClusterSetUpError as e:
-            # Raised by the launch path for a non-retryable setup failure, e.g.
-            # the job's pod was OOMKilled during cluster/runtime setup. The
-            # failure is deterministic, so we mark the job terminal (rather than
-            # retrying forever) and surface the reason to the CLI/dashboard.
-            logger.error(f'Cluster setup failed for task {task_id}')
-            failure_reason = common_utils.format_exception(e, use_bracket=True)
-            logger.error(failure_reason)
-            await self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_SETUP,
-                failure_reason)
-        except asyncio.CancelledError:  # pylint: disable=try-except-raise
-            # have this here to avoid getting caught by the general except block
-            # below.
-            cancelled = True
-            raise
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(
-                f'Unexpected error in JobsController run for task {task_id}')
-            with ux_utils.enable_traceback():
-                logger.error(traceback.format_exc())
-            msg = ('Unexpected error occurred: ' +
-                   common_utils.format_exception(e, use_bracket=True))
-            logger.error(msg)
-            await self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
-                msg)
+                except exceptions.ProvisionPrechecksError as e:
+                    # Please refer to the docstring of self._run for the cases
+                    # when this exception can occur.
+                    logger.error(f'Provision prechecks failed for '
+                                 f'task {task_id}')
+                    failure_reason = ('; '.join(
+                        common_utils.format_exception(reason, use_bracket=True)
+                        for reason in e.reasons))
+                    logger.error(failure_reason)
+                    await self._update_failed_task_state(
+                        task_id,
+                        managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+                        failure_reason)
+                    attempt_done = True
+                except exceptions.ManagedJobReachedMaxRetriesError as e:
+                    # Please refer to the docstring of self._run for the cases
+                    # when this exception can occur.
+                    logger.error(
+                        f'Managed job reached max retries for task {task_id}')
+                    failure_reason = common_utils.format_exception(e)
+                    logger.error(failure_reason)
+                    # The managed job should be marked as FAILED_NO_RESOURCE,
+                    # as the managed job may be able to launch next time.
+                    await self._update_failed_task_state(
+                        task_id,
+                        managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                        failure_reason)
+                    attempt_done = True
+                except exceptions.ClusterSetUpError as e:
+                    # Raised by the launch path for a non-retryable setup
+                    # failure, e.g. the job's pod was OOMKilled during
+                    # cluster/runtime setup. The failure is deterministic, so
+                    # we mark the job terminal (rather than retrying forever)
+                    # and surface the reason to the CLI/dashboard.
+                    logger.error(f'Cluster setup failed for task {task_id}')
+                    failure_reason = common_utils.format_exception(
+                        e, use_bracket=True)
+                    logger.error(failure_reason)
+                    await self._update_failed_task_state(
+                        task_id,
+                        managed_job_state.ManagedJobStatus.FAILED_SETUP,
+                        failure_reason)
+                    attempt_done = True
+                except asyncio.CancelledError:  # pylint: disable=try-except-raise
+                    # have this here to avoid getting caught by the general
+                    # except block below.
+                    cancelled = True
+                    raise
+                except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    logger.error(f'Unexpected error in JobsController run for '
+                                 f'task {task_id}')
+                    with ux_utils.enable_traceback():
+                        logger.error(traceback.format_exc())
+                    msg = ('Unexpected error occurred: ' +
+                           common_utils.format_exception(e, use_bracket=True))
+                    logger.error(msg)
+                    try:
+                        failure_note = (await self._handle_unexpected_error(e))
+                    except asyncio.CancelledError:
+                        # The user cancelled the job while we were doing the
+                        # emergency-recovery bookkeeping. Mark cancelled so
+                        # the finally below leaves the CANCELLED transition
+                        # to run_job_loop, which runs it after cleanup.
+                        cancelled = True
+                        raise
+                    if failure_note is None:
+                        # Emergency recovery: retry managing the job in place.
+                        continue
+                    msg = f'{msg} {failure_note}'
+                    await self._update_failed_task_state(
+                        task_id,
+                        managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
+                        msg)
+                    attempt_done = True
         finally:
             callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id,
@@ -2033,10 +2228,252 @@ class JobController:
             if not cancelled:
                 # the others haven't been run yet so we can set them to
                 # cancelled immediately (no resources to clean up).
-                # if we are running and get cancelled, we need to clean up the
-                # resources first so this will be done later.
+                # if we are running and get cancelled, we need to clean up
+                # the resources first so this will be done later.
                 await managed_job_state.set_cancelled_async(
                     job_id=self._job_id, callback_func=callback_func)
+
+    async def _handle_unexpected_error(
+            self, error: Union[Exception, SystemExit]) -> Optional[str]:
+        """Decide how to handle an unexpected error in the job loop.
+
+        Runs the emergency-recovery bookkeeping with an outer retry layer
+        (each DB call inside additionally retries transient errors). Only
+        when every round fails do we give up and fail the job — we never
+        trade a known-bad state for an unknown one.
+
+        Returns None to retry managing the job in place (emergency
+        recovery). Returns a failure note (appended to the failure_reason)
+        to fail the job (FAILED_CONTROLLER) instead.
+
+        Raises only asyncio.CancelledError (user cancellation must reach
+        run()'s cancel handling).
+        """
+        # Per escaped error, reset the memoized episode state: the attempt
+        # number is computed once and reused across the outer-retry rounds
+        # (so a re-run cannot double-spend the budget), and the RECOVERING
+        # event is emitted once (so a re-run cannot append a duplicate).
+        self._emergency_attempt: Optional[int] = None
+        self._emergency_event_emitted = False
+        backoff = common_utils.Backoff(initial_backoff=10, max_backoff_factor=5)
+        for round_idx in range(_EMERGENCY_BOOKKEEPING_ROUNDS):
+            try:
+                return await self._attempt_emergency_recovery(error)
+            except asyncio.CancelledError:  # pylint: disable=try-except-raise
+                raise
+            except Exception as bookkeeping_error:  # pylint: disable=broad-except
+                logger.warning(
+                    'Emergency recovery bookkeeping failed (round '
+                    f'{round_idx + 1}/{_EMERGENCY_BOOKKEEPING_ROUNDS}): '
+                    f'{common_utils.format_exception(bookkeeping_error)}')
+                await asyncio.sleep(backoff.current_backoff())
+        return ('(Also, emergency recovery was attempted but its '
+                'bookkeeping failed repeatedly.)')
+
+    async def _release_launch_slot(self) -> None:
+        """Free this job's shared launching slot for the backoff.
+
+        The launching slots are the in-memory ``starting`` set
+        (LAUNCHES_PER_WORKER per worker). A job added at start_job time (or,
+        for pool jobs, never removed by scheduled_launch since it yields
+        without touching the set) would otherwise hold its slot for the
+        whole emergency backoff — up to ~3h — starving new-job admission and
+        other jobs' recovery launches on this worker. Discard it here; the
+        retry re-adds it via scheduled_launch when it actually relaunches.
+        Idempotent: the job may already be absent (past its first launch).
+        """
+        async with self.starting_lock:
+            self.starting.discard(self._job_id)
+            self.starting_signal.notify()
+
+    async def _emergency_before_teardown_hook(self, task_id: int,
+                                              cluster_name: str) -> None:
+        """Let the runtime snapshot the about-to-be-lost run before teardown.
+
+        Mirrors the on_before_recovery call on the normal recovery path
+        (_monitor_one_task): the emergency path tears the cluster down here,
+        before the retry's forced recovery runs, so without this call the
+        runtime's log-capture hook would only ever see an
+        already-terminated cluster. Best-effort — a hook failure must never
+        block recovery.
+        """
+        if not managed_job_runtime.is_registered():
+            return
+        try:
+            handle = await asyncio.to_thread(
+                global_user_state.get_handle_from_cluster_name, cluster_name)
+            job_id_on_pool_cluster = None
+            if self._pool is not None:
+                _, job_id_on_pool_cluster = (
+                    await
+                    managed_job_state.get_pool_submit_info_async(self._job_id))
+            await asyncio.to_thread(managed_job_runtime.on_before_recovery,
+                                    handle, self._backend, self._job_id,
+                                    task_id, None, job_id_on_pool_cluster)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('on_before_recovery hook failed before the '
+                           'emergency teardown (continuing recovery): '
+                           f'{common_utils.format_exception(e)}')
+
+    async def _attempt_emergency_recovery(
+            self, error: Union[Exception, SystemExit]) -> Optional[str]:
+        """One round of the emergency-recovery bookkeeping.
+
+        Sequence: spend one unit of the bounded retry budget (once per
+        escaped error, memoized), free the launching slot, mark the latest
+        task RECOVERING (recovery_source=EMERGENCY on the event; a PENDING
+        task is left untouched so the retry relaunches it fresh), tear the
+        cluster down after a runtime log-capture hook, and reset any stuck
+        launch-adjacent schedule state. Every step is idempotent so that the
+        outer retry in _handle_unexpected_error can safely re-run the whole
+        sequence after a transient failure without double-spending the
+        budget or duplicating the RECOVERING event.
+
+        Returns None to retry managing the job in place, or a failure note
+        to fail the job (budget exhausted).
+
+        May raise on DB errors (handled by the caller's retry layer).
+        """
+        # 1. Spend one unit of the retry budget. The attempt number is
+        # computed once per escaped error (memoized on self) and reused
+        # across the outer-retry rounds: re-reading the budget each round
+        # would re-read the just-incremented count and double-spend. The
+        # count is written as an absolute value, so re-running this round
+        # with the same attempt is idempotent.
+        now = time.time()
+        max_attempts = jobs_constants.EMERGENCY_RECOVERY_MAX_ATTEMPTS
+        if self._emergency_attempt is None:
+            count, last_at = (
+                await managed_job_state.get_emergency_recovery_budget_async(
+                    self._job_id))
+            if (last_at is not None and now - last_at >
+                    jobs_constants.EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS):
+                # The previous emergency was long ago; start a new episode.
+                count = 0
+            attempt = count + 1
+            if attempt > max_attempts:
+                logger.error(
+                    'Emergency recovery budget exhausted for job '
+                    f'{self._job_id} ({count}/{max_attempts} attempts used). '
+                    'Failing the job.')
+                return (f'(Emergency recovery was attempted {count} times; '
+                        'giving up.)')
+            self._emergency_attempt = attempt
+        attempt = self._emergency_attempt
+        await managed_job_state.record_emergency_recovery_attempt_async(
+            self._job_id, attempt, now)
+
+        # 2. Determine the latest task and its status. Use the latest task
+        # (it is the only one that can be mid-flight in a chain DAG; for job
+        # groups the resume classification handles the other tasks from
+        # their raw statuses).
+        task_id, cur_status = (
+            await
+            managed_job_state.get_latest_task_id_status_async(self._job_id))
+        if task_id is None:
+            task_id = 0
+
+        # Free the launching slot for the whole backoff (see helper).
+        await self._release_launch_slot()
+
+        if cur_status == managed_job_state.ManagedJobStatus.PENDING:
+            # The task never initialized (set_starting_async has not run).
+            # Do not mark it RECOVERING — that would make the retry treat it
+            # as a resume and skip initialization forever. Leave it PENDING;
+            # the retry relaunches it fresh (is_resume=False). There is no
+            # cluster to tear down yet. Fall through to the backoff so a
+            # PENDING-phase error is bounded and paced like any episode.
+            logger.info(f'Job {self._job_id} task {task_id} is PENDING; '
+                        'relaunching fresh after the emergency backoff.')
+        else:
+            # Mark the latest task RECOVERING (recovery_source=EMERGENCY on
+            # the event). Emit the event only once per escaped error, so an
+            # outer-retry re-run does not append a duplicate.
+            reason = (
+                f'Unexpected controller error (emergency recovery attempt '
+                f'{attempt}/{max_attempts}): ' +
+                common_utils.format_exception(error, use_bracket=True))
+            emit_event = not self._emergency_event_emitted
+            applied = await managed_job_state.set_emergency_recovering_async(
+                self._job_id,
+                task_id,
+                reason=reason,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=self._dag.tasks[task_id]),
+                emit_event=emit_event)
+            if applied and emit_event:
+                self._emergency_event_emitted = True
+            if not applied:
+                # The task is CANCELLING or already terminal — those paths
+                # own the task now. Retry the job loop immediately (no
+                # backoff): the resume logic completes the cancellation
+                # (re-raising CancelledError) or finishes the terminal task
+                # cleanly.
+                logger.info(f'Job {self._job_id} task {task_id} is cancelling '
+                            'or terminal; retrying the job loop to let it '
+                            'complete.')
+                await asyncio.to_thread(self._load_dag)
+                return None
+
+            # 3. Tear down the task's cluster now (best-effort) instead of
+            # leaving it to the retry's forced recovery: the retry always
+            # relaunches from scratch, so the cluster is doomed anyway —
+            # don't leave it running (and billing) through a backoff that can
+            # be up to 30 minutes. terminate_cluster is idempotent and the
+            # retry's forced recovery runs the same cleanup again, so a
+            # failure here only delays the teardown. Pool jobs keep their
+            # shared cluster (no dedicated cluster to tear down) — the
+            # retry's forced recovery cancels the stale pool submission and
+            # runs the hook, so nothing to do here.
+            task_name = self._dag.tasks[task_id].name
+            if self._pool is None and task_name is not None:
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task_name, self._job_id))
+                # Give the runtime a chance to snapshot the run's logs before
+                # we tear the cluster down.
+                await self._emergency_before_teardown_hook(
+                    task_id, cluster_name)
+                try:
+                    await self._cleanup_cluster(cluster_name)
+                except Exception as cleanup_error:  # pylint: disable=broad-except
+                    logger.warning(
+                        'Best-effort cluster teardown before the emergency '
+                        'backoff failed; the retry will clean up instead: '
+                        f'{common_utils.format_exception(cleanup_error)}')
+
+        # 4. If the error escaped mid-launch, the job may be stuck in a
+        # launch-adjacent schedule state (LAUNCHING / ALIVE_WAITING /
+        # ALIVE_BACKOFF); reset it to ALIVE so it neither holds launch
+        # accounting nor blocks lower-priority jobs' scheduling during the
+        # backoff. The retry re-enters LAUNCHING cleanly when it launches.
+        await (managed_job_state.
+               normalize_schedule_state_for_emergency_retry_async(self._job_id))
+
+        # The retry must start from a freshly loaded DAG: the failed attempt
+        # may have left the in-memory task objects mutated (see _load_dag).
+        await asyncio.to_thread(self._load_dag)
+
+        nominal_backoff = min(
+            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_BASE_SECONDS *
+            2**(attempt - 1),
+            jobs_constants.EMERGENCY_RECOVERY_BACKOFF_CAP_SECONDS)
+        # Jitter +/-50% around the nominal backoff (so the average is still the
+        # nominal value): a systemic incident tends to push many jobs into
+        # emergency recovery at the same instant, and a deterministic backoff
+        # would resynchronize their retries into DB-load waves. The retry's
+        # bookkeeping is all DB writes, so spreading the waves matters most on
+        # the shared DB in consolidation mode.
+        self._emergency_backoff_seconds = nominal_backoff * random.uniform(
+            0.5, 1.5)
+        logger.info(
+            f'Emergency recovery attempt {attempt}/{max_attempts} for job '
+            f'{self._job_id}: retrying the job loop in '
+            f'{self._emergency_backoff_seconds:.0f}s '
+            f'(nominal {nominal_backoff:.0f}s, jittered +/-50%).')
+        return None
 
     async def _update_failed_task_state(
             self, task_id: int,
@@ -2383,6 +2820,7 @@ class ControllerManager:
 
         cancelling = False
         graceful, graceful_timeout = False, None
+        controller: Optional[JobController] = None
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
@@ -2448,6 +2886,9 @@ class ControllerManager:
             # down, we skip gracefully.
             if active_task_ids:
                 try:
+                    # A cancel can only land at an await point, all of which
+                    # are after the controller is constructed.
+                    assert controller is not None
                     await self._download_logs_for_cancelled_job(
                         controller, job_id, active_task_ids, dag, pool)
                 except Exception as e:  # pylint: disable=broad-except
@@ -2467,11 +2908,13 @@ class ControllerManager:
                                     pool=pool,
                                     graceful=graceful,
                                     graceful_timeout=graceful_timeout)
-                logger.info(
-                    f'Cluster of managed job {job_id} has been cleaned up.')
+                logger.info(f'Cluster of managed job {job_id} has been cleaned '
+                            'up.')
             except Exception as e:  # pylint: disable=broad-except
-                failure_reason = ('Failed to clean up: '
-                                  f'{common_utils.format_exception(e)}')
+                failure_reason = (
+                    'Failed to clean up, resources may have leaked: '
+                    f'{common_utils.format_exception(e)}. Please check '
+                    'whether the job\'s cluster and storage still exist.')
                 await managed_job_state.set_failed_async(
                     job_id,
                     task_id=None,
@@ -2493,8 +2936,9 @@ class ControllerManager:
             # the job status is not terminal.
             job_status = await managed_job_state.get_status_async(job_id)
             assert job_status is not None
-            # The job can be non-terminal if the controller exited abnormally,
-            # e.g. failed to launch cluster after reaching the MAX_RETRY.
+            # The job can be non-terminal if the controller exited
+            # abnormally, e.g. failed to launch cluster after reaching
+            # the MAX_RETRY.
             if not job_status.is_terminal():
                 logger.info(f'Previous job status: {job_status.value}')
                 await managed_job_state.set_failed_async(

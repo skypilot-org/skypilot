@@ -446,6 +446,9 @@ def _get_single_resources_schema():
                     'type': 'integer',
                 }],
             },
+            # Deprecated: use disk_size instead. Kept for backward
+            # compatibility with configs written by older versions.
+            # TODO (kyuds): remove v0.14.0.
             'ephemeral_storage': {
                 'anyOf': [{
                     'type': 'string',
@@ -2683,6 +2686,36 @@ def get_config_schema():
         },
     }
 
+    metrics_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            # The Prometheus deployment that /gpu-metrics federates from
+            # in each context. Defaults match the SkyPilot Helm chart
+            # (service `skypilot-prometheus-server` in namespace
+            # `skypilot`, port 80).
+            'prometheus': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'namespace': {
+                        'type': 'string',
+                    },
+                    'service': {
+                        'type': 'string',
+                    },
+                    'port': {
+                        'type': 'integer',
+                        'minimum': 1,
+                        'maximum': 65535,
+                    },
+                },
+            },
+        },
+    }
+
     dashboard_schema = {
         'type': 'object',
         'required': [],
@@ -2752,6 +2785,7 @@ def get_config_schema():
             'daemons': daemon_schema,
             'data': data_schema,
             'dashboard': dashboard_schema,
+            'metrics': metrics_schema,
             **cloud_configs,
             # For plugin-specific config.
             'plugins': {

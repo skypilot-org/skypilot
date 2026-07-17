@@ -1152,7 +1152,7 @@ class TestFormatJobDetails:
             cloud='Kubernetes',
             recovery_reason='Evicted: Pod ephemeral local storage usage '
             'exceeds the total limit of containers 2Gi.')
-        assert 'resources.ephemeral_storage' in result
+        assert 'resources.disk_size' in result
 
     def test_recovery_reason_no_hint_on_non_kubernetes(self):
         # A non-k8s reason containing a matched word ('Insufficient') must not

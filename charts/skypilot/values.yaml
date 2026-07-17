@@ -21,6 +21,10 @@ apiService:
   image: berkeleyskypilot/skypilot-nightly:latest
   # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
+  # Interface the API server binds to: "0.0.0.0" for IPv4 (the default) or "::"
+  # for IPv6 dual-stack.
+  # @schema enum: ["0.0.0.0", "::"]
+  host: "0.0.0.0"
   preDeployHook: |-
     # Run commands before deploying the API server, e.g. installing an admin policy.
     # Refer to https://docs.skypilot.co/en/latest/cloud-setup/policy.html for more details about admin policy.
@@ -369,6 +373,14 @@ storage:
   # leave empty to provision one from the fields below (subject to
   # storage.enabled).
   existingClaim: ""
+  # Volume subdirectory persisted at ~/.sky/api_server/clients (in-flight
+  # upload artifacts). Override when attaching a pre-existing volume whose
+  # layout keeps that data under a different directory, so the deployment
+  # keeps reading/writing the existing data instead of starting an empty one.
+  # Note: only takes effect when apiService.upgradeStrategy is "RollingUpdate";
+  # under "Recreate" the whole volume is mounted at ~/.sky and the clients
+  # directory is always at <volume>/.sky/api_server/clients.
+  clientsSubPath: "api_server/clients"
   # Storage class name - leave empty to use cluster default
   # For RWX storage with RollingUpdate, use a storage class that supports ReadWriteMany access mode:
   # - GKE: Create a Filestore-backed storage class (https://cloud.google.com/filestore/docs/accessing-fileshares)
@@ -562,6 +574,14 @@ rbac:
     - apiGroups: [""]
       resources: ["services"]
       verbs: ["list", "get"]
+    # Required for detecting whether a kubeconfig context points back at the
+    # cluster the API server runs in when federating GPU metrics (reads the
+    # UID of the kube-system namespace as the cluster identity, see
+    # is_local_context in sky/metrics/utils.py).
+    - apiGroups: [ "" ]
+      resources: [ "namespaces" ]
+      resourceNames: [ "kube-system" ]
+      verbs: [ "get" ]
   # This allows the API server to grant permissions to SkyPilot Pods and system components.
   # `kubernetes.remote_identity` must be specified in the sky config if this is disabled.
   manageRbacPolicies: true

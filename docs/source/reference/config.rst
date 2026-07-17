@@ -2846,3 +2846,40 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+
+.. _config-yaml-metrics:
+
+``metrics``
+~~~~~~~~~~~
+
+GPU metrics federation configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-metrics-prometheus:
+
+``metrics.prometheus``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Prometheus deployment that ``/gpu-metrics`` federates from in each Kubernetes context (optional).
+
+By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm chart: service ``skypilot-prometheus-server`` in namespace ``skypilot``, port ``80``. Set these fields if your Prometheus lives in a different namespace or under a different service name.
+
+``namespace``
+    Namespace the Prometheus service is deployed in. Default: ``skypilot``.
+
+``service``
+    Name of the Prometheus service. Default: ``skypilot-prometheus-server``.
+
+``port``
+    Port of the Prometheus service. Default: ``80``.
+
+.. code-block:: yaml
+
+  metrics:
+    prometheus:
+      namespace: monitoring
+      service: prometheus-server
+      port: 80
+
+.. note::
+
+    When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the ``kube-system`` namespace as seen through the context's credentials with the UID seen through the in-cluster credentials) and skips that context during federation: the central Prometheus (the one deployed next to the API server, e.g. by the SkyPilot Helm chart) already scrapes the local cluster's exporters directly, so federating it again would only duplicate the series. The dashboard queries the local cluster's series by their missing ``cluster`` label instead of a context name. If detection fails (e.g. the context's credentials cannot ``get`` the ``kube-system`` namespace), the context is treated as remote and federated over port-forward — the previous behavior for every context.

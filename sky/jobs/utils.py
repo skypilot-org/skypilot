@@ -364,6 +364,12 @@ def cleanup_expired_api_access_tokens() -> int:
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for consolidation mode.
 
+    Naming quirk: this path is historically called "HA recovery" because it
+    originally only applied to controllers deployed in HA mode (a k8s
+    deployment that auto-restarts). It now runs on any controller process
+    restart (e.g. a normal API-server upgrade/rollout); the recovery source
+    recorded for recoveries it forces is RecoverySource.RESTART.
+
     This should only be called from the managed-job-status-refresh-daemon, due
     so that we have correct ordering recovery -> controller start -> job status
     updates. This also should ensure correct operation during a rolling update.

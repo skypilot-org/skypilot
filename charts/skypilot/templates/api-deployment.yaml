@@ -357,7 +357,7 @@ spec:
           mountPath: /root/.sky
         - name: state-volume
           mountPath: /root/.sky/api_server/clients
-          subPath: api_server/clients
+          subPath: {{ .Values.storage.clientsSubPath | default "api_server/clients" | quote }}
         {{- else }}
         - name: state-volume
           mountPath: /root/.sky

@@ -1942,9 +1942,11 @@ def realtime_slurm_gpu_availability(
 @usage_lib.entrypoint
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> None:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> None:
     """Creates a local cluster."""
-    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
+    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus,
+                                                 num_nodes)
 
 
 def local_down(name: Optional[str] = None) -> None:

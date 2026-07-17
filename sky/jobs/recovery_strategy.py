@@ -6,6 +6,8 @@ resources:
     job_recovery: EAGER_NEXT_REGION
 """
 import asyncio
+import concurrent.futures
+import contextlib
 import logging
 import os
 import traceback
@@ -27,10 +29,13 @@ from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.server import common as server_common
+from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import context_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import instance_links as instance_links_utils
@@ -76,6 +81,78 @@ ENV_VARS_TO_CLEAR = [
     # api_start refuses to start a local server. Always start local here.
     constants.SKY_API_SERVER_URL_ENV_VAR,
 ]
+
+# Interval to poll the status of the underlying sky.launch request while
+# streaming its logs, to detect that the request has been parked (WAITING).
+_LAUNCH_REQUEST_STATUS_POLL_SECONDS = 30
+# Poll backoff bounds while the job is parked waiting for its launch request
+# to resume. The launch request resumes and completes on the API server
+# independently of this poll, so the poll interval only affects how quickly
+# the job re-acquires a launch slot and proceeds to job submission.
+_PARKED_POLL_INITIAL_BACKOFF_SECONDS = 15
+_PARKED_POLL_MAX_BACKOFF_FACTOR = 8
+# Consecutive polls where a parked request is not found before concluding it
+# is gone (a single empty response can be transient, e.g. the API server is
+# briefly unreachable or mid-restart).
+_PARKED_POLL_MAX_CONSECUTIVE_MISSING = 3
+# Consecutive failed polls of a parked request before giving up on waiting
+# for it (e.g. the API server is persistently unreachable). Unlike
+# _PARKED_POLL_MAX_CONSECUTIVE_MISSING, this does NOT fall back to a fresh
+# launch attempt - see _wait_for_parked_request.
+_PARKED_POLL_MAX_CONSECUTIVE_ERRORS = 8
+
+# Request statuses considered "still live" on the API server. Used to decide,
+# on reattach, whether a carried stream that already failed can be replaced
+# with a fresh one (request still live) or whether the request's outcome is
+# already decided (request terminal or unknown) - see _launch's reattach
+# path.
+_LIVE_REQUEST_STATUS_VALUES = frozenset(
+    s.value for s in requests_lib.RequestStatus.active_statuses())
+
+# The blocking sync-SDK log stream of each inner launch request runs in a
+# worker thread. Deliberately NOT asyncio.to_thread's default executor: a
+# parked job keeps its stream attached across the park (the blocking stream
+# cannot be interrupted from outside, and does not need to be), so the number
+# of concurrent stream threads is bounded by the number of jobs with an
+# in-flight launch request (up to MAX_JOBS_PER_WORKER per controller
+# process), not by LAUNCHES_PER_WORKER - more than enough to exhaust the
+# small default executor and stall every other to_thread call in the
+# controller. The small headroom covers a vanished request's dying stream
+# briefly overlapping its replacement.
+_LAUNCH_STREAM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=controller_utils.MAX_JOBS_PER_WORKER + 8,
+    thread_name_prefix='launch-request-stream')
+
+
+def _consume_task_exception(task: 'asyncio.Future') -> None:
+    """Consume a finished task's exception to avoid asyncio warnings."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if isinstance(exc, Exception):
+        logger.debug('Abandoned launch request stream task failed: '
+                     f'{common_utils.format_exception(exc)}')
+
+
+class _LaunchRequestParked(Exception):
+    """The underlying launch request was parked to wait for a condition.
+
+    Raised while supervising the inner sky.launch request when the request is
+    set to WAITING by the API server, i.e. the launch is waiting on some
+    external condition (e.g. admission to a queue) and has yielded its
+    executor worker. We mirror that at the job scheduling layer: exit the
+    scheduled_launch context so the job releases its launch slot instead of
+    holding it for the entire wait.
+
+    Notably, this must not tear down the partially provisioned cluster: a
+    parked launch keeps its resources (e.g. its position in an admission
+    queue) and will reuse them on resume.
+    """
+
+    def __init__(self, request_id: str, status_msg: Optional[str]):
+        super().__init__(status_msg or 'Launch request is waiting to resume.')
+        self.request_id = request_id
+        self.status_msg = status_msg
 
 
 class StrategyExecutor:
@@ -506,6 +583,198 @@ class StrategyExecutor:
                 f'Refreshed priority for job {self.job_id} to {new_priority} '
                 f'(priority_class={new_priority_class}) from persisted DAG.')
 
+    async def _cancel_launch_request(self, request_id: str) -> None:
+        """Cancel an inner launch/exec request of this job."""
+        try:
+            req = await asyncio.to_thread(sdk.api_cancel, request_id)
+        except Exception as e:  # pylint: disable=broad-except
+            # If we can't even submit the cancel (e.g. the API server is
+            # unreachable), there is nothing more we can do here. This must
+            # not raise: callers - notably the asyncio.CancelledError
+            # handler in _launch - rely on this being best-effort, so that
+            # an unrelated failure here does not replace the in-flight
+            # cancellation.
+            logger.error(f'Failed to cancel the request: {e}')
+            return
+        logger.debug(f'sdk.api_cancel request ID: {req}')
+        try:
+            await asyncio.to_thread(sdk.get, req)
+        except Exception as e:  # pylint: disable=broad-except
+            # we must still propagate the cancellation
+            logger.error(f'Failed to cancel the request: {e}')
+
+    async def _get_request_payload(self, request_id: str) -> Optional[Any]:
+        """Fetch the status and status_msg of a request.
+
+        Returns:
+            The request payload (with status and status_msg fields), or None
+            if the request is unknown to the API server.
+
+        Raises:
+            Exception: If the API server could not be reached.
+        """
+        request_payloads = await asyncio.to_thread(
+            sdk.api_status,
+            request_ids=[request_id],
+            fields=['status', 'status_msg'])
+        if not request_payloads:
+            return None
+        return request_payloads[0]
+
+    def _start_stream_task(self, request_id: str) -> 'asyncio.Future':
+        """Start awaiting the inner launch request in a worker thread.
+
+        Streams the launch request's logs into this controller's per-job log,
+        relaying the encoded rich-status payloads so that `sky jobs launch` /
+        `sky jobs logs` can re-render the provisioning spinner, matching the
+        `sky launch` experience (see
+        :func:`sky.utils.rich_utils.decode_rich_status`).
+
+        The returned future completes with the request's result, or raises
+        the request's own exception. Transient stream interruptions (e.g. an
+        API server rolling restart or a connection reset) are retried
+        transparently inside the SDK (see
+        :func:`sky.server.rest.retry_transient_errors`).
+
+        Uses context_utils.to_thread_with_executor (not
+        loop.run_in_executor/asyncio.to_thread directly) so that the worker
+        thread inherits a copy of this coroutine's contextvars context - in
+        particular, the per-job log/stdout redirection is contextvars-based,
+        and without it the request's log stream would bypass this job's log
+        file and land in the shared controller log.
+        """
+
+        # A plain wrapper (rather than passing sdk.stream_and_get directly)
+        # sidesteps a ParamSpec/@typing.overload interaction that mypy
+        # cannot resolve through to_thread_with_executor.
+        def _stream_and_get() -> Any:
+            return sdk.stream_and_get(typing.cast(server_common.RequestId,
+                                                  request_id),
+                                      relay_rich_status=True)
+
+        return context_utils.to_thread_with_executor(_LAUNCH_STREAM_EXECUTOR,
+                                                     _stream_and_get)
+
+    async def _await_launch_request(self, request_id: str,
+                                    stream_task: 'asyncio.Future') -> None:
+        """Wait for the inner launch request, detecting if it parks.
+
+        While waiting on the request's log stream (started by
+        _start_stream_task), periodically poll the request's status: if the
+        API server has parked the request as WAITING (the request yielded its
+        executor worker to wait for some external condition, e.g. admission
+        to a queue), raise _LaunchRequestParked so that the caller can
+        release this job's launch slot for the duration of the wait.
+
+        The stream task is deliberately left running when parking: the
+        blocking sync stream cannot be interrupted from outside, and it does
+        not need to be - the caller carries it across the park and re-awaits
+        it on resume. The server keeps the stream open (with heartbeats)
+        while the request is WAITING, so the same stream picks up where it
+        left off, with no reconnect and no replayed log lines.
+
+        Raises:
+            _LaunchRequestParked: The request was parked as WAITING.
+            Exception: Any exception raised by the launch request itself.
+        """
+        while True:
+            done, _ = await asyncio.wait(
+                {stream_task}, timeout=_LAUNCH_REQUEST_STATUS_POLL_SECONDS)
+            if done:
+                # Surface the exception of the request, if any.
+                stream_task.result()
+                return
+            try:
+                request_payload = await self._get_request_payload(request_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # Tolerate transient failures of the status poll - the
+                # stream is still the authoritative wait.
+                logger.debug('Failed to poll the status of launch '
+                             f'request {request_id}: {e}')
+                continue
+            if request_payload is None:
+                # Request unknown to the server. Keep waiting on the
+                # stream, which will fail or complete on its own.
+                continue
+            if (request_payload.status ==
+                    requests_lib.RequestStatus.WAITING.value):
+                raise _LaunchRequestParked(request_id,
+                                           request_payload.status_msg)
+
+    async def _wait_for_parked_request(self, request_id: str) -> Optional[str]:
+        """Wait until a parked launch request is no longer WAITING.
+
+        The request resumes (and continues provisioning) on the API server on
+        its own once the condition it is waiting for is met; this poll only
+        determines when this job should re-acquire a launch slot and
+        re-attach to the request.
+
+        Cancellation is handled by the caller (_launch), which cancels the
+        outstanding parked request on asyncio.CancelledError.
+
+        Returns:
+            The request id to re-attach to, or None if the request has
+            genuinely vanished from the API server (e.g. lost across a
+            server restart), in which case a fresh launch attempt should be
+            made.
+
+        Raises:
+            Exception: If the status poll persistently fails (e.g. the API
+                server is unreachable, as opposed to reachable-but-unaware-
+                of-the-request). This is deliberately NOT treated the same
+                as "vanished": the old request may still be parked
+                server-side and could resume once the server is reachable
+                again, so falling back to a fresh launch here could
+                double-launch on the same cluster. The caller propagates
+                this with parked_request_id still set, so it is best-effort
+                cancelled instead.
+        """
+        poll_backoff = common_utils.Backoff(
+            _PARKED_POLL_INITIAL_BACKOFF_SECONDS,
+            _PARKED_POLL_MAX_BACKOFF_FACTOR)
+        consecutive_missing = 0
+        consecutive_errors = 0
+        while True:
+            await asyncio.sleep(poll_backoff.current_backoff())
+            try:
+                request_payload = await self._get_request_payload(request_id)
+            except Exception as e:  # pylint: disable=broad-except
+                consecutive_errors += 1
+                if consecutive_errors >= _PARKED_POLL_MAX_CONSECUTIVE_ERRORS:
+                    # Do not fall back to the vanished-request path here -
+                    # see the Raises section of the docstring above.
+                    logger.warning(
+                        'Repeatedly failed to poll the status of parked '
+                        f'launch request {request_id}. Last error: {e}')
+                    raise
+                logger.debug('Failed to poll the status of parked launch '
+                             f'request {request_id}: {e}')
+                continue
+            consecutive_errors = 0
+            if request_payload is None:
+                # A single empty response can be transient (e.g. the
+                # controller-local API server is mid-restart) - require
+                # multiple consecutive misses before concluding the request
+                # is gone.
+                consecutive_missing += 1
+                if consecutive_missing >= _PARKED_POLL_MAX_CONSECUTIVE_MISSING:
+                    logger.info(f'Parked launch request {request_id} no '
+                                'longer exists on the API server. Will make '
+                                'a new launch attempt.')
+                    break
+                continue
+            consecutive_missing = 0
+            if (request_payload.status !=
+                    requests_lib.RequestStatus.WAITING.value):
+                return request_id
+        # The request is genuinely gone (the persistently-unreachable case
+        # above raises instead of reaching here). Best-effort cancel the old
+        # request so that it cannot resume concurrently with the fresh
+        # launch attempt on the same cluster.
+        with contextlib.suppress(Exception):
+            await self._cancel_launch_request(request_id)
+        return None
+
     async def _launch(self,
                       max_retry: Optional[int] = 3,
                       raise_on_failure: bool = True,
@@ -552,20 +821,75 @@ class StrategyExecutor:
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
+        # Request id (and its carried log-stream future) of a launch request
+        # that was parked (WAITING) while we were waiting for it, to re-attach
+        # to on the next attempt instead of submitting a new launch. Set by
+        # the _LaunchRequestParked handler below; consumed by the inner
+        # try/except once it takes ownership of the request. While set, the
+        # asyncio.CancelledError handler below cancels the outstanding
+        # request if the job is cancelled.
+        parked_request_id: Optional[str] = None
+        parked_stream_task: Optional['asyncio.Future'] = None
+        parked_reason: Optional[str] = None
         while True:
             retry_cnt += 1
+            # Whether this iteration is resuming from a park, i.e. the
+            # top-of-loop block below runs and sets the task back to
+            # PENDING. Reset every iteration; distinct from
+            # reattach_request_id below, which is None when the parked
+            # request has vanished even though the task was still set
+            # PENDING for the wait.
+            resuming_from_park = False
+            # The stream future of this attempt's launch request; assigned in
+            # the inner try below, referenced by the park handler.
+            stream_task: Optional['asyncio.Future'] = None
             try:
+                if parked_request_id is not None:
+                    resuming_from_park = True
+                    if parked_reason is not None:
+                        # The task was STARTING/RECOVERING; set it back to
+                        # PENDING (with the park reason) while we wait for
+                        # the request to resume.
+                        await state.set_backoff_pending_async(
+                            self.job_id, self.task_id, reason=parked_reason)
+                        parked_reason = None
+                    resumed_request_id = await self._wait_for_parked_request(
+                        parked_request_id)
+                    if (resumed_request_id is None and
+                            parked_stream_task is not None):
+                        # The request vanished; its carried stream will fail
+                        # or finish on its own - consume its result and make
+                        # a fresh launch attempt.
+                        parked_stream_task.add_done_callback(
+                            _consume_task_exception)
+                        parked_stream_task = None
+                    parked_request_id = resumed_request_id
                 async with scheduler.scheduled_launch(
                         self.job_id,
                         self.starting,
                         self.starting_lock,
                         self.starting_signal,
                 ):
-                    # The job state may have been PENDING during backoff -
-                    # update to STARTING or RECOVERING.
-                    # On the first attempt (when retry_cnt is 1), we should
-                    # already be in STARTING or RECOVERING.
-                    if retry_cnt > 1:
+                    # Note: parked_request_id stays set until the inner
+                    # try/except below takes ownership of the request, so
+                    # that the outer asyncio.CancelledError handler can
+                    # cancel the outstanding request if the job is cancelled
+                    # in the meantime (e.g. while waiting for a launch slot
+                    # above).
+                    reattach_request_id = parked_request_id
+                    reattach_stream_task = parked_stream_task
+                    # The job state may have been PENDING during backoff or
+                    # while the launch request was parked - update to STARTING
+                    # or RECOVERING. Gate on resuming_from_park rather than
+                    # reattach_request_id: even if the parked request
+                    # vanished (reattach_request_id is None here), the
+                    # top-of-loop block above already set the task PENDING
+                    # while waiting, and it needs to be restored before the
+                    # fresh launch attempt below.
+                    # On the first attempt (when retry_cnt is 1 and we did
+                    # not just resume from a park), we should already be in
+                    # STARTING or RECOVERING.
+                    if retry_cnt > 1 or resuming_from_park:
                         await state.set_restarting_async(
                             self.job_id, self.task_id, recovery)
                     try:
@@ -573,82 +897,136 @@ class StrategyExecutor:
                         if self.pool is None:
                             assert self.cluster_name is not None
 
-                            # sdk.launch will implicitly start the API server,
-                            # but then the API server will inherit the current
-                            # env vars/user, which we may not want.
-                            # Instead, clear env vars here and call api_start
-                            # explicitly.
-                            vars_to_restore = {}
-                            try:
-                                for env_var in ENV_VARS_TO_CLEAR:
-                                    vars_to_restore[env_var] = os.environ.pop(
-                                        env_var, None)
-                                    logger.debug('Cleared env var: '
-                                                 f'{env_var}')
-                                logger.debug('Env vars for api_start: '
-                                             f'{os.environ}')
-                                await asyncio.to_thread(sdk.api_start)
-                                logger.info('API server started.')
-                            finally:
-                                for env_var, value in vars_to_restore.items():
-                                    if value is not None:
-                                        logger.debug('Restored env var: '
-                                                     f'{env_var}: {value}')
-                                        os.environ[env_var] = value
+                            if reattach_request_id is None:
+                                # sdk.launch will implicitly start the API
+                                # server, but then the API server will inherit
+                                # the current env vars/user, which we may not
+                                # want.
+                                # Instead, clear env vars here and call
+                                # api_start explicitly.
+                                vars_to_restore = {}
+                                try:
+                                    for env_var in ENV_VARS_TO_CLEAR:
+                                        vars_to_restore[env_var] = (
+                                            os.environ.pop(env_var, None))
+                                        logger.debug('Cleared env var: '
+                                                     f'{env_var}')
+                                    logger.debug('Env vars for api_start: '
+                                                 f'{os.environ}')
+                                    await asyncio.to_thread(sdk.api_start)
+                                    logger.info('API server started.')
+                                finally:
+                                    for env_var, value in (
+                                            vars_to_restore.items()):
+                                        if value is not None:
+                                            logger.debug('Restored env var: '
+                                                         f'{env_var}: {value}')
+                                            os.environ[env_var] = value
 
-                            # HA failover may land the controller on new hosts,
-                            # ensure blob extraction on the current host
-                            if self.file_mounts_blob_id is not None:
-                                await asyncio.to_thread(
-                                    server_common.resolve_blob_dir,
-                                    self.file_mounts_blob_id,
-                                    common_utils.get_user_hash())
+                                # HA failover may land the controller on new
+                                # hosts, ensure blob extraction on the current
+                                # host
+                                if self.file_mounts_blob_id is not None:
+                                    await asyncio.to_thread(
+                                        server_common.resolve_blob_dir,
+                                        self.file_mounts_blob_id,
+                                        common_utils.get_user_hash())
 
-                            request_id = None
+                            request_id: Optional[str] = None
                             try:
-                                extra_ctx = self.extra_launch_context()
-                                request_id = await asyncio.to_thread(
-                                    sdk.launch,
-                                    self.dag,
-                                    cluster_name=self.cluster_name,
-                                    # We expect to tear down the cluster as soon
-                                    # as the job is finished. However, in case
-                                    # the controller dies, set autodown to try
-                                    # and avoid a resource leak.
-                                    idle_minutes_to_autostop=_AUTODOWN_MINUTES,
-                                    down=True,
-                                    _is_launched_by_jobs_controller=True,
-                                    _file_mounts_blob_id=(
-                                        self.file_mounts_blob_id),
-                                    _extra_launch_context=(extra_ctx if
-                                                           extra_ctx else None),
-                                )
-                                logger.debug('sdk.launch request ID: '
-                                             f'{request_id}')
-                                # Relay the encoded rich-status payloads from
-                                # the inner cluster launch into this per-job
-                                # controller log (instead of rendering/dropping
-                                # them here). `stream_logs_by_id` decodes them
-                                # to drive the provisioning spinner shown by
-                                # `sky jobs launch` / `sky jobs logs`, matching
-                                # the `sky launch` experience.
-                                await asyncio.to_thread(
-                                    sdk.stream_and_get,
-                                    request_id,
-                                    relay_rich_status=True,
-                                )
+                                if reattach_request_id is None:
+                                    extra_ctx = self.extra_launch_context()
+                                    request_id = await asyncio.to_thread(
+                                        sdk.launch,
+                                        self.dag,
+                                        cluster_name=self.cluster_name,
+                                        # We expect to tear down the cluster as
+                                        # soon as the job is finished. However,
+                                        # in case the controller dies, set
+                                        # autodown to try and avoid a resource
+                                        # leak.
+                                        idle_minutes_to_autostop=(
+                                            _AUTODOWN_MINUTES),
+                                        down=True,
+                                        _is_launched_by_jobs_controller=True,
+                                        _file_mounts_blob_id=(
+                                            self.file_mounts_blob_id),
+                                        _extra_launch_context=(
+                                            extra_ctx if extra_ctx else None),
+                                    )
+                                    logger.debug('sdk.launch request ID: '
+                                                 f'{request_id}')
+                                    stream_task = self._start_stream_task(
+                                        request_id)
+                                else:
+                                    request_id = reattach_request_id
+                                    stream_task = reattach_stream_task
+                                    # Ownership of the request transfers to
+                                    # this try's CancelledError handler.
+                                    parked_request_id = None
+                                    parked_stream_task = None
+                                    logger.info('Re-attaching to launch '
+                                                f'request {request_id}.')
+                                    if (stream_task is not None and
+                                            stream_task.done() and
+                                            stream_task.exception()
+                                            is not None):
+                                        # The carried stream already failed -
+                                        # e.g. a transient transport error
+                                        # while the API server was briefly
+                                        # unreachable during the park - even
+                                        # though the request itself may have
+                                        # survived and already resumed.
+                                        # Trusting this stale error would
+                                        # tear down an otherwise healthy
+                                        # cluster, so don't let it propagate
+                                        # below: consume it and check the
+                                        # request's real state instead.
+                                        stream_task.add_done_callback(
+                                            _consume_task_exception)
+                                        request_payload = (
+                                            await self._get_request_payload(
+                                                request_id))
+                                        if (request_payload is not None and
+                                                request_payload.status
+                                                in _LIVE_REQUEST_STATUS_VALUES):
+                                            # Still live server-side - start a
+                                            # fresh stream to finish waiting
+                                            # on it instead of the dead one.
+                                            stream_task = (
+                                                self._start_stream_task(
+                                                    request_id))
+                                        else:
+                                            # Terminal (or unknown to the
+                                            # server): the outcome is already
+                                            # decided. Surface it directly -
+                                            # this raises the request's own
+                                            # exception if it failed - rather
+                                            # than waiting on a stream that
+                                            # will never produce one.
+                                            result: Any = (
+                                                await asyncio.to_thread(
+                                                    sdk.get,
+                                                    typing.cast(
+                                                        server_common.RequestId,
+                                                        request_id)))
+                                            stream_task = (
+                                                asyncio.get_running_loop(
+                                                ).create_future())
+                                            stream_task.set_result(result)
+                                assert stream_task is not None
+                                await self._await_launch_request(
+                                    request_id, stream_task)
                             except asyncio.CancelledError:
                                 if request_id:
-                                    req = await asyncio.to_thread(
-                                        sdk.api_cancel, request_id)
-                                    logger.debug('sdk.api_cancel request '
-                                                 f'ID: {req}')
-                                    try:
-                                        await asyncio.to_thread(sdk.get, req)
-                                    except Exception as e:  # pylint: disable=broad-except
-                                        # we must still return a CancelledError
-                                        logger.error(
-                                            f'Failed to cancel the job: {e}')
+                                    await self._cancel_launch_request(request_id
+                                                                     )
+                                if stream_task is not None:
+                                    # The stream ends once the cancelled
+                                    # request goes terminal; consume its
+                                    # result to avoid asyncio warnings.
+                                    stream_task.add_done_callback(
+                                        _consume_task_exception)
                                 raise
                             logger.info('Managed job cluster launched.')
                         else:
@@ -680,16 +1058,8 @@ class StrategyExecutor:
                                                                  request_id))
                             except asyncio.CancelledError:
                                 if request_id:
-                                    req = await asyncio.to_thread(
-                                        sdk.api_cancel, request_id)
-                                    logger.debug('sdk.api_cancel request '
-                                                 f'ID: {req}')
-                                    try:
-                                        await asyncio.to_thread(sdk.get, req)
-                                    except Exception as e:  # pylint: disable=broad-except
-                                        # we must still return a CancelledError
-                                        logger.error(
-                                            f'Failed to cancel the job: {e}')
+                                    await self._cancel_launch_request(request_id
+                                                                     )
                                 raise
                             assert job_id_on_pool_cluster is not None, (
                                 self.cluster_name, self.job_id)
@@ -697,6 +1067,13 @@ class StrategyExecutor:
                             await state.set_job_id_on_pool_cluster_async(
                                 self.job_id, job_id_on_pool_cluster)
                         logger.info('Managed job cluster launched.')
+                    except _LaunchRequestParked:
+                        # Not a launch failure - handled by the outer loop,
+                        # which releases the launch slot while the request is
+                        # parked. Notably, this must not fall through to the
+                        # teardown/backoff path below: the parked launch keeps
+                        # its partially provisioned resources.
+                        raise
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
                             exceptions.ResourcesMismatchError,
@@ -839,13 +1216,57 @@ class StrategyExecutor:
                             return None
 
                     # Raise NoClusterLaunchedError to indicate that the job is
-                    # in retry backoff. This will trigger special handling in
-                    # scheduler.schedule_launched().
-                    # We will exit the scheduled_launch context so that the
-                    # schedule state is ALIVE_BACKOFF during the backoff. This
-                    # allows other jobs to launch.
+                    # in retry backoff. We will exit the scheduled_launch
+                    # context so that the launch slot is released during the
+                    # backoff. This allows other jobs to launch.
                     raise exceptions.NoClusterLaunchedError()
 
+            except _LaunchRequestParked as e:
+                # The underlying launch request yielded its executor worker
+                # and is waiting to resume (e.g. waiting for admission to a
+                # queue). Mirror it at this layer: we have exited the
+                # scheduled_launch context above, releasing this job's launch
+                # slot, so that other jobs (including higher-priority ones)
+                # can launch while this job waits. This mirrors the
+                # retry-backoff path below, except that:
+                # - the cluster is NOT torn down: the parked launch keeps its
+                #   partially provisioned resources (e.g. its position in an
+                #   admission queue), and
+                # - we wait for the request to resume instead of sleeping a
+                #   fixed backoff, and then re-attach to the same request.
+                # The waiting itself happens at the top of the next loop
+                # iteration: this handler must not await anything, since an
+                # exception raised inside an except block (e.g. a
+                # cancellation delivered at an await) would bypass the
+                # sibling CancelledError handler below.
+                retry_cnt -= 1  # Parking is not a failed launch attempt.
+                parked_request_id = e.request_id
+                # Carry the stream across the park: the blocking stream
+                # cannot (and need not) be interrupted; it is re-awaited on
+                # resume.
+                parked_stream_task = stream_task
+                parked_reason = 'Job is waiting to launch'
+                if e.status_msg:
+                    parked_reason = f'{parked_reason}: {e.status_msg}'
+                logger.info(f'Launch request {e.request_id} is parked '
+                            f'({e.status_msg}). Releasing the launch slot '
+                            'while waiting for it to resume.')
+                continue
+            except asyncio.CancelledError:
+                # The job was cancelled while an inner launch request from
+                # the park path is still outstanding (parked, or resumed but
+                # not yet re-attached - e.g. while waiting for a launch slot
+                # above). These windows are outside the inner try/except that
+                # covers the request while we are attached to it, so cancel
+                # the request here.
+                if parked_request_id is not None:
+                    await self._cancel_launch_request(parked_request_id)
+                if parked_stream_task is not None:
+                    # The carried stream ends once the cancelled request goes
+                    # terminal; consume its result to avoid asyncio warnings.
+                    parked_stream_task.add_done_callback(
+                        _consume_task_exception)
+                raise
             except exceptions.NoClusterLaunchedError:
                 # Update the status to PENDING during backoff.
                 await state.set_backoff_pending_async(self.job_id, self.task_id)
@@ -856,6 +1277,30 @@ class StrategyExecutor:
                             f'{gap_seconds:.1f} seconds.')
                 await asyncio.sleep(gap_seconds)
                 continue
+            except Exception:
+                # Between the park handler above and the inner try/except
+                # taking ownership of the request (parked_request_id = None),
+                # several awaits run with the request still parked
+                # (set_backoff_pending_async, scheduled_launch.__aenter__,
+                # set_restarting_async) and can raise, e.g.
+                # ManagedJobStatusError or a DB error. Unlike the
+                # asyncio.CancelledError case above, this exception must
+                # propagate unchanged - but without this handler it would
+                # escape while the request is still parked (and possibly
+                # about to resume) on the API server, unattended. Mirror the
+                # CancelledError handler's cleanup, best-effort: a failure to
+                # cancel here must not replace the original exception.
+                if parked_request_id is not None:
+                    with contextlib.suppress(Exception):
+                        await self._cancel_launch_request(parked_request_id)
+                    if parked_stream_task is not None:
+                        # The carried stream ends once the cancelled request
+                        # goes terminal (or on its own if the cancel above
+                        # failed); consume its result to avoid asyncio
+                        # warnings.
+                        parked_stream_task.add_done_callback(
+                            _consume_task_exception)
+                raise
             else:
                 # The inner loop should either return or throw
                 # NoClusterLaunchedError.

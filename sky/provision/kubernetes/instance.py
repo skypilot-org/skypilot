@@ -909,9 +909,10 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         pods_to_check = [
             pod for pod in all_pods if pod.metadata.name in expected_pod_names
         ]
+        num_threads = max(1, min(_NUM_THREADS, len(pods_to_check)))
         pod_statuses = subprocess_utils.run_in_parallel(_inspect_pod_status,
                                                         pods_to_check,
-                                                        _NUM_THREADS)
+                                                        num_threads)
 
         all_pods_running = True
         pending_reasons_count: Dict[str, int] = {}
@@ -1099,7 +1100,8 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
 
     # Run pre_init in parallel across all new_nodes
-    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, _NUM_THREADS)
+    num_threads = max(1, min(_NUM_THREADS, len(new_nodes)))
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, num_threads)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -1698,8 +1700,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # due to node failure or manual termination, etc. and then launch
         # again to create the Pods back.
         # The existing Pods will be skipped in _create_resource_thread.
+        num_threads = max(1, min(_NUM_THREADS, config.count))
         created_resources = subprocess_utils.run_in_parallel(
-            _create_resource_thread, list(range(config.count)), _NUM_THREADS)
+            _create_resource_thread, list(range(config.count)), num_threads)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
@@ -1935,8 +1938,9 @@ def terminate_instances(
         _terminate_node(namespace, context, pod_name, _is_head(pod))
 
     # Run pod termination in parallel
+    num_threads = max(1, min(_NUM_THREADS, len(pods)))
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
-                                     _NUM_THREADS)
+                                     num_threads)
 
     if not worker_only:
         # Cleanup all services by label selector as a fallback.

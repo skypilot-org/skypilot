@@ -2038,10 +2038,10 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     # contains both, and the first match wins.
     (['ephemeral'],
      'The pod exceeded its ephemeral (local) storage limit and was evicted. '
-     'To fix: Increase `resources.ephemeral_storage` in your task YAML.'),
+     'To fix: Increase `resources.disk_size` in your task YAML.'),
     (['Evicted'],
      'The pod was evicted by the node under resource pressure. To fix: Increase the '
-     'relevant request (`resources.memory` or `resources.ephemeral_storage`) '
+     'relevant request (`resources.memory` or `resources.disk_size`) '
      'in your task YAML.'),
     (['Insufficient'],
      'The cluster does not have enough free resources. To fix: View node '

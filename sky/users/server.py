@@ -820,6 +820,24 @@ def create_service_account_token(
             status_code=400,
             detail='Expiration days must be positive or 0 for never expire')
 
+    # Validate the optional role up front so we fail before creating anything.
+    if token_body.role is not None:
+        if token_body.role not in rbac.get_supported_roles():
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid role {token_body.role!r}. Supported roles: '
+                f'{", ".join(rbac.get_supported_roles())}.')
+        # Only admins may create an admin-role service account; otherwise a
+        # non-admin could escalate by minting an admin-scoped token.
+        if token_body.role == rbac.RoleName.ADMIN.value:
+            caller_roles = permission.permission_service.get_user_roles(
+                auth_user.id)
+            if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
+                raise fastapi.HTTPException(
+                    status_code=403,
+                    detail='Only admins can create a service account with the '
+                    'admin role.')
+
     try:
         # Generate a unique service account user ID
         service_account_user_id = _generate_service_account_user_id()
@@ -844,6 +862,11 @@ def create_service_account_token(
         # an admin's runtime `rbac.default_role` change then applies without a
         # server restart.
         permission.seed_new_user_role(service_account_user_id)
+        # If a role was requested, apply it now so the token is created with the
+        # intended role atomically (no separate update-role round trip).
+        if token_body.role is not None:
+            permission.permission_service.update_role(service_account_user_id,
+                                                      token_body.role)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days

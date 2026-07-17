@@ -32,6 +32,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky import catalog
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.skylet import constants
 
 
@@ -90,6 +91,35 @@ def test_azure_images():
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_private_image():
+    # Exercises booting from a private Shared Image Gallery (SIG) image-version
+    # resource ID (see parse_shared_image_gallery_id in
+    # sky/clouds/utils/azure_utils.py). The image is a copy of the SkyPilot CPU
+    # image maintained in SkyPilot's Azure CI subscription; it lives in the same
+    # subscription the CI authenticates to and is replicated only to East US, so
+    # the region is pinned below.
+    name = smoke_tests_utils.get_cluster_name()
+    # Build the resource ID from the active subscription so the subscription
+    # GUID is not committed to source.
+    subscription_id = azure.get_subscription_id()
+    image_id = (f'/subscriptions/{subscription_id}/resourceGroups/'
+                'skypilot-sig-test/providers/Microsoft.Compute/galleries/'
+                'skypilot_sig_test_gallery/images/skypilot-sig-test-cpu/'
+                'versions/1.0.0')
+    test = smoke_tests_utils.Test(
+        'azure_private_image',
+        [
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id {image_id} --infra azure/eastus tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )

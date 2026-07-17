@@ -3518,3 +3518,230 @@ def test_managed_jobs_api_access(generic_cloud: str):
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing emergency recovery from unexpected controller errors ----------
+@pytest.mark.managed_jobs
+# Mutates the managed-jobs DB directly on the API server host, so it cannot
+# run against a remote API server (skip at collection, not just runtime).
+@pytest.mark.no_remote_server
+def test_managed_jobs_emergency_recovery(generic_cloud: str):
+    """An externally mutated schedule state triggers emergency recovery.
+
+    Mutating job_info.schedule_state out from under the controller makes its
+    next schedule-state transition fail unexpectedly (the incident signature
+    this feature addresses). The job must emergency-recover — surfacing as a
+    RECOVERING job event tagged recovery_source=EMERGENCY, with exactly one
+    recovery attempt recorded — and still end SUCCEEDED with no duplicate
+    cluster. (Emergency recovery reuses the normal RECOVERING status; the
+    EMERGENCY source on the event is the distinguishing signal.)
+
+    The mutation needs direct access to the managed-jobs DB, so the test
+    only runs where that access exists: local API server (both
+    consolidation mode, via the local DB, and non-consolidation, via ssh to
+    the jobs controller). Remote-server configurations are skipped by the
+    no_remote_server marker (at collection time), so no runtime check here.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    consolidation = smoke_tests_utils.server_side_is_consolidation_mode()
+
+    # The conditional UPDATE consumes the LAUNCHING window atomically: it
+    # only applies while schedule_state is LAUNCHING, so retrying it every
+    # few seconds both waits for and triggers the failure with no race.
+    #
+    # There are two LAUNCHING windows. The claim-time one (set by the
+    # scheduler before the controller runs, while the task status is still
+    # PENDING) is self-healing: scheduler_set_launching_async unconditionally
+    # re-sets LAUNCHING when the controller actually launches, so mutating it
+    # there does nothing. The launch-time window (during the controller's
+    # launch(), after the task has moved to STARTING) is the one whose
+    # LAUNCHING->ALIVE transition 0-rows and raises the unexpected error we
+    # want. Gate on the task being STARTING so we only hit the second window.
+    mutation_sql = ("UPDATE job_info SET schedule_state='ALIVE' "
+                    f"WHERE name='{name}' AND schedule_state='LAUNCHING' "
+                    "AND spot_job_id IN (SELECT spot_job_id FROM spot "
+                    "WHERE status='STARTING')")
+    count_sql = ('SELECT emergency_recovery_count FROM job_info '
+                 f"WHERE name='{name}'")
+    # Count of RECOVERING events tagged EMERGENCY — the distinguishing
+    # signal that this was an emergency recovery (not a preemption).
+    emergency_event_sql = (
+        'SELECT COUNT(*) FROM job_events e JOIN job_info j '
+        'ON e.spot_job_id = j.spot_job_id '
+        f"WHERE j.name='{name}' AND e.new_status='RECOVERING' "
+        "AND e.recovery_source='EMERGENCY'")
+
+    def _run_sql_locally(sql: str) -> int:
+        """Run sql against the local server's managed-jobs DB.
+
+        Returns the affected row count for UPDATEs, or the first column of
+        the first row for SELECTs (-1 if no row).
+        """
+        import sqlalchemy  # pylint: disable=import-outside-toplevel
+
+        from sky.jobs import state as managed_job_state
+        engine = managed_job_state._db_manager.get_engine()  # pylint: disable=protected-access
+        with engine.connect() as conn:
+            result = conn.execute(sqlalchemy.text(sql))
+            conn.commit()
+            if sql.lstrip().upper().startswith('SELECT'):
+                row = result.fetchone()
+                if row is None or row[0] is None:
+                    return -1
+                return int(row[0])
+            return result.rowcount
+
+    def _run_sql_on_controller(sql: str) -> int:
+        """Run sql against ~/.sky/spot_jobs.db on the jobs controller."""
+        controller = None
+        status_out = subprocess.run(['sky', 'status'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60,
+                                    check=False).stdout
+        for line in status_out.splitlines():
+            if 'sky-jobs-controller-' in line:
+                controller = line.split()[0]
+                break
+        if controller is None:
+            raise RuntimeError('ENVIRONMENT FAILURE: no jobs controller '
+                               'found in sky status; recovery NOT exercised.')
+        # Pass the SQL as a repr'd literal, not embedded in a '''...'''
+        # block: a query ending in a quoted literal (e.g. ...='EMERGENCY')
+        # would otherwise close the triple-quoted string early and raise a
+        # SyntaxError in the remote python.
+        code = textwrap.dedent(f"""\
+            import os
+            import sqlite3
+            conn = sqlite3.connect(
+                os.path.expanduser('~/.sky/spot_jobs.db'))
+            cursor = conn.execute({sql!r})
+            conn.commit()
+            if {repr(sql.lstrip().upper().startswith('SELECT'))}:
+                row = cursor.fetchone()
+                print(-1 if row is None or row[0] is None else int(row[0]))
+            else:
+                print(cursor.rowcount)
+            """)
+        # Bare `python3` is not on the non-interactive ssh PATH on every
+        # controller: Kubernetes pods have no system python3, only the
+        # SkyPilot runtime env. Resolve the interpreter the way SkyPilot
+        # itself does (the path recorded in ~/.sky/python_path), falling back
+        # to python3 (present on VM controllers).
+        remote_python = ('$([ -s ~/.sky/python_path ] && '
+                         'cat ~/.sky/python_path 2>/dev/null || '
+                         'command -v python3)')
+        result = subprocess.run(['ssh', controller, f'exec {remote_python} -'],
+                                input=code,
+                                capture_output=True,
+                                text=True,
+                                timeout=60,
+                                check=False)
+        if result.returncode != 0:
+            # Surface the remote python's output so a failed controller read
+            # reports *why* it failed. A bare CalledProcessError hides the
+            # remote traceback (it lives in .stderr, which is otherwise
+            # discarded), which is exactly what we need to debug a
+            # non-consolidation smoke failure.
+            raise RuntimeError(
+                f'Remote sql on {controller} exited {result.returncode}. '
+                f'SQL: {sql!r}\n--- remote stdout ---\n{result.stdout}'
+                f'\n--- remote stderr ---\n{result.stderr}')
+        return int(result.stdout.strip().splitlines()[-1])
+
+    run_sql = _run_sql_locally if consolidation else _run_sql_on_controller
+
+    def _count_job_clusters() -> int:
+        status_out = subprocess.run(['sky', 'status', '-u'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60,
+                                    check=False).stdout
+        return sum(1 for line in status_out.splitlines()
+                   if line.startswith(f'{name}-'))
+
+    def check_emergency_recovery():
+        # Consume the LAUNCHING window. Environmental slowness only extends
+        # the loop; the deadline is generous on purpose.
+        deadline = time.time() + 600
+        mutated = 0
+        while time.time() < deadline:
+            try:
+                mutated = run_sql(mutation_sql)
+            except (subprocess.SubprocessError, RuntimeError) as e:
+                yield f'Transient error applying mutation, retrying: {e}'
+                mutated = 0
+            if mutated:
+                break
+            time.sleep(2)
+        if not mutated:
+            raise RuntimeError(
+                'ENVIRONMENT FAILURE: never observed the LAUNCHING window; '
+                'recovery NOT exercised.')
+        yield 'Mutated schedule_state during LAUNCHING.'
+
+        # Subject under test, strict from here on: an EMERGENCY-tagged
+        # RECOVERING event must appear (it is recorded when the emergency is
+        # detected, before the backoff, and persists in job_events, so the
+        # 5s poll over 300s cannot miss it), and the cluster must never be
+        # duplicated.
+        observed = False
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            if run_sql(emergency_event_sql) >= 1:
+                observed = True
+                break
+            jobs_list = sky.get(sky.jobs.queue(refresh=False))
+            job = [j for j in jobs_list if j['job_name'] == name]
+            status = job[0]['status'] if job else None
+            assert status not in (
+                sky.ManagedJobStatus.FAILED_CONTROLLER,
+                None), (f'Job failed instead of emergency-recovering: {status}')
+            assert _count_job_clusters() <= 1, 'Duplicate cluster detected.'
+            time.sleep(5)
+        assert observed, ('No EMERGENCY-tagged RECOVERING event after the '
+                          'schedule-state mutation.')
+        yield 'Observed an EMERGENCY recovery event.'
+        assert _count_job_clusters() <= 1, 'Duplicate cluster detected.'
+
+        # Exactly one recovery attempt for exactly one mutation.
+        attempts = run_sql(count_sql)
+        assert attempts == 1, (f'Expected exactly 1 emergency recovery '
+                               f'attempt, got {attempts}.')
+        yield 'Recovery attempt recorded; waiting for the job to succeed.'
+
+        smoke_tests_utils.wait_for_managed_job_status_sdk(
+            name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        # A managed job is marked SUCCEEDED before its cluster is torn down:
+        # set_succeeded runs first for responsiveness, then the controller
+        # downloads logs and terminates the cluster, and only then does its
+        # schedule_state reach DONE (run_job_loop calls _cleanup before
+        # scheduler.job_done). So wait for DONE — the controller's own
+        # "fully cleaned up" signal — before checking for a leaked cluster,
+        # rather than racing the teardown right after SUCCEEDED.
+        done_sql = (f"SELECT COUNT(*) FROM job_info WHERE name='{name}' "
+                    "AND schedule_state='DONE'")
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            if run_sql(done_sql) >= 1:
+                break
+            time.sleep(5)
+        assert run_sql(done_sql) >= 1, (
+            'Controller never reached schedule_state DONE after SUCCEEDED.')
+        assert _count_job_clusters() == 0, (
+            'Job cluster still exists after the controller finished (DONE).')
+        yield 'Job recovered and succeeded with no leaked cluster.'
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-emergency-recovery',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d -- '
+            f'"echo job started; sleep 60"',
+            check_emergency_recovery,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

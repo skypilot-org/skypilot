@@ -81,6 +81,8 @@ from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
+
+    from sky import models
 else:
     yaml = adaptors_common.LazyImport('yaml')
 
@@ -1069,6 +1071,31 @@ def register_config_save_validator(
         _CONFIG_SAVE_VALIDATORS.append(fn)
 
 
+# Post-save hooks invoked at the end of `update_api_server_config_no_lock`,
+# after the new config has been persisted and reloaded in-process. Unlike
+# `register_config_update_hook`, each hook receives the previously persisted
+# config, the newly persisted config, and the user who made the change.
+ConfigPostSaveHook = Callable[
+    [config_utils.Config, config_utils.Config, Optional['models.User']], None]
+_CONFIG_POST_SAVE_HOOKS: List[ConfigPostSaveHook] = []
+
+
+def register_config_post_save_hook(fn: ConfigPostSaveHook) -> None:
+    """Register a hook invoked after the API server config is saved.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. Each hook is called as ``fn(old, new, user)`` after the
+    new config has been persisted and reloaded, where ``old`` is the
+    previously persisted config, ``new`` is the config that was just saved,
+    and ``user`` is the user who made the change. Hooks receive copies, so
+    mutating them has no effect. Like `register_config_update_hook`,
+    exceptions are caught and logged so a misbehaving hook cannot fail the
+    config update.
+    """
+    if fn not in _CONFIG_POST_SAVE_HOOKS:
+        _CONFIG_POST_SAVE_HOOKS.append(fn)
+
+
 def _get_effective_k8s_config_value(
         cloud: str,
         property_keys: List[Tuple[str, ...]],
@@ -1278,15 +1305,21 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
 
+    # Capture the currently persisted config before it is overwritten, for
+    # save validators and post-save hooks (to_dict() returns a fresh copy).
+    old_config: Optional[config_utils.Config] = None
+    if _CONFIG_SAVE_VALIDATORS or _CONFIG_POST_SAVE_HOOKS:
+        old_config = to_dict()
+
     # Run registered validators before persisting the config, so a validator
     # can veto the save by raising; exceptions propagate to abort the update.
     # Validators must not mutate the config, so hand them a deep copy of the
-    # incoming config (to_dict() already returns a fresh copy for `current`).
+    # incoming config.
     if _CONFIG_SAVE_VALIDATORS:
-        current = to_dict()
+        assert old_config is not None
         incoming = copy.deepcopy(config)
         for validator in list(_CONFIG_SAVE_VALIDATORS):
-            validator(current, incoming)
+            validator(old_config, incoming)
 
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
@@ -1345,3 +1378,17 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Config-update hook {hook!r} raised: {e}',
                            exc_info=True)
+    if _CONFIG_POST_SAVE_HOOKS:
+        assert old_config is not None
+        user = common_utils.get_current_user()
+        # At this point `config` reflects what was persisted (e.g. with the
+        # ('db',) key stripped); hand each hook its own copies so mutations
+        # by one hook cannot leak into another.
+        for post_save_hook in list(_CONFIG_POST_SAVE_HOOKS):
+            try:
+                post_save_hook(copy.deepcopy(old_config), copy.deepcopy(config),
+                               user)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Config post-save hook {post_save_hook!r} raised: {e}',
+                    exc_info=True)

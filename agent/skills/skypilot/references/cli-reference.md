@@ -712,8 +712,8 @@ Starts the SkyPilot API server locally.
 
 **Options:**
 
-- `--deploy` — Deploy the SkyPilot API server. When set to True, SkyPilot API server will use all resources on the host machine assuming the machine is dedicated to SkyPilot API server; host will also be set to 0.0....
-- `--host` (default: `127.0.0.1`) — The host to deploy the SkyPilot API server. To allow remote access, set this to 0.0.0.0
+- `--deploy` — Deploy the SkyPilot API server. When set to True, SkyPilot API server will use all resources on the host machine assuming the machine is dedicated to SkyPilot API server; host will also be set to a wi...
+- `--host` (default: `127.0.0.1`) — The host to bind the SkyPilot API server to. To allow remote access, set this to 0.0.0.0; use :: for IPv6 dual-stack.
 - `--foreground` — Run the SkyPilot API server in the foreground and output its logs to stdout/stderr. Allowing external systems to manage the process lifecycle and collect logs directly. This is useful when the API ser...
 - `--enable-basic-auth` — Enable basic authentication in the SkyPilot API server.
 

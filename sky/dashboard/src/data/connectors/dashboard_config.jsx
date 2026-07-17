@@ -8,17 +8,23 @@ import { apiClient } from '@/data/connectors/client';
 let dashboardConfigCache = null;
 let dashboardConfigPromise = null;
 
-const EMPTY_CONFIG = { externalLinks: [] };
+// `localContexts` falls back to ['in-cluster'] (the context name that is
+// local by construction) so the infra page keeps matching the local
+// cluster's unstamped GPU series even when the config endpoint is
+// unreachable.
+const EMPTY_CONFIG = { externalLinks: [], localContexts: ['in-cluster'] };
 
 /**
  * Fetch the admin-configured dashboard settings from the server.
  *
  * Returns an object of the shape
- * { externalLinks: [{ label, regex } | { label, url }] }, where `regex`
- * entries are matched against logs and `url` entries are templates resolved
- * against cluster/job metadata. On network or parse failure, returns an
- * empty config rather than throwing so the dashboard stays usable when the
- * endpoint is unavailable.
+ * { externalLinks: [{ label, regex } | { label, url }],
+ *   localContexts: [string] }, where `regex` entries are matched against
+ * logs, `url` entries are templates resolved against cluster/job metadata,
+ * and `localContexts` lists the Kubernetes contexts the server detected as
+ * pointing at its own cluster. On network or parse failure, returns a
+ * default config rather than throwing so the dashboard stays usable when
+ * the endpoint is unavailable.
  */
 export const getDashboardConfig = async () => {
   if (dashboardConfigCache !== null) {
@@ -53,7 +59,10 @@ export const getDashboardConfig = async () => {
             ? { label: entry.label, regex: entry.regex }
             : { label: entry.label, url: entry.url }
         );
-      dashboardConfigCache = { externalLinks };
+      const localContexts = Array.isArray(data?.local_contexts)
+        ? data.local_contexts.filter((entry) => typeof entry === 'string')
+        : EMPTY_CONFIG.localContexts;
+      dashboardConfigCache = { externalLinks, localContexts };
       return dashboardConfigCache;
     } catch (error) {
       console.debug('Dashboard config fetch failed:', error);
