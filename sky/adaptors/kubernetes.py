@@ -110,7 +110,7 @@ def _get_config_file() -> str:
     return os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
-def _enable_response_compression(api_client: Any) -> Any:
+def _enable_response_compression(client: Any) -> Any:
     """Advertise gzip so the API server compresses large response bodies.
 
     The Kubernetes API server gzip-compresses responses above a size threshold
@@ -120,8 +120,8 @@ def _enable_response_compression(api_client: Any) -> Any:
     connections to the API server. urllib3 transparently decompresses the body,
     including when the response is streamed with ``_preload_content=False``.
     """
-    api_client.set_default_header('Accept-Encoding', 'gzip')
-    return api_client
+    client.set_default_header('Accept-Encoding', 'gzip')
+    return client
 
 
 def _get_api_client(context: Optional[str] = None) -> Any:
