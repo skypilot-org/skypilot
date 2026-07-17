@@ -80,6 +80,10 @@ ENV_VARS_TO_CLEAR = [
     # If this is set, get_server_url() returns a non-local URL and
     # api_start refuses to start a local server. Always start local here.
     constants.SKY_API_SERVER_URL_ENV_VAR,
+    # If this is set, api_start refuses to start a local server even when the
+    # server URL is local (check_local_api_server_enabled_or_raise). The
+    # controller always needs to start a local server here, so clear it too.
+    env_options.Options.DISABLE_LOCAL_API_SERVER.env_key,
 ]
 
 # Interval to poll the status of the underlying sky.launch request while
