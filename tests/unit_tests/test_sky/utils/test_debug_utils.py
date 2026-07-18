@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import posixpath
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
@@ -2039,6 +2040,108 @@ class TestCollectControllerDebugData:
         debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
 
         # Should record the rsync error
+        assert len(errors) == 1
+        assert 'rsync/' in errors[0]['resource']
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_exec_and_rsync_are_bounded(self, mock_accessible,
+                                                   mock_backend_cls, tmp_path):
+        """The controller exec + rsync must pass timeouts so a slow/wedged
+        controller can't hang the dump."""
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/file.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # Exec is bounded by both a connect timeout and an overall timeout.
+        _, exec_kwargs = mock_backend.run_on_head.call_args
+        assert exec_kwargs['connect_timeout'] == (
+            debug_utils._CONTROLLER_EXEC_CONNECT_TIMEOUT)
+        assert exec_kwargs['timeout'] == debug_utils._CONTROLLER_EXEC_TIMEOUT
+        # Rsync is bounded by a total timeout.
+        _, rsync_kwargs = mock_runner.rsync.call_args
+        assert rsync_kwargs['timeout'] == debug_utils._CONTROLLER_RSYNC_TIMEOUT
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_exec_timeout_is_recorded_not_raised(
+            self, mock_accessible, mock_backend_cls, tmp_path):
+        """A timed-out controller exec is recorded as a partial failure; the
+        function returns instead of propagating and aborting the whole dump."""
+        mock_handle = mock.MagicMock()
+        mock_accessible.return_value = mock_handle
+
+        mock_backend = mock.MagicMock()
+        # run_with_log raises subprocess.TimeoutExpired on an exec timeout,
+        # which propagates out of run_on_head.
+        mock_backend.run_on_head.side_effect = subprocess.TimeoutExpired(
+            cmd='<manifest codegen>',
+            timeout=debug_utils._CONTROLLER_EXEC_TIMEOUT)
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        # Must not raise.
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert errors[0]['resource'] == 'controller_manifest'
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_controller_rsync_timeout_is_recorded_not_raised(
+            self, mock_accessible, mock_backend_cls, tmp_path):
+        """A timed-out controller rsync is recorded as a partial failure and
+        does not abort the dump."""
+        from sky import exceptions as sky_exceptions
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        # rsync(timeout=...) raises CommandError (returncode 255) on timeout.
+        mock_runner.rsync.side_effect = sky_exceptions.CommandError(
+            returncode=255,
+            command='rsync ...',
+            error_msg='rsync timed out after 120 seconds.',
+            detailed_reason=None)
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/big.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        # Must not raise.
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
         assert len(errors) == 1
         assert 'rsync/' in errors[0]['resource']
 

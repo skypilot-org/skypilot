@@ -1000,6 +1000,17 @@ _SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT = 10
 # enough that one bad node can't hang the whole dump.
 _SKYLET_LOG_RSYNC_TIMEOUT = 60
 
+# Bounds for collecting controller-side debug data. A slow, overloaded, or
+# wedged jobs controller (or an oversized job log) must not be able to hang the
+# dump: the connect timeout fails fast on an unreachable controller, and the
+# overall timeouts backstop a connected-but-stalled exec (the manifest CodeGen
+# runs DB queries on the controller) or transfer (a job log can be large).
+# Mirrors the skylet-log bounds above; a timeout is recorded as a partial
+# failure so the rest of the dump still completes.
+_CONTROLLER_EXEC_CONNECT_TIMEOUT = 10
+_CONTROLLER_EXEC_TIMEOUT = 120
+_CONTROLLER_RSYNC_TIMEOUT = 120
+
 
 def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
     """Resolve the absolute skylet log path on the head node.
@@ -1749,11 +1760,16 @@ def _collect_controller_debug_data(
         code = managed_job_utils.ManagedJobCodeGen.get_debug_dump_manifest(
             job_ids)
         backend = CloudVmRayBackend()
-        returncode, stdout, stderr = backend.run_on_head(handle,
-                                                         code,
-                                                         stream_logs=False,
-                                                         require_outputs=True,
-                                                         separate_stderr=True)
+        # Bound the exec so a slow/wedged controller can't hang the dump: a
+        # timeout raises and is recorded by the except below (partial failure).
+        returncode, stdout, stderr = backend.run_on_head(
+            handle,
+            code,
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True,
+            connect_timeout=_CONTROLLER_EXEC_CONNECT_TIMEOUT,
+            timeout=_CONTROLLER_EXEC_TIMEOUT)
         subprocess_utils.handle_returncode(
             returncode, code,
             'Failed to collect debug dump manifest from controller.', stderr)
@@ -1823,11 +1839,15 @@ def _collect_controller_debug_data(
                 local_path = str(target)
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 try:
+                    # Bound the transfer so an oversized log or stalled
+                    # connection can't hang the dump; a timeout raises
+                    # CommandError, recorded as a partial failure below.
                     runner.rsync(
                         source=remote_path,
                         target=local_path,
                         up=False,
                         stream_logs=False,
+                        timeout=_CONTROLLER_RSYNC_TIMEOUT,
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
