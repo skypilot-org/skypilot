@@ -1111,11 +1111,11 @@ class JobController:
             # cluster failure (unambiguous, and its attribution must not
             # expire while waiting). None/STOPPED verdicts recover
             # immediately.
+            plugin_failures = None
             if (cluster_status == status_lib.ClusterStatus.INIT and
                     not force_transit_to_recovering and
                     (job_status is None or not job_status.is_terminal())):
                 consecutive_init_statuses += 1
-                plugin_failures = None
                 if ExternalFailureSource.is_registered():
                     plugin_failures = await asyncio.to_thread(
                         ExternalFailureSource.get, cluster_name=cluster_name)
@@ -1172,8 +1172,15 @@ class JobController:
                                  f'{common_utils.format_exception(e)}')
 
                 if ExternalFailureSource.is_registered():
-                    cluster_failures = await asyncio.to_thread(
-                        ExternalFailureSource.get, cluster_name=cluster_name)
+                    # Reuse the INIT-tolerance gate's fetch from this tick --
+                    # re-querying could lose the attribution of a record
+                    # that expired in between.
+                    cluster_failures = (
+                        plugin_failures
+                        if plugin_failures is not None else
+                        await asyncio.to_thread(
+                            ExternalFailureSource.get,
+                            cluster_name=cluster_name))
                     if cluster_failures:
                         logger.info(
                             f'Detected cluster failures: {cluster_failures}')
