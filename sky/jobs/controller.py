@@ -67,15 +67,18 @@ else:
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
-# Grace window before recovering a cluster whose refreshed status is INIT.
+# Tolerance before recovering a cluster whose refreshed status is INIT.
 # INIT is also the verdict a SINGLE failed ray-health probe produces while
 # every cloud node is up (e.g. an SSH timeout to a head node under heavy
 # CPU/IO load), and it is not sticky: each monitor tick force-refreshes the
-# status, and a subsequent healthy probe restores UP. Tolerating INIT for a
-# bounded window turns a transient probe failure into a non-event, while a
-# genuine failure still recovers, merely this many seconds later. None and
-# STOPPED statuses are unambiguous and keep recovering immediately.
-_CLUSTER_INIT_RECOVERY_GRACE_SECONDS = 90.0
+# status, and a subsequent healthy probe restores UP. Recovery of an INIT
+# cluster therefore starts only after this many consecutive INIT
+# observations with no demonstrably healthy job in between (~90s at the
+# 15s monitor cadence). Counting observations rather than wall-clock keeps
+# the tolerance immune to clock steps and to ticks that never probed
+# (e.g. network outages). None and STOPPED statuses are unambiguous and
+# keep recovering immediately.
+_CLUSTER_INIT_RECOVERY_GRACE_PROBES = 6
 
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
@@ -932,8 +935,9 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
-        # Start of the current INIT-status grace episode (None = none).
-        init_grace_start_time = None
+        # Consecutive INIT observations without a demonstrably healthy
+        # job. See _CLUSTER_INIT_RECOVERY_GRACE_PROBES.
+        consecutive_init_statuses = 0
         # External-link labels already surfaced for this task, so we stop
         # polling the worker's metadata once every pattern has matched.
         live_link_labels: Set[str] = set()
@@ -1074,9 +1078,9 @@ class JobController:
             # status.
             if (job_status is not None and not job_status.is_terminal() and
                     task.num_nodes == 1):
-                # A healthy job closes any INIT grace episode -- the cluster
-                # is demonstrably serving.
-                init_grace_start_time = None
+                # A healthy job closes any INIT tolerance episode -- the
+                # cluster is demonstrably serving.
+                consecutive_init_statuses = 0
                 continue
 
             if job_status in job_lib.JobStatus.user_code_failure_states():
@@ -1097,33 +1101,42 @@ class JobController:
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
-            # Tolerate a bounded window of INIT verdicts before recovering:
-            # INIT commonly means "the ray health probe failed while all
-            # nodes are up" -- a verdict a single transient SSH failure
-            # produces -- and each tick's force-refresh re-probes, restoring
-            # UP once the transient clears. None/STOPPED are unambiguous and
-            # recover immediately.
-            if cluster_status == status_lib.ClusterStatus.INIT:
-                if init_grace_start_time is None:
-                    init_grace_start_time = time.time()
-                init_elapsed = time.time() - init_grace_start_time
-                if init_elapsed < _CLUSTER_INIT_RECOVERY_GRACE_SECONDS:
+            # Tolerate a bounded run of INIT verdicts before recovering
+            # (see _CLUSTER_INIT_RECOVERY_GRACE_PROBES). Gated off for
+            # forced recovery (no healthy workload to protect, and the
+            # force path skips the loop's sleep -- the tolerance would
+            # busy-spin and delay the mandated double-submit cleanup), for
+            # terminal job states (the healthy-job premise is known
+            # false), and when a registered plugin reports a concrete
+            # cluster failure (unambiguous, and its attribution must not
+            # expire while waiting). None/STOPPED verdicts recover
+            # immediately.
+            if (cluster_status == status_lib.ClusterStatus.INIT and
+                    not force_transit_to_recovering and
+                    (job_status is None or not job_status.is_terminal())):
+                consecutive_init_statuses += 1
+                plugin_failures = None
+                if ExternalFailureSource.is_registered():
+                    plugin_failures = await asyncio.to_thread(
+                        ExternalFailureSource.get, cluster_name=cluster_name)
+                if (not plugin_failures and consecutive_init_statuses <
+                        _CLUSTER_INIT_RECOVERY_GRACE_PROBES):
                     logger.info(
                         'Cluster status is INIT; tolerating a possibly '
                         'transient health-probe failure before recovery '
-                        f'({init_elapsed:.0f}s/'
-                        f'{_CLUSTER_INIT_RECOVERY_GRACE_SECONDS:.0f}s).')
+                        f'({consecutive_init_statuses}/'
+                        f'{_CLUSTER_INIT_RECOVERY_GRACE_PROBES}).')
                     continue
-            else:
-                init_grace_start_time = None
+            elif cluster_status != status_lib.ClusterStatus.INIT:
+                consecutive_init_statuses = 0
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
                 # the cloud. Spot recovery is needed (will be done later in the
                 # code).
-                # Entering recovery closes the INIT grace episode, so a
-                # post-recovery INIT starts a fresh window.
-                init_grace_start_time = None
+                # Entering recovery closes the INIT tolerance episode, so a
+                # post-recovery INIT starts fresh.
+                consecutive_init_statuses = 0
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
                 logger.info(
@@ -1170,7 +1183,10 @@ class JobController:
             else:
                 # Cluster is UP
                 if job_status is not None and not job_status.is_terminal():
-                    # The multi-node job is still running, continue monitoring.
+                    # The multi-node job is still running, continue
+                    # monitoring; a healthy job closes any INIT tolerance
+                    # episode.
+                    consecutive_init_statuses = 0
                     continue
                 elif (job_status
                       in job_lib.JobStatus.user_code_failure_states() or
