@@ -9,12 +9,14 @@ from unittest import mock
 
 from sky import cloud_stores
 
-# The install guard must resolve `awscli_path` from PATH (falling back to
-# installing awscli into the runtime venv), and the sync commands must invoke
-# the resolved `$awscli_path` -- never a hardcoded venv binary. Otherwise,
-# images that already ship `aws` skip the install and the sync fails with
-# '.../bin/aws: No such file or directory' (#9823).
-_AWSCLI_GUARD = 'awscli_path=$(which aws) || '
+# The install guard must resolve a runnable `awscli_path` from PATH (falling
+# back to installing awscli into the runtime venv when `aws` is absent or not
+# runnable), and the sync commands must invoke the resolved `$awscli_path` --
+# never a hardcoded venv binary. Otherwise, images that already ship `aws` skip
+# the install and the sync fails with '.../bin/aws: No such file or directory'
+# (#9823).
+_AWSCLI_GUARD = ('awscli_path=$(command -v aws) && '
+                 '$awscli_path --version >/dev/null 2>&1 || ')
 
 
 class TestAwsCliSyncCommands(unittest.TestCase):

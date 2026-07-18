@@ -33,13 +33,16 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 # Install guard shared by the stores that sync via the AWS CLI. Resolves
-# `awscli_path` to the `aws` binary on PATH if present, otherwise installs
+# `awscli_path` to a runnable `aws` on PATH if one exists, otherwise installs
 # awscli into the SkyPilot runtime venv and points `awscli_path` there, so
 # that the binary the guard checks for is the binary the sync commands
 # invoke (via `$awscli_path`). Checking PATH but invoking the venv binary
-# breaks on images that already ship `aws` (#9823).
+# breaks on images that already ship `aws` (#9823). Uses `command -v` (works
+# on slim images that lack `which`) plus a `--version` probe, so a present but
+# non-runnable `aws` still falls back to the venv install.
 _GET_AWSCLI = [
-    'awscli_path=$(which aws) || '
+    'awscli_path=$(command -v aws) && '
+    '$awscli_path --version >/dev/null 2>&1 || '
     f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
     f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
 ]
