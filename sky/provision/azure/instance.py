@@ -597,6 +597,28 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     # So we don't need to wait here.
 
 
+def _get_os_disk_size_gb(compute_client: 'azure_compute.ComputeManagementClient',
+                         resource_group: str, instance: Any) -> Optional[int]:
+    """Actual OS disk size of an instance, in GB.
+
+    The VM list response's ``storage_profile.os_disk.disk_size_gb`` goes
+    stale (``None``) after an out-of-band managed-disk grow, so the disk
+    resource itself is the authority when the profile carries no size.
+    Best-effort: shape reporting must never fail a provision/start.
+    """
+    try:
+        os_disk = instance.storage_profile.os_disk
+        if os_disk.disk_size_gb:
+            return int(os_disk.disk_size_gb)
+        disk = compute_client.disks.get(resource_group, os_disk.name)
+        if disk.disk_size_gb:
+            return int(disk.disk_size_gb)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to read OS disk size for instance '
+                       f'{instance.name!r}: {e}')
+    return None
+
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -624,6 +646,16 @@ def get_cluster_info(
         internal_ip, external_ip = _get_instance_ips(network_client, inst,
                                                      resource_group,
                                                      use_internal_ips)
+        # Report the ACTUAL shape so the backend can heal
+        # handle.launched_resources after out-of-band SKU swaps / disk
+        # grows. vm_size comes free with the list response; the disk
+        # size costs one disks.get, so it is fetched for the head node
+        # only (the only node the heal reads).
+        hardware_profile = getattr(inst, 'hardware_profile', None)
+        vm_size = getattr(hardware_profile, 'vm_size', None)
+        os_disk_size_gb = (_get_os_disk_size_gb(compute_client,
+                                                resource_group, inst)
+                           if inst.name == head_instance_id else None)
         instances[inst.name] = [
             common.InstanceInfo(
                 instance_id=inst.name,
@@ -632,6 +664,8 @@ def get_cluster_info(
                 tags=inst.tags,
                 # Azure VM name is the instance_id
                 node_name=inst.name,
+                instance_type=vm_size,
+                os_disk_size_gb=os_disk_size_gb,
             )
         ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))

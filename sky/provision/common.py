@@ -168,6 +168,13 @@ class InstanceInfo:
     # For Kubernetes: the k8s node name the pod runs on.
     # For clouds: the instance name (e.g., from AWS Name tag, GCP name).
     node_name: Optional[str] = None
+    # The ACTUAL shape the cloud reported at provision/start time, so the
+    # backend can heal handle.launched_resources after an out-of-band SKU
+    # swap or disk grow (otherwise the record stays stale until the
+    # cluster is re-launched). None = the provisioner does not report it.
+    instance_type: Optional[str] = None
+    # Actual OS/boot disk size in GB.
+    os_disk_size_gb: Optional[int] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns

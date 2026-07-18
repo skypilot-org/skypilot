@@ -382,6 +382,35 @@ class GangSchedulingStatus(enum.Enum):
     HEAD_FAILED = 2
 
 
+def _shape_overrides_from_cluster_info(
+        launched_resources: 'resources_lib.Resources',
+        cluster_info: provision_common.ClusterInfo) -> Dict[str, Any]:
+    """launched_resources overrides from the shape the cloud reported.
+
+    Out-of-band mutations (a SKU swap or managed-disk grow done behind
+    SkyPilot's back while the cluster was stopped) leave
+    ``handle.launched_resources`` stale forever, because only a fresh
+    provision writes it — so ``sky status`` and the cost report keep
+    showing the old shape. Provisioners that report the head node's
+    ACTUAL shape in ``InstanceInfo`` (``instance_type``,
+    ``os_disk_size_gb``; currently Azure) let every provision/restart
+    heal the record. ``getattr`` guards handles pickled before the
+    fields existed. Returns only the fields that differ; empty dict when
+    nothing to heal.
+    """
+    head = cluster_info.get_head_instance()
+    if head is None:
+        return {}
+    overrides: Dict[str, Any] = {}
+    instance_type = getattr(head, 'instance_type', None)
+    if instance_type and instance_type != launched_resources.instance_type:
+        overrides['instance_type'] = instance_type
+    os_disk_size_gb = getattr(head, 'os_disk_size_gb', None)
+    if os_disk_size_gb and int(os_disk_size_gb) != launched_resources.disk_size:
+        overrides['disk_size'] = int(os_disk_size_gb)
+    return overrides
+
+
 def _add_to_blocked_resources(blocked_resources: Set['resources_lib.Resources'],
                               resources: 'resources_lib.Resources') -> None:
     # If the resources is already blocked by blocked_resources, we don't need to
@@ -3580,6 +3609,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_record.region, zone=provision_record.zone)
+
+                # Heal the recorded shape from the actuals the provisioner
+                # reported, so out-of-band SKU swaps / disk grows stop
+                # going stale in the state DB. Best-effort —
+                # Resources.copy() re-validates against the catalog and a
+                # heal must never fail a provision/start.
+                try:
+                    shape_overrides = _shape_overrides_from_cluster_info(
+                        handle.launched_resources, cluster_info)
+                    if shape_overrides:
+                        logger.info('Refreshing launched resources from '
+                                    f'cloud actuals: {shape_overrides}')
+                        handle.launched_resources = (
+                            handle.launched_resources.copy(**shape_overrides))
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning('Failed to refresh launched resources '
+                                   f'from cloud actuals: {e}')
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
