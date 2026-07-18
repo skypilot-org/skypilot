@@ -67,6 +67,16 @@ else:
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
+# Grace window before recovering a cluster whose refreshed status is INIT.
+# INIT is also the verdict a SINGLE failed ray-health probe produces while
+# every cloud node is up (e.g. an SSH timeout to a head node under heavy
+# CPU/IO load), and it is not sticky: each monitor tick force-refreshes the
+# status, and a subsequent healthy probe restores UP. Tolerating INIT for a
+# bounded window turns a transient probe failure into a non-event, while a
+# genuine failure still recovers, merely this many seconds later. None and
+# STOPPED statuses are unambiguous and keep recovering immediately.
+_CLUSTER_INIT_RECOVERY_GRACE_SECONDS = 90.0
+
 _background_tasks: Set[asyncio.Task] = set()
 _background_tasks_lock: asyncio.Lock = asyncio.Lock()
 
@@ -922,6 +932,8 @@ class JobController:
 
         transient_job_check_error_start_time = None
         job_check_backoff = None
+        # Start of the current INIT-status grace episode (None = none).
+        init_grace_start_time = None
         # External-link labels already surfaced for this task, so we stop
         # polling the worker's metadata once every pattern has matched.
         live_link_labels: Set[str] = set()
@@ -1062,6 +1074,9 @@ class JobController:
             # status.
             if (job_status is not None and not job_status.is_terminal() and
                     task.num_nodes == 1):
+                # A healthy job closes any INIT grace episode -- the cluster
+                # is demonstrably serving.
+                init_grace_start_time = None
                 continue
 
             if job_status in job_lib.JobStatus.user_code_failure_states():
@@ -1082,11 +1097,33 @@ class JobController:
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
+            # Tolerate a bounded window of INIT verdicts before recovering:
+            # INIT commonly means "the ray health probe failed while all
+            # nodes are up" -- a verdict a single transient SSH failure
+            # produces -- and each tick's force-refresh re-probes, restoring
+            # UP once the transient clears. None/STOPPED are unambiguous and
+            # recover immediately.
+            if cluster_status == status_lib.ClusterStatus.INIT:
+                if init_grace_start_time is None:
+                    init_grace_start_time = time.time()
+                init_elapsed = time.time() - init_grace_start_time
+                if init_elapsed < _CLUSTER_INIT_RECOVERY_GRACE_SECONDS:
+                    logger.info(
+                        'Cluster status is INIT; tolerating a possibly '
+                        'transient health-probe failure before recovery '
+                        f'({init_elapsed:.0f}s/'
+                        f'{_CLUSTER_INIT_RECOVERY_GRACE_SECONDS:.0f}s).')
+                    continue
+            else:
+                init_grace_start_time = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
                 # the cloud. Spot recovery is needed (will be done later in the
                 # code).
+                # Entering recovery closes the INIT grace episode, so a
+                # post-recovery INIT starts a fresh window.
+                init_grace_start_time = None
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
                 logger.info(
