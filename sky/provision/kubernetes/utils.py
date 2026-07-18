@@ -2782,7 +2782,12 @@ def check_credentials(context: Optional[str],
             return False, 'Invalid credentials - do you have permission ' \
                           'to access the cluster?'
         else:
-            return False, f'Failed to communicate with the cluster: {str(e)}'
+            # Build the reason from the HTTP status/reason only. Using str(e)
+            # would embed the full HTTP response body, which for gateway errors
+            # (e.g. 502/503/504/524) is often a raw HTML error page.
+            reason = e.reason if e.reason else 'unknown error'
+            return False, ('Failed to communicate with the cluster: '
+                           f'HTTP {e.status} ({reason}).')
     except kubernetes.config_exception() as e:
         return False, f'Invalid configuration file: {str(e)}'
     except kubernetes.max_retry_error():
@@ -2792,8 +2797,13 @@ def check_credentials(context: Optional[str],
     except ValueError as e:
         return False, common_utils.format_exception(e)
     except Exception as e:  # pylint: disable=broad-except
-        return False, ('An error occurred: '
-                       f'{common_utils.format_exception(e, use_bracket=True)}')
+        msg = common_utils.format_exception(e, use_bracket=True)
+        # Guard against leaking a raw HTML error page (e.g. a gateway error
+        # from a proxy/CDN in front of the API server) into the reason.
+        lowered = msg.lower()
+        if '<!doctype html' in lowered or '<html' in lowered:
+            msg = 'the cluster returned an unexpected HTML error response.'
+        return False, f'An error occurred: {msg}'
 
     # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
     # optional checks.
