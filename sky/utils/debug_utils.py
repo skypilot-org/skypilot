@@ -57,8 +57,101 @@ def _full_traceback() -> str:
         return traceback.format_exc()
 
 
+# ---------------------------------------------------------------------------
+# Best-effort overall deadline helpers.
+#
+# A ``deadline`` is an absolute ``time.monotonic()`` value (not wall-clock
+# time.time(), which can jump). ``None`` means "no deadline" -- every helper
+# below is a no-op in that case, so the default path is byte-for-byte the same
+# as before the deadline was introduced.
+# ---------------------------------------------------------------------------
+def _remaining_budget(deadline: Optional[float]) -> Optional[float]:
+    """Seconds left until ``deadline`` (may be <= 0), or None if unbounded."""
+    if deadline is None:
+        return None
+    return deadline - time.monotonic()
+
+
+def _deadline_exceeded(deadline: Optional[float]) -> bool:
+    """True iff a deadline is set and has already passed."""
+    if deadline is None:
+        return False
+    return time.monotonic() >= deadline
+
+
+def _bounded_timeout(fixed: float, deadline: Optional[float]) -> float:
+    """Clamp a fixed per-op timeout to what the overall deadline still allows.
+
+    With no deadline this is just ``fixed`` (unchanged behavior). With a
+    deadline it is ``min(fixed, remaining_budget)`` so an operation started
+    late can't overrun the overall budget by its full fixed timeout; when the
+    budget is already gone the op gets a non-positive timeout and fails fast,
+    which its existing best-effort handler records as a partial failure.
+    """
+    remaining = _remaining_budget(deadline)
+    if remaining is None:
+        return fixed
+    return min(fixed, remaining)
+
+
+def _run_with_deadline(
+    fn: Callable[[], Any],
+    timeout: Optional[float],
+    *,
+    component: str,
+    resource: str,
+    errors: Optional[List[Dict[str, str]]] = None,
+) -> Tuple[bool, Any]:
+    """Run ``fn()`` in a worker thread bounded by a wall-clock timeout.
+
+    Returns ``(True, result)`` if ``fn()`` completes within ``timeout``. On
+    timeout the worker is orphaned (``shutdown(wait=False)`` -- see below), a
+    partial-failure record is appended to ``errors`` (mirroring the shared
+    error-record shape used across the dump), and ``(False, None)`` is
+    returned. Any OTHER exception raised by ``fn()`` propagates to the caller,
+    so each call site keeps its own existing ``except`` handling for the
+    non-timeout failure modes it already handles.
+
+    This is the same executor-deadline pattern the sky-check probe uses: we
+    deliberately do NOT use the executor as a context manager -- its
+    ``__exit__`` calls ``shutdown(wait=True)``, which would re-block on the
+    still-running worker and defeat the timeout. On timeout we shut it down
+    with ``wait=False`` and let the orphaned worker finish in the background
+    (the bounded operations here are read-only, so a lingering thread is
+    harmless for this one-shot dump).
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(fn)
+        result = future.result(timeout=timeout)
+        executor.shutdown(wait=False)
+        return True, result
+    except concurrent.futures.TimeoutError:
+        executor.shutdown(wait=False)
+        msg = (f'{component}/{resource} timed out after {timeout}s; recorded '
+               'as a partial failure and skipped so the rest of the dump '
+               'still completes.')
+        logger.warning(msg)
+        if errors is not None:
+            errors.append({
+                'component': component,
+                'resource': resource,
+                'error': msg,
+                'traceback': _full_traceback(),
+            })
+        return False, None
+
+
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
+
+# Env var that sets a best-effort overall wall-clock budget (seconds) for a
+# single debug-dump collection. When set to a positive float, collection stops
+# starting new sections once the budget is exhausted and still zips + returns
+# whatever was gathered so far (partial dump). Unset/invalid/<=0 -> no deadline,
+# i.e. unchanged behavior. An explicit ``overall_timeout`` arg to
+# create_debug_dump takes precedence over this env var.
+_DEBUG_DUMP_TIMEOUT_ENV_VAR = 'SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS'
 
 # Env var names whose values should be redacted (show bool presence only).
 # Used for both server_info environment and request body sanitization.
@@ -230,7 +323,8 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
 
 def _get_requests_from_managed_jobs(
         debug_dump_context: DebugDumpContext,
-        reachability: '_KubeContextReachabilityChecker') -> None:
+        reachability: '_KubeContextReachabilityChecker',
+        deadline: Optional[float] = None) -> None:
     """Parse request database to find requests related to managed jobs."""
     if not debug_dump_context['managed_job_ids']:
         return
@@ -253,17 +347,30 @@ def _get_requests_from_managed_jobs(
                                    dead_context))
     else:
         try:
-            jobs, _, _, _ = managed_jobs_core.queue_v2(
+            # Bound the queue_v2 call dump-side (see
+            # _MANAGED_JOB_QUEUE_TIMEOUT): a timeout is recorded by the helper
+            # and we degrade to no name/user matching, exactly as the except
+            # below handles a queue_v2 failure.
+            ok, result = _run_with_deadline(functools.partial(
+                managed_jobs_core.queue_v2,
                 refresh=False,
                 job_ids=list(debug_dump_context['managed_job_ids']),
-                all_users=True)
-            for job in jobs:
-                name = job.get('job_name')
-                if name:
-                    job_names.add(name)
-                user_hash = job.get('user_hash')
-                if user_hash:
-                    job_user_hashes.add(user_hash)
+                all_users=True),
+                                            _bounded_timeout(
+                                                _MANAGED_JOB_QUEUE_TIMEOUT,
+                                                deadline),
+                                            component='cross_link',
+                                            resource='managed_job_details',
+                                            errors=debug_dump_context['errors'])
+            if ok:
+                jobs, _, _, _ = result
+                for job in jobs:
+                    name = job.get('job_name')
+                    if name:
+                        job_names.add(name)
+                    user_hash = job.get('user_hash')
+                    if user_hash:
+                        job_user_hashes.add(user_hash)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to fetch managed job details: {e}')
             debug_dump_context['errors'].append({
@@ -495,7 +602,8 @@ def _managed_job_cluster_names_from_records(
 
 def _get_managed_jobs_from_clusters(
         debug_dump_context: DebugDumpContext,
-        reachability: '_KubeContextReachabilityChecker') -> None:
+        reachability: '_KubeContextReachabilityChecker',
+        deadline: Optional[float] = None) -> None:
     """Get managed job IDs whose underlying cluster is in the context.
 
     This must run FIRST in _build_debug_dump — before the recent-activity
@@ -521,8 +629,20 @@ def _get_managed_jobs_from_clusters(
                                    dead_context))
         return
     try:
-        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                   all_users=True)
+        # Bound the queue_v2 call dump-side (see _MANAGED_JOB_QUEUE_TIMEOUT); on
+        # timeout the helper records it and we skip the expansion, mirroring the
+        # except-and-return degrade below.
+        ok, result = _run_with_deadline(
+            functools.partial(managed_jobs_core.queue_v2,
+                              refresh=False,
+                              all_users=True),
+            _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
+            component='cross_link',
+            resource='managed_jobs_from_clusters',
+            errors=debug_dump_context['errors'])
+        if not ok:
+            return
+        jobs, _, _, _ = result
         job_cluster_names = _managed_job_cluster_names_from_records(jobs)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get managed jobs for clusters: {e}')
@@ -609,6 +729,7 @@ def _populate_recent_context(
     debug_dump_context: DebugDumpContext,
     minutes: float,
     reachability: '_KubeContextReachabilityChecker',
+    deadline: Optional[float] = None,
 ) -> None:
     """Populate context with resources active within the given time window."""
     logger.debug(
@@ -693,23 +814,36 @@ def _populate_recent_context(
                                    dead_context))
     else:
         try:
-            jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                       all_users=True)
-            for job in jobs:
-                submitted_at = job.get('submitted_at') or 0
-                end_at = job.get('end_at') or time.time()
-                if submitted_at >= cutoff_time or end_at >= cutoff_time:
-                    job_id = job.get('job_id')
-                    if job_id is not None:
-                        reasons = []
-                        if submitted_at >= cutoff_time:
-                            reasons.append(f'submitted_at={submitted_at:.0f}')
-                        if end_at >= cutoff_time:
-                            reasons.append(f'end_at={end_at:.0f}')
-                        logger.debug(f'Recent: including managed job {job_id} '
-                                     f'({", ".join(reasons)} >= '
-                                     f'cutoff {cutoff_time:.0f})')
-                        debug_dump_context['managed_job_ids'].add(job_id)
+            # Bound the queue_v2 call dump-side (see
+            # _MANAGED_JOB_QUEUE_TIMEOUT); on timeout the helper records it and
+            # we skip the recent-jobs scan, mirroring the except degrade below.
+            ok, result = _run_with_deadline(
+                functools.partial(managed_jobs_core.queue_v2,
+                                  refresh=False,
+                                  all_users=True),
+                _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
+                component='recent_context',
+                resource='managed_jobs',
+                errors=debug_dump_context['errors'])
+            if ok:
+                jobs, _, _, _ = result
+                for job in jobs:
+                    submitted_at = job.get('submitted_at') or 0
+                    end_at = job.get('end_at') or time.time()
+                    if submitted_at >= cutoff_time or end_at >= cutoff_time:
+                        job_id = job.get('job_id')
+                        if job_id is not None:
+                            reasons = []
+                            if submitted_at >= cutoff_time:
+                                reasons.append(
+                                    f'submitted_at={submitted_at:.0f}')
+                            if end_at >= cutoff_time:
+                                reasons.append(f'end_at={end_at:.0f}')
+                            logger.debug(
+                                f'Recent: including managed job {job_id} '
+                                f'({", ".join(reasons)} >= '
+                                f'cutoff {cutoff_time:.0f})')
+                            debug_dump_context['managed_job_ids'].add(job_id)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get recent managed jobs: {e}')
             debug_dump_context['errors'].append({
@@ -735,7 +869,8 @@ _SKY_CHECK_TIMEOUT = 30
 
 
 def _dump_server_info(dump_dir: str,
-                      errors: Optional[List[Dict[str, str]]] = None) -> None:
+                      errors: Optional[List[Dict[str, str]]] = None,
+                      deadline: Optional[float] = None) -> None:
     """Collect server metadata."""
     logger.debug('Entering _dump_server_info')
     server_info: Dict[str, Any] = {
@@ -796,38 +931,28 @@ def _dump_server_info(dump_dir: str,
     # sky_check.check() probes every enabled context's credentials
     # (list_namespaced_pod), and a defunct context costs ~20s there (urllib3
     # retries). check() is general-purpose and has no timeout param, and we
-    # must NOT change its global behavior, so we bound it for the dump only:
-    # run it in a worker thread with a wall-clock deadline. On timeout we
-    # record a partial-result error and move on rather than hang the dump.
-    # (The worker may keep running briefly; check() is a read-only probe, so a
-    # lingering thread is harmless for this one-shot dump.)
-    #
-    # NOTE: we deliberately do NOT use the executor as a context manager -- its
-    # __exit__ calls shutdown(wait=True), which would re-block on the
-    # still-running worker and defeat the timeout. On timeout we shut it down
-    # with wait=False and let the orphaned worker finish in the background.
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    # must NOT change its global behavior, so we bound it for the dump only via
+    # the shared executor-deadline helper: run it in a worker thread with a
+    # wall-clock deadline. On timeout the helper records a partial-result error
+    # and returns not-ok, so we skip enabled_clouds and move on rather than
+    # hang the dump. The timeout is clamped to the remaining overall budget so
+    # this probe can't overrun a set deadline.
+    sky_check_timeout = _bounded_timeout(_SKY_CHECK_TIMEOUT, deadline)
     try:
-        future = executor.submit(sky_check.check, quiet=True)
-        server_info['enabled_clouds'] = future.result(
-            timeout=_SKY_CHECK_TIMEOUT)
-        executor.shutdown(wait=False)
-    except concurrent.futures.TimeoutError:
-        executor.shutdown(wait=False)
-        msg = (f'sky check timed out after {_SKY_CHECK_TIMEOUT}s (likely a '
-               f'defunct/unreachable cloud or kube context); skipping '
-               f'enabled_clouds in the dump.')
-        logger.warning(msg)
-        server_info['cloud_status_error'] = msg
-        if errors is not None:
-            errors.append({
-                'component': 'server_info',
-                'resource': 'cloud_status',
-                'error': msg,
-                'traceback': _full_traceback()
-            })
+        ok, enabled_clouds = _run_with_deadline(functools.partial(
+            sky_check.check, quiet=True),
+                                                sky_check_timeout,
+                                                component='server_info',
+                                                resource='cloud_status',
+                                                errors=errors)
+        if ok:
+            server_info['enabled_clouds'] = enabled_clouds
+        else:
+            server_info['cloud_status_error'] = (
+                f'sky check timed out after {sky_check_timeout}s (likely a '
+                f'defunct/unreachable cloud or kube context); skipping '
+                f'enabled_clouds in the dump.')
     except Exception as e:  # pylint: disable=broad-except
-        executor.shutdown(wait=False)
         server_info['cloud_status_error'] = str(e)
         if errors is not None:
             errors.append({
@@ -993,6 +1118,13 @@ def _dump_request_id_info(
 # rather than hang the dump waiting to connect.
 _SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT = 10
 
+# Overall wall-clock timeout for the skylet-log path-resolve exec. The connect
+# timeout above fails fast on an unreachable node, but a connected-but-stalled
+# shell (e.g. a hung source_bashrc) needs an overall backstop too; the sibling
+# rsync already has one (_SKYLET_LOG_RSYNC_TIMEOUT). A timeout is absorbed by
+# the resolve's broad except, which falls back to the default log path.
+_SKYLET_LOG_RESOLVE_TIMEOUT = 30
+
 # Total wall-clock timeout for the skylet-log rsync. Reachability is already
 # gated by the resolve step above (connect_timeout), so this is a backstop
 # for a connected-but-stalled transfer (flaky network, oversized rotated
@@ -1011,8 +1143,21 @@ _CONTROLLER_EXEC_CONNECT_TIMEOUT = 10
 _CONTROLLER_EXEC_TIMEOUT = 120
 _CONTROLLER_RSYNC_TIMEOUT = 120
 
+# Overall wall-clock timeout for a single managed_jobs_core.queue_v2() call made
+# from the dump. queue_v2 fans out into shared, non-dump code that can hang
+# indefinitely against a reachable-but-wedged / non-gRPC controller: the
+# fetch_managed_job_table exec (backend.run_on_head, no timeout) and the
+# controller-accessibility "ray status" probe (runner.run, no timeout). Both
+# live in shared code with non-dump callers, so we bound the whole queue_v2 call
+# DUMP-SIDE via the executor-deadline helper instead of touching that shared
+# code. Same magnitude as the controller bounds above; a timeout is recorded as
+# a partial failure and the caller degrades to an empty result.
+_MANAGED_JOB_QUEUE_TIMEOUT = 120
 
-def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
+
+def _resolve_remote_skylet_log_path(runner: Any,
+                                    cluster_name: str,
+                                    deadline: Optional[float] = None) -> str:
     """Resolve the absolute skylet log path on the head node.
 
     Skylet writes its log to ``$SKY_RUNTIME_DIR/.sky/skylet.log``, where
@@ -1043,7 +1188,8 @@ def _resolve_remote_skylet_log_path(runner: Any, cluster_name: str) -> str:
             require_outputs=True,
             stream_logs=False,
             source_bashrc=True,
-            connect_timeout=_SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT)
+            connect_timeout=_SKYLET_LOG_RESOLVE_CONNECT_TIMEOUT,
+            timeout=_bounded_timeout(_SKYLET_LOG_RESOLVE_TIMEOUT, deadline))
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Failed to resolve skylet log path on cluster '
                      f'{cluster_name!r}, falling back to {default_path!r}: {e}')
@@ -1064,7 +1210,8 @@ def _collect_cluster_skylet_log(
         cluster_dir: str,
         handle: Any,
         errors: Optional[List[Dict[str, str]]] = None,
-        status: Optional['status_lib.ClusterStatus'] = None) -> None:
+        status: Optional['status_lib.ClusterStatus'] = None,
+        deadline: Optional[float] = None) -> None:
     """Rsync the head node's skylet log into the cluster dump dir.
 
     Skylet runs only on the head node (see
@@ -1114,14 +1261,16 @@ def _collect_cluster_skylet_log(
         return
 
     runner = runners[0]  # Head node; skylet runs only there.
-    remote_path = _resolve_remote_skylet_log_path(runner, cluster_name)
+    remote_path = _resolve_remote_skylet_log_path(runner, cluster_name,
+                                                  deadline)
     target = os.path.join(cluster_dir, 'skylet.log')
     try:
         runner.rsync(source=remote_path,
                      target=target,
                      up=False,
                      stream_logs=False,
-                     timeout=_SKYLET_LOG_RSYNC_TIMEOUT)
+                     timeout=_bounded_timeout(_SKYLET_LOG_RSYNC_TIMEOUT,
+                                              deadline))
         logger.debug(f'Collected skylet log for cluster {cluster_name!r}')
     except exceptions.CommandError as e:
         if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -1432,9 +1581,10 @@ def _controller_skip_error(component: str, resource: str,
     }
 
 
-def _dump_one_cluster(
-        cluster_name: str, clusters_dir: str,
-        reachability: _KubeContextReachabilityChecker) -> List[Dict[str, str]]:
+def _dump_one_cluster(cluster_name: str,
+                      clusters_dir: str,
+                      reachability: _KubeContextReachabilityChecker,
+                      deadline: Optional[float] = None) -> List[Dict[str, str]]:
     """Dump one cluster's state, events, requests, skylet log and k8s objects.
 
     Returns this cluster's error records. Runs as a worker under
@@ -1574,7 +1724,7 @@ def _dump_one_cluster(
                 skip_skylet = True
         if not skip_skylet:
             _collect_cluster_skylet_log(cluster_name, cluster_dir, handle,
-                                        errors, status)
+                                        errors, status, deadline)
     else:
         logger.debug(f'Skipping skylet log for cluster {cluster_name!r} '
                      f'(status={status})')
@@ -1595,7 +1745,8 @@ def _dump_one_cluster(
 def _dump_cluster_info(cluster_names: Set[str],
                        dump_dir: str,
                        reachability: '_KubeContextReachabilityChecker',
-                       errors: Optional[List[Dict[str, str]]] = None) -> None:
+                       errors: Optional[List[Dict[str, str]]] = None,
+                       deadline: Optional[float] = None) -> None:
     """Collect cluster state and events.
 
     Clusters are dumped in parallel: each cluster's collection can make slow
@@ -1617,8 +1768,8 @@ def _dump_cluster_info(cluster_names: Set[str],
     num_threads = min(len(cluster_list),
                       subprocess_utils.get_parallel_threads())
     results = subprocess_utils.run_in_parallel(
-        lambda name: _dump_one_cluster(name, clusters_dir, reachability),
-        cluster_list, num_threads)
+        lambda name: _dump_one_cluster(name, clusters_dir, reachability,
+                                       deadline), cluster_list, num_threads)
 
     if errors is not None:
         for cluster_errors in results:
@@ -1627,11 +1778,11 @@ def _dump_cluster_info(cluster_names: Set[str],
     logger.debug('Exiting _dump_cluster_info')
 
 
-def _dump_managed_job_info(
-        managed_job_ids: Set[int],
-        dump_dir: str,
-        reachability: '_KubeContextReachabilityChecker',
-        errors: Optional[List[Dict[str, str]]] = None) -> None:
+def _dump_managed_job_info(managed_job_ids: Set[int],
+                           dump_dir: str,
+                           reachability: '_KubeContextReachabilityChecker',
+                           errors: Optional[List[Dict[str, str]]] = None,
+                           deadline: Optional[float] = None) -> None:
     """Collect managed job state and logs.
 
     Both phases exec into the jobs controller outside consolidation mode,
@@ -1661,27 +1812,41 @@ def _dump_managed_job_info(
 
     # Phase 1: Queue info from queue_v2 (works in both consolidation and
     # non-consolidation modes via existing gRPC/SSH plumbing)
-    _dump_managed_job_queue_info(managed_job_ids, jobs_dir, errors)
+    _dump_managed_job_queue_info(managed_job_ids, jobs_dir, errors, deadline)
 
     # Phase 2: Controller-side debug data (controller logs, events,
     # run logs, cluster info) via new gRPC RPC / CodeGen fallback
-    _collect_controller_debug_data(list(managed_job_ids), dump_dir, errors)
+    _collect_controller_debug_data(list(managed_job_ids), dump_dir, errors,
+                                   deadline)
 
     logger.debug('Exiting _dump_managed_job_info')
 
 
-def _dump_managed_job_queue_info(
-        managed_job_ids: Set[int],
-        jobs_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None) -> None:
+def _dump_managed_job_queue_info(managed_job_ids: Set[int],
+                                 jobs_dir: str,
+                                 errors: Optional[List[Dict[str, str]]] = None,
+                                 deadline: Optional[float] = None) -> None:
     """Collect managed job info from queue_v2.
 
     This works in both consolidation and non-consolidation modes.
     Makes a single batched queue_v2 call for all job IDs.
     """
     try:
-        all_records, _, _, _ = managed_jobs_core.queue_v2(
-            refresh=False, job_ids=list(managed_job_ids), all_users=True)
+        # Bound the queue_v2 call dump-side (see _MANAGED_JOB_QUEUE_TIMEOUT); on
+        # timeout the helper records it and we skip this sub-section, mirroring
+        # the except-and-return degrade below.
+        ok, result = _run_with_deadline(
+            functools.partial(managed_jobs_core.queue_v2,
+                              refresh=False,
+                              job_ids=list(managed_job_ids),
+                              all_users=True),
+            _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
+            component='managed_jobs',
+            resource='queue_v2_batch',
+            errors=errors)
+        if not ok:
+            return
+        all_records, _, _, _ = result
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to fetch managed job queue info: {e}')
         if errors is not None:
@@ -1721,10 +1886,11 @@ def _dump_managed_job_queue_info(
         logger.debug(f'Dumped managed job {job_id} ({len(tasks)} task(s))')
 
 
-def _collect_controller_debug_data(
-        job_ids: List[int],
-        dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None) -> None:
+def _collect_controller_debug_data(job_ids: List[int],
+                                   dump_dir: str,
+                                   errors: Optional[List[Dict[str,
+                                                              str]]] = None,
+                                   deadline: Optional[float] = None) -> None:
     """Collect controller-side debug data via CodeGen manifest + rsync.
 
     Phase 1: Run CodeGen on the controller to get a manifest containing:
@@ -1769,7 +1935,7 @@ def _collect_controller_debug_data(
             require_outputs=True,
             separate_stderr=True,
             connect_timeout=_CONTROLLER_EXEC_CONNECT_TIMEOUT,
-            timeout=_CONTROLLER_EXEC_TIMEOUT)
+            timeout=_bounded_timeout(_CONTROLLER_EXEC_TIMEOUT, deadline))
         subprocess_utils.handle_returncode(
             returncode, code,
             'Failed to collect debug dump manifest from controller.', stderr)
@@ -1847,7 +2013,8 @@ def _collect_controller_debug_data(
                         target=local_path,
                         up=False,
                         stream_logs=False,
-                        timeout=_CONTROLLER_RSYNC_TIMEOUT,
+                        timeout=_bounded_timeout(_CONTROLLER_RSYNC_TIMEOUT,
+                                                 deadline),
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -1889,12 +2056,20 @@ def _build_debug_dump(
     recent_minutes: Optional[float],
     client_info: Optional[Dict[str, Any]],
     requested: Dict[str, Any],
+    deadline: Optional[float] = None,
 ) -> None:
     """Build the debug dump contents in dump_dir.
 
     Populates context via cross-linking, then dumps all sections
     (server info, requests, clusters, managed jobs, client info,
     errors, summary).
+
+    ``deadline`` is an optional absolute ``time.monotonic()`` best-effort
+    budget: once it passes, the remaining section calls are skipped (each with
+    its own recorded skip record) instead of run, and in-flight per-operation
+    timeouts are clamped to the remaining budget. The client-info / errors /
+    summary writes below always run so the partial dump is self-describing.
+    ``None`` (the default) keeps the previous behavior exactly.
     """
     # Populate the context and cross-link related resources. Each helper
     # runs exactly once, and the order is load-bearing:
@@ -1927,14 +2102,20 @@ def _build_debug_dump(
     reachability = _kube_context_reachable
 
     logger.debug('Cross-linking related resources')
-    _get_managed_jobs_from_clusters(debug_dump_context, reachability)
+    _get_managed_jobs_from_clusters(debug_dump_context,
+                                    reachability,
+                                    deadline=deadline)
     if recent_minutes is not None:
-        _populate_recent_context(debug_dump_context, recent_minutes,
-                                 reachability)
+        _populate_recent_context(debug_dump_context,
+                                 recent_minutes,
+                                 reachability,
+                                 deadline=deadline)
     _get_managed_jobs_from_requests(debug_dump_context)
     _get_job_clusters_from_managed_jobs(debug_dump_context)
     _get_requests_from_clusters(debug_dump_context)
-    _get_requests_from_managed_jobs(debug_dump_context, reachability)
+    _get_requests_from_managed_jobs(debug_dump_context,
+                                    reachability,
+                                    deadline=deadline)
     _get_clusters_from_requests(debug_dump_context)
     _get_clusters_from_managed_jobs(debug_dump_context)
 
@@ -1946,24 +2127,48 @@ def _build_debug_dump(
                  f'{len(debug_dump_context["cluster_names"])} clusters, '
                  f'{len(debug_dump_context["managed_job_ids"])} managed jobs')
 
-    # Dump all sections
+    # Dump all sections. These run as an ordered, sequential block; each is
+    # already best-effort (per-section failures are recorded in ``errors``,
+    # never raised). When an overall ``deadline`` is set we check it before
+    # starting each section: if the budget is gone we record a skip for THAT
+    # section and continue, so every remaining section gets its own skip record
+    # (rather than silently breaking) and the dump still reaches the zip step
+    # with whatever was gathered. Cluster-wide k8s objects (GPU-metrics pods,
+    # Kueue quota config) are fetched once per allowed kube context (source of
+    # truth: existing_allowed_contexts, so a context with no SkyPilot clusters
+    # is still captured).
     errors = debug_dump_context['errors']
-    _dump_server_info(dump_dir, errors=errors)
-    # Cluster-wide k8s objects (GPU-metrics pods, Kueue quota config), fetched
-    # once per allowed kube context (source of truth: existing_allowed_contexts,
-    # so a context with no SkyPilot clusters is still captured).
-    _dump_kube_contexts_info(dump_dir, errors=errors)
-    _dump_request_id_info(debug_dump_context['request_ids'],
-                          dump_dir,
-                          errors=errors)
-    _dump_cluster_info(debug_dump_context['cluster_names'],
-                       dump_dir,
-                       reachability,
-                       errors=errors)
-    _dump_managed_job_info(debug_dump_context['managed_job_ids'],
-                           dump_dir,
-                           reachability,
-                           errors=errors)
+    sections: List[Tuple[str, Callable[[], None]]] = [
+        ('server_info',
+         lambda: _dump_server_info(dump_dir, errors=errors, deadline=deadline)),
+        ('kubernetes_contexts',
+         lambda: _dump_kube_contexts_info(dump_dir, errors=errors)),
+        ('request_ids', lambda: _dump_request_id_info(
+            debug_dump_context['request_ids'], dump_dir, errors=errors)),
+        ('clusters',
+         lambda: _dump_cluster_info(debug_dump_context['cluster_names'],
+                                    dump_dir,
+                                    reachability,
+                                    errors=errors,
+                                    deadline=deadline)),
+        ('managed_jobs',
+         lambda: _dump_managed_job_info(debug_dump_context['managed_job_ids'],
+                                        dump_dir,
+                                        reachability,
+                                        errors=errors,
+                                        deadline=deadline)),
+    ]
+    for name, dump_section in sections:
+        if _deadline_exceeded(deadline):
+            logger.warning(f'Skipping debug-dump section {name!r}: overall '
+                           'deadline exceeded.')
+            errors.append({
+                'component': name,
+                'resource': 'section',
+                'error': 'Skipped: overall debug-dump deadline exceeded.',
+            })
+            continue
+        dump_section()
 
     # Write client info if provided
     if client_info:
@@ -1997,12 +2202,37 @@ def _build_debug_dump(
         json.dump(summary, f, indent=2)
 
 
+def _resolve_overall_timeout(
+        overall_timeout: Optional[float]) -> Optional[float]:
+    """Resolve the best-effort overall dump timeout in seconds.
+
+    Precedence: an explicit ``overall_timeout`` arg wins; else the
+    ``SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS`` env var (parsed as a float, ignored
+    if unset/invalid/<=0); else ``None`` (no deadline == unchanged behavior).
+    """
+    if overall_timeout is not None:
+        return overall_timeout if overall_timeout > 0 else None
+    raw = os.environ.get(_DEBUG_DUMP_TIMEOUT_ENV_VAR)
+    if raw is None:
+        return None
+    try:
+        parsed = float(raw)
+    except (TypeError, ValueError):
+        logger.warning(f'Ignoring invalid {_DEBUG_DUMP_TIMEOUT_ENV_VAR}='
+                       f'{raw!r} (not a number).')
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
     cluster_names: Optional[List[str]] = None,
     managed_job_ids: Optional[List[int]] = None,
     recent_minutes: Optional[float] = None,
     client_info: Optional[Dict[str, Any]] = None,
+    overall_timeout: Optional[float] = None,
 ) -> pathlib.Path:
     """Create a debug dump for troubleshooting.
 
@@ -2014,15 +2244,29 @@ def create_debug_dump(
         recent_minutes: If specified, include all resources active within
             this many minutes.
         client_info: Optional client-side info to include in the dump.
+        overall_timeout: Optional best-effort overall wall-clock budget, in
+            seconds, for the whole collection. When set (or supplied via the
+            ``SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS`` env var), collection stops
+            starting new sections once the budget is exhausted and still zips +
+            returns whatever was gathered (a partial dump, with the skipped
+            sections noted in errors.json). ``None`` (and env unset/invalid/<=0)
+            means no deadline == unchanged behavior.
 
     Returns:
         Path to the created zip file.
     """
+    resolved_timeout = _resolve_overall_timeout(overall_timeout)
+    # Absolute monotonic deadline, computed once. None == no deadline, which
+    # makes every deadline-aware code path below a no-op (unchanged behavior).
+    deadline = (time.monotonic() +
+                resolved_timeout if resolved_timeout is not None else None)
+
     logger.debug('Starting debug dump creation')
     logger.debug(f'Initial inputs: request_ids={request_ids}, '
                  f'cluster_names={cluster_names}, '
                  f'managed_job_ids={managed_job_ids}, '
-                 f'recent_minutes={recent_minutes}')
+                 f'recent_minutes={recent_minutes}, '
+                 f'overall_timeout={resolved_timeout}')
 
     # Resolve request ID prefixes to full IDs (same pattern as
     # sky api status in server.py)
@@ -2096,7 +2340,8 @@ def create_debug_dump(
                               debug_dump_context,
                               recent_minutes,
                               client_info,
-                              requested=original_requested)
+                              requested=original_requested,
+                              deadline=deadline)
         finally:
             sky_root_logger.removeHandler(debug_handler)
             provision_logger.removeHandler(debug_handler)
