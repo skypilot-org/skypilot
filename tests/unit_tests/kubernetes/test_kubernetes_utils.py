@@ -4485,6 +4485,84 @@ class TestCheckCredentials:
         finally:
             self._stop(patches)
 
+    # A trimmed, redacted Cloudflare-style 524 gateway error page. Kept
+    # deliberately generic (only example.com) so the test exercises the
+    # HTML-body handling and not any real deployment.
+    _GATEWAY_HTML_BODY = (
+        '<!DOCTYPE html><html><head>'
+        '<title>example.com | 524: A timeout occurred</title></head>'
+        '<body><h1>A timeout occurred</h1>'
+        '<p>Error code 524</p></body></html>')
+
+    @patch('sky.provision.kubernetes.utils.get_namespace')
+    def test_gateway_error_html_body_not_leaked(self, mock_get_namespace):
+        """A gateway ApiException (524 w/ HTML body) yields a concise reason.
+
+        The API server behind a proxy/CDN can return a gateway error whose
+        response body is a raw HTML page. `check_credentials` must build the
+        failure reason from the HTTP status/reason only and never embed the
+        HTML body (which `str(exception)` would otherwise include verbatim).
+        """
+        mocks, patches = self._patch_common()
+        mock_core_api = mocks[0]
+        try:
+            mock_get_namespace.return_value = 'team-a'
+
+            # Mimic how the kubernetes client surfaces a gateway error:
+            # str(e) contains the status line AND the HTML response body.
+            api_exc = kubernetes.client.rest.ApiException(
+                status=524, reason='Origin Time-out')
+            api_exc.body = self._GATEWAY_HTML_BODY
+            api_exc.headers = {'Content-Type': 'text/html'}
+            # Sanity-check the fixture: the raw exception really does embed
+            # the HTML body, so the assertions below are meaningful.
+            assert '<!DOCTYPE html' in str(api_exc)
+            mock_core_api.return_value.list_namespaced_pod.side_effect = api_exc
+
+            ok, reason = utils.check_credentials(context='shared-ctx')
+
+            assert ok is False
+            # Concise reason built from the HTTP status/reason.
+            assert reason is not None
+            assert '524' in reason
+            assert 'Origin Time-out' in reason
+            assert 'Failed to communicate with the cluster' in reason
+            # The raw HTML body must not leak into the reason.
+            lowered = reason.lower()
+            assert '<!doctype' not in lowered
+            assert '<html' not in lowered
+            assert '</html>' not in lowered
+        finally:
+            self._stop(patches)
+
+    @patch('sky.provision.kubernetes.utils.get_namespace')
+    def test_broad_except_collapses_html_error(self, mock_get_namespace):
+        """The broad `except` fallback collapses any HTML body to one line.
+
+        Defense-in-depth: even a non-ApiException error whose message happens
+        to carry an HTML page must not leak that HTML into the failure reason.
+        """
+        mocks, patches = self._patch_common()
+        mock_core_api = mocks[0]
+        try:
+            mock_get_namespace.return_value = 'team-a'
+            mock_core_api.return_value.list_namespaced_pod.side_effect = (
+                RuntimeError(self._GATEWAY_HTML_BODY))
+
+            ok, reason = utils.check_credentials(context='shared-ctx')
+
+            assert ok is False
+            assert reason is not None
+            assert 'unexpected HTML error response' in reason
+            # Neither the raw HTML nor the body text may leak.
+            lowered = reason.lower()
+            assert '<!doctype' not in lowered
+            assert '<html' not in lowered
+            assert '</html>' not in lowered
+            assert 'Error code 524' not in reason
+        finally:
+            self._stop(patches)
+
 
 # ----------------------------------------------------------------------------
 # Taint toleration tests (kubernetes.pod_config.spec.tolerations)
