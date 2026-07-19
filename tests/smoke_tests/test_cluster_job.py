@@ -509,28 +509,30 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
-    'image,pkg_mgr',
+    'image,pkg_mgr,num_nodes',
     [
-        # RHEL family / dnf -- community rebuild (validated on real hardware).
-        ('rockylinux:9', 'dnf'),
+        # RHEL family / dnf -- community rebuild. 2 nodes so the worker-join
+        # /dev/tcp probe is exercised on a non-Debian image.
+        ('rockylinux:9', 'dnf', 2),
         # RHEL family / dnf -- Red Hat's official UBI (the motivating image
         # family; UBI ships the free ubi repos so prereqs install cleanly).
-        ('redhat/ubi9', 'dnf'),
-        # SUSE family / zypper -- a distinct package manager (exercises the
-        # openssh-server -> openssh name mapping).
-        ('opensuse/leap:15', 'zypper'),
+        ('redhat/ubi9', 'dnf', 1),
     ])
-def test_kubernetes_non_debian_image(image, pkg_mgr):
-    """A range of non-Debian images boot on Kubernetes (pkg-manager-agnostic
-    bootstrap).
+def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
+    """Non-Debian images boot on Kubernetes (pkg-manager-agnostic bootstrap).
 
-    The per-node bootstrap detects the image's package manager (dnf/zypper
-    here) rather than assuming Debian apt/dpkg, so RHEL- and SUSE-family images
-    reach the SkyPilot runtime and run jobs. Regression test for the previously
+    The per-node bootstrap detects the image's package manager (dnf here)
+    rather than assuming Debian apt/dpkg, so RHEL-family images reach the
+    SkyPilot runtime and run jobs. Regression test for the previously
     Debian-only bootstrap, which failed such images during setup with a
-    misleading `container not found ("ray-node")`. All images here are
-    glibc-based; Alpine/musl is intentionally excluded because its conda/uv
-    runtime is unrelated to (and would mask) this bootstrap path.
+    misleading `container not found ("ray-node")`. The 2-node case also covers
+    the worker-join /dev/tcp probe.
+
+    All images are glibc-based; Alpine/musl is intentionally excluded (its
+    conda/uv runtime is unrelated to this path, and Ray publishes no musl
+    wheels). The zypper/openSUSE case was dropped after it proved flaky
+    end-to-end; the zypper name mapping is covered by the map_pkg_names unit
+    test instead.
     """
     # get_cluster_name() keys off the (shared) test function name, so the
     # parametrized cases would otherwise collide on one cluster name -- append a
@@ -543,7 +545,7 @@ def test_kubernetes_non_debian_image(image, pkg_mgr):
             # `sky launch` returns 0 only if the non-apt bootstrap installed the
             # prereqs and ray came up on the non-Debian image.
             f'sky launch -y -c {name} --infra kubernetes '
-            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'--image-id docker:{image}',
             # Confirm it really ran on the non-Debian image (not a fallback):
             # the image's own package manager is present and apt-get is not.

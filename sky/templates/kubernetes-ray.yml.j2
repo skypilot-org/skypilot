@@ -1059,6 +1059,13 @@ available_node_types:
                 #           this.
                 #   (1, 1): impossible on Ubuntu 22.04+ (Breaks declaration);
                 #           treated as no-op for forward-compat.
+                {% if k8s_fuse_device_required %}
+                # Only install FUSE when the task actually needs it (mounts).
+                # `fuse` goes into INSTALL_FIRST (fatal), so on a non-Debian
+                # image whose repos lack fuse/fuse-libs this would fail the whole
+                # launch -- and everything that uses FUSE (device plugin,
+                # fusermount setup) is already gated on k8s_fuse_device_required,
+                # so installing it otherwise is pointless anyway.
                 HAS_FUSE=0; pkg_present fuse && HAS_FUSE=1
                 HAS_FUSE3=0; pkg_present fuse3 && HAS_FUSE3=1
                 if [ "$HAS_FUSE" = "0" ] && [ "$HAS_FUSE3" = "0" ]; then
@@ -1067,6 +1074,7 @@ available_node_types:
                 elif [ "$HAS_FUSE" = "1" ] && [ "$HAS_FUSE3" = "0" ]; then
                   MISSING_PACKAGES="$MISSING_PACKAGES fuse3"
                 fi
+                {% endif %}
 
                 # Detect distro for mirror fallback
                 APT_OS="unknown"
@@ -1128,7 +1136,7 @@ available_node_types:
 
                   # Try INSTALL_FIRST (required core packages)
                   if [ ! -z "$INSTALL_FIRST" ]; then
-                    echo "Installing core packages: $INSTALL_FIRST" >> /tmp/apt-update.log;
+                    echo "Installing core packages: $(map_pkg_names $INSTALL_FIRST)" >> /tmp/apt-update.log;
                     apt_update_install_with_retries $(map_pkg_names $INSTALL_FIRST) >> /tmp/apt-update.log 2>&1 || {
                       echo "Install failed with ${candidate:-default sources}: $INSTALL_FIRST" >> /tmp/apt-update.log
                       continue
