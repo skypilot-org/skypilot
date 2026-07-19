@@ -211,8 +211,9 @@ TPU_RESOURCE_KEY = 'google.com/tpu'
 # AWS Neuron (Trainium/Inferentia) is advertised by the Neuron k8s device
 # plugin under this resource key.
 NEURON_RESOURCE_KEY = 'aws.amazon.com/neuron'
-# SkyPilot canonical names for AWS Neuron accelerators.
-NEURON_ACCELERATORS = {'Trainium', 'Trainium2', 'Inferentia', 'Inferentia2'}
+# AWS Neuron accelerator names, lowercased for case-insensitive matching
+# (see is_neuron_accelerator).
+NEURON_ACCELERATORS = {'trainium', 'trainium2', 'inferentia', 'inferentia2'}
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
@@ -4794,7 +4795,7 @@ def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
     """
     if accelerator is None:
         return False
-    return accelerator.capitalize() in NEURON_ACCELERATORS
+    return accelerator.lower() in NEURON_ACCELERATORS
 
 
 def get_node_accelerator_count(context: Optional[str],
