@@ -76,9 +76,12 @@ SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH -C $HOME'
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/python_path'
 SKY_RAY_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/ray_path'
-SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
-                           f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
-                           'which python3')
+SKY_GET_PYTHON_PATH_CMD = (
+    f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
+    f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
+    # POSIX builtin, present even when the `which` binary
+    # is not (e.g. minimal RHEL/Rocky images ship no which).
+    'command -v python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = (f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} '
                   f'$({SKY_GET_PYTHON_PATH_CMD})')
@@ -90,7 +93,7 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # The ray executable is a python script with a header like:
 #   #!/opt/conda/bin/python3
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
-               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
+               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || command -v ray)')
 
 # Use $(which env) to find env, falling back to /usr/bin/env if which is
 # unavailable. This works around a Slurm quirk where srun's execvp() doesn't
@@ -250,7 +253,7 @@ SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
-    'which conda > /dev/null 2>&1 || '
+    'command -v conda > /dev/null 2>&1 || '
     '{ '
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniconda3-Linux.sh script.
@@ -354,7 +357,7 @@ RAY_INSTALLATION_COMMANDS = (
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '
-    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+    f'command -v ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 # Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.

@@ -511,12 +511,11 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.parametrize(
     'image,pkg_mgr,num_nodes',
     [
-        # RHEL family / dnf -- community rebuild. 2 nodes so the worker-join
-        # /dev/tcp probe is exercised on a non-Debian image.
+        # Both run 2 nodes so the worker-join /dev/tcp probe is exercised on a
+        # non-Debian image. rockylinux:9 = community rebuild; redhat/ubi9 =
+        # Red Hat's official UBI (the motivating family; ships the free ubi repos).
         ('rockylinux:9', 'dnf', 2),
-        # RHEL family / dnf -- Red Hat's official UBI (the motivating image
-        # family; UBI ships the free ubi repos so prereqs install cleanly).
-        ('redhat/ubi9', 'dnf', 1),
+        ('redhat/ubi9', 'dnf', 2),
     ])
 def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
     """Non-Debian images boot on Kubernetes (pkg-manager-agnostic bootstrap).
