@@ -4815,12 +4815,18 @@ def get_node_accelerator_count(context: Optional[str],
             resource is found, it returns 0.
     """
     gpu_resource_name = get_gpu_resource_key(context)
-    # A node advertises at most one accelerator family (GPU, TPU, or Neuron).
+    # A node is expected to advertise at most one accelerator family (GPU, TPU,
+    # or Neuron). Rather than assert on external cluster state (which would crash
+    # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
+    # hybrid state), warn and fall through to the first family found below.
     present_keys = [
         k for k in (gpu_resource_name, TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY)
         if k in attribute_dict
     ]
-    assert len(present_keys) <= 1, present_keys
+    if len(present_keys) > 1:
+        logger.warning(
+            f'Node advertises multiple accelerator families {present_keys}; '
+            f'using {present_keys[0]}.')
     if gpu_resource_name in attribute_dict:
         return int(attribute_dict[gpu_resource_name])
     elif TPU_RESOURCE_KEY in attribute_dict:

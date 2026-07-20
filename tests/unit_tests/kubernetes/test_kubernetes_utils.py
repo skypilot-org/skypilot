@@ -5383,5 +5383,19 @@ def test_get_node_accelerator_count_neuron():
         assert utils.get_node_accelerator_count(None, {'cpu': '4'}) == 0
 
 
+def test_get_node_accelerator_count_multiple_families_no_crash():
+    """A node advertising multiple accelerator families must not crash the
+    caller (e.g. sky status/show-gpus); it warns and returns the first family
+    found (GPU > TPU > Neuron)."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # GPU + Neuron on the same node -> GPU wins, no exception.
+        assert utils.get_node_accelerator_count(None, {
+            'nvidia.com/gpu': '8',
+            'aws.amazon.com/neuron': '16',
+        }) == 8
+
+
 def test_get_handled_taint_keys_includes_neuron():
     assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()
