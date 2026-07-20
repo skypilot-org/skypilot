@@ -24,6 +24,13 @@ def clear_request_catalog_cache():
     annotations.clear_request_level_cache()
 
 
+def _make_vast_client(*methods: str) -> mock.Mock:
+    client = mock.Mock(spec=[*methods, "client"])
+    client.client = mock.Mock(spec=["api_key"])
+    client.client.api_key = "test-api-key"
+    return client
+
+
 def test_vast_catalog_does_not_expose_ephemeral_offer_resolution():
     """Marketplace offers must never be durable SkyPilot instance types."""
     assert not hasattr(vast_catalog, "get_dynamic_offer")
@@ -110,8 +117,8 @@ def test_live_search_without_capacity_raises_typed_resource_error(monkeypatch):
 
 def test_launch_reconciles_eventual_instance_visibility(monkeypatch):
     """A successful create must not be retried merely because reads lag."""
-    client = mock.Mock(
-        spec=["search_offers", "create_instance", "show_instance"])
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance")
     client.search_offers.return_value = [{"id": 123, "min_bid": 0.4}]
     client.create_instance.return_value = {"new_contract": 456}
     client.show_instance.side_effect = [
@@ -137,8 +144,8 @@ def test_launch_reconciles_eventual_instance_visibility(monkeypatch):
 
 
 def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
-    client = mock.Mock(
-        spec=["search_offers", "create_instance", "show_instance"])
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance")
     client.search_offers.return_value = [{"id": 123, "min_bid": 0.4}]
     client.create_instance.return_value = {"new_contract": 456}
     client.show_instance.return_value = {"id": 456}
@@ -176,12 +183,13 @@ def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
     assert params["extra"] == "--shm-size=16g"
     assert "image" not in params
     assert "disk" not in params
+    assert ('echo "test-api-key" > ~/.vast_api_key' in params["onstart_cmd"])
     assert params["onstart_cmd"].endswith("echo ready")
 
 
 def test_launch_rejects_invalid_env_value(monkeypatch):
-    client = mock.Mock(
-        spec=["search_offers", "create_instance", "show_instance"])
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance")
     client.search_offers.return_value = [{"id": 123, "min_bid": 0.4}]
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
@@ -200,7 +208,7 @@ def test_launch_rejects_invalid_env_value(monkeypatch):
 
 
 def test_launch_converts_disappeared_offer_to_typed_capacity_error(monkeypatch):
-    client = mock.Mock(spec=["search_offers", "create_instance"])
+    client = _make_vast_client("search_offers", "create_instance")
     client.search_offers.return_value = [{"id": 123, "min_bid": 0.4}]
     client.create_instance.side_effect = RuntimeError(
         "offer 123 is no longer rentable")
