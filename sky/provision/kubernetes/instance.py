@@ -1618,7 +1618,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
@@ -1634,7 +1635,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 gpu_toleration
             ]
@@ -1648,7 +1650,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 neuron_toleration
             ]
