@@ -385,8 +385,8 @@ SKY_APISERVER_LOCAL_CONTEXT_DETECTION_DURATION_SECONDS = prom.Histogram(
 # success | unauthorized | no_credentials | no_uid | error.
 # `unauthorized` means the API server's own service account lacks
 # `get` on the kube-system namespace, which disables detection for
-# every named context; alert on any nonzero
-# rate(sky_apiserver_local_context_anchor_read_total{result="unauthorized"}[15m]).
+# every named context; alert on any nonzero rate of the
+# result="unauthorized" series over a 15m window.
 SKY_APISERVER_LOCAL_CONTEXT_ANCHOR_READ_TOTAL = prom.Counter(
     'sky_apiserver_local_context_anchor_read_total',
     'Count of in-cluster identity-anchor (kube-system) read outcomes',
