@@ -16,6 +16,6 @@ SkyPilot: Manage all your AI compute
    :hidden:
 
    Docs <docs/index>
-   Case Studies <https://blog.skypilot.co/case-studies/>
-   Blog <https://blog.skypilot.co/>
+   Case Studies <https://skypilot.ai/case-studies>
+   Blog <https://skypilot.ai/blog>
 

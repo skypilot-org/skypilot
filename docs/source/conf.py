@@ -109,6 +109,7 @@ html_theme_options = {
     'navbar_end': [
         'theme-switcher',
         'navbar-icon-links',
+        'try-platform-button',
     ],
     'navbar_persistent': ['search-button-field'],
     'logo': {

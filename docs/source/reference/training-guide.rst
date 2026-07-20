@@ -643,7 +643,7 @@ Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://docs.skypilot.co/en/latest/llm/vicuna.html>`_, `YAML <https://docs.skypilot.co/en/latest/llm/vicuna/train.html>`__
-* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
+* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://skypilot.ai/blog/large-scale-vector-database>`__
 * `Qwen <https://docs.skypilot.co/en/latest/examples/models/qwen.html>`__
 * PyTorch DDP, ResNet: `YAML <https://docs.skypilot.co/en/latest/examples/spot/resnet.html>`__
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://docs.skypilot.co/en/latest/examples/spot/lightning_cifar10.html>`__

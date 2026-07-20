@@ -107,7 +107,54 @@
     }
 }
 
+/*
+ * "Try SkyPilot Platform" navbar call-to-action (_templates/try-platform-button.html).
+ *
+ * Below 960px the theme sets .navbar-header-items { display: none }, so this
+ * button is not shown in the header on small screens -- it is reached through
+ * the hamburger sidebar, which re-renders the navbar_end items.
+ */
+.sky-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1;
+    padding: 7px 13px;
+    border-radius: 6px;
+    background-color: var(--pst-color-primary);
+    color: #fff !important;
+    text-decoration: none !important;
+    transition: background-color 0.15s ease;
+}
+
+.sky-cta:hover {
+    background-color: var(--sky-cta-hover);
+}
+
+.sky-cta__arrow {
+    font-weight: 700;
+    opacity: 0.85;
+}
+
+/* Full label on wide viewports, short label where the navbar gets tight. */
+.sky-cta__label-short {
+    display: none;
+}
+
+@media (max-width: 1100px) {
+    .sky-cta__label-full {
+        display: none;
+    }
+    .sky-cta__label-short {
+        display: inline;
+    }
+}
+
 html[data-theme="light"] {
+  --sky-cta-hover: #0f57bd;
   --sky-announcement-text: #1f2328;
   --sky-announcement-border: #e2e4e7;
   --sky-announcement-accent: #176de8;
@@ -119,6 +166,9 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
+  /* Hover darkens rather than lightens: white-on-blue drops below the 4.5:1
+     text-contrast floor as the blue gets lighter (#3f8cff is only 3.3:1). */
+  --sky-cta-hover: #2563d8;
   --sky-announcement-text: #eef1f5;
   --sky-announcement-border: #333b47;
   --sky-announcement-accent: #6ea8ff;

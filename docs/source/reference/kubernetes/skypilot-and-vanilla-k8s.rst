@@ -182,10 +182,10 @@ This is because etcd, the control store for Kubernetes state, can timeout and fa
 
 Being restricted to a single region/cloud with Vanilla Kubernetes has two drawbacks:
 
-1. `GPU availability is reduced <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ because you cannot utilize
+1. `GPU availability is reduced <https://skypilot.ai/blog/introducing-sky-serve#why-skyserve>`_ because you cannot utilize
 available capacity elsewhere.
 
-2. `Costs increase <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ as you are unable to
+2. `Costs increase <https://skypilot.ai/blog/introducing-sky-serve#why-skyserve>`_ as you are unable to
 take advantage of cheaper resources in other regions.
 
 SkyPilot is designed to scale across clouds and regions: it allows you to run your tasks on your Kubernetes cluster, and burst to more regions and clouds if needed. In doing so, SkyPilot ensures that your tasks are always running in the most cost-effective region, while maintaining high availability.
