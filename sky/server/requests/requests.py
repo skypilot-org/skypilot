@@ -1350,9 +1350,9 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         return int.from_bytes(digest[:8], 'big') & ((1 << 63) - 1)
 
     @staticmethod
-    def _bind_sql(sql: str,
-                  parameters: Optional[Any] = None) -> Tuple[str, Dict[str,
-                                                                       Any]]:
+    def _bind_sql(
+            sql: str,
+            parameters: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
         if parameters is None:
             values = []
         elif isinstance(parameters, (list, tuple)):
@@ -1466,9 +1466,8 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                 ON {REQUEST_TABLE} (created_at)"""))
 
     def _acquire_request_lock(self, conn, request_id: str) -> None:
-        conn.execute(
-            sqlalchemy.text('SELECT pg_advisory_xact_lock(:lock_key)'),
-            {'lock_key': self._lock_key(request_id)})
+        conn.execute(sqlalchemy.text('SELECT pg_advisory_xact_lock(:lock_key)'),
+                     {'lock_key': self._lock_key(request_id)})
 
     async def _acquire_request_lock_async(self, conn, request_id: str) -> None:
         await conn.execute(
@@ -1483,8 +1482,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         columns_str = ', '.join(fields) if fields else ', '.join(
             REQUEST_COLUMNS)
         rows = self._execute_on_conn(
-            conn,
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
             'WHERE request_id LIKE ?', (request_id + '%',),
             fetch=True)
         row = rows[0] if rows else None
@@ -1502,8 +1500,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         columns_str = ', '.join(fields) if fields else ', '.join(
             REQUEST_COLUMNS)
         rows = await self._execute_on_async_conn(
-            conn,
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
             'WHERE request_id LIKE ?', (request_id + '%',),
             fetch=True)
         row = rows[0] if rows else None
@@ -1518,7 +1515,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                               request.to_row())
 
     async def _add_or_update_request_on_async_conn(self, conn,
-                                                  request: Request) -> None:
+                                                   request: Request) -> None:
         await self._execute_on_async_conn(conn, _add_or_update_request_sql,
                                           request.to_row())
 
@@ -1679,8 +1676,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                     logger.warning(
                         'Postgres request backend cannot safely signal API '
                         'worker pid %s from this process; marking request %s '
-                        'cancelled in the request DB.',
-                        request_record.pid,
+                        'cancelled in the request DB.', request_record.pid,
                         request_id)
                 request_record.status = RequestStatus.CANCELLED
                 request_record.finished_at = time.time()
@@ -1697,9 +1693,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                 logger.warning(
                     'Postgres request backend cannot safely signal API worker '
                     'pid %s from this process; marking request %s cancelled in '
-                    'the request DB.',
-                    request.pid,
-                    request_id)
+                    'the request DB.', request.pid, request_id)
             request.status = RequestStatus.CANCELLED
             request.finished_at = time.time()
         return True

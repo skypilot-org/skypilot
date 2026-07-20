@@ -207,8 +207,8 @@ def get_request_backend() -> RequestBackend:
     global _storage_backend
     if _storage_backend is None:
         # pylint: disable=import-outside-toplevel
-        from sky.server.requests.requests import (PostgresRequestBackend,
-                                                  SqliteRequestBackend)
+        from sky.server.requests.requests import PostgresRequestBackend
+        from sky.server.requests.requests import SqliteRequestBackend
 
         backend = os.environ.get(constants.ENV_VAR_API_REQUEST_DB_BACKEND, '')
         if backend.lower() == 'postgres':
