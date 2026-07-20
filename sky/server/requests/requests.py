@@ -8,6 +8,7 @@ import functools
 import hashlib
 import os
 import pathlib
+import re
 import shutil
 import signal
 import sqlite3
@@ -1325,7 +1326,9 @@ async def requests_gc_daemon():
 
 def _cleanup():
     if _DB is not None:
-        asyncio.run(_DB.close())
+        result = _DB.close()
+        if asyncio.iscoroutine(result):
+            asyncio.run(result)
 
 
 atexit.register(_cleanup)
@@ -1349,6 +1352,8 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         digest = hashlib.sha256(request_id.encode('utf-8')).digest()
         return int.from_bytes(digest[:8], 'big') & ((1 << 63) - 1)
 
+    _PLACEHOLDER_RE = re.compile(r'\?')
+
     @staticmethod
     def _bind_sql(
             sql: str,
@@ -1363,12 +1368,13 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         bind_params: Dict[str, Any] = {}
         for i, value in enumerate(values):
             bind_params[f'p{i}'] = value
-            sql = sql.replace('?', f':p{i}', 1)
+        sql = PostgresRequestBackend._PLACEHOLDER_RE.sub(
+            lambda m, _i=iter(range(len(values))): f':p{next(_i)}', sql)
         return sql, bind_params
 
     @staticmethod
     def _rewrite_sql(sql: str) -> str:
-        if sql.startswith(f'INSERT OR REPLACE INTO {REQUEST_TABLE} '):
+        if sql.strip().startswith(f'INSERT OR REPLACE INTO {REQUEST_TABLE} '):
             values = ', '.join(f':p{i}' for i in range(len(REQUEST_COLUMNS)))
             updates = ', '.join(
                 f'{column}=EXCLUDED.{column}' for column in REQUEST_COLUMNS
@@ -1454,12 +1460,12 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                 sqlalchemy.text(f"""\
                 CREATE INDEX IF NOT EXISTS status_name_idx
                 ON {REQUEST_TABLE} (status, name)
-                WHERE status IN ('PENDING', 'RUNNING')"""))
+                WHERE status IN ('PENDING', 'WAITING', 'RUNNING')"""))
             conn.execute(
                 sqlalchemy.text(f"""\
                 CREATE INDEX IF NOT EXISTS cluster_name_idx
                 ON {REQUEST_TABLE} ({COL_CLUSTER_NAME})
-                WHERE status IN ('PENDING', 'RUNNING')"""))
+                WHERE status IN ('PENDING', 'WAITING', 'RUNNING')"""))
             conn.execute(
                 sqlalchemy.text(f"""\
                 CREATE INDEX IF NOT EXISTS created_at_idx
@@ -1481,9 +1487,11 @@ class PostgresRequestBackend(request_storage.RequestBackend):
             fields: Optional[List[str]] = None) -> Optional[Request]:
         columns_str = ', '.join(fields) if fields else ', '.join(
             REQUEST_COLUMNS)
+        where, params = _request_id_where(request_id)
         rows = self._execute_on_conn(
-            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            'WHERE request_id LIKE ?', (request_id + '%',),
+            conn,
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            f'WHERE {where}', params,
             fetch=True)
         row = rows[0] if rows else None
         if row is None:
@@ -1499,9 +1507,11 @@ class PostgresRequestBackend(request_storage.RequestBackend):
             fields: Optional[List[str]] = None) -> Optional[Request]:
         columns_str = ', '.join(fields) if fields else ', '.join(
             REQUEST_COLUMNS)
+        where, params = _request_id_where(request_id)
         rows = await self._execute_on_async_conn(
-            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            'WHERE request_id LIKE ?', (request_id + '%',),
+            conn,
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            f'WHERE {where}', params,
             fetch=True)
         row = rows[0] if rows else None
         if row is None:
@@ -1745,9 +1755,10 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         columns = 'status'
         if include_msg:
             columns += ', status_msg'
+        where, params = _request_id_where(request_id)
         rows = await self._execute_async(
             f'SELECT {columns} FROM {REQUEST_TABLE} '
-            'WHERE request_id LIKE ?', (request_id + '%',),
+            f'WHERE {where}', params,
             fetch=True)
         if not rows:
             return None
@@ -1757,28 +1768,31 @@ class PostgresRequestBackend(request_storage.RequestBackend):
 
     async def get_api_request_ids_start_with(self,
                                              incomplete: str) -> List[str]:
+        clause, params = _request_id_prefix_clause(incomplete)
         rows = await self._execute_async(
             f"""SELECT request_id FROM {REQUEST_TABLE}
-                WHERE request_id LIKE ?
+                {clause}
                 ORDER BY
                     CASE
                         WHEN status IN ('PENDING', 'RUNNING') THEN 0
                         ELSE 1
                     END,
                     created_at DESC
-                LIMIT 1000""", (f'{incomplete}%',),
+                LIMIT 1000""", params,
             fetch=True)
         if not rows:
             return []
         return [row[0] for row in rows]
 
     def get_active_file_mounts_blob_ids(self) -> Set[str]:
+        active_values = [s.value for s in RequestStatus.active_statuses()]
+        placeholders = ', '.join(['?'] * len(active_values))
         rows = self._execute(
             f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
             f'FROM {REQUEST_TABLE} '
-            f'WHERE status IN (?, ?) '
+            f'WHERE status IN ({placeholders}) '
             f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
-            (RequestStatus.PENDING.value, RequestStatus.RUNNING.value),
+            tuple(active_values),
             fetch=True)
         return {row[0] for row in rows}
 

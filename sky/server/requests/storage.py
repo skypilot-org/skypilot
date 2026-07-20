@@ -198,6 +198,9 @@ class RequestBackend(abc.ABC):
     def reset_on_startup(self) -> None:
         """Called on server startup for backend-specific initialization."""
 
+    def close(self) -> None:
+        """Release resources held by the backend (engines, connections, etc.)."""
+
 
 _storage_backend: Optional[RequestBackend] = None
 
