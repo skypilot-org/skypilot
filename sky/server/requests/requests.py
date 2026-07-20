@@ -1368,7 +1368,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
             bind_params[f'p{i}'] = value
         counter = iter(range(len(values)))
 
-        def _replacer(match: re.Match) -> str:
+        def _replacer(match: re.Match) -> str:  # pylint: disable=unused-argument
             return f':p{next(counter)}'
 
         sql = PostgresRequestBackend._PLACEHOLDER_RE.sub(_replacer, sql)
@@ -1492,7 +1492,8 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         where, params = _request_id_where(request_id)
         rows = self._execute_on_conn(
             conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            f'WHERE {where}', params,
+            f'WHERE {where}',
+            params,
             fetch=True)
         row = rows[0] if rows else None
         if row is None:
@@ -1511,7 +1512,8 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         where, params = _request_id_where(request_id)
         rows = await self._execute_on_async_conn(
             conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-            f'WHERE {where}', params,
+            f'WHERE {where}',
+            params,
             fetch=True)
         row = rows[0] if rows else None
         if row is None:
