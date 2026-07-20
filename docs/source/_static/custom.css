@@ -45,7 +45,72 @@
     color: var(--pst-color-link) !important;
 }
 
+/*
+ * Launch announcement bar.
+ *
+ * Scoped to .container-fluid, which the theme's `announcement` option emits but
+ * the developer-preview notice in _templates/header.html does not -- both share
+ * the .bd-header-announcement class, so this keeps the two visually distinct.
+ */
+.bd-header-announcement.container-fluid {
+    background-color: var(--pst-color-surface) !important;
+    border-bottom: 1px solid var(--sky-announcement-border) !important;
+    padding: 9px 14px !important;
+}
+
+.bd-header-announcement a.sky-announcement {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    text-decoration: none !important;
+    color: var(--sky-announcement-text) !important;
+}
+
+.sky-announcement__pill {
+    background-color: var(--pst-color-primary);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 20px;
+}
+
+.sky-announcement__text {
+    font-weight: 600;
+}
+
+.bd-header-announcement a.sky-announcement:hover .sky-announcement__text {
+    text-decoration: underline;
+}
+
+.sky-announcement__arrow {
+    /* Own accent rather than --pst-color-primary: that blue only reaches
+       2.7:1 on the dark surface, below the 3:1 non-text contrast floor. */
+    color: var(--sky-announcement-accent);
+    font-weight: 700;
+    transition: transform 0.15s ease;
+}
+
+.bd-header-announcement a.sky-announcement:hover .sky-announcement__arrow {
+    transform: translateX(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sky-announcement__arrow {
+        transition: none;
+    }
+}
+
 html[data-theme="light"] {
+  --sky-announcement-text: #1f2328;
+  --sky-announcement-border: #e2e4e7;
+  --sky-announcement-accent: #176de8;
   --pst-color-link: #176de8;
   --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
@@ -54,6 +119,9 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
+  --sky-announcement-text: #eef1f5;
+  --sky-announcement-border: #333b47;
+  --sky-announcement-accent: #6ea8ff;
   --pst-color-link: #176de8;
   --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
