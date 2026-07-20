@@ -13,9 +13,32 @@ from sky import clouds
 from sky import exceptions
 from sky import optimizer
 from sky import skypilot_config
+from sky.catalog import common as catalog_common
 from sky.client.cli import command
+from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
+
+_VAST_DRYRUN_CATALOG_CSV = """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,HostingType
+vast-t4,T4,1,4,16,"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 16384}}]}",0.2,0.2,any,1
+vast-v100,V100,1,8,32,"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 32768}}]}",0.4,0.4,any,1
+vast-a100,A100,1,8,80,"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 81920}}]}",0.8,0.8,any,1
+"""
+
+
+@pytest.fixture
+def offline_vast_catalog(monkeypatch):
+    """Provide deterministic Vast metadata without external network access."""
+
+    def fetch_catalog_text(filename):
+        assert filename == 'vast/vms.csv'
+        return _VAST_DRYRUN_CATALOG_CSV
+
+    monkeypatch.setattr(catalog_common, 'fetch_catalog_text',
+                        fetch_catalog_text)
+    annotations.clear_request_level_cache()
+    yield
+    annotations.clear_request_level_cache()
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
@@ -894,6 +917,7 @@ def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
             'accelerators': '16384MB'
         }, ['T4'], []),
     ])
+@pytest.mark.usefixtures('offline_vast_catalog')
 def test_accelerator_memory_filtering(capfd, enable_all_clouds, spec, expected,
                                       unexpected):
     """Test filtering accelerators by memory requirements."""
@@ -919,6 +943,7 @@ def test_accelerator_memory_filtering(capfd, enable_all_clouds, spec, expected,
             'accelerators': 'nvidia:32GB+'
         }, ['V100', 'A100'], ['T4']),
     ])
+@pytest.mark.usefixtures('offline_vast_catalog')
 def test_accelerator_manufacturer_filtering(capfd, enable_all_clouds, spec,
                                             expected, unexpected):
     """Test filtering accelerators by manufacturer."""

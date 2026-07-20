@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import pandas as pd
 
 from sky.catalog import common
+from sky.utils import annotations
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -30,13 +31,15 @@ _REQUIRED_CATALOG_COLUMNS = {
 }
 
 
+@annotations.lru_cache(scope='request', maxsize=1)
 def _catalog_df() -> pd.DataFrame:
     """Fetch the current stable Vast instance-type metadata.
 
     Vast marketplace offers are selected only during provisioning. They must
     not become catalog identities because offer IDs can disappear at any time.
-    This intentionally does not use SkyPilot's local catalog cache: a catalog
-    request must reflect the latest hosted Vast GPU inventory.
+    This intentionally does not use SkyPilot's local catalog cache: each
+    request must reflect the latest hosted Vast GPU inventory. All catalog
+    queries within one request share the same metadata snapshot.
     """
     try:
         catalog_df = pd.read_csv(

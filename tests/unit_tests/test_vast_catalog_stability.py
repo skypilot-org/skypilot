@@ -10,10 +10,18 @@ from sky import exceptions
 from sky.catalog import common
 from sky.catalog import vast_catalog
 from sky.provision.vast import utils as vast_utils
+from sky.utils import annotations
 
 _VALID_VAST_CATALOG_CSV = """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
 1x-A100-4-8192,A100,1,4,8,\"{'Gpus': [{'MemoryInfo': {'SizeInMiB': 81920}}]}\",0.8,0.8,any
 """
+
+
+@pytest.fixture(autouse=True)
+def clear_request_catalog_cache():
+    annotations.clear_request_level_cache()
+    yield
+    annotations.clear_request_level_cache()
 
 
 def test_vast_catalog_does_not_expose_ephemeral_offer_resolution():
@@ -30,8 +38,8 @@ def test_vast_catalog_uses_only_stable_instance_types(monkeypatch):
                for instance_type in vast_catalog._catalog_df()["InstanceType"])
 
 
-def test_vast_catalog_fetches_fresh_catalog_for_each_query(monkeypatch):
-    """Vast listings are fetched anew rather than served from a local cache."""
+def test_vast_catalog_reuses_snapshot_within_request(monkeypatch):
+    """Vast catalog queries share one stable metadata snapshot per request."""
     payloads = [_VALID_VAST_CATALOG_CSV, _VALID_VAST_CATALOG_CSV.replace("A100", "H100")]
     calls: List[str] = []
 
@@ -42,8 +50,24 @@ def test_vast_catalog_fetches_fresh_catalog_for_each_query(monkeypatch):
     monkeypatch.setattr(common, "fetch_catalog_text", fetch_catalog_text)
 
     assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "A100"
+    assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "A100"
+    assert calls == ["vast/vms.csv"]
+
+    annotations.clear_request_level_cache()
     assert vast_catalog._catalog_df().iloc[0]["AcceleratorName"] == "H100"
     assert calls == ["vast/vms.csv", "vast/vms.csv"]
+
+
+def test_vast_catalog_rejects_missing_required_columns(monkeypatch):
+    monkeypatch.setattr(
+        common,
+        'fetch_catalog_text',
+        lambda _filename: 'InstanceType,AcceleratorName\nexample,A100\n',
+    )
+
+    with pytest.raises(common.CatalogFetchError,
+                       match='missing required columns'):
+        vast_catalog._catalog_df()
 
 
 def test_vast_catalog_rejects_payload_without_gpu_rows(monkeypatch):

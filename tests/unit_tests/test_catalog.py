@@ -94,6 +94,69 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
             os.remove(lock_path)
 
 
+@mock.patch('sky.catalog.common.requests.get')
+def test_fetch_catalog_text_uses_mirror_after_connection_error(mock_get):
+    class DummyResponse:
+
+        status_code = 200
+        text = 'InstanceType\nexample\n'
+
+        def raise_for_status(self):
+            return None
+
+    mock_get.side_effect = [
+        catalog_common.requests.exceptions.ConnectionError('reset'),
+        DummyResponse(),
+    ]
+
+    assert catalog_common.fetch_catalog_text('vast/vms.csv') == (
+        'InstanceType\nexample\n')
+    assert mock_get.call_count == 2
+    assert all(call.kwargs['timeout'] == 30
+               for call in mock_get.call_args_list)
+    assert mock_get.call_args_list[1].kwargs['url'].startswith(
+        catalog_common.constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR)
+
+
+@mock.patch('sky.catalog.common.requests.get')
+def test_fetch_catalog_text_uses_mirror_after_rate_limit(mock_get):
+    class DummyResponse:
+
+        def __init__(self, status_code, text):
+            self.status_code = status_code
+            self.text = text
+
+        def raise_for_status(self):
+            if self.status_code == 429:
+                raise catalog_common.requests.exceptions.HTTPError(
+                    'rate limited')
+
+    mock_get.side_effect = [
+        DummyResponse(429, ''),
+        DummyResponse(200, 'InstanceType\nexample\n'),
+    ]
+
+    assert catalog_common.fetch_catalog_text('vast/vms.csv') == (
+        'InstanceType\nexample\n')
+    assert mock_get.call_count == 2
+    assert mock_get.call_args_list[1].kwargs['url'].startswith(
+        catalog_common.constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR)
+
+
+@mock.patch('sky.catalog.common.requests.get')
+def test_fetch_catalog_text_raises_after_both_endpoints_fail(mock_get):
+    primary_error = catalog_common.requests.exceptions.ConnectionError(
+        'reset')
+    fallback_error = catalog_common.requests.exceptions.Timeout('timeout')
+    mock_get.side_effect = [primary_error, fallback_error]
+
+    with pytest.raises(catalog_common.CatalogFetchError) as exc_info:
+        catalog_common.fetch_catalog_text('vast/vms.csv')
+
+    assert exc_info.value.__cause__ is fallback_error
+    assert mock_get.call_count == 2
+
+
 @pytest.mark.parametrize(
     "cpus, memory, region, zone, expected",
     [

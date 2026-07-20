@@ -203,20 +203,22 @@ def fetch_catalog_text(filename: str) -> str:
     url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
     url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
     headers = {'User-Agent': 'SkyPilot/0.7'}
-    try:
-        response = requests.get(
-            url=url, headers=headers, timeout=_CATALOG_FETCH_TIMEOUT_SECONDS)
-        if response.status_code == 429:
+    last_error = None
+    for catalog_url in (url, url_fallback):
+        try:
             response = requests.get(
-                url=url_fallback,
+                url=catalog_url,
                 headers=headers,
                 timeout=_CATALOG_FETCH_TIMEOUT_SECONDS,
             )
-        response.raise_for_status()
-    except requests.exceptions.RequestException as exc:
-        raise CatalogFetchError(
-            f'Failed to fetch current catalog {filename}.') from exc
-    return response.text
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+
+    assert last_error is not None
+    raise CatalogFetchError(
+        f'Failed to fetch current catalog {filename}.') from last_error
 
 
 def read_catalog(filename: str,
