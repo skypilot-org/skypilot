@@ -2244,13 +2244,19 @@ def create_debug_dump(
         Path to the created zip file.
     """
     dump_start = time.monotonic()
-    # Convert the caller's absolute wall-clock deadline to our monotonic
-    # reference, once. None == no deadline (every deadline-aware path below is a
-    # no-op == unchanged behavior). Wall-clock is the only clock comparable
-    # across the (out-of-process) scheduler and this worker; the >=0 clamp means
-    # an already-passed deadline -- the caller spent the budget before we even
-    # started, e.g. queued -- stops us immediately with a near-empty partial
-    # rather than reading as "no deadline".
+    # The caller passes an absolute WALL-CLOCK deadline because wall-clock is
+    # the only clock two processes agree on: the scheduler that set it runs
+    # elsewhere, and monotonic zero-points are per-process (not comparable
+    # across the hop). We touch wall-clock once, here, only to get "seconds
+    # left from now", then re-anchor that onto OUR monotonic clock and compare
+    # against it for the rest of the dump -- monotonic can't be skewed by an
+    # NTP/clock jump mid-run. Three cases:
+    #   * None: no deadline set; every deadline check below is a no-op
+    #     (byte-for-byte the pre-feature behavior).
+    #   * still in the future: budget = the seconds remaining; a normal run.
+    #   * already elapsed (the caller spent the whole budget before we started,
+    #     e.g. queued): max(0, ...) pins the budget at 0, so the first section
+    #     check trips and we return a near-empty partial instead of nothing.
     deadline = (dump_start + max(0.0, overall_deadline - time.time())
                 if overall_deadline is not None else None)
 
