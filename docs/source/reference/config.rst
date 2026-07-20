@@ -255,7 +255,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
       template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
-      env: "-e YOUR_CUSTOM=YOUR_VAL"
+      env:
+        YOUR_CUSTOM: YOUR_VAL
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -2756,6 +2757,9 @@ parameters to filter for professional datacenter-hosted machines. Note some GPUs
 may only be available on non-datacenter offers. This config filters both the catalog
 (during resource planning) and the launch query (during provisioning). This config
 can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
+SkyPilot uses stable catalog instance types for planning, then searches the
+live Vast marketplace immediately before creating an instance. Marketplace
+offer IDs are never stored as SkyPilot instance types.
 
 Default: ``false``
 
@@ -2766,8 +2770,12 @@ Default: ``false``
 
 Additional parameters to pass to the Vast API when creating instances (optional).
 
-This allows full access to Vast's instance creation options. User-provided
-parameters are passed through to the Vast API.
+SkyPilot passes each non-``None`` parameter to Vast's
+``create_instance`` API. This is intentionally an open-ended mapping: any
+keyword accepted by the installed ``vastai-sdk`` can be supplied, including
+options added by newer SDK versions. The options below are the fields supported
+by the current integration and Vast API. The SDK version installed with
+SkyPilot determines which fields are available.
 
 .. dropdown:: Supported parameters
 
@@ -2776,7 +2784,11 @@ parameters are passed through to the Vast API.
         configuration. When using a template, this is not required. (e.g vastai/base-image:@vastai-automatic-tag)
 
     ``env``
-        Environment variables and port mappings (e.g., ``"-e KEY=value -p 8080:8080"``).
+        Environment variables. Use a mapping with the current Vast API, for
+        example ``{KEY: value}``. SkyPilot also accepts legacy strings containing
+        ``-e KEY=value`` pairs. The ``__SOURCE=skypilot`` metadata variable is
+        added automatically. Port mappings are not accepted in ``env`` by
+        ``vastai-sdk`` v6 and later.
 
     ``price`` / ``bid_price``
         Bid price for the instance. For preemptible instances, if not specified,
@@ -2791,7 +2803,8 @@ parameters are passed through to the Vast API.
         (e.g., ``cluster-name-head`` or ``cluster-name-worker``).
 
     ``extra``
-        Extra docker run arguments to pass to the container.
+        Extra Docker run options to pass to the container (for example,
+        ``"--shm-size=16g"``).
 
     ``onstart_cmd``
         Command to run on instance start. SkyPilot prepends its own initialization
@@ -2803,7 +2816,8 @@ parameters are passed through to the Vast API.
 
     ``login``
         Docker registry login credentials (e.g., ``"-u user -p pass registry"``).
-        Required when using private Docker registries.
+        Required when using a private Docker registry. A value supplied here
+        takes precedence over credentials from SkyPilot's Docker configuration.
 
     ``image_login``
         Docker registry credentials if needed.
@@ -2817,6 +2831,10 @@ parameters are passed through to the Vast API.
 
     ``jupyter_lab``
         Use JupyterLab instead of Jupyter Notebook (boolean true | false).
+
+    ``use_jupyter_lab``
+        JupyterLab option used by some Vast SDK versions. SkyPilot passes this
+        field through without renaming it.
 
     ``jupyter_dir``
         Jupyter notebook directory path.
@@ -2840,6 +2858,34 @@ parameters are passed through to the Vast API.
     ``vm``
         Whether this is a VM instance. (boolean true | false)
 
+    ``runtype``
+        Vast run type, such as ``"ssh"`` or ``"jupyter"``, when supported by
+        the installed SDK.
+
+    ``volume_info``
+        Volume attachment configuration as a mapping, when supported by the
+        installed SDK.
+
+SkyPilot manages the following values during instance creation:
+
+* ``id`` is always replaced with the offer ID selected from the live Vast
+  marketplace; it cannot be overridden through this mapping.
+* ``label`` defaults to the SkyPilot cluster node name when not provided.
+* ``image`` and ``disk`` default to the task configuration when no template is
+  used. A template supplies these values instead.
+* ``price`` is populated with the offer's minimum bid for preemptible tasks
+  when no price is provided. The legacy ``bid_price`` name is translated to
+  ``price``.
+* SkyPilot initialization and SSH setup commands are prepended to
+  ``onstart_cmd``. If ``onstart`` is provided, the referenced script is read
+  and appended to the resulting startup command.
+* ``env`` is converted to a mapping before it is sent to Vast.
+
+The old ``direct`` and ``ssh`` creation kwargs are not supported by
+``vastai-sdk`` v6 and later and must not be supplied. SkyPilot handles the
+SSH connection setup itself. Unsupported or misspelled fields are not
+validated by SkyPilot; Vast returns the resulting API error.
+
 Example:
 
 .. code-block:: yaml
@@ -2851,6 +2897,8 @@ Example:
       lang_utf8: true
       extra: "--shm-size=16g"
       onstart_cmd: "echo 'Instance started'"
+      env:
+        MY_ENV: my-value
 
 Example using a Vast template:
 
