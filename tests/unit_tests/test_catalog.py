@@ -96,6 +96,7 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
 
 @mock.patch('sky.catalog.common.requests.get')
 def test_fetch_catalog_text_uses_mirror_after_connection_error(mock_get):
+
     class DummyResponse:
 
         status_code = 200
@@ -112,14 +113,14 @@ def test_fetch_catalog_text_uses_mirror_after_connection_error(mock_get):
     assert catalog_common.fetch_catalog_text('vast/vms.csv') == (
         'InstanceType\nexample\n')
     assert mock_get.call_count == 2
-    assert all(call.kwargs['timeout'] == 30
-               for call in mock_get.call_args_list)
+    assert all(call.kwargs['timeout'] == 30 for call in mock_get.call_args_list)
     assert mock_get.call_args_list[1].kwargs['url'].startswith(
         catalog_common.constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR)
 
 
 @mock.patch('sky.catalog.common.requests.get')
 def test_fetch_catalog_text_uses_mirror_after_rate_limit(mock_get):
+
     class DummyResponse:
 
         def __init__(self, status_code, text):
@@ -145,8 +146,7 @@ def test_fetch_catalog_text_uses_mirror_after_rate_limit(mock_get):
 
 @mock.patch('sky.catalog.common.requests.get')
 def test_fetch_catalog_text_raises_after_both_endpoints_fail(mock_get):
-    primary_error = catalog_common.requests.exceptions.ConnectionError(
-        'reset')
+    primary_error = catalog_common.requests.exceptions.ConnectionError('reset')
     fallback_error = catalog_common.requests.exceptions.Timeout('timeout')
     mock_get.side_effect = [primary_error, fallback_error]
 

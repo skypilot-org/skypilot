@@ -59,8 +59,7 @@ def _catalog_df() -> pd.DataFrame:
     accelerator_count = pd.to_numeric(catalog_df['AcceleratorCount'],
                                       errors='coerce')
     usable_gpu_rows = (catalog_df['AcceleratorName'].notna() &
-                       accelerator_count.gt(0) &
-                       catalog_df['GpuInfo'].notna())
+                       accelerator_count.gt(0) & catalog_df['GpuInfo'].notna())
     if not usable_gpu_rows.any():
         raise common.CatalogFetchError(
             'Current Vast catalog contains no usable GPU rows.')
@@ -100,14 +99,13 @@ def get_hourly_cost(instance_type: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')
     return common.get_hourly_cost_impl(_catalog_df(), instance_type, use_spot,
-                                       region,
-                                       zone)
+                                       region, zone)
 
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(
-        _catalog_df(), instance_type)
+    return common.get_vcpus_mem_from_instance_type_impl(_catalog_df(),
+                                                        instance_type)
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
@@ -188,6 +186,6 @@ def list_accelerators(
     """Returns all instance types in Vast offering GPUs."""
     del require_price  # Unused.
     return common.list_accelerators_impl('Vast', _catalog_df(), gpus_only,
-                                         name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

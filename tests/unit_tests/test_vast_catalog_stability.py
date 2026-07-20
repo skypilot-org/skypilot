@@ -33,14 +33,18 @@ def test_vast_catalog_does_not_expose_ephemeral_offer_resolution():
 
 def test_vast_catalog_uses_only_stable_instance_types(monkeypatch):
     """Catalog instance type identifiers must survive marketplace refreshes."""
-    monkeypatch.setattr(common, "fetch_catalog_text", lambda _filename: _VALID_VAST_CATALOG_CSV)
+    monkeypatch.setattr(common, "fetch_catalog_text",
+                        lambda _filename: _VALID_VAST_CATALOG_CSV)
     assert all(not str(instance_type).startswith("dynamic-")
                for instance_type in vast_catalog._catalog_df()["InstanceType"])
 
 
 def test_vast_catalog_reuses_snapshot_within_request(monkeypatch):
     """Vast catalog queries share one stable metadata snapshot per request."""
-    payloads = [_VALID_VAST_CATALOG_CSV, _VALID_VAST_CATALOG_CSV.replace("A100", "H100")]
+    payloads = [
+        _VALID_VAST_CATALOG_CSV,
+        _VALID_VAST_CATALOG_CSV.replace("A100", "H100")
+    ]
     calls: List[str] = []
 
     def fetch_catalog_text(filename: str) -> str:
@@ -74,7 +78,8 @@ def test_vast_catalog_rejects_payload_without_gpu_rows(monkeypatch):
     monkeypatch.setattr(
         common,
         "fetch_catalog_text",
-        lambda _filename: """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
+        lambda _filename:
+        """InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region
 small,,0,2,4,,0.1,0.1,any
 """,
     )
@@ -153,7 +158,9 @@ def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
             "template_hash_id": "template-123",
             "login": "user-login",
             "onstart_cmd": "echo ready",
-            "env": {"KEY": "value"},
+            "env": {
+                "KEY": "value"
+            },
             "extra": "--shm-size=16g",
         },
     ) == 456
@@ -195,10 +202,12 @@ def test_launch_rejects_invalid_env_value(monkeypatch):
 def test_launch_converts_disappeared_offer_to_typed_capacity_error(monkeypatch):
     client = mock.Mock(spec=["search_offers", "create_instance"])
     client.search_offers.return_value = [{"id": 123, "min_bid": 0.4}]
-    client.create_instance.side_effect = RuntimeError("offer 123 is no longer rentable")
+    client.create_instance.side_effect = RuntimeError(
+        "offer 123 is no longer rentable")
     monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
 
-    with pytest.raises(exceptions.VastOfferUnavailableError, match="no longer rentable"):
+    with pytest.raises(exceptions.VastOfferUnavailableError,
+                       match="no longer rentable"):
         vast_utils.launch(
             name="test-head",
             instance_type="1x-A100-4-8192",

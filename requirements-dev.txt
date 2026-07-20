@@ -1,3 +1,6 @@
+# task runner
+poethepoet>=0.40.0
+
 # formatting
 # match the version with .pre-commit-config.yaml
 yapf==0.32.0

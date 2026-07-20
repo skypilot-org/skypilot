@@ -2,6 +2,22 @@
 requires = ["setuptools>=58.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.poe.tasks]
+# Keep formatting aligned with the repository's CI and format.sh tooling.
+format-yapf = {cmd = "yapf --in-place --recursive --parallel --exclude 'build/**' --exclude 'sky/schemas/generated/**' --exclude 'tests/unit_tests/test_sky/backends/testdata/**' sky tests examples llm"}
+format-isort = {cmd = "isort sky tests examples llm docs --sg 'build/**' --sg 'sky/schemas/generated/**' --sg 'tests/unit_tests/test_sky/backends/testdata/**'"}
+format = ["format-yapf", "format-isort"]
+format-check = {shell = "yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' --exclude 'sky/schemas/generated/**' --exclude 'tests/unit_tests/test_sky/backends/testdata/**' && isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' --sg 'sky/schemas/generated/**' --sg 'tests/unit_tests/test_sky/backends/testdata/**'"}
+
+lint = {cmd = "pylint --load-plugins pylint_quotes --ignore-paths 'sky/schemas/generated|sky/skylet/providers/ibm' sky examples"}
+mypy = {shell = "mypy $(cat tests/mypy_files.txt)"}
+
+test = "pytest --numprocesses=auto"
+test-fail-fast = "pytest --numprocesses=auto --maxfail=1"
+
+before-commit = ["format", "lint", "mypy"]
+before-commit-test = ["format", "lint", "mypy", "test"]
+
 [tool.yapf]
 based_on_style = "google"
 allow_split_before_dict_value = false
