@@ -184,6 +184,10 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class VastOfferUnavailableError(ResourcesUnavailableError):
+    """Raised when a live Vast marketplace query has no matching offer."""
+
+
 class KubeAPIUnreachableError(ResourcesUnavailableError):
     """Raised when the Kubernetes API is currently unreachable.
 

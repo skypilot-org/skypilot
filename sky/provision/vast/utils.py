@@ -6,13 +6,65 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import re
 import shlex
+import time
 from typing import Any, Dict, List, Optional
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import vast
 
 logger = sky_logging.init_logger(__name__)
+
+_SHOW_INSTANCE_MAX_ATTEMPTS = 3
+_SHOW_INSTANCE_RETRY_SECONDS = 1
+_OFFER_UNAVAILABLE_ERROR_SNIPPETS = (
+    'unavailable',
+    'no longer rentable',
+    'already been rented',
+    'already rented',
+)
+
+
+def _is_offer_unavailable_error(exc: Exception) -> bool:
+    """Return whether Vast rejected creation because this offer vanished."""
+    message = str(exc).lower()
+    return 'offer' in message and any(
+        snippet in message for snippet in _OFFER_UNAVAILABLE_ERROR_SNIPPETS)
+
+
+def _get_created_instance(contract_id: str) -> Dict[str, Any]:
+    """Read a newly created Vast contract without issuing another create.
+
+    Vast's create endpoint can succeed before its read path observes the new
+    contract. Retrying ``create_instance`` in that window risks a duplicate
+    paid instance, so only the read is retried.
+    """
+    for attempt in range(_SHOW_INSTANCE_MAX_ATTEMPTS):
+        try:
+            return vast.vast().show_instance(id=contract_id)
+        except Exception:  # pylint: disable=broad-except
+            if attempt + 1 == _SHOW_INSTANCE_MAX_ATTEMPTS:
+                raise
+            time.sleep(_SHOW_INSTANCE_RETRY_SECONDS)
+    raise RuntimeError('Failed to read the newly created Vast instance.')
+
+
+def _normalize_env(user_env: Any) -> Dict[str, Any]:
+    """Convert supported create-instance environment formats to a mapping."""
+    env_dict: Dict[str, Any] = {'__SOURCE': 'skypilot'}
+    if user_env is None:
+        return env_dict
+    if isinstance(user_env, dict):
+        env_dict.update(user_env)
+        return env_dict
+    if isinstance(user_env, str):
+        for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
+            env_dict[match.group(1)] = match.group(2)
+        return env_dict
+    raise ValueError(
+        "Vast create_instance_kwargs['env'] must be a mapping or string.")
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
@@ -115,10 +167,13 @@ def launch(name: str,
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
+    # The optimizer's catalog region is descriptive metadata, not a user
+    # placement requirement. Final selection searches the live marketplace
+    # without inheriting that stale catalog location.
+    del region
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
@@ -132,9 +187,10 @@ def launch(name: str,
     instance_list = vast.vast().search_offers(query=query_str)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
-        raise RuntimeError('Failed to create instances, could not find an '
-                           'offer that satisfies the requirements '
-                           f'"{query_str}".')
+        raise exceptions.VastOfferUnavailableError(
+            'Failed to create instances, could not find an '
+            'offer that satisfies the requirements '
+            f'"{query_str}".')
 
     instance_touse = instance_list[0]
 
@@ -225,21 +281,16 @@ def launch(name: str,
     # Handle env - Vast.ai SDK requires env as a dict, not a CLI-style string.
     # Merge user-provided env (dict or legacy string) with skypilot metadata.
     user_env = launch_params.pop('env', None)
-    env_dict: Dict[str, str] = {'__SOURCE': 'skypilot'}
-    if user_env is not None:
-        if isinstance(user_env, dict):
-            env_dict.update(user_env)
-        elif isinstance(user_env, str):
-            # Parse legacy "-e KEY=VAL" style strings for backwards compat
-            import re  # pylint: disable=import-outside-toplevel
-            for match in re.finditer(r'-e\s+(\w+)=([^\s]*)', user_env):
-                env_dict[match.group(1)] = match.group(2)
+    env_dict = _normalize_env(user_env)
     launch_params['env'] = env_dict
 
-    new_instance_contract = vast.vast().create_instance(**launch_params)
-
-    new_instance = vast.vast().show_instance(
-        id=new_instance_contract['new_contract'])
+    try:
+        new_instance_contract = vast.vast().create_instance(**launch_params)
+    except Exception as exc:  # pylint: disable=broad-except
+        if _is_offer_unavailable_error(exc):
+            raise exceptions.VastOfferUnavailableError(str(exc)) from exc
+        raise
+    new_instance = _get_created_instance(new_instance_contract['new_contract'])
 
     return new_instance['id']
 
