@@ -2231,10 +2231,10 @@ def create_debug_dump(
             this many minutes.
         client_info: Optional client-side info to include in the dump.
         overall_deadline: Optional absolute wall-clock (``time.time()``) instant
-            to stop the whole collection by. When set, collection stops starting
-            new sections once it is reached and still zips + returns whatever was
-            gathered (a partial dump, with the skipped sections noted in
-            errors.json). An absolute deadline (rather than a relative timeout)
+            to stop the whole collection by. When set, collection stops
+            starting new sections once it is reached and still zips + returns
+            whatever was gathered (a partial dump, with the skipped sections
+            noted in errors.json). An absolute deadline (not a relative timeout)
             lets an out-of-process scheduler charge time already elapsed before
             the build starts -- notably executor queue wait -- against the
             budget; an already-passed deadline yields an immediate near-empty
