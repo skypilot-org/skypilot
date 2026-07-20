@@ -128,7 +128,9 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': '',  # Put announcements such as meetups here.
+    # Put announcements such as meetups here.
+    'announcement': ('<a href="https://skypilot.ai/blog/skypilot-the-company">'
+                     'Announcing SkyPilot Platform and our $20M seed</a>'),
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',
