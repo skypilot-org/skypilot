@@ -1004,6 +1004,12 @@ class CreateDebugDumpBody(RequestBody):
     recent_minutes: Optional[float] = None
     # Client-side info for troubleshooting (version, config, environment)
     client_info: Optional[Dict[str, Any]] = None
+    # Best-effort overall wall-clock budget (seconds) for the whole
+    # collection. When exhausted, collection stops early and a partial dump
+    # is returned. None (the default) means no deadline; a caller that omits
+    # it gets the previous behavior, and the SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS
+    # env var still applies as a fallback in create_debug_dump.
+    overall_timeout: Optional[float] = None
 
 
 class RequestPayload(BasePayload):

@@ -2158,6 +2158,12 @@ def _build_debug_dump(
                                         errors=errors,
                                         deadline=deadline)),
     ]
+    budget = _remaining_budget(deadline)
+    logger.info(f'debug dump: collecting {len(sections)} sections '
+                f'({len(debug_dump_context["request_ids"])} requests, '
+                f'{len(debug_dump_context["cluster_names"])} clusters, '
+                f'{len(debug_dump_context["managed_job_ids"])} managed jobs); '
+                f'budget={"unbounded" if budget is None else f"{budget:.0f}s"}')
     for name, dump_section in sections:
         if _deadline_exceeded(deadline):
             logger.warning(f'Skipping debug-dump section {name!r}: overall '
@@ -2168,7 +2174,19 @@ def _build_debug_dump(
                 'error': 'Skipped: overall debug-dump deadline exceeded.',
             })
             continue
+        # INFO (not debug) so the per-section trail lands in the executor
+        # worker's request log at prod log levels. If the dump is hard-killed
+        # (e.g. an outer deadline elsewhere kills the request) the temp dir --
+        # and the errors.json skip records -- are discarded, so these lines are
+        # the only surviving evidence of which section was in flight. A section
+        # 'start' with no matching 'done' pins the culprit.
+        section_start = time.monotonic()
+        remaining = _remaining_budget(deadline)
+        logger.info(f'debug dump: section {name!r} start' + (
+            '' if remaining is None else f' ({remaining:.0f}s budget left)'))
         dump_section()
+        logger.info(f'debug dump: section {name!r} done in '
+                    f'{time.monotonic() - section_start:.1f}s')
 
     # Write client info if provided
     if client_info:
@@ -2256,9 +2274,10 @@ def create_debug_dump(
         Path to the created zip file.
     """
     resolved_timeout = _resolve_overall_timeout(overall_timeout)
+    dump_start = time.monotonic()
     # Absolute monotonic deadline, computed once. None == no deadline, which
     # makes every deadline-aware code path below a no-op (unchanged behavior).
-    deadline = (time.monotonic() +
+    deadline = (dump_start +
                 resolved_timeout if resolved_timeout is not None else None)
 
     logger.debug('Starting debug dump creation')
@@ -2352,13 +2371,17 @@ def create_debug_dump(
         total_dump_size = sum(f.stat().st_size
                               for f in pathlib.Path(dump_dir).rglob('*')
                               if f.is_file())
-        logger.debug(f'Total dump size before zipping: {total_dump_size} bytes')
 
         # Create zip file in PERSISTENT location (outside temp dir)
         zip_filename = f'debug_dump_{timestamp}.zip'
         zip_file_path = dump_base_dir / zip_filename
-        logger.debug(f'Creating zip file: {zip_file_path}')
+        # INFO so the zip step is visible in the worker log: it is the last
+        # thing that runs before the dump is durable, and slow zips eat into
+        # any outer deadline's buffer (see the per-section logging note above).
+        logger.info(f'debug dump: collection done, zipping {total_dump_size} '
+                    f'bytes to {zip_filename}')
 
+        zip_start = time.monotonic()
         file_count = 0
         with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(dump_dir):
@@ -2368,7 +2391,9 @@ def create_debug_dump(
                     zipf.write(file_path, arcname)
                     file_count += 1
 
-        logger.debug(f'Debug dump created with {file_count} files: '
-                     f'{zip_file_path}')
+        logger.info(f'debug dump: created {zip_filename} ({file_count} files) '
+                    f'in {time.monotonic() - zip_start:.1f}s')
 
+    logger.info(f'debug dump: finished in {time.monotonic() - dump_start:.1f}s '
+                f'-> {zip_file_path}')
     return zip_file_path

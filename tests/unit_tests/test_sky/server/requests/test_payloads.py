@@ -56,3 +56,36 @@ def test_request_body_env_vars_client_user_hash_none_with_basic_auth(
 
     env_vars = payloads.request_body_env_vars()
     assert constants.CLIENT_USER_HASH_ENV_VAR not in env_vars
+
+
+def test_create_debug_dump_body_overall_timeout_threads_through():
+    """overall_timeout must survive to_kwargs so the executor forwards it to
+    core.create_debug_dump; omitting it stays None (back-compat)."""
+    body = payloads.CreateDebugDumpBody(managed_job_ids=[37],
+                                        overall_timeout=840)
+    kwargs = body.to_kwargs()
+    assert kwargs['overall_timeout'] == 840
+    assert kwargs['managed_job_ids'] == [37]
+
+    # Default omitted -> None, i.e. unchanged (no-deadline) behavior.
+    default_kwargs = payloads.CreateDebugDumpBody(
+        managed_job_ids=[37]).to_kwargs()
+    assert default_kwargs['overall_timeout'] is None
+
+
+def test_create_debug_dump_body_ignores_unknown_field():
+    """Version-skew guard: a newer caller (e.g. a plugin built against a newer
+    OSS) may pass a field this model doesn't define yet. BasePayload's
+    extra='ignore' must drop it silently -- construct + JSON round-trip must
+    not raise -- so a new plugin against an old OSS degrades to a no-op rather
+    than crashing every dump.
+    """
+    body = payloads.CreateDebugDumpBody(
+        managed_job_ids=[37], some_future_field_old_oss_lacks='ignored')
+    assert not hasattr(body, 'some_future_field_old_oss_lacks')
+    assert 'some_future_field_old_oss_lacks' not in body.to_kwargs()
+    # The path the request actually takes across replicas: serialize -> store
+    # -> reload. Must survive without the unknown field tripping validation.
+    reloaded = payloads.CreateDebugDumpBody.model_validate_json(
+        body.model_dump_json())
+    assert reloaded.managed_job_ids == [37]
