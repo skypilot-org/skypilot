@@ -4316,24 +4316,6 @@ class TestOverallDeadlineHelpers:
         # A tight deadline clamps the fixed timeout down.
         assert debug_utils._bounded_timeout(120, time.monotonic() + 5) <= 5
 
-    def test_resolve_overall_timeout_precedence(self, monkeypatch):
-        # Explicit arg wins.
-        monkeypatch.setenv(debug_utils._DEBUG_DUMP_TIMEOUT_ENV_VAR, '10')
-        assert debug_utils._resolve_overall_timeout(30) == 30
-        # Env var used when no arg.
-        assert debug_utils._resolve_overall_timeout(None) == 10
-        # Non-positive arg / env -> None (no deadline).
-        assert debug_utils._resolve_overall_timeout(0) is None
-        monkeypatch.setenv(debug_utils._DEBUG_DUMP_TIMEOUT_ENV_VAR, '0')
-        assert debug_utils._resolve_overall_timeout(None) is None
-        # Invalid env -> None.
-        monkeypatch.setenv(debug_utils._DEBUG_DUMP_TIMEOUT_ENV_VAR, 'notafloat')
-        assert debug_utils._resolve_overall_timeout(None) is None
-        # Unset env, no arg -> None (default == unchanged behavior).
-        monkeypatch.delenv(debug_utils._DEBUG_DUMP_TIMEOUT_ENV_VAR,
-                           raising=False)
-        assert debug_utils._resolve_overall_timeout(None) is None
-
 
 class TestOverallDeadlineDump:
     """End-to-end tests that the overall deadline yields a partial dump and
@@ -4379,17 +4361,14 @@ class TestOverallDeadlineDump:
             name = next(n for n in zf.namelist() if n.endswith('errors.json'))
             return json.loads(zf.read(name))
 
-    def test_deadline_exceeded_skips_sections_but_still_zips(
-            self, tmp_path, monkeypatch):
-        """With the deadline already gone, every section is skipped with its
-        own recorded reason, yet a real (partial) zip is still produced."""
-        monkeypatch.delenv(debug_utils._DEBUG_DUMP_TIMEOUT_ENV_VAR,
-                           raising=False)
-        with self._patched_dump(tmp_path) as section_mocks, \
-             mock.patch('sky.utils.debug_utils._deadline_exceeded',
-                        return_value=True):
-            result = debug_utils.create_debug_dump(cluster_names=['c'],
-                                                   overall_timeout=60)
+    def test_past_deadline_skips_sections_but_still_zips(self, tmp_path):
+        """An already-passed overall_deadline (e.g. the caller spent the whole
+        budget queueing) skips every section with its own recorded reason, yet
+        still produces a real (partial) zip. Exercises the real wall-clock ->
+        monotonic conversion + >=0 clamp, no internal mocking."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() - 1)
 
         # A partial zip is still produced and returned.
         assert result.exists()
@@ -4409,14 +4388,12 @@ class TestOverallDeadlineDump:
         assert len(skip_records) == len(self._SECTION_FNS)
         assert all(e['resource'] == 'section' for e in skip_records)
 
-    def test_no_deadline_runs_all_sections(self, tmp_path, monkeypatch):
-        """overall_timeout=None with env unset == unchanged behavior: every
-        section runs and nothing is skipped."""
-        monkeypatch.delenv(debug_utils._DEBUG_DUMP_TIMEOUT_ENV_VAR,
-                           raising=False)
+    def test_no_deadline_runs_all_sections(self, tmp_path):
+        """overall_deadline=None == unchanged behavior: every section runs and
+        nothing is skipped."""
         with self._patched_dump(tmp_path) as section_mocks:
             result = debug_utils.create_debug_dump(cluster_names=['c'],
-                                                   overall_timeout=None)
+                                                   overall_deadline=None)
 
         assert result.exists()
         for fn, m in section_mocks.items():
@@ -4428,3 +4405,14 @@ class TestOverallDeadlineDump:
             if e.get('error', '').startswith('Skipped: overall debug-dump')
         ]
         assert not skip_records
+
+    def test_future_deadline_runs_all_sections(self, tmp_path):
+        """A generous future overall_deadline must not spuriously skip: every
+        section runs when there is budget left."""
+        with self._patched_dump(tmp_path) as section_mocks:
+            result = debug_utils.create_debug_dump(
+                cluster_names=['c'], overall_deadline=time.time() + 3600)
+
+        assert result.exists()
+        for fn, m in section_mocks.items():
+            assert m.call_count == 1, f'{fn} should have run exactly once'

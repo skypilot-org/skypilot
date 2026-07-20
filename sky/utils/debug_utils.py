@@ -145,14 +145,6 @@ def _run_with_deadline(
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
-# Env var that sets a best-effort overall wall-clock budget (seconds) for a
-# single debug-dump collection. When set to a positive float, collection stops
-# starting new sections once the budget is exhausted and still zips + returns
-# whatever was gathered so far (partial dump). Unset/invalid/<=0 -> no deadline,
-# i.e. unchanged behavior. An explicit ``overall_timeout`` arg to
-# create_debug_dump takes precedence over this env var.
-_DEBUG_DUMP_TIMEOUT_ENV_VAR = 'SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS'
-
 # Env var names whose values should be redacted (show bool presence only).
 # Used for both server_info environment and request body sanitization.
 _SENSITIVE_ENV_VARS = {
@@ -2220,37 +2212,13 @@ def _build_debug_dump(
         json.dump(summary, f, indent=2)
 
 
-def _resolve_overall_timeout(
-        overall_timeout: Optional[float]) -> Optional[float]:
-    """Resolve the best-effort overall dump timeout in seconds.
-
-    Precedence: an explicit ``overall_timeout`` arg wins; else the
-    ``SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS`` env var (parsed as a float, ignored
-    if unset/invalid/<=0); else ``None`` (no deadline == unchanged behavior).
-    """
-    if overall_timeout is not None:
-        return overall_timeout if overall_timeout > 0 else None
-    raw = os.environ.get(_DEBUG_DUMP_TIMEOUT_ENV_VAR)
-    if raw is None:
-        return None
-    try:
-        parsed = float(raw)
-    except (TypeError, ValueError):
-        logger.warning(f'Ignoring invalid {_DEBUG_DUMP_TIMEOUT_ENV_VAR}='
-                       f'{raw!r} (not a number).')
-        return None
-    if parsed <= 0:
-        return None
-    return parsed
-
-
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
     cluster_names: Optional[List[str]] = None,
     managed_job_ids: Optional[List[int]] = None,
     recent_minutes: Optional[float] = None,
     client_info: Optional[Dict[str, Any]] = None,
-    overall_timeout: Optional[float] = None,
+    overall_deadline: Optional[float] = None,
 ) -> pathlib.Path:
     """Create a debug dump for troubleshooting.
 
@@ -2262,30 +2230,36 @@ def create_debug_dump(
         recent_minutes: If specified, include all resources active within
             this many minutes.
         client_info: Optional client-side info to include in the dump.
-        overall_timeout: Optional best-effort overall wall-clock budget, in
-            seconds, for the whole collection. When set (or supplied via the
-            ``SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS`` env var), collection stops
-            starting new sections once the budget is exhausted and still zips +
-            returns whatever was gathered (a partial dump, with the skipped
-            sections noted in errors.json). ``None`` (and env unset/invalid/<=0)
-            means no deadline == unchanged behavior.
+        overall_deadline: Optional absolute wall-clock (``time.time()``) instant
+            to stop the whole collection by. When set, collection stops starting
+            new sections once it is reached and still zips + returns whatever was
+            gathered (a partial dump, with the skipped sections noted in
+            errors.json). An absolute deadline (rather than a relative timeout)
+            lets an out-of-process scheduler charge time already elapsed before
+            the build starts -- notably executor queue wait -- against the
+            budget; an already-passed deadline yields an immediate near-empty
+            partial. ``None`` means no deadline == unchanged behavior.
 
     Returns:
         Path to the created zip file.
     """
-    resolved_timeout = _resolve_overall_timeout(overall_timeout)
     dump_start = time.monotonic()
-    # Absolute monotonic deadline, computed once. None == no deadline, which
-    # makes every deadline-aware code path below a no-op (unchanged behavior).
-    deadline = (dump_start +
-                resolved_timeout if resolved_timeout is not None else None)
+    # Convert the caller's absolute wall-clock deadline to our monotonic
+    # reference, once. None == no deadline (every deadline-aware path below is a
+    # no-op == unchanged behavior). Wall-clock is the only clock comparable
+    # across the (out-of-process) scheduler and this worker; the >=0 clamp means
+    # an already-passed deadline -- the caller spent the budget before we even
+    # started, e.g. queued -- stops us immediately with a near-empty partial
+    # rather than reading as "no deadline".
+    deadline = (dump_start + max(0.0, overall_deadline - time.time())
+                if overall_deadline is not None else None)
 
     logger.debug('Starting debug dump creation')
     logger.debug(f'Initial inputs: request_ids={request_ids}, '
                  f'cluster_names={cluster_names}, '
                  f'managed_job_ids={managed_job_ids}, '
                  f'recent_minutes={recent_minutes}, '
-                 f'overall_timeout={resolved_timeout}')
+                 f'overall_deadline={overall_deadline}')
 
     # Resolve request ID prefixes to full IDs (same pattern as
     # sky api status in server.py)

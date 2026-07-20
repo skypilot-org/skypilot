@@ -1973,7 +1973,7 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
                       managed_job_ids: Optional[List[int]] = None,
                       recent_minutes: Optional[float] = None,
                       client_info: Optional[Dict[str, Any]] = None,
-                      overall_timeout: Optional[float] = None) -> str:
+                      overall_deadline: Optional[float] = None) -> str:
     """Create a debug dump for troubleshooting.
 
     Args:
@@ -1983,10 +1983,12 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         recent_minutes: If specified, include all resources active within
             this many minutes.
         client_info: Optional client-side info to include in the dump.
-        overall_timeout: Optional best-effort overall wall-clock budget, in
-            seconds, for the whole collection. When exhausted, collection stops
-            early and a partial dump is returned. Also settable via the
-            SKYPILOT_DEBUG_DUMP_TIMEOUT_SECONDS env var; None means no deadline.
+        overall_deadline: Optional absolute wall-clock (time.time()) instant to
+            stop the whole collection by; when reached, collection stops early
+            and a partial dump is returned. Passing an absolute deadline lets an
+            out-of-process caller charge already-elapsed time (e.g. executor
+            queue wait) against the budget rather than ignoring it. None means
+            no deadline.
 
     Returns:
         Path to the created zip file on the server.
@@ -2005,7 +2007,7 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         managed_job_ids=managed_job_ids,
         recent_minutes=recent_minutes,
         client_info=client_info,
-        overall_timeout=overall_timeout)
+        overall_deadline=overall_deadline)
     logger.info('Debug dump created')
     logger.debug(f'Debug dump path on API server: {debug_dump_path}')
     return str(debug_dump_path)
