@@ -64,7 +64,7 @@ def _normalize_env(user_env: Any) -> Dict[str, Any]:
             env_dict[match.group(1)] = match.group(2)
         return env_dict
     raise ValueError(
-        "Vast create_instance_kwargs['env'] must be a mapping or string.")
+        'Vast create_instance_kwargs[\'env\'] must be a mapping or string.')
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:

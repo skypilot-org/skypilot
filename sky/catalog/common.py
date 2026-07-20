@@ -198,7 +198,8 @@ class CatalogFetchError(RuntimeError):
 
 
 def fetch_catalog_text(filename: str) -> str:
-    """Fetch one hosted catalog response without reading or updating local cache."""
+    """Fetch one hosted catalog response without reading or updating local
+    cache."""
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
     url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
