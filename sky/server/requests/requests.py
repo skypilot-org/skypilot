@@ -1326,9 +1326,7 @@ async def requests_gc_daemon():
 
 def _cleanup():
     if _DB is not None:
-        result = _DB.close()
-        if asyncio.iscoroutine(result):
-            asyncio.run(result)
+        asyncio.run(_DB.close())
 
 
 atexit.register(_cleanup)
@@ -1368,8 +1366,12 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         bind_params: Dict[str, Any] = {}
         for i, value in enumerate(values):
             bind_params[f'p{i}'] = value
-        sql = PostgresRequestBackend._PLACEHOLDER_RE.sub(
-            lambda m, _i=iter(range(len(values))): f':p{next(_i)}', sql)
+        counter = iter(range(len(values)))
+
+        def _replacer(match: re.Match) -> str:
+            return f':p{next(counter)}'
+
+        sql = PostgresRequestBackend._PLACEHOLDER_RE.sub(_replacer, sql)
         return sql, bind_params
 
     @staticmethod
@@ -1489,8 +1491,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
             REQUEST_COLUMNS)
         where, params = _request_id_where(request_id)
         rows = self._execute_on_conn(
-            conn,
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
             f'WHERE {where}', params,
             fetch=True)
         row = rows[0] if rows else None
@@ -1509,8 +1510,7 @@ class PostgresRequestBackend(request_storage.RequestBackend):
             REQUEST_COLUMNS)
         where, params = _request_id_where(request_id)
         rows = await self._execute_on_async_conn(
-            conn,
-            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            conn, f'SELECT {columns_str} FROM {REQUEST_TABLE} '
             f'WHERE {where}', params,
             fetch=True)
         row = rows[0] if rows else None
@@ -1758,7 +1758,8 @@ class PostgresRequestBackend(request_storage.RequestBackend):
         where, params = _request_id_where(request_id)
         rows = await self._execute_async(
             f'SELECT {columns} FROM {REQUEST_TABLE} '
-            f'WHERE {where}', params,
+            f'WHERE {where}',
+            params,
             fetch=True)
         if not rows:
             return None
@@ -1778,7 +1779,8 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                         ELSE 1
                     END,
                     created_at DESC
-                LIMIT 1000""", params,
+                LIMIT 1000""",
+            params,
             fetch=True)
         if not rows:
             return []
