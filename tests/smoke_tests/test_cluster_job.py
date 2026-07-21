@@ -1531,6 +1531,10 @@ def test_volume_env_mount_kubernetes():
         volumes:
           /mnt/test-data: ${{USERNAME}}-{pvc_name}
         run: |
+          set -e
+          df -h /mnt/test-data
+          touch /mnt/test-data/test.txt
+          ls -lart /mnt/test-data
           echo "Mounted volume"
     """)
     full_pvc_name = f'user-{pvc_name}'
