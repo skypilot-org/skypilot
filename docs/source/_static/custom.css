@@ -46,11 +46,11 @@
 }
 
 /*
- * Launch announcement bar.
+ * Launch announcement bar (the `announcement` theme option in conf.py).
  *
- * Scoped to .container-fluid, which the theme's `announcement` option emits but
- * the developer-preview notice in _templates/header.html does not -- both share
- * the .bd-header-announcement class, so this keeps the two visually distinct.
+ * Scoped to .container-fluid, which the theme's own announcement markup carries,
+ * so these rules cannot leak onto any other .bd-header-announcement banner added
+ * later via a custom template.
  */
 .bd-header-announcement.container-fluid {
     background-color: var(--pst-color-surface) !important;
@@ -104,6 +104,26 @@
 @media (prefers-reduced-motion: reduce) {
     .sky-announcement__arrow {
         transition: none;
+    }
+}
+
+/* On narrow screens the pill is what tips the headline onto a second line, so
+   drop it. Also switch from flex to inline flow: as flex items the text and the
+   arrow wrap independently, which orphans the arrow on a line of its own at
+   ~375px. Inline, the arrow simply follows the last word. */
+@media (max-width: 600px) {
+    .sky-announcement__pill {
+        display: none;
+    }
+
+    .bd-header-announcement a.sky-announcement {
+        display: block;
+        text-align: center;
+        font-size: 0.8125rem;
+    }
+
+    .sky-announcement__arrow {
+        margin-left: 6px;
     }
 }
 
