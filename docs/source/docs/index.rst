@@ -280,7 +280,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
-   For Frontier AI <../frontier-ai>
+   SkyPilot Platform <../skypilot-platform>
 
 .. toctree::
    :hidden:
