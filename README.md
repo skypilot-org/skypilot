@@ -203,8 +203,6 @@ To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overvi
 
 SkyPilot adopters: [Testimonials and Case Studies](https://skypilot.ai/case-studies)
 
-Partners and integrations: [Community Spotlights](https://blog.skypilot.co/community/)
-
 Follow updates:
 - [Slack](http://slack.skypilot.co)
 - [X](https://twitter.com/skypilot_org)

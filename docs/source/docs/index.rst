@@ -259,8 +259,6 @@ To learn more, see :ref:`SkyPilot Overview <overview>` and `SkyPilot blog <https
 
 SkyPilot adopters: `Testimonials and Case Studies <https://skypilot.ai/case-studies>`_
 
-Partners and integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
-
 Follow updates:
 
 * `Slack <http://slack.skypilot.co>`_
