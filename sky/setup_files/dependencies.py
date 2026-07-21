@@ -77,7 +77,6 @@ install_requires = [
     # 2.0.16 introduced create_async_engine(async_creator=...), which we
     # rely on in sky/utils/db/db_utils.py to hand asyncpg the libpq DSN.
     'sqlalchemy>=2.0.16',
-    'psycopg[binary]',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
