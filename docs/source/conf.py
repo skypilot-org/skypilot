@@ -258,18 +258,34 @@ def copy_example_assets(app, exception):
         # Find all assets directories in examples
         for assets_dir in glob.glob(os.path.join(examples_dir, '*/assets')):
             if os.path.exists(assets_dir):
-                # Destination directory in the built HTML
-                dest_dir = os.path.join(app.outdir, 'examples', 'applications',
-                                        'assets')
-                os.makedirs(dest_dir, exist_ok=True)
+                # READMEs reference assets relatively ("assets/foo.png"), so the
+                # files have to land next to the generated page. Examples are
+                # grouped into category directories (agents/, applications/,
+                # ...), so resolve the category by locating the generated page
+                # rather than assuming one.
+                example_name = os.path.basename(os.path.dirname(assets_dir))
+                pages = glob.glob(
+                    os.path.join(app.outdir, 'examples', '*',
+                                 example_name + '.html'))
+                dest_dirs = {
+                    os.path.join(os.path.dirname(page), 'assets')
+                    for page in pages
+                }
+                if not dest_dirs:
+                    print(f'No generated page found for example '
+                          f'{example_name!r}; skipping its assets.')
+                    continue
 
-                # Copy all files from assets directory
-                for file in os.listdir(assets_dir):
-                    src = os.path.join(assets_dir, file)
-                    dst = os.path.join(dest_dir, file)
-                    if os.path.isfile(src):
-                        shutil.copy2(src, dst)
-                        print(f'Copied asset: {file}')
+                for dest_dir in dest_dirs:
+                    os.makedirs(dest_dir, exist_ok=True)
+
+                    # Copy all files from assets directory
+                    for file in os.listdir(assets_dir):
+                        src = os.path.join(assets_dir, file)
+                        dst = os.path.join(dest_dir, file)
+                        if os.path.isfile(src):
+                            shutil.copy2(src, dst)
+                            print(f'Copied asset: {file} -> {dest_dir}')
 
 
 def setup(app):

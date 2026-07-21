@@ -170,7 +170,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
 Scale beyond a single region/cluster
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/failover.png
+.. figure:: ../../images/k8s-failover.png
     :align: center
     :width: 95%
     :alt: Scaling beyond a single region Kubernetes cluster with SkyPilot
