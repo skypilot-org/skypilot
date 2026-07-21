@@ -208,6 +208,12 @@ MEMORY_SIZE_UNITS = {
 # or status.capacity fields to indicate the available resources on the node.
 SUPPORTED_GPU_RESOURCE_KEYS = {'amd': 'amd.com/gpu', 'nvidia': 'nvidia.com/gpu'}
 TPU_RESOURCE_KEY = 'google.com/tpu'
+# AWS Neuron (Trainium/Inferentia) is advertised by the Neuron k8s device
+# plugin under this resource key.
+NEURON_RESOURCE_KEY = 'aws.amazon.com/neuron'
+# AWS Neuron accelerator names, lowercased for case-insensitive matching
+# (see is_neuron_accelerator).
+NEURON_ACCELERATORS = {'trainium', 'trainium2', 'inferentia', 'inferentia2'}
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
@@ -843,12 +849,51 @@ def _accelerator_name_matches(requested_acc: str,
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
-    """Karpeneter label formatter
-    Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
-    the GPU type. Details: https://karpenter.sh/docs/reference/instance-types/
-    The naming scheme is same as the SkyPilot formatter, so we inherit from it.
+    """Karpenter label formatter.
+
+    Karpenter labels GPU nodes with `karpenter.k8s.aws/instance-gpu-name`
+    (value scheme is the same as the SkyPilot formatter, so GPU handling is
+    inherited) and labels AWS Neuron nodes (Trainium/Inferentia) with
+    `karpenter.k8s.aws/instance-accelerator-name`. We recognize both so a single
+    Karpenter cluster can expose GPUs and Neuron devices -- mirroring the way
+    GKELabelFormatter handles both GPU and TPU labels.
+    Details: https://karpenter.sh/docs/reference/instance-types/
     """
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
+    NEURON_LABEL_KEY = 'karpenter.k8s.aws/instance-accelerator-name'
+
+    # Karpenter's instance-accelerator-name values (derived from EC2
+    # AcceleratorInfo, generation-specific) -> SkyPilot canonical Neuron names.
+    _NEURON_VALUE_TO_ACC = {
+        'inferentia': 'Inferentia',
+        'inferentia2': 'Inferentia2',
+        'trainium': 'Trainium',
+        'trainium2': 'Trainium2',
+    }
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        if accelerator is not None and is_neuron_accelerator(accelerator):
+            return cls.NEURON_LABEL_KEY
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY, cls.NEURON_LABEL_KEY]
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key in cls.get_label_keys()
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        # Neuron nodes report e.g. 'trainium' / 'inferentia2' via the
+        # instance-accelerator-name label; map those to canonical names. GPU
+        # nodes fall through to the inherited value.upper().
+        neuron = cls._NEURON_VALUE_TO_ACC.get(value.lower())
+        if neuron is not None:
+            return neuron
+        return super().get_accelerator_from_label_value(value)
 
 
 class NebiusLabelFormatter(GPULabelFormatter):
@@ -1402,7 +1447,8 @@ def detect_accelerator_resource(
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
-                       TPU_RESOURCE_KEY in cluster_resources)
+                       TPU_RESOURCE_KEY in cluster_resources or
+                       NEURON_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
 
@@ -2028,22 +2074,23 @@ def pod_terminated_abnormally(pod: 'kubernetes_models.V1Pod') -> bool:
 # substitute the real URL, others fall back to a generic phrase.
 KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['ImagePullBackOff', 'ErrImagePull'],
-     'Verify the image tag exists and registry credentials are configured.'),
+     'To fix: Verify the image tag exists and registry credentials are configured.'
+    ),
     (['OOMKilled'],
-     'The container ran out of memory. Increase the memory request with '
+     'The container ran out of memory. To fix: Increase the memory request with '
      '`resources.memory` in your task YAML; if `kubernetes.'
      'set_pod_resource_limits` is set, the memory limit scales with it.'),
     # 'ephemeral' must precede 'Evicted': an ephemeral-storage eviction reason
     # contains both, and the first match wins.
     (['ephemeral'],
      'The pod exceeded its ephemeral (local) storage limit and was evicted. '
-     'Increase `resources.ephemeral_storage` in your task YAML.'),
+     'To fix: Increase `resources.disk_size` in your task YAML.'),
     (['Evicted'],
-     'The pod was evicted by the node under resource pressure. Increase the '
-     'relevant request (`resources.memory` or `resources.ephemeral_storage`) '
+     'The pod was evicted by the node under resource pressure. To fix: Increase the '
+     'relevant request (`resources.memory` or `resources.disk_size`) '
      'in your task YAML.'),
     (['Insufficient'],
-     'The cluster does not have enough free resources. View node '
+     'The cluster does not have enough free resources. To fix: View node '
      'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
 ]
 
@@ -2330,8 +2377,11 @@ def adjust_resources_to_allocatable(
     return adjusted_cpus, adjusted_mem
 
 
-def check_instance_fits(context: Optional[str],
-                        instance: str) -> Tuple[bool, Optional[str]]:
+def check_instance_fits(
+        context: Optional[str],
+        instance: str,
+        ephemeral_storage_gb: Optional[float] = None
+) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
     If the instance has GPU requirements, checks if the GPU type is
@@ -2340,6 +2390,8 @@ def check_instance_fits(context: Optional[str],
 
     Args:
         instance: str, the instance type to check.
+        ephemeral_storage_gb: Optional[float], the amount of ephemeral (local)
+            storage in GB requested by the instance, if any.
 
     Returns:
         bool: True if the instance fits on the cluster, False otherwise.
@@ -2348,29 +2400,37 @@ def check_instance_fits(context: Optional[str],
 
     def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
                            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
-        """Checks if the instance fits on the cluster based on CPU and memory.
+        """Checks if the instance fits on the cluster based on resources.
 
-        We check only capacity, not allocatable, because availability can
-        change during scheduling, and we want to let the Kubernetes scheduler
-        handle that.
+        Checks CPU, memory and (if requested) ephemeral storage. We check only
+        capacity, not allocatable, because availability can change during
+        scheduling, and we want to let the Kubernetes scheduler handle that.
         """
-        # We log max CPU and memory found on the GPU nodes for debugging.
+        # We log the max resources found on a single node for debugging.
         max_cpu = 0.0
         max_mem = 0.0
+        max_ephemeral_storage_gb = 0.0
 
         for node in node_list:
             node_cpus = parse_cpu_or_gpu_resource(node.status.capacity['cpu'])
             node_memory_gb = parse_memory_resource(
                 node.status.capacity['memory'], unit='G')
+            node_ephemeral_storage_gb = parse_memory_resource(
+                node.status.capacity.get('ephemeral-storage', '0'), unit='G')
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
+                max_ephemeral_storage_gb = node_ephemeral_storage_gb
             if (node_cpus >= candidate_instance_type.cpus and
-                    node_memory_gb >= candidate_instance_type.memory):
+                    node_memory_gb >= candidate_instance_type.memory and
+                (ephemeral_storage_gb is None or
+                 node_ephemeral_storage_gb >= ephemeral_storage_gb)):
                 return True, None
         return False, (
             'Maximum resources found on a single node: '
-            f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
+            f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory, '
+            f'{common_utils.format_float(max_ephemeral_storage_gb)}G '
+            'Ephemeral Storage')
 
     def check_tpu_fits(acc_type: str, acc_count: int,
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
@@ -2448,18 +2508,26 @@ def check_instance_fits(context: Optional[str],
                     f'No GPU nodes found with {acc_count} or more GPUs.')
 
         candidate_nodes = gpu_nodes
+        ephemeral_storage_reason = (
+            f' and/or ephemeral storage (>= {ephemeral_storage_gb} G)'
+            if ephemeral_storage_gb is not None else '')
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type} do not have '
             f'enough CPU (>= {k8s_instance_type.cpus} CPUs) and/or '
-            f'memory (>= {k8s_instance_type.memory} G). ')
+            f'memory (>= {k8s_instance_type.memory} G)'
+            f'{ephemeral_storage_reason}. ')
     else:
         candidate_nodes = [node for node in nodes if node.is_ready()]
         if not candidate_nodes:
             return False, 'No ready nodes found in the cluster.'
+        ephemeral_storage_reason = (
+            f' and/or ephemeral storage (>= {ephemeral_storage_gb} G)'
+            if ephemeral_storage_gb is not None else '')
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (>= {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
-                                 f'(>= {k8s_instance_type.memory} G). ')
+                                 f'(>= {k8s_instance_type.memory} G)'
+                                 f'{ephemeral_storage_reason}. ')
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
@@ -4116,7 +4184,12 @@ def get_custom_config_k8s_contexts() -> List[str]:
 # corresponding spot label key and value.
 SPOT_LABEL_MAP = {
     kubernetes_enums.KubernetesAutoscalerType.GKE.value:
-        ('cloud.google.com/gke-spot', 'true')
+        ('cloud.google.com/gke-spot', 'true'),
+    # Karpenter satisfies a pod's capacity-type node requirement by choosing the
+    # capacity type, so a `karpenter.sh/capacity-type: spot` node selector routes
+    # the pod to a spot NodePool.
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER.value:
+        ('karpenter.sh/capacity-type', 'spot'),
 }
 
 
@@ -4157,10 +4230,11 @@ def get_spot_label(
                     key] == value:
                 return key, value
 
-    # Check if autoscaler is configured. Allow spot instances if autoscaler type
-    # is known to support spot instances.
+    # Check if autoscaler is configured. Allow spot instances if the autoscaler
+    # type is known to support them (i.e. has an entry in SPOT_LABEL_MAP).
     autoscaler_type = get_autoscaler_type(context=context)
-    if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
+    if (autoscaler_type is not None and
+            autoscaler_type.value in SPOT_LABEL_MAP):
         return SPOT_LABEL_MAP[autoscaler_type.value]
 
     return None, None
@@ -4225,7 +4299,10 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
 def get_handled_taint_keys() -> List[str]:
     """Get the taint keys that will be handled automatically by SkyPilot."""
-    keys = [TPU_RESOURCE_KEY, *SUPPORTED_GPU_RESOURCE_KEYS.values()]
+    keys = [
+        TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY,
+        *SUPPORTED_GPU_RESOURCE_KEYS.values()
+    ]
     custom_key = os.getenv('CUSTOM_GPU_RESOURCE_KEY', None)
     if custom_key:
         keys.append(custom_key)
@@ -4710,6 +4787,17 @@ def is_tpu_on_gke(accelerator: str, normalize: bool = True) -> bool:
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
+def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
+    """Determines if the given accelerator is an AWS Neuron device.
+
+    AWS Trainium/Inferentia (Neuron) use their own k8s resource key
+    (aws.amazon.com/neuron) and node taint, distinct from nvidia/amd GPUs.
+    """
+    if accelerator is None:
+        return False
+    return accelerator.lower() in NEURON_ACCELERATORS
+
+
 def get_node_accelerator_count(context: Optional[str],
                                attribute_dict: dict) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
@@ -4727,12 +4815,24 @@ def get_node_accelerator_count(context: Optional[str],
             resource is found, it returns 0.
     """
     gpu_resource_name = get_gpu_resource_key(context)
-    assert not (gpu_resource_name in attribute_dict and
-                TPU_RESOURCE_KEY in attribute_dict)
+    # A node is expected to advertise at most one accelerator family (GPU, TPU,
+    # or Neuron). Rather than assert on external cluster state (which would crash
+    # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
+    # hybrid state), warn and fall through to the first family found below.
+    present_keys = [
+        k for k in (gpu_resource_name, TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY)
+        if k in attribute_dict
+    ]
+    if len(present_keys) > 1:
+        logger.warning(
+            f'Node advertises multiple accelerator families {present_keys}; '
+            f'using {present_keys[0]}.')
     if gpu_resource_name in attribute_dict:
         return int(attribute_dict[gpu_resource_name])
     elif TPU_RESOURCE_KEY in attribute_dict:
         return int(attribute_dict[TPU_RESOURCE_KEY])
+    elif NEURON_RESOURCE_KEY in attribute_dict:
+        return int(attribute_dict[NEURON_RESOURCE_KEY])
     return 0
 
 
@@ -5085,7 +5185,8 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     with open(kubeconfig_path, 'r', encoding='utf-8') as file:
         config = yaml_utils.safe_load(file)
     normalized = yaml.dump(config, sort_keys=True)
-    hashed = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+    hashed = hashlib.sha1(normalized.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()
     path = os.path.expanduser(
         f'{kubernetes_constants.SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE}/{hashed}.yaml'
     )

@@ -3367,10 +3367,12 @@ class AzureBlobStore(AbstractStore):
         """
         assert region is not None
         subscription_id = azure.get_subscription_id()
-        subscription_hash_obj = hashlib.md5(subscription_id.encode('utf-8'))
+        subscription_hash_obj = hashlib.md5(subscription_id.encode('utf-8'),
+                                            usedforsecurity=False)
         subscription_hash = subscription_hash_obj.hexdigest(
         )[:AzureBlobStore._SUBSCRIPTION_HASH_LENGTH]
-        region_hash_obj = hashlib.md5(region.encode('utf-8'))
+        region_hash_obj = hashlib.md5(region.encode('utf-8'),
+                                      usedforsecurity=False)
         region_hash = region_hash_obj.hexdigest()[:AzureBlobStore.
                                                   _REGION_HASH_LENGTH]
 

@@ -32,6 +32,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -67,6 +68,7 @@ if typing.TYPE_CHECKING:
     from google.protobuf import json_format
     import grpc
     import psutil
+    import sqlalchemy
 
     import sky
     from sky import dag as dag_lib
@@ -361,6 +363,12 @@ def cleanup_expired_api_access_tokens() -> int:
 
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for consolidation mode.
+
+    Naming quirk: this path is historically called "HA recovery" because it
+    originally only applied to controllers deployed in HA mode (a k8s
+    deployment that auto-restarts). It now runs on any controller process
+    restart (e.g. a normal API-server upgrade/rollout); the recovery source
+    recorded for recoveries it forces is RecoverySource.RESTART.
 
     This should only be called from the managed-job-status-refresh-daemon, due
     so that we have correct ordering recovery -> controller start -> job status
@@ -846,13 +854,24 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
                                  cluster_name,
                                  job_id=job_id,
                                  get_end_time=True)
-    except (exceptions.CommandError, grpc.RpcError,
-            grpc.FutureTimeoutError) as e:
-        if isinstance(e, exceptions.CommandError) and e.returncode == 255 or \
-                (isinstance(e, grpc.RpcError) and e.code() in [
-                    grpc.StatusCode.UNAVAILABLE,
-                    grpc.StatusCode.DEADLINE_EXCEEDED,
-                ]) or isinstance(e, grpc.FutureTimeoutError):
+    except exceptions.CommandError as e:
+        # Any failure of the end-time probe means the instance is unreachable
+        # or gone. An SSH connection failure surfaces as returncode 255, but
+        # the instance can also disappear between the job-status check and this
+        # fetch - e.g. on Kubernetes the pod may be deleted on preemption or
+        # teardown, which fails with returncode 1 and a "pods ... not found"
+        # error. This read is best-effort, so fall back to the current time
+        # instead of crashing the controller.
+        logger.warning(
+            f'Failed to get the end time from instance {cluster_name} '
+            f'(returncode={e.returncode}); assuming the instance was '
+            f'preempted or torn down. stderr: {e.detailed_reason}')
+        return time.time()
+    except (grpc.RpcError, grpc.FutureTimeoutError) as e:
+        if (isinstance(e, grpc.RpcError) and e.code() in [
+                grpc.StatusCode.UNAVAILABLE,
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+        ]) or isinstance(e, grpc.FutureTimeoutError):
             # Failed to connect - probably the instance was preempted since the
             # job completed. We shouldn't crash here, so just log and use the
             # current time.
@@ -959,17 +978,18 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     # Merge results and collect cluster info for unique clusters
     seen_cluster_names: Set[str] = set()
     seen_controller_uuids: Set[str] = set()
-    for job_id, (job_inline, job_files, job_errors, cluster_name,
+    for job_id, (job_inline, job_files, job_errors, cluster_names,
                  controller_uuids) in zip(job_ids, results):
         inline_data.extend(job_inline)
         file_paths.extend(job_files)
         errors.extend(job_errors)
         seen_controller_uuids.update(controller_uuids)
-        if cluster_name and cluster_name not in seen_cluster_names:
-            seen_cluster_names.add(cluster_name)
-            job_prefix = f'managed_jobs/{job_id}'
-            _collect_cluster_debug_manifest(cluster_name, job_prefix,
-                                            inline_data, errors)
+        for cluster_name in cluster_names:
+            if cluster_name not in seen_cluster_names:
+                seen_cluster_names.add(cluster_name)
+                job_prefix = f'managed_jobs/{job_id}'
+                _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                                inline_data, file_paths, errors)
 
     # Collect controller system log paths (shared, not per-job). Scope to
     # the controllers that actually ran the requested jobs — globbing the
@@ -977,6 +997,12 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     # processes' logs.
     _collect_controller_system_log_paths(file_paths, errors,
                                          seen_controller_uuids)
+
+    # Submission logs (submit-job-*.log): each records the "Started N
+    # controllers" count for one submission (the controller over-count
+    # signal), scoped to the requested jobs like the controller_system
+    # logs above.
+    _collect_controller_submit_log_paths(file_paths, errors, job_ids)
 
     return {
         'inline_data': inline_data,
@@ -988,12 +1014,14 @@ def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
 def _collect_job_debug_manifest(
     job_id: int,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[Dict[str, str]],
-           Optional[str], Set[str]]:
+           List[str], Set[str]]:
     """Collect debug manifest entries for a single managed job.
 
     Returns:
-        (inline_data, file_paths, errors, cluster_name, controller_uuids)
-        for this job. ``controller_uuids`` is the set of parent controller
+        (inline_data, file_paths, errors, cluster_names, controller_uuids)
+        for this job. ``cluster_names`` are the underlying cluster name(s)
+        of the job's tasks (a multi-task pipeline launches one cluster per
+        task). ``controller_uuids`` is the set of parent controller
         UUIDs that ran this job (empty if no <jobid>.log exists yet or the
         log doesn't contain the marker — e.g., the job never started).
     """
@@ -1079,52 +1107,64 @@ def _collect_job_debug_manifest(
                     'relative_path': f'{job_prefix}/run{suffix}.log',
                 })
 
-    # 5. Resolve cluster name (cluster info collected in caller for dedup)
-    cluster_name = None
+    # 5. Resolve cluster name(s) (cluster info collected in caller for
+    # dedup). A pool job records its assigned worker; a non-pool job uses
+    # a deterministic per-task cluster name (a multi-task pipeline
+    # launches one cluster per task, so there can be several).
+    cluster_names: List[str] = []
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/cluster_info'):
-        cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
-        if cluster_name is None:
-            # Fall back to generated name
+        pool_cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
+        if pool_cluster_name is not None:
+            cluster_names.append(pool_cluster_name)
+        else:
+            # Fall back to the generated per-task names
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
-            if task_info:
-                _, task_name, _, _, _ = task_info[0]
-                cluster_name = generate_managed_job_cluster_name(
-                    task_name, job_id)
+            for _, task_name, _, _, _ in task_info:
+                cluster_names.append(
+                    generate_managed_job_cluster_name(task_name, job_id))
+            # De-duplicate while preserving order.
+            cluster_names = list(dict.fromkeys(cluster_names))
 
-    return inline_data, file_paths, errors, cluster_name, controller_uuids
+    return inline_data, file_paths, errors, cluster_names, controller_uuids
 
 
 def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
                                     inline_data: List[Dict[str, str]],
+                                    file_paths: List[Dict[str, str]],
                                     errors: List[Dict[str, str]]) -> None:
-    """Collect cluster info and events for a managed job's cluster."""
+    """Collect cluster info, history, events, and the provision log for a
+    managed job's cluster.
+
+    Cluster history and events outlive the cluster row, so this still
+    produces data for terminated clusters (the normal state for a finished
+    managed job's cluster).
+    """
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
 
     with _catch_to_errors(errors, 'managed_jobs',
                           f'{cluster_name}/cluster_info'):
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is None:
-            return
-        cluster_info = debug_dump_helpers.serialize_cluster_record(
-            cluster_record)
-        inline_data.append({
-            'relative_path': f'{cluster_prefix}/cluster_info.json',
-            'content': json.dumps(cluster_info, indent=2, default=str),
-        })
-
-        cluster_hash = cluster_record.get('cluster_hash')
-        if not cluster_hash:
-            return
-        for event_data in debug_dump_helpers.get_cluster_events_data(
-                cluster_hash):
+        for filename, content in debug_dump_helpers.get_cluster_dump_data(
+                cluster_name):
             inline_data.append({
-                'relative_path': f'{cluster_prefix}/'
-                                 f'events_{event_data["event_type"]}.json',
-                'content': json.dumps(event_data['events'],
-                                      indent=2,
-                                      default=str),
+                'relative_path': f'{cluster_prefix}/{filename}',
+                'content': json.dumps(content, indent=2, default=str),
             })
+
+    # Provision log (FILE — needs rsync). The path is recorded in cluster
+    # history, so this also works for terminated clusters.
+    with _catch_to_errors(errors, 'managed_jobs',
+                          f'{cluster_name}/provision_log'):
+        provision_log_path = (
+            global_user_state.get_cluster_history_provision_log_path(
+                cluster_name))
+        if provision_log_path:
+            provision_log = pathlib.Path(provision_log_path).expanduser()
+            if provision_log.is_file():
+                file_paths.append({
+                    'remote_path': str(provision_log),
+                    'relative_path': f'{cluster_prefix}/provision.log',
+                })
 
 
 def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
@@ -1152,6 +1192,103 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
                 file_paths.append({
                     'remote_path': str(log_file),
                     'relative_path': f'managed_jobs/controller_system/'
+                                     f'{log_file.name}',
+                })
+
+
+def _parse_submit_log_job_ranges(job_ids_str: str) -> List[Tuple[int, int]]:
+    """Parse a submit-job log filename's id portion into inclusive ranges.
+
+    Inverse of sky.jobs.server.core._job_ids_to_str: a comma-separated list of
+    single ids (``584``) or inclusive ranges (``580-588``), returned as
+    (start, end) tuples. Ranges are kept intact rather than expanded into a set
+    of ints -- a filename like ``submit-job-1-100000000.log`` would otherwise
+    blow up memory. Raises ValueError on an unrecognized or inverted range so
+    the caller can skip the file.
+    """
+    ranges: List[Tuple[int, int]] = []
+    for token in job_ids_str.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        if '-' in token:
+            start_str, _, end_str = token.partition('-')
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                raise ValueError(f'Inverted range: {token!r}')
+            ranges.append((start, end))
+        else:
+            val = int(token)
+            ranges.append((val, val))
+    return ranges
+
+
+def _collect_controller_submit_log_paths(file_paths: List[Dict[str, str]],
+                                         errors: List[Dict[str, str]],
+                                         job_ids: List[int]) -> None:
+    """Collect managed-job submission log file paths (submit-job-*.log).
+
+    Each submission writes ``~/sky_logs/managed_jobs/submit-job-<ids>.log``
+    (see sky.jobs.server.core), where ``<ids>`` is the submission's job-id set
+    formatted as comma-separated singletons/ranges. This per-submission log
+    records the "Started N controllers" count -- the over-count signal that
+    pins leaked controllers to a specific submission -- and is not
+    reconstructable from the per-job ``<jobid>.log`` or ``job_info``.
+
+    Consolidation mode only: ``submit-job-*.log`` is written solely by
+    ``_consolidated_launch``. In non-consolidation mode the submission runs as a
+    Ray job on the controller cluster and its output goes to
+    ``~/sky_logs/managed_jobs/job-id-<N>/controller.log`` (what ``sky jobs logs
+    --controller`` downloads), which this path does not collect -- so the glob
+    below simply finds nothing. The over-count signal is not lost, though:
+    ``maybe_start_controllers`` also runs in the controller skylet's
+    reconciliation loop, logging "Started N controllers" to the controller
+    cluster's ``skylet.log``, which the dump already collects.
+    TODO(ishankaul1): also collect controller.log for non-consolidation mode.
+
+    Scoped to ``job_ids``: we list ``submit-job-*.log`` but only collect
+    submissions whose id-set intersects the requested jobs. Unlike
+    _collect_controller_system_log_paths -- which builds exact
+    ``controller_<uuid>.log`` paths from the relevant UUID set and never lists
+    the directory -- a job id cannot be mapped back to its submission filename
+    without listing: the job may have been submitted in a multi-job batch whose
+    file is range-named (e.g. ``submit-job-580-588.log``). So the listing is
+    unavoidable; what stays bounded is the expensive part -- the set of files
+    rsynced -- not the directory scan.
+    """
+    requested = set(job_ids)
+    if not requested:
+        return
+    prefix, suffix = 'submit-job-', '.log'
+    with _catch_to_errors(errors, 'managed_jobs', 'controller_submit_logs'):
+        submit_logs_dir = (
+            pathlib.Path(constants.SKY_LOGS_DIRECTORY).expanduser() /
+            'managed_jobs')
+        if not submit_logs_dir.is_dir():
+            return
+        for log_file in submit_logs_dir.glob(f'{prefix}*{suffix}'):
+            if not log_file.is_file():
+                continue
+            ids_str = log_file.name[len(prefix):-len(suffix)]
+            try:
+                submission_ranges = _parse_submit_log_job_ranges(ids_str)
+            except ValueError:
+                # The only writer is sky.jobs.server.core with a fixed format,
+                # so an unparseable name is unexpected -- surface it rather than
+                # silently guess which jobs the submission covered.
+                logger.warning('Skipping submit-job log with unrecognized '
+                               f'name: {log_file.name}')
+                continue
+            # Test if any requested job id is in the submission ranges.
+            # Requests and submission ranges are likely small,
+            # so nested check is likely OK.
+            # TODO (ishankaul1) - Add a more efficient check if needed.
+            if any(start <= req <= end
+                   for start, end in submission_ranges
+                   for req in requested):
+                file_paths.append({
+                    'remote_path': str(log_file),
+                    'relative_path': f'managed_jobs/controller_submit_logs/'
                                      f'{log_file.name}',
                 })
 
@@ -1650,6 +1787,16 @@ def stream_logs_by_id(
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file_ever_existed = False
+            # Whether a task's logs went to an external store is a per-task,
+            # write-time fact: the controller only skips persisting a local
+            # copy (leaving local_log_file NULL) when a logging agent forwarded
+            # the logs elsewhere (see download_log_and_stream). So we decide the
+            # read source per task by the presence of a local file, NOT by the
+            # current global logging-agent config -- this keeps read-back
+            # working after the agent is disconnected or when serving from a
+            # replica whose config view differs. When there is no local copy we
+            # stream from the registered log reader, mirroring core.tail_logs.
+            log_reader = logs.get_log_reader()
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
@@ -1726,6 +1873,52 @@ def stream_logs_by_id(
                                 f'{task_str} finished '
                                 f'(status: {task_status.value}).'),
                                   flush=True)
+                elif log_reader is not None:
+                    # No local copy was persisted for this task, so its logs
+                    # were forwarded to an external store. Stream them back for
+                    # this task's ephemeral cluster; the cluster ran exactly one
+                    # job, so read the latest indexed one (job_id=None).
+                    returncode = None
+                    try:
+                        pool = managed_job_state.get_pool_from_job_id(job_id)
+                        if pool is not None:
+                            cluster_name, _ = (
+                                managed_job_state.get_pool_submit_info(job_id))
+                        else:
+                            cluster_name = generate_managed_job_cluster_name(
+                                task_name, job_id)
+                        if cluster_name is None:
+                            # A pool job that was never assigned a cluster has
+                            # no logs to read back; fall through to the message.
+                            continue
+                        task_str = (f'Task {task_name}({task_id})'
+                                    if task_name else f'Task {task_id}')
+                        if num_tasks > 1 or task is not None:
+                            print(f'=== {task_str} ===')
+                        returncode = log_reader.read_cluster_job_logs(
+                            cluster_name,
+                            None,
+                            follow=False,
+                            tail=tail if tail is not None else 0)
+                    except Exception as e:  # pylint: disable=broad-except
+                        # Surface the failure (streamed to the user via the
+                        # request's stdout redirection) and fall through to the
+                        # terminal-state message instead of crashing.
+                        logger.warning(
+                            'Failed to read logs for job %s task %s from the '
+                            'external log store: %s', job_id, task_id, e)
+                        continue
+                    if returncode is None:
+                        # No logs in the external store for this task; fall
+                        # through to the terminal-state message below.
+                        continue
+                    log_file_ever_existed = True
+                    if num_tasks > 1 or task is not None:
+                        if task_status.is_terminal():
+                            print(ux_utils.finishing_message(
+                                f'{task_str} finished '
+                                f'(status: {task_status.value}).'),
+                                  flush=True)
             if log_file_ever_existed:
                 # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
@@ -1734,6 +1927,23 @@ def stream_logs_by_id(
                           flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
+            if log_reader is not None:
+                # An external log reader is registered but returned nothing for
+                # this job: its logs were not persisted locally and are not (or
+                # no longer) in the external store -- e.g. outside the store's
+                # retention window, or never captured. When a logging agent is
+                # in use, task-log retention is governed by the external store,
+                # not by jobs.controller.task_logs_gc_retention_hours.
+                return (
+                    f'{colorama.Fore.YELLOW}'
+                    f'No logs found for job {job_id} in the external log '
+                    f'store. The logs may be outside the store\'s retention '
+                    f'window or were never captured. For controller logs, '
+                    f'run: sky jobs logs --controller {job_id}'
+                    f'{colorama.Style.RESET_ALL}'
+                    f'{job_msg}',
+                    exceptions.JobExitCode.from_managed_job_status(
+                        managed_job_status))
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '
@@ -2305,8 +2515,9 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
 def _format_job_details(*,
                         job: Dict[str, Any],
                         highest_blocking_priority: int,
-                        recovery_reason: Optional[str] = None) -> None:
-    """Add details about schedule state / backoff / recovery."""
+                        recovery_reason: Optional[str] = None,
+                        pending_reason: Optional[str] = None) -> None:
+    """Add details about schedule state / backoff / recovery / pending."""
     state_details = None
     if job['schedule_state'] == 'ALIVE_BACKOFF':
         state_details = 'In backoff, waiting for resources'
@@ -2343,6 +2554,13 @@ def _format_job_details(*,
             if hint is not None:
                 detail += f' ({hint})'
         job['details'] = detail
+    elif pending_reason:
+        # Surface why a job is still PENDING (e.g. it was submitted to the
+        # controller queue or is in launch backoff) so the reason is visible
+        # in the job details view, not just the event table. Collapse
+        # whitespace so a multi-line reason renders on a single line in the
+        # details column.
+        job['details'] = ' '.join(pending_reason.split())
     else:
         job['details'] = None
 
@@ -2407,6 +2625,7 @@ def get_managed_job_queue(
     sort_order: Optional[str] = None,
     submitted_after: Optional[float] = None,
     submitted_before: Optional[float] = None,
+    status_expr: Optional['sqlalchemy.ColumnElement'] = None,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -2455,6 +2674,7 @@ def get_managed_job_queue(
         skip_finished=skip_finished,
         submitted_after=submitted_after,
         submitted_before=submitted_before,
+        status_expr=status_expr,
     )
 
     jobs, total = managed_job_state.get_managed_jobs_with_filters(
@@ -2473,6 +2693,7 @@ def get_managed_job_queue(
         limit=limit,
         sort_by=sort_by,
         sort_order=sort_order,
+        status_expr=status_expr,
     )
 
     if cluster_handle_required:
@@ -2564,25 +2785,35 @@ def get_managed_job_queue(
 
     _populate_job_records_from_handles(jobs_with_handle)
 
-    # Batch-fetch the reason a recovering job is recovering (e.g. an OOMKilled
-    # pod), so it can be surfaced in `details`. Scoped to RECOVERING jobs (a
-    # small, transient subset) and done in one query to stay off the per-job
-    # path. `job['status']` is already stringified above.
+    # Batch-fetch the reason a job is recovering (e.g. an OOMKilled pod) or
+    # still pending (e.g. submitted to the queue or in launch backoff), so it
+    # can be surfaced in `details`. Both were previously only visible in the
+    # event table. Scoped to the (small, transient) RECOVERING/PENDING subsets
+    # and fetched together in one query to stay off the per-job path and avoid
+    # an extra DB round trip. `job['status']` is already stringified above.
     recovery_reasons: Dict[int, str] = {}
+    pending_reasons: Dict[int, str] = {}
     if not fields or 'details' in fields:
         recovering_job_ids = [
             job['job_id'] for job in jobs if job['status'] ==
             managed_job_state.ManagedJobStatus.RECOVERING.value
         ]
-        recovery_reasons = managed_job_state.get_latest_recovery_reasons(
-            recovering_job_ids)
+        pending_job_ids = [
+            job['job_id']
+            for job in jobs
+            if job['status'] == managed_job_state.ManagedJobStatus.PENDING.value
+        ]
+        recovery_reasons, pending_reasons = (
+            managed_job_state.get_latest_recovery_and_pending_reasons(
+                recovering_job_ids, pending_job_ids))
 
     for job in jobs:
         if not fields or 'details' in fields:
             _format_job_details(
                 job=job,
                 highest_blocking_priority=highest_blocking_priority,
-                recovery_reason=recovery_reasons.get(job['job_id']))
+                recovery_reason=recovery_reasons.get(job['job_id']),
+                pending_reason=pending_reasons.get(job['job_id']))
 
         # Derive is_job_group from execution column
         job['is_job_group'] = (
@@ -2750,6 +2981,36 @@ def _get_job_status_from_tasks(
             # confusing.
             break
     return managed_task_status, current_task_id
+
+
+def format_job_ids_as_ranges(job_ids: Optional[List[int]]) -> str:
+    """Formats job IDs as a compact comma-separated list of ranges.
+
+    Contiguous IDs are collapsed into ``start-end`` ranges, e.g.
+    ``[1, 2, 3, 5, 6]`` becomes ``'1-3,5-6'``. This keeps the output readable
+    when many jobs are submitted at once (e.g. ``sky jobs launch --num-jobs``).
+    Returns an empty string for empty input.
+    """
+    if not job_ids:
+        return ''
+
+    if len(job_ids) == 1:
+        return str(job_ids[0])
+
+    job_ids = sorted(job_ids)
+    ranges = []
+    start = prev = job_ids[0]
+
+    for n in job_ids[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append(f'{start}-{prev}' if start != prev else str(start))
+        start = prev = n
+
+    # append last range
+    ranges.append(f'{start}-{prev}' if start != prev else str(start))
+    return ','.join(ranges)
 
 
 @typing.overload

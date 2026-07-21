@@ -161,8 +161,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                         })
                 newly_added = global_user_state.add_or_update_user(auth_user)
                 if newly_added:
-                    permission.permission_service.add_user_if_not_exists(
-                        auth_user.id)
+                    # Offload the blocking config reload + role seed to a
+                    # worker thread so this async middleware doesn't block the
+                    # event loop. The reload lets a runtime `rbac.default_role`
+                    # change take effect for this new user without a restart.
+                    await asyncio.to_thread(permission.seed_new_user_role,
+                                            auth_user.id)
                 request.state.auth_user = auth_user
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
@@ -204,8 +208,11 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         """Extract user info from OAuth2 proxy response headers."""
         email_header = response.headers.get('X-Auth-Request-Email')
         if email_header:
-            user_hash = hashlib.md5(email_header.encode()).hexdigest(
-            )[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user id from the (non-secret) SSO
+            # email; auth itself is done by oauth2-proxy. Not a security use.
+            email_hash = hashlib.md5(email_header.encode(),
+                                     usedforsecurity=False).hexdigest()
+            user_hash = email_hash[:common_utils.USER_HASH_LENGTH]
             return models.User(id=user_hash,
                                name=email_header,
                                user_type=models.UserType.SSO.value)

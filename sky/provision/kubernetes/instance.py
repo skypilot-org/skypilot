@@ -909,9 +909,10 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         pods_to_check = [
             pod for pod in all_pods if pod.metadata.name in expected_pod_names
         ]
+        num_threads = max(1, min(_NUM_THREADS, len(pods_to_check)))
         pod_statuses = subprocess_utils.run_in_parallel(_inspect_pod_status,
                                                         pods_to_check,
-                                                        _NUM_THREADS)
+                                                        num_threads)
 
         all_pods_running = True
         pending_reasons_count: Dict[str, int] = {}
@@ -1099,7 +1100,8 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
 
     # Run pre_init in parallel across all new_nodes
-    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, _NUM_THREADS)
+    num_threads = max(1, min(_NUM_THREADS, len(new_nodes)))
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, num_threads)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -1499,6 +1501,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     needs_gpus = False
     needs_gpus_nvidia = False
+    needs_neuron = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
@@ -1506,6 +1509,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                 0) > 0
         needs_gpus_nvidia = limits.get(
             kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
+        # AWS Neuron (Trainium/Inferentia) uses its own resource key.
+        needs_neuron = limits.get(kubernetes_utils.NEURON_RESOURCE_KEY, 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
@@ -1613,7 +1618,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
@@ -1629,9 +1635,25 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 gpu_toleration
+            ]
+        # Add Neuron toleration if AWS Neuron (Trainium/Inferentia) is requested.
+        # The Neuron device plugin taints nodes aws.amazon.com/neuron:NoSchedule
+        # to keep non-Neuron workloads off them; tolerate it like the GPU case.
+        if needs_neuron:
+            neuron_toleration = {
+                'key': kubernetes_utils.NEURON_RESOURCE_KEY,
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            }
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                neuron_toleration
             ]
 
         # Apply allowed_nodes scheduling constraints to restrict pods to
@@ -1698,8 +1720,9 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # due to node failure or manual termination, etc. and then launch
         # again to create the Pods back.
         # The existing Pods will be skipped in _create_resource_thread.
+        num_threads = max(1, min(_NUM_THREADS, config.count))
         created_resources = subprocess_utils.run_in_parallel(
-            _create_resource_thread, list(range(config.count)), _NUM_THREADS)
+            _create_resource_thread, list(range(config.count)), num_threads)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
@@ -1935,8 +1958,9 @@ def terminate_instances(
         _terminate_node(namespace, context, pod_name, _is_head(pod))
 
     # Run pod termination in parallel
+    num_threads = max(1, min(_NUM_THREADS, len(pods)))
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
-                                     _NUM_THREADS)
+                                     num_threads)
 
     if not worker_only:
         # Cleanup all services by label selector as a fallback.
@@ -2354,7 +2378,7 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
 
     # Check pod status conditions for high level overview.
     # No need to sort, as each condition.type will only appear once.
-    for condition in pod.status.conditions:
+    for condition in (pod.status.conditions or []):
         reason = condition.reason or 'Unknown reason'
         message = condition.message or ''
 

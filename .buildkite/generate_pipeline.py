@@ -23,6 +23,7 @@ smoke tests for those clouds are not generated.
 
 import argparse
 import collections
+import hashlib
 import os
 import re
 import shlex
@@ -155,6 +156,12 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--submodule-base-branch')
     parser.add_argument('--dependency', nargs='?', const='', default='all')
     parser.add_argument('--concurrency', type=int)
+    # Select only tests marked `exclusive` and serialize them (one step at a
+    # time). Exclusive tests mutate shared server state, so they must not run
+    # concurrently with other tests or each other. Without this flag, exclusive
+    # tests are excluded from the (parallel) pipeline entirely. Generator-only
+    # flag: not forwarded to pytest.
+    parser.add_argument('--exclusive', action='store_true')
 
     # pytest_native: args the generate_pipeline parser does not recognise
     # (e.g. --no-resource-heavy).  They are conftest-registered pytest flags
@@ -226,15 +233,19 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--generic-cloud {parsed_args.generic_cloud}')
 
     return (default_clouds_to_run, parsed_args.k, extra_args,
-            parsed_args.concurrency, parsed_args.env_file
-            is not None, pytest_native)
+            parsed_args.concurrency, parsed_args.env_file,
+            parsed_args.exclusive, pytest_native)
 
 
 def _extract_marked_tests(
-    file_path: str, args: str, default_clouds_to_run: List[str],
-    k_value: Optional[str], extra_args: List[str]
-) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[str],
-                     List[bool]]]:
+    file_path: str,
+    args: str,
+    default_clouds_to_run: List[str],
+    k_value: Optional[str],
+    extra_args: List[str],
+    exclusive_run: bool = False
+) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[List[str]],
+                     List[bool], List[Optional[str]]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -306,11 +317,30 @@ def _extract_marked_tests(
 
     function_cloud_map = {}
     for function_name, marks in function_name_marks_map.items():
+        # Partition exclusive vs normal tests. Exclusive-marked tests run only
+        # in an --exclusive run (serialized) and are excluded from normal
+        # parallel runs; non-exclusive tests are excluded from --exclusive runs.
+        # The two never share a pipeline, so server-mutating tests never run
+        # alongside others.
+        if ('exclusive' in marks) != exclusive_run:
+            continue
         clouds_to_include = []
         run_on_cloud_kube_backend = ('resource_heavy' in marks and
                                      'kubernetes' in default_clouds_to_run)
         benchmark_test = 'benchmark' in marks
         no_auto_retry = 'no_auto_retry' in marks
+
+        # A concurrency_group(name) marker serializes this test globally across
+        # all builds and pipelines: the step gets that concurrency_group with a
+        # limit of 1, so only one instance runs at a time org-wide while every
+        # other step is unaffected. conftest.py renders the marker as
+        # 'concurrency_group(<name>)' in the collect-only output.
+        test_concurrency_group = None
+        for mark in marks:
+            group_match = re.match(r'concurrency_group\((.+)\)$', mark)
+            if group_match:
+                test_concurrency_group = group_match.group(1).strip()
+                break
 
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
@@ -354,7 +384,9 @@ def _extract_marked_tests(
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
-        ], [no_auto_retry for _ in range(len(final_clouds_to_include))])
+        ], [no_auto_retry for _ in range(len(final_clouds_to_include))], [
+            test_concurrency_group for _ in range(len(final_clouds_to_include))
+        ])
 
     return function_cloud_map
 
@@ -363,8 +395,9 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
-    (default_clouds_to_run, k_value, extra_args, concurrency, has_env_file,
-     pytest_native) = _parse_args(args)
+    (default_clouds_to_run, k_value, extra_args, concurrency, env_file,
+     exclusive, pytest_native) = _parse_args(args)
+    has_env_file = env_file is not None
     # Pass a clean arg string: extra_args (conftest-registered flags extracted
     # from the generate_pipeline parser) + pytest_native (conftest-registered
     # flags the generate_pipeline parser did not recognise).
@@ -375,16 +408,29 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     pytest_collect_args = shlex.join(extra_args + list(pytest_native))
     function_cloud_map = _extract_marked_tests(test_file, pytest_collect_args,
                                                default_clouds_to_run, k_value,
-                                               extra_args)
+                                               extra_args, exclusive)
     concurrency_limit = None
     build_id = None
-    if has_env_file:
+    concurrency_group = None
+    if exclusive:
+        # Exclusive tests mutate shared server state, so the whole exclusive-only
+        # run is serialized to one step at a time. Key the group on the target
+        # (the --env-file) rather than the build id, so two exclusive builds
+        # against the SAME server also serialize -- e.g. a re-triggered run, or a
+        # deploy-and-test command racing a manual run. Fall back to the build id
+        # when there is no --env-file (each build kept isolated).
+        concurrency_limit = 1
+        tag = (hashlib.sha256(env_file.encode()).hexdigest()[:12]
+               if env_file else os.environ.get('BUILDKITE_BUILD_ID', 'local'))
+        concurrency_group = f'exclusive-smoke-test-{tag}'
+    elif has_env_file:
         concurrency_limit = (concurrency if concurrency is not None else
                              DEFAULT_ENV_FILE_CONCURRENCY_LIMIT)
         build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
+        concurrency_group = f'env-file-smoke-test-{build_id}'
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param, extra_args, no_auto_retry in zip(
-                *clouds_queues_param):
+        for (cloud, queue, param, extra_args, no_auto_retry,
+             test_concurrency_group) in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
@@ -408,9 +454,16 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                     'queue': queue
                 }
             }
-            if concurrency_limit is not None:
+            if test_concurrency_group is not None:
+                # Per-test global serialization takes precedence over any
+                # run-wide group: a Buildkite step has a single concurrency
+                # group, and this one is a fixed name shared across all builds
+                # and pipelines, so instances of this test serialize org-wide.
+                step['concurrency'] = 1
+                step['concurrency_group'] = test_concurrency_group
+            elif concurrency_limit is not None:
                 step['concurrency'] = concurrency_limit
-                step['concurrency_group'] = f'env-file-smoke-test-{build_id}'
+                step['concurrency_group'] = concurrency_group
             if no_auto_retry:
                 # Disable automatic retries but allow manual retries.
                 step['retry'] = {

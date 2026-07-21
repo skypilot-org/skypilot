@@ -31,6 +31,14 @@ class Options(enum.Enum):
     # config.
     ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
                                      False)
+    # Disable starting a local API server on this machine, including the
+    # silent auto-start that happens when a client command finds no API
+    # server endpoint configured. When set, any code path that would start
+    # a local API server fails with an actionable error instead. Useful in
+    # managed environments (CI runners, dev containers, in-cluster pods)
+    # where an implicitly started local API server could schedule real
+    # workloads using ambient credentials (e.g. a pod ServiceAccount).
+    DISABLE_LOCAL_API_SERVER = ('SKYPILOT_DISABLE_LOCAL_API_SERVER', False)
     # Whether `allowed_contexts: 'all'` (or the env-var-triggered allow-all
     # path) should include the API server's own in-cluster context. Default
     # `True` (backward compatible). Set to `false` on the API server pod to

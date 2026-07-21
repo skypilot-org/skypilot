@@ -16,7 +16,7 @@ import platform
 import threading
 import time
 import typing
-from typing import Any, Callable, List, Optional, Set
+from typing import Any, Callable, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -61,37 +61,42 @@ KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
 logger = sky_logging.init_logger(__name__)
 
 
-def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
-    for attr_name in dir(obj):
-        attr = getattr(obj, attr_name)
-        # Skip methods starting with '__' since they are invoked through one
-        # of the main methods, which are already decorated.
-        if callable(attr) and not attr_name.startswith('__'):
-            decorated_types: Set[str] = getattr(attr, '_sky_decorator_types',
-                                                set())
-            if decoration_type not in decorated_types:
-                decorated_attr = decorator(attr)
-                decorated_attr._sky_decorator_types = (  # pylint: disable=protected-access
-                    decorated_types | {decoration_type})
-                setattr(obj, attr_name, decorated_attr)
-    return obj
-
-
 def _api_logging_decorator(logger_src: str, level: int):
-    """Decorator to set logging level for API calls.
+    """Decorator to keep a logger at the given level for API calls.
 
-    This is used to suppress the verbose logging from urllib3 when calls to the
-    Kubernetes API timeout.
+    This is used to suppress the verbose logging from urllib3 when calls to
+    the Kubernetes API fail. kubernetes.client.Configuration.__init__ resets
+    the urllib3 logger back to WARNING every time a client is constructed
+    (via its `debug` property setter), so the level is re-asserted after the
+    decorated getter runs. The lock-free level read below keeps
+    Logger.setLevel() calls rare (once per client construction, not per API
+    call): setLevel() acquires logging's process-wide lock (via
+    Manager._clear_cache()), and on Python < 3.13 a fork() while another
+    thread holds that lock leaves the lock permanently held in the child,
+    deadlocking its next logging call. Fixed in CPython 3.13 by
+    https://github.com/python/cpython/pull/109462; the previous
+    implementation entered a set/restore context manager on every API
+    method call, making that deadlock easy to hit. The level is never
+    restored: the old restore was racy under concurrent API calls
+    (interleaved restores could leave the level set anyway).
     """
+    # Resolve the logger once at decoration (module import) time rather
+    # than inside wrapped(): on Python < 3.13, logging.getLogger() also
+    # acquires the process-wide logging lock on every call (only converted
+    # to the exception-safe context-manager form by the CPython commit
+    # above), so calling it per API call would reintroduce the per-call
+    # global lock traffic this decorator exists to avoid. Loggers are
+    # process-lifetime singletons, so the cached reference stays valid.
+    log = logging.getLogger(logger_src)
 
     def decorated_api(api):
 
+        @functools.wraps(api)
         def wrapped(*args, **kwargs):
-            obj = api(*args, **kwargs)
-            _decorate_methods(obj,
-                              sky_logging.set_logging_level(logger_src, level),
-                              'api_log')
-            return obj
+            result = api(*args, **kwargs)
+            if log.level != level:
+                log.setLevel(level)
+            return result
 
         return wrapped
 
@@ -103,6 +108,20 @@ def _get_config_file() -> str:
     # package initialization. So we have to reload the KUBECONFIG env var
     # everytime in case the KUBECONFIG env var is changed.
     return os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
+
+
+def _enable_response_compression(client: Any) -> Any:
+    """Advertise gzip so the API server compresses large response bodies.
+
+    The Kubernetes API server gzip-compresses responses above a size threshold
+    when the client sends ``Accept-Encoding: gzip``. This substantially reduces
+    transfer time for large LIST responses (e.g. listing nodes or pods on large
+    clusters), which is especially impactful on high-latency or low-bandwidth
+    connections to the API server. urllib3 transparently decompresses the body,
+    including when the response is streamed with ``_preload_content=False``.
+    """
+    client.set_default_header('Accept-Encoding', 'gzip')
+    return client
 
 
 def _get_api_client(context: Optional[str] = None) -> Any:
@@ -195,14 +214,16 @@ def _get_api_client(context: Optional[str] = None) -> Any:
 
             config = kubernetes.client.Configuration()
             kubernetes.config.load_incluster_config(config)
-            return kubernetes.client.ApiClient(configuration=config)
+            return _enable_response_compression(
+                kubernetes.client.ApiClient(configuration=config))
         except kubernetes.config.config_exception.ConfigException:
             if context == in_cluster_context_name():
                 # Explicitly requested in-cluster context but not in a cluster
                 raise
             # Otherwise, if context is None, fall through to kubeconfig
 
-    return _get_api_client_from_kubeconfig(context)
+    return _enable_response_compression(
+        _get_api_client_from_kubeconfig(context))
 
 
 def list_kube_config_contexts():

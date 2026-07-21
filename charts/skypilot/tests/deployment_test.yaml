@@ -1303,3 +1303,18 @@ tests:
       - lengthEqual:
           path: spec.template.spec.containers[0].env
           count: 9
+
+  # Test cases for apiService.host (bind interface)
+  - it: should bind 0.0.0.0 by default
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .*--host=0\\.0\\.0\\.0"
+
+  - it: should pass a custom bind host when apiService.host is set (IPv6)
+    set:
+      apiService.host: "::"
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[2]
+          pattern: "exec sky api start .*--host=::"

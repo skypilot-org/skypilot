@@ -696,7 +696,6 @@ def test_kubernetes_ensure_no_fd_leak_fusermount_server():
     """
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    cloud = 'kubernetes'
     yaml_content = textwrap.dedent(f"""\
         resources:
           cloud: kubernetes
@@ -754,25 +753,41 @@ def test_kubernetes_ensure_no_fd_leak_fusermount_server():
                       ' | grep -q MOUNT_READY'
                       ' && break || sleep 5;'
                       ' done')
+        # The fuse fd check runs kubectl from the cloud-cmd helper, whose
+        # in-cluster credentials only reach its own cluster. On a
+        # multi-context API server each `sky launch` may land on a different
+        # context, so we pin everything to a single context: launch the first
+        # workload cluster, resolve the context it landed on, pin the cloud-cmd
+        # helper to it, and launch the second workload cluster on the same
+        # context. This keeps both workload pods (and their per-node
+        # fusermount-server pods) visible to the helper's kubectl.
+        landed_context = (
+            f'$(cat {smoke_tests_utils.k8s_landed_context_file(name1)})')
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, name),
-            # Launch first cluster with MOUNT_CACHED
+            # Launch first cluster with MOUNT_CACHED; it may land on any
+            # context on a multi-context API server.
             f'sky launch -y -c {name1} -d {yaml_path}',
+            # Pin the cloud-cmd helper to the context the first cluster landed
+            # on so its in-cluster kubectl can see the workload's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name1),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name1),
             wait_mount.format(cluster=name1),
             # After first mount: assert 0 leaked fuse fds
             smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name, fuse_fd_check.format(cluster=name1)),
-            # Launch second cluster with MOUNT_CACHED
-            f'sky launch -y -c {name2} -d {yaml_path}',
+                name1, fuse_fd_check.format(cluster=name1)),
+            # Launch second cluster with MOUNT_CACHED, pinned to the same
+            # context so the same cloud-cmd helper can reach it too.
+            f'sky launch -y -c {name2} --infra kubernetes/{landed_context} '
+            f'-d {yaml_path}',
             wait_mount.format(cluster=name2),
             # After second mount: still 0 leaked fuse fds
             smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name, fuse_fd_check.format(cluster=name2)),
+                name1, fuse_fd_check.format(cluster=name2)),
         ]
         clean_command = (
             f'sky down -y {name1} {name2}; '
-            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name1)}; '
             f'sky storage delete -y {storage_name}')
         test = smoke_tests_utils.Test(
             'kubernetes_ensure_no_fd_leak_fusermount_server',

@@ -3,7 +3,6 @@ import enum
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky import exceptions
 from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky.schemas.api import responses
@@ -72,37 +71,17 @@ def get_managed_job_queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    try:
-        return typing.cast(
-            server_common.RequestId[
-                Union[List[responses.ManagedJobRecord],
-                      Tuple[List[responses.ManagedJobRecord], int,
-                            Dict[str, int], int]]],
-            managed_jobs.queue_v2(
-                refresh,
-                skip_finished,
-                all_users,
-                job_ids,
-                limit,
-                fields,
-                statuses=statuses,
-                submitted_after=submitted_after,
-                submitted_before=submitted_before)), QueueResultVersion.V2
-    except exceptions.APINotSupportedError:
-        if statuses is not None:
-            logger.warning(
-                'Filtering by status is not supported in your API server. '
-                'Please upgrade to a newer API server to use --status. '
-                'Showing all jobs.')
-        if submitted_after is not None or submitted_before is not None:
-            logger.warning(
-                'Filtering by submission time is not supported in your API '
-                'server. Please upgrade to a newer API server to use '
-                '--since/--after/--before. Showing all jobs.')
-        return typing.cast(
-            server_common.RequestId[
-                Union[List[responses.ManagedJobRecord],
-                      Tuple[List[responses.ManagedJobRecord], int,
-                            Dict[str, int], int]]],
-            managed_jobs.queue(refresh, skip_finished, all_users,
-                               job_ids)), QueueResultVersion.V1
+    return typing.cast(
+        server_common.RequestId[Union[List[responses.ManagedJobRecord],
+                                      Tuple[List[responses.ManagedJobRecord],
+                                            int, Dict[str, int], int]]],
+        managed_jobs.queue_v2(
+            refresh,
+            skip_finished,
+            all_users,
+            job_ids,
+            limit,
+            fields,
+            statuses=statuses,
+            submitted_after=submitted_after,
+            submitted_before=submitted_before)), QueueResultVersion.V2

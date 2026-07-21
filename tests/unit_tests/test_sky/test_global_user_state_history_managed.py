@@ -102,3 +102,47 @@ def test_history_excludes_managed_after_termination(tmp_path, monkeypatch):
         'regular', 'my-job-1'
     }
     assert _history_names(exclude_managed_clusters=True) == {'regular'}
+
+
+def test_creation_yaml_only_fetched_for_filtered_queries(tmp_path, monkeypatch):
+    """last_creation_yaml / last_creation_command are the largest history
+    columns and are only *fetched* from the DB for targeted by-hash / by-name
+    lookups (single-cluster detail views). Bulk reports (cost report, history
+    list) must not load every cluster's YAML.
+
+    The non-abbreviated dict schema is preserved regardless: the keys remain
+    present (None) on bulk non-abbreviated queries so existing callers do not
+    hit a KeyError; they are only dropped entirely for abbreviated responses,
+    matching the pre-existing behavior.
+    """
+    _fresh_db(tmp_path, monkeypatch)
+    _add_cluster('regular', is_managed=False)
+
+    # Bulk (unfiltered) non-abbreviated report: heavy columns are not fetched,
+    # but the keys remain present (None) to keep the dict schema stable.
+    bulk = global_user_state.get_clusters_from_history()
+    assert bulk, 'expected at least one history record'
+    assert all(r['last_creation_yaml'] is None for r in bulk)
+    assert all(r['last_creation_command'] is None for r in bulk)
+
+    # Abbreviated bulk report (dashboard summary): keys are omitted entirely,
+    # as before.
+    abbreviated = global_user_state.get_clusters_from_history(
+        abbreviate_response=True)
+    assert abbreviated
+    assert all('last_creation_yaml' not in r for r in abbreviated)
+    assert all('last_creation_command' not in r for r in abbreviated)
+
+    # Targeted lookup by hash: the full record (incl. YAML) is returned.
+    cluster_hash = bulk[0]['cluster_hash']
+    by_hash = global_user_state.get_clusters_from_history(
+        cluster_hashes=[cluster_hash])
+    assert by_hash
+    assert all('last_creation_yaml' in r for r in by_hash)
+    assert all('last_creation_command' in r for r in by_hash)
+
+    # Targeted lookup by name also returns the full record.
+    by_name = global_user_state.get_clusters_from_history(
+        cluster_names=['regular'])
+    assert by_name
+    assert all('last_creation_yaml' in r for r in by_name)

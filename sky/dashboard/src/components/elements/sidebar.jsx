@@ -59,6 +59,10 @@ export function SidebarProvider({ children }) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState(null);
   const [userRole, setUserRole] = useState(null);
+  // Server-side flag (rbac.restrict_config_to_admins, default true) surfaced
+  // via /api/health, so the config UI can be hidden for non-admins. Default to
+  // restricted before /api/health resolves.
+  const [restrictConfigToAdmins, setRestrictConfigToAdmins] = useState(true);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => !prev);
@@ -68,40 +72,51 @@ export function SidebarProvider({ children }) {
     setIsMobileSidebarOpen((prev) => !prev);
   };
 
-  const baseUrl = window.location.origin;
+  // Guard window access so the component doesn't throw during Next.js SSR/SSG
+  // (window is undefined on the server).
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const fullEndpoint = `${baseUrl}${ENDPOINT}`;
   useEffect(() => {
     // Fetch user info from health endpoint
     fetch(`${fullEndpoint}/api/health`)
       .then((res) => res.json())
       .then((data) => {
+        setRestrictConfigToAdmins(!!data.restrict_config_to_admins);
         if (data.user && data.user.name) {
           setUserEmail(data.user.name);
-
-          // Get role from direct API endpoint to avoid cache interference
-          // Using cache would cause race condition, which leads to unexpected
-          // behavior in workspaces and users page.
-          const getUserRole = async () => {
-            try {
-              const response = await fetch(`${fullEndpoint}/users/role`);
-              if (response.ok) {
-                const roleData = await response.json();
-                if (roleData.role) {
-                  setUserRole(roleData.role);
-                }
-              }
-            } catch (error) {
-              // If role data is not available or there's an error,
-              // we just don't show the role - it's not critical
-              console.log('Could not fetch user role:', error);
-            }
-          };
-
-          getUserRole();
         }
+
+        // Always resolve the role from /users/role rather than inferring it
+        // from the presence of a user in /api/health.
+        // Fetch directly (no cache) to avoid a race that misbehaves on
+        // the workspaces and users pages.
+        const getUserRole = async () => {
+          try {
+            const response = await fetch(`${fullEndpoint}/users/role`);
+            if (response.ok) {
+              const roleData = await response.json();
+              // Fall back to the least-privileged role if the payload has no
+              // role, so admin-gated views (e.g. the Config page) never hang
+              // waiting on a null role.
+              setUserRole(roleData.role || 'user');
+            } else {
+              setUserRole('user');
+            }
+          } catch (error) {
+            // On any failure, resolve to the least-privileged role rather
+            // than leaving it null (which would hang admin-gated views).
+            console.log('Could not fetch user role:', error);
+            setUserRole('user');
+          }
+        };
+
+        getUserRole();
       })
       .catch((error) => {
         console.error('Error fetching user data:', error);
+        // User-data fetch failed entirely; resolve the role to the
+        // least-privileged value so admin-gated views don't hang on null.
+        setUserRole('user');
       });
   }, [fullEndpoint]);
 
@@ -114,6 +129,7 @@ export function SidebarProvider({ children }) {
         toggleMobileSidebar,
         userEmail,
         userRole,
+        restrictConfigToAdmins,
       }}
     >
       {children}
@@ -182,8 +198,18 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   const router = useRouter();
   const isMobile = useMobile();
-  const { userEmail, userRole, isMobileSidebarOpen, toggleMobileSidebar } =
-    useSidebar();
+  const {
+    userEmail,
+    userRole,
+    restrictConfigToAdmins,
+    isMobileSidebarOpen,
+    toggleMobileSidebar,
+  } = useSidebar();
+  // Who can actually read the config: admins always; a 'user' only when the
+  // server hasn't restricted it. Viewers never can (config is not on the
+  // viewer allowlist), so the entry point is hidden for them too.
+  const showConfigLink =
+    userRole === 'admin' || (userRole === 'user' && !restrictConfigToAdmins);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [openNavDropdown, setOpenNavDropdown] = useState(null);
   const { ungrouped, groups } = useGroupedNavLinks();
@@ -651,24 +677,27 @@ export function TopBar() {
                 {/* Version Display */}
                 <UpgradeHint />
 
-                {/* Config Button */}
-                <CustomTooltip
-                  content="Configuration"
-                  className="text-sm text-muted-foreground"
-                >
-                  <Link
-                    href="/settings"
-                    className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
-                      isActivePath('/settings')
-                        ? 'text-blue-600 hover:bg-gray-100'
-                        : 'text-gray-600 hover:bg-gray-100'
-                    }`}
-                    title="Configuration"
-                    prefetch={false}
+                {/* Config button: hidden for non-admins when the server
+                    restricts config to admins (it exposes secrets). */}
+                {showConfigLink && (
+                  <CustomTooltip
+                    content="Configuration"
+                    className="text-sm text-muted-foreground"
                   >
-                    <Settings className="w-5 h-5" />
-                  </Link>
-                </CustomTooltip>
+                    <Link
+                      href="/settings"
+                      className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
+                        isActivePath('/settings')
+                          ? 'text-blue-600 hover:bg-gray-100'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                      title="Configuration"
+                      prefetch={false}
+                    >
+                      <Settings className="w-5 h-5" />
+                    </Link>
+                  </CustomTooltip>
+                )}
               </>
             )}
 
@@ -915,19 +944,23 @@ export function TopBar() {
                   Slack
                 </a>
 
-                <Link
-                  href="/settings"
-                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
-                    isActivePath('/settings')
-                      ? 'bg-blue-50 text-blue-600'
-                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                  }`}
-                  onClick={toggleMobileSidebar}
-                  prefetch={false}
-                >
-                  <Settings className="w-5 h-5 mr-3" />
-                  Configuration
-                </Link>
+                {/* Config link: hidden for non-admins when the server
+                    restricts config to admins (it exposes secrets). */}
+                {showConfigLink && (
+                  <Link
+                    href="/settings"
+                    className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                      isActivePath('/settings')
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                    }`}
+                    onClick={toggleMobileSidebar}
+                    prefetch={false}
+                  >
+                    <Settings className="w-5 h-5 mr-3" />
+                    Configuration
+                  </Link>
+                )}
               </div>
             </nav>
           </div>

@@ -29,6 +29,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
+    :ref:`logs_retention_hours <config-yaml-api-server-logs-retention-hours>`: 720
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 720
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
     :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
@@ -320,6 +321,24 @@ Example:
 
   api_server:
     requests_retention_hours: -1 # Disable requests GC
+
+.. _config-yaml-api-server-logs-retention-hours:
+
+``api_server.logs_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period in hours for the per-operation provision log directories under ``~/sky_logs/sky-*`` on the API server (optional). Set to a negative value to disable this GC.
+
+Each launch/exec/provision creates a ``~/sky_logs/sky-<timestamp>`` directory holding server-side copies of ``provision.log``, ``setup-*.log``, ``run.log``, etc. (and each upload a ``~/sky_logs/file_uploads/*.log`` file). The GC daemon removes entries older than this period, except directories holding the provision log of an existing cluster, which are kept for as long as the cluster exists. The launched resources (clusters/jobs) are unaffected.
+
+Default: ``720`` (30 days).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    logs_retention_hours: -1 # Disable sky_logs provision dir GC
 
 .. _config-yaml-api-server-cluster-event-retention-hours:
 
@@ -2827,3 +2846,40 @@ Valid daemon names are:
       log_level: INFO
     managed-job-status-refresh-daemon:
       log_level: WARNING
+
+.. _config-yaml-metrics:
+
+``metrics``
+~~~~~~~~~~~
+
+GPU metrics federation configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-metrics-prometheus:
+
+``metrics.prometheus``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Prometheus deployment that ``/gpu-metrics`` federates from in each Kubernetes context (optional).
+
+By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm chart: service ``skypilot-prometheus-server`` in namespace ``skypilot``, port ``80``. Set these fields if your Prometheus lives in a different namespace or under a different service name.
+
+``namespace``
+    Namespace the Prometheus service is deployed in. Default: ``skypilot``.
+
+``service``
+    Name of the Prometheus service. Default: ``skypilot-prometheus-server``.
+
+``port``
+    Port of the Prometheus service. Default: ``80``.
+
+.. code-block:: yaml
+
+  metrics:
+    prometheus:
+      namespace: monitoring
+      service: prometheus-server
+      port: 80
+
+.. note::
+
+    When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the ``kube-system`` namespace as seen through the context's credentials with the UID seen through the in-cluster credentials) and skips that context during federation: the central Prometheus (the one deployed next to the API server, e.g. by the SkyPilot Helm chart) already scrapes the local cluster's exporters directly, so federating it again would only duplicate the series. The dashboard queries the local cluster's series by their missing ``cluster`` label instead of a context name. If detection fails (e.g. the context's credentials cannot ``get`` the ``kube-system`` namespace), the context is treated as remote and federated over port-forward — the previous behavior for every context.

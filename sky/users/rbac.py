@@ -11,7 +11,7 @@ from sky.workspaces import utils as workspaces_utils
 logger = sky_logging.init_logger(__name__)
 
 # Default user blocklist for user role
-# Cannot access workspace CUD operations
+# Cannot access workspace CUD operations.
 _DEFAULT_USER_BLOCKLIST = [{
     'path': '/workspaces/config',
     'method': 'POST'
@@ -247,6 +247,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'GET'
     },
     {
+        'path': '/kubernetes/allowed_nodes',
+        'method': 'GET'
+    },
+    {
         'path': '/list_accelerators',
         'method': 'POST'
     },
@@ -389,6 +393,19 @@ def get_viewer_allowlist(
     return combined
 
 
+def restrict_config_to_admins() -> bool:
+    """Whether GET /workspaces/config is restricted to admins.
+
+    The config payload includes admin-only secrets (e.g. cloud provider
+    tokens), so non-admin reads are blocked by default. Admins can opt out by
+    setting ``rbac.restrict_config_to_admins: false`` (POST is always
+    admin-only regardless).
+    """
+    return bool(
+        skypilot_config.get_nested(('rbac', 'restrict_config_to_admins'),
+                                   default_value=True))
+
+
 def get_role_permissions(
     plugin_rules: Optional[Dict[str, List[Dict[str, str]]]] = None
 ) -> Dict[str, Dict[str, Dict[str, List[Dict[str, str]]]]]:
@@ -434,6 +451,21 @@ def get_role_permissions(
                 'blocklist': _DEFAULT_USER_BLOCKLIST.copy()
             }
         }
+
+    # Optionally block config reads for the user role (the payload exposes
+    # admin-only secrets). Off by default; opt in via
+    # rbac.restrict_config_to_admins. Applied here (rather than only to the
+    # default blocklist) so the restriction still holds when an admin has
+    # customized the user role in the config.
+    if restrict_config_to_admins():
+        user_cfg = config_permissions.get('user')
+        if isinstance(user_cfg, dict):
+            permissions = user_cfg.setdefault('permissions', {})
+            if isinstance(permissions, dict):
+                blocklist = permissions.setdefault('blocklist', [])
+                entry = {'path': '/workspaces/config', 'method': 'GET'}
+                if isinstance(blocklist, list) and entry not in blocklist:
+                    blocklist.append(entry)
 
     # Merge plugin rules into the appropriate roles
     if plugin_rules:

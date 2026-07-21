@@ -248,6 +248,16 @@ class ClusterEventType(enum.Enum):
     LAUNCH_PROGRESS = 'LAUNCH_PROGRESS'
 
 
+# Prefix of the STATUS_CHANGE event reason recorded when a cluster is flipped
+# to INIT because a status refresh found it in an abnormal state -- e.g. a node
+# terminated/preempted, the ray cluster is unhealthy, or a pod is OOMKilled
+# (see backend_utils._refresh_cluster_status). INIT is overloaded: a cluster is
+# INIT both while it is actively launching and while it is stuck/broken. The
+# dashboard uses this prefix to tell the two apart (actively 'launching' vs
+# 'unhealthy') so it can show the underlying problem instead of a misleading
+# "LAUNCHING". Keep in sync with the event reason written in backend_utils.
+ABNORMAL_STATUS_REASON_PREFIX = 'Cluster is abnormal because'
+
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
 # ending_status: Status of the cluster at the end of the event.
@@ -1126,15 +1136,21 @@ def _get_last_or_terminal_cluster_event_multiple(
 
 
 def get_last_cluster_event_of_type_multiple(
-        cluster_hashes: Set[str],
-        event_type: ClusterEventType) -> Dict[str, str]:
-    """Returns the latest event of `event_type` per cluster_hash.
+    cluster_hashes: Set[str],
+    event_type: Union[ClusterEventType, List[ClusterEventType]],
+) -> Dict[str, str]:
+    """Returns the newest event of the given type(s) per cluster_hash.
 
-    Mirrors _get_last_or_terminal_cluster_event_multiple but filters to a
-    single event type (no TERMINAL-priority ordering).
+    ``event_type`` may be a single ClusterEventType or a list; when a list is
+    given, the single most-recent event across all listed types is returned per
+    cluster (ordered by transitioned_at). Mirrors
+    _get_last_or_terminal_cluster_event_multiple but without its TERMINAL-first
+    priority ordering. Clusters with no matching event are omitted.
     """
     if not cluster_hashes:
         return {}
+    event_types = ([event_type]
+                   if isinstance(event_type, ClusterEventType) else event_type)
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         row_number = sqlalchemy.func.row_number().over(
@@ -1147,7 +1163,7 @@ def get_last_cluster_event_of_type_multiple(
             row_number,
         ).filter(
             cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-            cluster_event_table.c.type == event_type.value,
+            cluster_event_table.c.type.in_([t.value for t in event_types]),
         ).subquery()
 
         rows = session.query(
@@ -1686,6 +1702,15 @@ def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     if row is None:
         return None
     return getattr(row, 'provision_log_path', None)
+
+
+@metrics_lib.time_me
+def get_all_cluster_provision_log_paths() -> List[str]:
+    """Returns the recorded provision_log_path of every existing cluster."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(cluster_table.c.provision_log_path).all()
+    return [row.provision_log_path for row in rows if row.provision_log_path]
 
 
 @metrics_lib.time_me
@@ -2260,8 +2285,12 @@ def get_clusters(
         for row in rows
         if status_lib.ClusterStatus[row.status] is status_lib.ClusterStatus.INIT
     }
-    launch_progress_dict = get_last_cluster_event_of_type_multiple(
-        init_cluster_hashes, ClusterEventType.LAUNCH_PROGRESS)
+    # Newest launch/status-change event per INIT cluster. Its reason both tells
+    # an actively-launching cluster apart from one stuck in an abnormal state
+    # (see ABNORMAL_STATUS_REASON_PREFIX) and provides the message to display.
+    latest_init_event_dict = get_last_cluster_event_of_type_multiple(
+        init_cluster_hashes,
+        [ClusterEventType.STATUS_CHANGE, ClusterEventType.LAUNCH_PROGRESS])
 
     # get last cluster event for each row
     if not summary_response:
@@ -2296,14 +2325,22 @@ def get_clusters(
                           if exclude_managed_clusters else bool(row.is_managed),
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        # launch_status_reason is populated outside the summary_response
-        # gate so both the list page (summary_response=True) and detail
-        # page (summary_response=False) get the badge tooltip data.
+        # init_kind / init_status_reason are populated outside the
+        # summary_response gate so both the list page (summary_response=True)
+        # and detail page (summary_response=False) get the badge/banner data.
+        # init_kind disambiguates the overloaded INIT state: 'launching'
+        # (actively provisioning) vs 'unhealthy' (flipped to INIT by an
+        # abnormal-state refresh). See ABNORMAL_STATUS_REASON_PREFIX.
         if record['status'] is status_lib.ClusterStatus.INIT:
-            record['launch_status_reason'] = launch_progress_dict.get(
-                row.cluster_hash)
+            latest_reason = latest_init_event_dict.get(row.cluster_hash)
+            record['init_kind'] = (
+                status_lib.INIT_KIND_UNHEALTHY if latest_reason is not None and
+                latest_reason.startswith(ABNORMAL_STATUS_REASON_PREFIX) else
+                status_lib.INIT_KIND_LAUNCHING)
+            record['init_status_reason'] = latest_reason
         else:
-            record['launch_status_reason'] = None
+            record['init_kind'] = None
+            record['init_status_reason'] = None
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
@@ -2368,34 +2405,39 @@ def get_clusters_from_history(
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
+    # last_creation_yaml / last_creation_command hold the full task YAML and
+    # launch command for each history row. In aggregate these are by far the
+    # largest columns (a 30-day report can span thousands of clusters), yet
+    # only targeted by-hash / by-name lookups (e.g. a single cluster's detail
+    # view) actually read them. Bulk reports such as `sky cost-report` and the
+    # dashboard history list never use them, so fetch them only for filtered
+    # queries to avoid loading every cluster's YAML into memory.
+    include_creation_yaml = (not abbreviate_response and
+                             (cluster_hashes is not None or
+                              cluster_names is not None))
+
     with orm.Session(engine) as session:
-        # Explicitly select columns from both tables to avoid ambiguity
-        if abbreviate_response:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
-        else:
-            query = session.query(
-                cluster_history_table.c.cluster_hash,
-                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
-                cluster_history_table.c.launched_resources,
-                cluster_history_table.c.usage_intervals,
-                cluster_history_table.c.user_hash,
+        # Explicitly select columns from both tables to avoid ambiguity.
+        selected_columns = [
+            cluster_history_table.c.cluster_hash,
+            cluster_history_table.c.name,
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.launched_resources,
+            cluster_history_table.c.usage_intervals,
+            cluster_history_table.c.user_hash,
+            cluster_history_table.c.workspace.label('history_workspace'),
+            cluster_history_table.c.last_activity_time,
+            cluster_history_table.c.launched_at,
+            cluster_history_table.c.node_names,
+            cluster_table.c.status,
+            cluster_table.c.workspace,
+        ]
+        if include_creation_yaml:
+            selected_columns.extend([
                 cluster_history_table.c.last_creation_yaml,
                 cluster_history_table.c.last_creation_command,
-                cluster_history_table.c.workspace.label('history_workspace'),
-                cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at,
-                cluster_history_table.c.node_names, cluster_table.c.status,
-                cluster_table.c.workspace)
+            ])
+        query = session.query(*selected_columns)
 
         query = query.select_from(
             cluster_history_table.join(cluster_table,
@@ -2499,9 +2541,16 @@ def get_clusters_from_history(
             'last_event': last_event,
             'node_names': common_utils.get_display_node_names(row.node_names),
         }
-        if not abbreviate_response:
+        if include_creation_yaml:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
+        elif not abbreviate_response:
+            # Preserve the dict schema for non-abbreviated callers: these keys
+            # were always present (possibly None) before we stopped fetching
+            # the heavy columns on bulk paths. The columns were not selected
+            # here, so this is None at zero memory cost.
+            record['last_creation_yaml'] = None
+            record['last_creation_command'] = None
 
         records.append(record)
 

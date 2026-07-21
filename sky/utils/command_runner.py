@@ -875,8 +875,8 @@ class CommandRunner:
             raise exceptions.CommandError(1, '', error_msg, None)
 
         # Remote script path (use a unique name to avoid conflicts)
-        script_hash = hashlib.md5(
-            f'{self.node_id}_{target_dir}'.encode()).hexdigest()[:8]
+        script_hash = hashlib.md5(f'{self.node_id}_{target_dir}'.encode(),
+                                  usedforsecurity=False).hexdigest()[:8]
         remote_script_path = f'/tmp/sky_git_clone_{script_hash}.sh'
 
         # Step 1: Transfer the script to remote machine using rsync
@@ -992,7 +992,8 @@ class SSHCommandRunner(CommandRunner):
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
-                ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
+                ssh_control_name.encode(),
+                usedforsecurity=False).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
         self._ssh_proxy_jump = ssh_proxy_jump
         self.disable_control_master = (

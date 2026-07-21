@@ -307,6 +307,9 @@ class LaunchBody(RequestBody):
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
+    # When True, resize the existing cluster to the num_nodes specified in
+    # the task instead of performing a normal launch.
+    resize: bool = False
     extra_launch_context: Dict[str, Any] = {}
     # When True and the server supports it (API_VERSION >=
     # MIN_LAUNCH_CREDENTIALS_API_VERSION), the launch result will be a
@@ -502,6 +505,9 @@ class ServiceAccountTokenCreateBody(RequestBody):
     """The request body for creating a service account token."""
     token_name: str
     expires_in_days: Optional[int] = None
+    # Optional role for the new service account (e.g. 'admin'). When omitted,
+    # the account is seeded with the default role.
+    role: Optional[str] = None
 
 
 class ServiceAccountTokenDeleteBody(RequestBody):
@@ -817,6 +823,7 @@ class LocalUpBody(RequestBody):
     gpus: bool = True
     name: Optional[str] = None
     port_start: Optional[int] = None
+    num_nodes: int = 1
 
 
 class LocalDownBody(RequestBody):

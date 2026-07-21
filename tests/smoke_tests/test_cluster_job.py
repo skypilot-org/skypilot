@@ -1233,9 +1233,13 @@ def test_task_labels_kubernetes():
         test = smoke_tests_utils.Test(
             'task_labels_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
+                # Launch the cluster under test first; it may land on any
+                # context on a multi-context API server.
                 f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify with kubectl that the labels are set.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name, 'kubectl get pods '
@@ -1264,9 +1268,13 @@ def test_services_on_kubernetes():
     test = smoke_tests_utils.Test(
         'services_on_kubernetes',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
-            # Launch Kubernetes cluster with three nodes.
+            # Launch Kubernetes cluster with three nodes (may land on any
+            # context on a multi-context API server).
             f'sky launch -y -c {name} --num-nodes 3 --cpus=0.1+ --infra kubernetes',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
         ],
         f'sky down -y {name} && {service_check} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
@@ -1281,10 +1289,14 @@ def test_add_pod_annotations_for_autodown_with_launch():
     test = smoke_tests_utils.Test(
         'add_pod_annotations_for_autodown_with_launch',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
-            # Autodown is set.
+            # Autodown is set. It may land on any context on a multi-context
+            # API server.
             f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --infra kubernetes',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             # Get names of the pods matching the cluster's
             # skypilot-cluster-name annotation (excludes cloud-cmd pods
             # whose annotation value is '{name}-cloud-cmd').
@@ -1315,9 +1327,14 @@ def test_add_and_remove_pod_annotations_with_autostop():
     test = smoke_tests_utils.Test(
         'add_and_remove_pod_annotations_with_autostop',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
-            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            # Launch Kubernetes cluster with two nodes, each being head node and
+            # worker node. It may land on any context on a multi-context API
+            # server.
             f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --infra kubernetes',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             # Set autodown on the cluster with 'autostop' command.
             f'sky autostop -y {name} -i 20 --down',
             # Get names of the pods matching the cluster's
@@ -1479,10 +1496,13 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
         f'| grep {cache_mount}')
 
     test_cmds: List[str] = [
-        smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
         *setup_cmds,
         f'sky launch -y -c {name} --infra kubernetes {yaml_file}',
         f'sky logs {name} 1 --status',
+        # Pin the cloud-cmd helper to the context the target landed on so its
+        # in-cluster kubectl can see the target's resources.
+        smoke_tests_utils.resolve_k8s_context_cmd(name),
+        smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
         smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
     ]
 
@@ -1590,14 +1610,16 @@ def test_hostpath_volume_on_kubernetes():
         test = smoke_tests_utils.Test(
             'hostpath_volume_on_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
                 # Apply the hostpath volume
                 f'sky volumes apply -y {vol_f.name}',
                 f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep {volume_name}',
                 # Launch with hostpath volume and verify the job succeeds
                 f'sky launch -y -c {name} --infra kubernetes {task_f.name}',
                 f'sky logs {name} 1 --status',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify the pod spec contains the hostPath volume
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -1691,9 +1713,11 @@ def test_container_logs_multinode_kubernetes():
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
                 f'sky launch -y -c {name} --infra kubernetes {task_yaml} --num-nodes 2',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 _check_container_logs(name, head_logs, 9, 1),
                 _check_container_logs(name, worker_logs, 9, 1),
             ],
@@ -1718,10 +1742,12 @@ def test_container_logs_two_jobs_kubernetes():
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
                 f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
                 f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
             f'sky down -y {name} && '
@@ -1745,9 +1771,11 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
                 f'sky launch -y -c {name} --infra kubernetes',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
@@ -2655,14 +2683,14 @@ def test_aws_zero_quota_failover():
     if not region:
         pytest.xfail(
             'Unable to test zero quota failover optimization — quotas '
-            'for EC2 P3 instances were found on all AWS regions. Is this '
-            'expected for your account?')
+            'for EC2 P4d (A100) instances were found on all AWS regions. Is '
+            'this expected for your account?')
         return
 
     test = smoke_tests_utils.Test(
         'aws-zero-quota-failover',
         [
-            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus V100:8 --use-spot | grep "Found no quota"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus A100:8 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )
@@ -2982,8 +3010,12 @@ def test_kubernetes_recovery():
     test = smoke_tests_utils.Test(
         'kubernetes_pod_recovery',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch the cluster under test first; it may land on any context.
             f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 4 \'set -e;ps aux | grep -v "grep " | grep "ray/raylet/raylet"\'',
+            # Resolve its context and pin the cloud-cmd cluster to the same
+            # context so the cloud-cmd pod's in-cluster kubectl can see it.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             f'sky logs {name} --status 1',
 
             # Check launching again
@@ -3080,10 +3112,14 @@ def test_kubernetes_sigterm_keepalive():
     test = smoke_tests_utils.Test(
         'kubernetes_sigterm_keepalive',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch the cluster under test first; it may land on any context.
             (f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ '
              f'--num-nodes 2 -- "echo ready"'),
             f'sky logs {name} --status 1',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's resources.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 verify_two_pods_running,
@@ -3117,9 +3153,12 @@ def test_kubernetes_service_cleanup_on_down():
     test = smoke_tests_utils.Test(
         'kubernetes_service_cleanup_on_down',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
-            # Launch cluster
+            # Launch the cluster under test first; it may land on any context.
             f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 2 echo hello',
+            # Resolve its context and pin the cloud-cmd cluster to the same
+            # context so the cloud-cmd pod's in-cluster kubectl can see it.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             # Verify services exist
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
@@ -3155,9 +3194,12 @@ def test_kubernetes_service_cleanup_on_status_refresh():
     test = smoke_tests_utils.Test(
         'kubernetes_service_cleanup_on_status_refresh',
         [
-            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
-            # Launch cluster
+            # Launch the cluster under test first; it may land on any context.
             f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 2 echo hello',
+            # Resolve its context and pin the cloud-cmd cluster to the same
+            # context so the cloud-cmd pod's in-cluster kubectl can see it.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             # Verify services exist
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
@@ -3284,7 +3326,15 @@ def test_launching_with_pending_pods():
             # Check Pod pending
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, f'kubectl get pod {head} | grep "Pending"'),
-            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra kubernetes --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
+            # The pending head pod above was created via the cloud-cmd helper,
+            # i.e. on the helper's kubectl context. On a multi-context API
+            # server the launch below could otherwise land on a *different*
+            # context and never contend with that pod (it would then succeed
+            # instead of timing out, failing this test). Pin the launch to the
+            # helper's context so the two are co-located; on a local
+            # single-context server this is a no-op (`--infra kubernetes`).
+            smoke_tests_utils.resolve_cloud_cmd_k8s_context_cmd(name),
+            f's=$(SKYPILOT_DEBUG=1 sky launch -y -c {name} --infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} --cpus 0.1+ \'echo hi\'); echo "$s"; echo; echo; echo "$s" | grep "Timed out while waiting for nodes to start"',
             # Check Pods have been deleted
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
@@ -3414,11 +3464,14 @@ def test_kubernetes_pod_config_sidecar():
         test = smoke_tests_utils.Test(
             'kubernetes_pod_config_sidecar',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
-                # Launch SkyPilot cluster with sidecar
+                # Launch SkyPilot cluster with sidecar first; it may land on
+                # any context on a multi-context API server.
                 f'sky launch -y -c {name} --infra kubernetes '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Pin the cloud-cmd helper to the context the target landed on
+                # so its in-cluster kubectl can see the target's resources.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify pod has 2 containers (ray-node and sidecar)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -3468,11 +3521,14 @@ def test_kubernetes_set_pod_resource_limits():
         test = smoke_tests_utils.Test(
             'kubernetes_set_pod_resource_limits',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd(
-                    'kubernetes', name),
-                # Launch a cluster with set_pod_resource_limits=2.0
-                # Using --cpus 2 --memory 2 so limits should be 4 CPU, 4G memory
+                # Launch the cluster under test first; it may land on any
+                # context. Using --cpus 2 --memory 2 so limits should be
+                # 4 CPU, 4G memory with the 2x multiplier.
                 f'sky launch -y -c {name} --infra kubernetes --cpus 2 --memory 2',
+                # Resolve its context and pin the cloud-cmd cluster to the same
+                # context so the cloud-cmd pod's in-cluster kubectl can see it.
+                smoke_tests_utils.resolve_k8s_context_cmd(name),
+                smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
                 # Verify CPU limit is set (should be 4 with 2x multiplier)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -3566,5 +3622,78 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
         ],
         f'sky down -y {name}-1; sky down -y {name}-2; rm -f /tmp/{name}-*.log',
         timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Cluster Resize ----------
+def test_resize(generic_cloud: str):
+    """Test cluster resize end to end: CLI validation (``--resize`` requires
+    ``-c``, and ``--resize`` on a missing cluster warns and falls back to a
+    normal launch), scale up, scale down, busy-worker rejection, and (on
+    stop-capable clouds) resizing a STOPPED cluster.
+
+    Not marked ``@pytest.mark.kubernetes`` so it runs on the selected
+    ``generic_cloud``. The stopped-cluster scenario is skipped on Kubernetes,
+    which does not support ``sky stop`` (see sky/clouds/kubernetes.py).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Kubernetes cannot stop clusters, so the stopped-cluster resize scenario
+    # only runs on stop-capable clouds (e.g. AWS/GCP). On those clouds a
+    # `--resize` of a STOPPED cluster should restart AND resize it in one
+    # operation: scale-up adds workers; scale-down skips the SSH job-queue
+    # check (a stopped cluster has no running jobs) and then restarts at the
+    # new size.
+    stopped_resize_commands = []
+    if generic_cloud != 'kubernetes':
+        stopped_resize_commands = [
+            # Stop the (now 1-node) cluster.
+            f'sky stop -y {name}',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep STOPPED',
+            # --- Resize a STOPPED cluster: scale up (restarts + grows) ---
+            f'sky launch -y -c {name} --resize --num-nodes 2',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x" && echo "$s" | grep UP',
+            # Stop again, then resize down: stopped => no jobs => the SSH
+            # job-queue check is skipped and the cluster restarts at 1 node.
+            f'sky stop -y {name}',
+            f'sky launch -y -c {name} --resize --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "1x" && echo "$s" | grep UP',
+        ]
+    test = smoke_tests_utils.Test(
+        'resize',
+        [
+            # --- CLI validation (fail case): --resize requires -c ---
+            'sky launch --resize --num-nodes 4 2>&1 && '
+            'exit 1 || echo "Correctly rejected"',
+            # --- Create via --resize on a non-existent cluster: the backend
+            #     warns and falls back to a normal launch, creating the initial
+            #     single-node cluster (success / fallback case). ---
+            f'sky launch -y -c {name} --resize --infra {generic_cloud} '
+            f'--cpus 2 --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep UP',
+            # --- Scale up ---
+            f'sky launch -y -c {name} --resize --num-nodes 3',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "3x"',
+            # --- No-op ---
+            f'sky launch -y -c {name} --resize --num-nodes 3 2>&1 | '
+            'grep "already has 3"',
+            # --- Scale down (idle) ---
+            f'sky launch -y -c {name} --resize --num-nodes 2',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x"',
+            # --- Scale down rejected when job running ---
+            f'sky exec {name} --num-nodes 2 -d -- sleep 300',
+            'sleep 5',
+            f'sky launch -y -c {name} --resize --num-nodes 1 2>&1 && '
+            'exit 1 || echo "Correctly rejected"',
+            # Cancel jobs, then scale down succeeds.
+            f'sky cancel -y {name} -a',
+            'sleep 5',
+            f'sky launch -y -c {name} --resize --num-nodes 1',
+            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "1x"',
+        ] + stopped_resize_commands,
+        f'sky down -y {name}',
+        # Stop/start cycles on a real cloud (AWS/GCP) are much slower than the
+        # Kubernetes-only path.
+        timeout=(35 * 60 if generic_cloud != 'kubernetes' else 10 * 60),
     )
     smoke_tests_utils.run_one_test(test)

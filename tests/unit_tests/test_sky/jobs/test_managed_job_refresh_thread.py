@@ -266,7 +266,8 @@ class TestOuterLoopExceptionHandling:
 
 
 class TestBecomeLeaderOrdering:
-    """The recovery signal file must exist BEFORE the lock is acquired.
+    """The recovery signal file must exist BEFORE the lock is acquired, and
+    recovery must wait briefly after acquiring it.
 
     During a rolling update we block on acquire() while the old API server
     still holds the lock. If the gate file is missing in that window, a
@@ -274,6 +275,11 @@ class TestBecomeLeaderOrdering:
     server's update_managed_jobs_statuses, which could mark the job
     FAILED_CONTROLLER. The signal file gates controller starts, so it must
     be touched up-front, not after we win the lock.
+
+    After acquiring the lock we also wait briefly before recovery: the old
+    pod's detached controllers can outlive the lock release by a moment, and
+    recovery resetting jobs while they are still alive lets them re-claim and
+    re-stamp soon-dead PIDs (split brain across the upgrade overlap).
     """
 
     def test_signal_file_touched_before_lock_acquire(self, tmp_path,
@@ -288,6 +294,7 @@ class TestBecomeLeaderOrdering:
                                     instance=True,
                                     spec_set=True)
         lock.is_locked.return_value = False
+        lock.is_session_alive.return_value = True
         thread._lock = lock
 
         order = []
@@ -301,21 +308,96 @@ class TestBecomeLeaderOrdering:
 
         lock.acquire.side_effect = on_acquire
 
+        def on_sleep(*args, **kwargs):
+            order.append('sleep')
+
         def recovery_and_stop():
             order.append('recovery')
             # Raise to skip the infinite event loop that follows recovery.
             raise RuntimeError('stop before event loop')
 
-        with mock.patch.object(mjrt.managed_job_utils,
-                               'ha_recovery_for_consolidation_mode',
-                               side_effect=recovery_and_stop):
+        with mock.patch.object(mjrt.time, 'sleep', side_effect=on_sleep), \
+                mock.patch.object(mjrt.managed_job_utils,
+                                  'ha_recovery_for_consolidation_mode',
+                                  side_effect=recovery_and_stop):
             with pytest.raises(RuntimeError, match='stop before event loop'):
                 thread._become_leader_and_run()
 
-        # Recovery runs only after the lock is acquired.
-        assert order == ['acquire', 'recovery']
+        # Recovery runs only after the lock is acquired AND after the wait.
+        assert order == ['acquire', 'sleep', 'recovery']
         # The finally block removes the gate file even when recovery fails.
         assert not signal_file.exists()
+
+    def test_waits_for_configured_duration_before_recovery(
+            self, tmp_path, monkeypatch):
+        """The wait must use _RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS, and the
+        gate file must still be present while we wait (so controllers stay
+        gated and update_managed_jobs_statuses does not fire)."""
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+        monkeypatch.setattr(mjrt, '_RECOVERY_WAIT_AFTER_ACQUIRE_SECONDS', 7)
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        lock.is_locked.return_value = False
+        lock.is_session_alive.return_value = True
+        thread._lock = lock
+
+        slept = []
+
+        def on_sleep(seconds, *args, **kwargs):
+            # The gate file must still be in place during the wait.
+            assert signal_file.exists(), (
+                'signal file must persist through the post-acquire wait')
+            slept.append(seconds)
+
+        with mock.patch.object(mjrt.time, 'sleep', side_effect=on_sleep), \
+                mock.patch.object(
+                    mjrt.managed_job_utils,
+                    'ha_recovery_for_consolidation_mode',
+                    side_effect=RuntimeError('stop before event loop')):
+            with pytest.raises(RuntimeError, match='stop before event loop'):
+                thread._become_leader_and_run()
+
+        assert slept == [7]
+
+    def test_steps_down_if_lock_lost_during_wait(self, tmp_path, monkeypatch):
+        """If the lock session goes stale during the post-acquire wait, we
+        must NOT run recovery — another replica may now hold the lock. Step
+        down via _suicide_on_lock_loss and leave the gate file in place (the
+        suicide path re-touches it to keep controllers gated)."""
+        signal_file = tmp_path / 'restart_signal'
+        monkeypatch.setattr(mjrt.constants,
+                            'PERSISTENT_RUN_RESTARTING_SIGNAL_FILE',
+                            str(signal_file))
+
+        thread = mjrt.ManagedJobRefreshDaemonThread()
+        lock = mock.create_autospec(locks.PostgresLock,
+                                    instance=True,
+                                    spec_set=True)
+        lock.is_locked.return_value = False
+        # Session is dead by the time we re-check after the wait.
+        lock.is_session_alive.return_value = False
+        thread._lock = lock
+
+        with mock.patch.object(mjrt.time, 'sleep'), \
+                mock.patch.object(
+                    mjrt.managed_job_utils,
+                    'ha_recovery_for_consolidation_mode') as recovery, \
+                mock.patch.object(
+                    mjrt.ManagedJobRefreshDaemonThread,
+                    '_suicide_on_lock_loss') as suicide:
+            thread._become_leader_and_run()
+
+        suicide.assert_called_once()
+        recovery.assert_not_called()
+        # The gate file is NOT removed on the step-down path; the suicide
+        # routine owns re-touching it for the shutdown drain.
+        assert signal_file.exists()
 
 
 class TestStart:

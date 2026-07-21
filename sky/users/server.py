@@ -221,13 +221,14 @@ def get_user_workspace(
     # set `active_workspace` globally gets honored.
     if requested is None and skypilot_config.is_active_workspace_set():
         requested = skypilot_config.get_active_workspace()
-    accessible = sorted(workspaces_core.get_accessible_workspace_names())
     response: Dict[str, Any] = {
         'workspace': None,
         'source': None,
         'note': None,
         'preferred': user_for_resolve.preferred_workspace,
-        'accessible': accessible,
+        # Filled in AFTER resolution: the resolver can heal a missed
+        # first-login grant, which grows the accessible set.
+        'accessible': [],
     }
     try:
         resolution = workspaces_core.resolve_workspace_for_user(
@@ -245,14 +246,12 @@ def get_user_workspace(
         response['note'] = (e.note
                             if e.note else 'multiple workspaces accessible; '
                             'no preferred or active workspace set')
-        return response
     except exceptions.NoWorkspaceAccessError as e:
         # One-line message from the raise site ("User <name> (<id>) has
         # no accessible workspaces.") — short enough to fit in the tree
         # row and more informative than a generic stand-in.
         response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
         response['note'] = str(e)
-        return response
     except exceptions.PermissionDeniedError as e:
         # Per-workspace deny — raised when an explicit `requested`
         # workspace exists but the user can't access it. We keep the
@@ -262,10 +261,12 @@ def get_user_workspace(
         response['source'] = (
             workspace_constants.WORKSPACE_SOURCE_PERMISSION_DENIED)
         response['note'] = str(e)
-        return response
-    response['workspace'] = resolution.workspace
-    response['source'] = resolution.source
-    response['note'] = resolution.note
+    else:
+        response['workspace'] = resolution.workspace
+        response['source'] = resolution.source
+        response['note'] = resolution.note
+    response['accessible'] = sorted(
+        workspaces_core.get_accessible_workspace_names())
     return response
 
 
@@ -282,13 +283,21 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid role: {role}')
 
+    # Main-process handler: refresh config so runtime `rbac.default_role` /
+    # `workspaces` changes are honored without a server restart (executor
+    # requests reload per request, sync handlers like this one do not).
+    skypilot_config.safe_reload_config()
     if not role:
         role = rbac.get_default_role()
 
     # Create user
     password_hash = server_common.crypt_ctx.hash(password)
+    # MD5 here only derives a stable user identifier from the (non-secret)
+    # username; it is not used for any security purpose (passwords use bcrypt
+    # via crypt_ctx).
     user_hash = hashlib.md5(
-        username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+        username.encode(),
+        usedforsecurity=False).hexdigest()[:common_utils.USER_HASH_LENGTH]
     with _user_lock(user_hash):
         # Check if user already exists
         if global_user_state.get_user_by_name(username):
@@ -300,6 +309,11 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
                         password=password_hash,
                         user_type=models.UserType.BASIC.value))
         permission.permission_service.update_role(user_hash, role)
+        # Grant any private-workspace access the config's allowed_users owes
+        # this user: an admin may have listed this username before the account
+        # existed, in which case the startup / config-update sync dropped it.
+        permission.permission_service.resync_workspace_policies_for_new_user(
+            user_hash)
 
 
 @router.post('/update')
@@ -564,6 +578,10 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
             status_code=400,
             detail=f'Missing required columns: {", ".join(missing_headers)}')
 
+    # Main-process handler: refresh config once (not per row) so rows that fall
+    # back to `rbac.default_role` honor a runtime change without a restart.
+    skypilot_config.safe_reload_config()
+
     # Parse user data
     users_to_create = []
     parse_errors = []
@@ -627,8 +645,11 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
                 # Password is plain text, hash it
                 password_hash = server_common.crypt_ctx.hash(password)
 
-            user_hash = hashlib.md5(
-                username.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
+            # MD5 only derives a stable user identifier from the (non-secret)
+            # username; not a security use (passwords use bcrypt via crypt_ctx).
+            user_hash = hashlib.md5(username.encode(),
+                                    usedforsecurity=False).hexdigest()
+            user_hash = user_hash[:common_utils.USER_HASH_LENGTH]
 
             with _user_lock(user_hash):
                 global_user_state.add_or_update_user(
@@ -659,6 +680,9 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 def user_export() -> Dict[str, Any]:
     """Export all users as CSV content."""
     try:
+        # Main-process handler: refresh config once so the roleless-user display
+        # fallback below reflects a runtime `rbac.default_role` change.
+        skypilot_config.safe_reload_config()
         # Get all users
         user_list = global_user_state.get_all_users()
 
@@ -796,6 +820,24 @@ def create_service_account_token(
             status_code=400,
             detail='Expiration days must be positive or 0 for never expire')
 
+    # Validate the optional role up front so we fail before creating anything.
+    if token_body.role is not None:
+        if token_body.role not in rbac.get_supported_roles():
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail=f'Invalid role {token_body.role!r}. Supported roles: '
+                f'{", ".join(rbac.get_supported_roles())}.')
+        # Only admins may create an admin-role service account; otherwise a
+        # non-admin could escalate by minting an admin-scoped token.
+        if token_body.role == rbac.RoleName.ADMIN.value:
+            caller_roles = permission.permission_service.get_user_roles(
+                auth_user.id)
+            if not caller_roles or caller_roles[0] != rbac.RoleName.ADMIN.value:
+                raise fastapi.HTTPException(
+                    status_code=403,
+                    detail='Only admins can create a service account with the '
+                    'admin role.')
+
     try:
         # Generate a unique service account user ID
         service_account_user_id = _generate_service_account_user_id()
@@ -814,11 +856,17 @@ def create_service_account_token(
                 f'already exists ({service_account_user_id}). '
                 'Please use a different name.')
 
-        # Add service account to permission system with default role
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.users.permission import permission_service
-        permission_service.add_user_if_not_exists(service_account_user_id)
+        # Add the service account to the permission system with the default
+        # role. This handler runs in the main API-server process (no per-request
+        # config reload), so seed via the helper that refreshes config first —
+        # an admin's runtime `rbac.default_role` change then applies without a
+        # server restart.
+        permission.seed_new_user_role(service_account_user_id)
+        # If a role was requested, apply it now so the token is created with the
+        # intended role atomically (no separate update-role round trip).
+        if token_body.role is not None:
+            permission.permission_service.update_role(service_account_user_id,
+                                                      token_body.role)
 
         # Handle expiration: 0 means "never expire"
         expires_in_days = token_body.expires_in_days
