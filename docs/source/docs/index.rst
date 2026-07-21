@@ -41,16 +41,6 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
     :align: center
     :class: only-dark, hero-diagram
 
-.. grid:: 1 1 1 1
-    :gutter: 3
-
-    .. grid-item-card::
-        :link: https://demo.skypilot.co/dashboard/
-        :text-align: center
-
-        🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
-
-
 Why SkyPilot
 ----------------------
 
