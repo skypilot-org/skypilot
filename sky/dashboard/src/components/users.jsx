@@ -2078,7 +2078,7 @@ function UsersTable({
   // Jobs column and sorted among themselves by header.order. Brings the Users
   // table to parity with the clusters/jobs/volumes tables, which already render
   // these dynamically-registered columns.
-  const extraColumns = useTableColumns('users', {});
+  const extraColumns = useTableColumns('users', { deduplicateUsers });
   const sortedExtraColumns = [...extraColumns].sort(
     (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
   );
