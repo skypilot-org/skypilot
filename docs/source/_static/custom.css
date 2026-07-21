@@ -12,6 +12,46 @@
   padding: 0 !important;
 }
 
+/* Solid "Ask AI" launcher: no transparency, plain text, no shadow.
+   Light mode: white button, black text. Dark mode: dark button, white text. */
+#kapa-widget-container button {
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+}
+#kapa-widget-container button,
+#kapa-widget-container button p,
+#kapa-widget-container button span,
+#kapa-widget-container button div {
+  text-shadow: none !important;
+}
+html:not([data-theme="dark"]) #kapa-widget-container button {
+  background-color: #FFFFFF !important;
+}
+html:not([data-theme="dark"]) #kapa-widget-container button,
+html:not([data-theme="dark"]) #kapa-widget-container button p,
+html:not([data-theme="dark"]) #kapa-widget-container button span,
+html:not([data-theme="dark"]) #kapa-widget-container button div {
+  color: #000000 !important;
+}
+html[data-theme="dark"] #kapa-widget-container button {
+  background-color: #1F242C !important;
+}
+html[data-theme="dark"] #kapa-widget-container button,
+html[data-theme="dark"] #kapa-widget-container button p,
+html[data-theme="dark"] #kapa-widget-container button span,
+html[data-theme="dark"] #kapa-widget-container button div {
+  color: #FFFFFF !important;
+}
+/* The widget has no dark-mode logo option; swap in the white logo in dark
+   mode (relative URL resolves next to this file in _static/). The filter is
+   a fallback for browsers without `content` support on img — it renders the
+   default blue mark white, and is a no-op on the already-white logo. */
+html[data-theme="dark"] #kapa-widget-container img,
+html[data-theme="dark"] .mantine-Modal-root figure img {
+  content: url("skypilot-icon-dark.svg");
+  filter: brightness(0) invert(1);
+}
+
 .mantine-Modal-root figure {
   padding: 0 !important;
 }
