@@ -751,8 +751,8 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
     if security_group is not None:
         return security_group
 
-    logger.info(f'Security group {expected_sg_name!r} was not found in VPC '
-                f'{vpc_id!r}. Creating a new security group.')
+    logger.debug(f'Security group {expected_sg_name!r} was not found in VPC '
+                 f'{vpc_id!r}. Creating a new security group.')
     try:
         # create a new security group with skypilot tag
         ec2.meta.client.create_security_group(
