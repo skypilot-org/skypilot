@@ -28,13 +28,6 @@
     Manage all your AI compute
 </h3>
 
-<div align="center">
-
-#### [🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour](https://demo.skypilot.co/dashboard/)
-
-</div>
-
-
 SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastructure.
 
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
