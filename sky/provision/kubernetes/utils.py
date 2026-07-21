@@ -2331,8 +2331,11 @@ def adjust_resources_to_allocatable(
     return adjusted_cpus, adjusted_mem
 
 
-def check_instance_fits(context: Optional[str],
-                        instance: str) -> Tuple[bool, Optional[str]]:
+def check_instance_fits(
+        context: Optional[str],
+        instance: str,
+        ephemeral_storage_gb: Optional[float] = None
+) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
     If the instance has GPU requirements, checks if the GPU type is
@@ -2341,6 +2344,8 @@ def check_instance_fits(context: Optional[str],
 
     Args:
         instance: str, the instance type to check.
+        ephemeral_storage_gb: Optional[float], the amount of ephemeral (local)
+            storage in GB requested by the instance, if any.
 
     Returns:
         bool: True if the instance fits on the cluster, False otherwise.
@@ -2349,29 +2354,37 @@ def check_instance_fits(context: Optional[str],
 
     def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
                            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
-        """Checks if the instance fits on the cluster based on CPU and memory.
+        """Checks if the instance fits on the cluster based on resources.
 
-        We check only capacity, not allocatable, because availability can
-        change during scheduling, and we want to let the Kubernetes scheduler
-        handle that.
+        Checks CPU, memory and (if requested) ephemeral storage. We check only
+        capacity, not allocatable, because availability can change during
+        scheduling, and we want to let the Kubernetes scheduler handle that.
         """
-        # We log max CPU and memory found on the GPU nodes for debugging.
+        # We log the max resources found on a single node for debugging.
         max_cpu = 0.0
         max_mem = 0.0
+        max_ephemeral_storage_gb = 0.0
 
         for node in node_list:
             node_cpus = parse_cpu_or_gpu_resource(node.status.capacity['cpu'])
             node_memory_gb = parse_memory_resource(
                 node.status.capacity['memory'], unit='G')
+            node_ephemeral_storage_gb = parse_memory_resource(
+                node.status.capacity.get('ephemeral-storage', '0'), unit='G')
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
+                max_ephemeral_storage_gb = node_ephemeral_storage_gb
             if (node_cpus >= candidate_instance_type.cpus and
-                    node_memory_gb >= candidate_instance_type.memory):
+                    node_memory_gb >= candidate_instance_type.memory and
+                (ephemeral_storage_gb is None or
+                 node_ephemeral_storage_gb >= ephemeral_storage_gb)):
                 return True, None
         return False, (
             'Maximum resources found on a single node: '
-            f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
+            f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory, '
+            f'{common_utils.format_float(max_ephemeral_storage_gb)}G '
+            'Ephemeral Storage')
 
     def check_tpu_fits(acc_type: str, acc_count: int,
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
@@ -2449,18 +2462,26 @@ def check_instance_fits(context: Optional[str],
                     f'No GPU nodes found with {acc_count} or more GPUs.')
 
         candidate_nodes = gpu_nodes
+        ephemeral_storage_reason = (
+            f' and/or ephemeral storage (>= {ephemeral_storage_gb} G)'
+            if ephemeral_storage_gb is not None else '')
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type} do not have '
             f'enough CPU (>= {k8s_instance_type.cpus} CPUs) and/or '
-            f'memory (>= {k8s_instance_type.memory} G). ')
+            f'memory (>= {k8s_instance_type.memory} G)'
+            f'{ephemeral_storage_reason}. ')
     else:
         candidate_nodes = [node for node in nodes if node.is_ready()]
         if not candidate_nodes:
             return False, 'No ready nodes found in the cluster.'
+        ephemeral_storage_reason = (
+            f' and/or ephemeral storage (>= {ephemeral_storage_gb} G)'
+            if ephemeral_storage_gb is not None else '')
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (>= {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
-                                 f'(>= {k8s_instance_type.memory} G). ')
+                                 f'(>= {k8s_instance_type.memory} G)'
+                                 f'{ephemeral_storage_reason}. ')
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)

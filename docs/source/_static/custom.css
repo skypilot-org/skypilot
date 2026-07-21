@@ -159,7 +159,7 @@ nav.bd-links li > a.reference.external.new-item::after {
 }
 
 .navbar-brand.logo>svg {
-  width: 120px;
+  width: 103px;
 }
 
 .navbar-brand.logo>svg .cls-6 {
@@ -290,6 +290,18 @@ svg.svg-inline--fa.fa-lg {
    copy-page button on a full-width laptop viewport. */
 .hero-title h1 {
   font-size: 2.1rem;
+}
+
+/* Index page hero logo — breathing room between the page title above and the
+   GitHub/Slack buttons below. */
+img.hero-logo {
+  margin-top: 1.75rem;
+  margin-bottom: 2.25rem;
+}
+
+/* Index page architecture diagram — matching gap before the demo card below. */
+img.hero-diagram {
+  margin-bottom: 2.25rem;
 }
 
 /* Copy page as Markdown — split button next to title */
