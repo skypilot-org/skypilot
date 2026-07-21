@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-website-id', '4223d017-a3d2-4b92-b191-ea4d425a23c3');
        script.setAttribute('data-project-name', 'SkyPilot');
        script.setAttribute('data-project-color', '#4C4C4D');
-       script.setAttribute('data-project-logo', 'https://avatars.githubusercontent.com/u/109387420?s=100&v=4');
+       script.setAttribute('data-project-logo', 'https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/_static/skypilot-icon.png');
        script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
        script.setAttribute('data-button-position-bottom', '100px');

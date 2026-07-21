@@ -5364,3 +5364,38 @@ def test_match_kubernetes_failure_hint_text_realistic_eviction_reason():
     hint = utils.match_kubernetes_failure_hint_text(reason)
     assert hint is not None
     assert 'resources.disk_size' in hint
+
+
+def test_get_node_accelerator_count_neuron():
+    """AWS Neuron count is read from the aws.amazon.com/neuron resource key."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # Neuron node: count from the Neuron resource key.
+        assert utils.get_node_accelerator_count(
+            None, {'aws.amazon.com/neuron': '16'}) == 16
+        # GPU / TPU paths unchanged.
+        assert utils.get_node_accelerator_count(None,
+                                                {'nvidia.com/gpu': '8'}) == 8
+        assert utils.get_node_accelerator_count(None,
+                                                {'google.com/tpu': '4'}) == 4
+        # No accelerator -> 0.
+        assert utils.get_node_accelerator_count(None, {'cpu': '4'}) == 0
+
+
+def test_get_node_accelerator_count_multiple_families_no_crash():
+    """A node advertising multiple accelerator families must not crash the
+    caller (e.g. sky status/show-gpus); it warns and returns the first family
+    found (GPU > TPU > Neuron)."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # GPU + Neuron on the same node -> GPU wins, no exception.
+        assert utils.get_node_accelerator_count(None, {
+            'nvidia.com/gpu': '8',
+            'aws.amazon.com/neuron': '16',
+        }) == 8
+
+
+def test_get_handled_taint_keys_includes_neuron():
+    assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()

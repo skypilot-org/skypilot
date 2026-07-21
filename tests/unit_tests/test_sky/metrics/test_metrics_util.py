@@ -1,5 +1,6 @@
 """Unit tests for sky.metrics.utils."""
 import asyncio
+import queue
 import subprocess
 import threading
 import time
@@ -29,28 +30,53 @@ def _fake_namespace(uid):
     return namespace
 
 
+def _clear_detection_state():
+    # pylint: disable=protected-access
+    with utils._local_context_cache_lock:
+        utils._local_context_cache.clear()
+        utils._probe_pending.clear()
+    while True:
+        try:
+            utils._probe_queue.get_nowait()
+        except queue.Empty:
+            break
+    utils._in_cluster_identity_uid = None
+    utils._anchor_read_failed = False
+
+
 @pytest.fixture(autouse=True)
 def _reset_local_context_detection_state():
-    """Reset the process-level detection caches between tests."""
-    utils._local_context_cache.clear()  # pylint: disable=protected-access
-    utils._local_context_probes.clear()  # pylint: disable=protected-access
-    utils._in_cluster_identity_uid = None  # pylint: disable=protected-access
-    yield
-    utils._local_context_cache.clear()  # pylint: disable=protected-access
-    utils._local_context_probes.clear()  # pylint: disable=protected-access
-    utils._in_cluster_identity_uid = None  # pylint: disable=protected-access
+    """Reset the process-level detection state between tests.
 
-
-def _seed_verdict(context, verdict):
-    """Mimics is_local_context writing its verdict to the shared cache.
-
-    The split tests mock is_local_context, so the real cache write never
-    runs; split_local_remote_contexts reads verdicts back through the
-    cache, so the mock must seed it just like the real probe would.
+    The probe worker thread (if one was started) is deliberately left
+    running: it blocks on the queue when idle and each test starts from
+    an empty queue. Jitter is disabled so re-probe intervals are exact.
     """
-    with utils._local_context_cache_lock:  # pylint: disable=protected-access
-        utils._local_context_cache[context] = (  # pylint: disable=protected-access
-            verdict, time.time() + 3600)
+    _clear_detection_state()
+    with mock.patch.object(utils.random, 'random', return_value=0.0):
+        yield
+    _clear_detection_state()
+
+
+def _wait_probes_drained(timeout=5.0):
+    """Waits until the probe worker has no queued or in-flight probes."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with utils._local_context_cache_lock:  # pylint: disable=protected-access
+            if not utils._probe_pending:  # pylint: disable=protected-access
+                return
+        time.sleep(0.01)
+    raise AssertionError('probe worker did not drain in time')
+
+
+def _seed_verdict(context, verdict, next_probe_in=3600.0):
+    """Writes a conclusive verdict, as a finished probe would."""
+    # pylint: disable=protected-access
+    entry = utils._ContextDetection()
+    entry.verdict = verdict
+    entry.next_probe_at = time.time() + next_probe_in
+    with utils._local_context_cache_lock:
+        utils._local_context_cache[context] = entry
     return verdict
 
 
@@ -189,8 +215,7 @@ def test_is_local_context_probe_failure_retried_soon():
     """A failed probe is retried after the short failure window.
 
     A transient error (RBAC not yet applied, API server hiccup) must not
-    pin a local context as remote — with self-federation running — for
-    the full cache TTL.
+    pin a wrong verdict for the full refresh interval.
     """
     retry = utils._LOCAL_CONTEXT_FAILURE_RETRY_SECONDS  # pylint: disable=protected-access
     fake_now = [0.0]
@@ -211,6 +236,68 @@ def test_is_local_context_probe_failure_retried_soon():
             fake_now[0] = retry + 1.0
             assert utils.is_local_context('ctx-a') is True
             assert len(h.probe_calls) == 2
+
+
+def test_is_local_context_failure_backoff_doubles_to_cap():
+    """Consecutive failures back off exponentially up to the cap.
+
+    Without the backoff, a permanently failing context (dead cluster,
+    missing RBAC) re-probes on every scrape cycle forever — the probe
+    churn that starves the co-located /metrics endpoint.
+    """
+    # pylint: disable=protected-access
+    base = utils._LOCAL_CONTEXT_FAILURE_RETRY_SECONDS
+    cap = utils._LOCAL_CONTEXT_FAILURE_RETRY_MAX_SECONDS
+    fake_now = [0.0]
+    with _DetectionHarness(own_uid='uid-1',
+                           probe_exc=_FakeApiException(403)) as h:
+        with mock.patch.object(utils.time,
+                               'time',
+                               side_effect=lambda: fake_now[0]):
+            expected_delay = base
+            for expected_calls in range(1, 8):
+                utils.is_local_context('ctx-a')
+                assert len(h.probe_calls) == expected_calls
+                entry = utils._local_context_cache['ctx-a']
+                assert entry.consecutive_failures == expected_calls
+                assert entry.next_probe_at == pytest.approx(fake_now[0] +
+                                                            expected_delay)
+                # Probing again before the backoff expires is a no-op.
+                utils.is_local_context('ctx-a')
+                assert len(h.probe_calls) == expected_calls
+                fake_now[0] = entry.next_probe_at + 1.0
+                expected_delay = min(expected_delay * 2, cap)
+            # The schedule has settled at the cap.
+            assert (utils._local_context_cache['ctx-a'].next_probe_at -
+                    fake_now[0]) <= cap
+
+
+def test_is_local_context_conclusive_verdict_sticky_across_failures():
+    """An inconclusive refresh keeps the previous conclusive verdict.
+
+    Flipping a known-local context to remote on a transient probe
+    failure would silently start self-federation; the verdict must
+    survive until a conclusive probe says otherwise.
+    """
+    ttl = utils._LOCAL_CONTEXT_CACHE_TTL_SECONDS  # pylint: disable=protected-access
+    fake_now = [0.0]
+    with _DetectionHarness(own_uid='uid-1',
+                           probe_result=_fake_namespace('uid-1')) as h:
+        with mock.patch.object(utils.time,
+                               'time',
+                               side_effect=lambda: fake_now[0]):
+            assert utils.is_local_context('ctx-a') is True
+            # The refresh probe fails: the local verdict is kept.
+            h._probe_exc = _FakeApiException(403)  # pylint: disable=protected-access
+            fake_now[0] = ttl + 1.0
+            assert utils.is_local_context('ctx-a') is True
+            assert len(h.probe_calls) == 2
+            # A conclusive probe updates the verdict again.
+            h._probe_exc = None  # pylint: disable=protected-access
+            h._probe_result = _fake_namespace('uid-2')  # pylint: disable=protected-access
+            entry = utils._local_context_cache['ctx-a']  # pylint: disable=protected-access
+            fake_now[0] = entry.next_probe_at + 1.0
+            assert utils.is_local_context('ctx-a') is False
 
 
 def test_is_local_context_no_identity_retried_soon():
@@ -255,65 +342,106 @@ def test_is_local_context_renamed_in_cluster_context():
         assert not h.probe_calls
 
 
+class _InClusterName:
+    """Patches the in-cluster context name for split tests."""
+
+    def __init__(self, name='in-cluster'):
+        self._patch = mock.patch(
+            'sky.adaptors.kubernetes.in_cluster_context_name',
+            return_value=name)
+
+    def __enter__(self):
+        self._patch.start()
+        return self
+
+    def __exit__(self, *args):
+        self._patch.stop()
+        return False
+
+
 def test_split_local_remote_contexts():
-    """Contexts are partitioned by is_local_context, order preserved."""
-
-    def _fake_is_local(context):
-        return _seed_verdict(context, context in ('in-cluster', 'ctx-local'))
-
-    with mock.patch.object(utils,
-                           'is_local_context',
-                           side_effect=_fake_is_local):
+    """Contexts are partitioned by cached verdicts, order preserved."""
+    _seed_verdict('ctx-local', True)
+    _seed_verdict('ctx-remote-1', False)
+    _seed_verdict('ctx-remote-2', False)
+    with _InClusterName():
         local, remote = utils.split_local_remote_contexts(
             ['ctx-remote-1', 'in-cluster', 'ctx-local', 'ctx-remote-2'])
     assert local == ['in-cluster', 'ctx-local']
     assert remote == ['ctx-remote-1', 'ctx-remote-2']
 
 
-def test_split_local_remote_contexts_warm_path_spawns_no_threads():
-    """A fully-cached call answers inline without spawning any probe."""
-    for ctx, verdict in (('ctx-local', True), ('ctx-remote', False)):
-        _seed_verdict(ctx, verdict)
+def test_split_local_remote_contexts_warm_path_never_probes():
+    """A call with fresh verdicts answers inline and schedules nothing."""
 
     def _must_not_probe(context):
         raise AssertionError(f'unexpected probe for {context!r}')
 
-    with mock.patch.object(utils,
-                           'is_local_context',
+    for ctx, verdict in (('ctx-local', True), ('ctx-remote', False)):
+        _seed_verdict(ctx, verdict)
+    with _InClusterName(), \
+         mock.patch.object(utils, 'is_local_context',
                            side_effect=_must_not_probe):
         local, remote = utils.split_local_remote_contexts(
             ['ctx-local', 'ctx-remote'])
     assert local == ['ctx-local']
     assert remote == ['ctx-remote']
-    # No probe thread was ever registered for the warm path.
-    assert not utils._local_context_probes  # pylint: disable=protected-access
+    # Nothing was handed to the probe worker.
+    assert not utils._probe_pending  # pylint: disable=protected-access
 
 
-def test_split_local_remote_contexts_dedupes_probe_threads():
-    """Repeated calls for the same context reuse one daemon probe thread."""
-    gate = threading.Event()
-    seen_threads = []
+def test_split_local_remote_contexts_unknown_served_remote_nonblocking():
+    """A context with no verdict is remote for this call, without waiting.
+
+    The probe runs in the background worker; a later call reads its
+    verdict back from the cache.
+    """
+    probed = threading.Event()
 
     def _fake_is_local(context):
-        seen_threads.append(threading.current_thread())
+        _seed_verdict(context, True)
+        probed.set()
+        return True
+
+    with _InClusterName(), \
+         mock.patch.object(utils, 'is_local_context',
+                           side_effect=_fake_is_local):
+        start = time.monotonic()
+        local, remote = utils.split_local_remote_contexts(['ctx-a'])
+        elapsed = time.monotonic() - start
+        # Answered immediately with the safe default.
+        assert (local, remote) == ([], ['ctx-a'])
+        assert elapsed < 1
+        # The worker probes in the background; the next call sees the
+        # verdict.
+        assert probed.wait(5)
+        _wait_probes_drained()
+        local, remote = utils.split_local_remote_contexts(['ctx-a'])
+    assert (local, remote) == (['ctx-a'], [])
+
+
+def test_split_local_remote_contexts_dedupes_pending_probes():
+    """Repeated calls while a probe is in flight schedule it only once."""
+    gate = threading.Event()
+    probe_calls = []
+
+    def _fake_is_local(context):
+        probe_calls.append(context)
         gate.wait(10)
         return _seed_verdict(context, False)
 
-    with mock.patch.object(utils, 'is_local_context',
-                           side_effect=_fake_is_local), \
-         mock.patch.object(utils, '_DETECTION_TIMEOUT_SECONDS', 0.2):
+    with _InClusterName(), \
+         mock.patch.object(utils, 'is_local_context',
+                           side_effect=_fake_is_local):
         utils.split_local_remote_contexts(['ctx-a'])
-        probe = utils._local_context_probes['ctx-a']  # pylint: disable=protected-access
-        # Daemon so a hung probe never blocks interpreter shutdown.
-        assert probe.daemon is True
-        # Second call while the first probe is still in flight must not
-        # spawn another thread for the same context.
         utils.split_local_remote_contexts(['ctx-a'])
-        assert utils._local_context_probes['ctx-a'] is probe  # pylint: disable=protected-access
-    gate.set()
-    probe.join(5)
-    # Exactly one probe ran despite two split calls.
-    assert len(seen_threads) == 1
+        utils.split_local_remote_contexts(['ctx-a'])
+        gate.set()
+        _wait_probes_drained()
+    # Exactly one probe ran despite three split calls.
+    assert probe_calls == ['ctx-a']
+    # The worker is a daemon so a hung probe never blocks shutdown.
+    assert utils._probe_worker.daemon is True  # pylint: disable=protected-access
 
 
 def test_split_local_remote_contexts_detection_unavailable():
@@ -325,45 +453,118 @@ def test_split_local_remote_contexts_detection_unavailable():
     assert remote == ['ctx-a']
 
 
-def test_split_local_remote_contexts_hung_probe_treated_remote():
-    """A probe stuck past the detection budget must not block the call."""
+def test_split_local_remote_contexts_hung_probe_never_blocks():
+    """A hung probe must not block any call, ever.
+
+    This is the probe-storm regression: the request path must stay a
+    pure cache read no matter how a context's probe misbehaves.
+    """
     release = threading.Event()
 
     def _fake_is_local(context):
-        if context == 'ctx-hung':
-            release.wait(10)
-        return _seed_verdict(context, context == 'ctx-local')
+        release.wait(10)
+        return _seed_verdict(context, False)
 
-    with mock.patch.object(utils, 'is_local_context',
-                           side_effect=_fake_is_local), \
-         mock.patch.object(utils, '_DETECTION_TIMEOUT_SECONDS', 0.2):
+    _seed_verdict('ctx-local', True)
+    with _InClusterName(), \
+         mock.patch.object(utils, 'is_local_context',
+                           side_effect=_fake_is_local):
         start = time.monotonic()
-        local, remote = utils.split_local_remote_contexts(
-            ['ctx-hung', 'ctx-local'])
+        for _ in range(3):
+            local, remote = utils.split_local_remote_contexts(
+                ['ctx-hung', 'ctx-local'])
         elapsed = time.monotonic() - start
-    release.set()
-    # The hung probe is treated as remote (the safe answer) and the
-    # call returns within the detection budget, not the probe duration.
+        release.set()
+        _wait_probes_drained()
+    # The hung probe is served as remote (the safe answer) and no call
+    # waited on it.
     assert local == ['ctx-local']
     assert remote == ['ctx-hung']
-    assert elapsed < 5
+    assert elapsed < 1
 
 
 def test_split_local_remote_contexts_probe_exception_treated_remote():
-    """An exception escaping a probe thread degrades that context to remote."""
+    """An exception escaping a probe leaves that context remote."""
 
     def _fake_is_local(context):
         if context == 'ctx-broken':
             raise RuntimeError('kubeconfig exploded')
-        return _seed_verdict(context, context == 'ctx-local')
+        return _seed_verdict(context, True)
 
-    with mock.patch.object(utils,
-                           'is_local_context',
+    with _InClusterName(), \
+         mock.patch.object(utils, 'is_local_context',
                            side_effect=_fake_is_local):
+        local, remote = utils.split_local_remote_contexts(
+            ['ctx-broken', 'ctx-local'])
+        assert (local, remote) == ([], ['ctx-broken', 'ctx-local'])
+        _wait_probes_drained()
+        # ctx-broken raised (stays remote), ctx-local concluded local.
         local, remote = utils.split_local_remote_contexts(
             ['ctx-broken', 'ctx-local'])
     assert local == ['ctx-local']
     assert remote == ['ctx-broken']
+
+
+def test_split_local_remote_contexts_serves_stale_while_refreshing():
+    """A due verdict is refreshed in the background, not on the call.
+
+    The hourly refresh must not take the request path back to probing:
+    the stale verdict is served now and the worker updates it for later
+    calls.
+    """
+    refreshed = threading.Event()
+
+    def _fake_is_local(context):
+        _seed_verdict(context, False)
+        refreshed.set()
+        return False
+
+    # Conclusive verdict whose refresh interval has already elapsed.
+    _seed_verdict('ctx-a', True, next_probe_in=-1.0)
+    with _InClusterName(), \
+         mock.patch.object(utils, 'is_local_context',
+                           side_effect=_fake_is_local):
+        local, remote = utils.split_local_remote_contexts(['ctx-a'])
+        # Served the stale verdict without waiting for the refresh.
+        assert (local, remote) == (['ctx-a'], [])
+        assert refreshed.wait(5)
+        _wait_probes_drained()
+        local, remote = utils.split_local_remote_contexts(['ctx-a'])
+    # The background refresh concluded remote; later calls see it.
+    assert (local, remote) == ([], ['ctx-a'])
+
+
+def test_split_local_remote_contexts_emits_served_and_probe_metrics():
+    """The new instrumentation reflects what the request path served."""
+
+    def _sample(metric, **labels):
+        for family in metric.collect():
+            for sample in family.samples:
+                if (sample.name.endswith('_total') and all(
+                        sample.labels.get(k) == v for k, v in labels.items())):
+                    return sample.value
+        return 0.0
+
+    served = utils.SKY_APISERVER_LOCAL_CONTEXT_SERVED_TOTAL
+    detected = utils.SKY_APISERVER_LOCAL_CONTEXT_DETECTION_TOTAL
+    before_unknown = _sample(served, context='ctx-m', result='unknown')
+    before_remote = _sample(served, context='ctx-m', result='remote')
+    before_inconclusive = _sample(detected,
+                                  context='ctx-m',
+                                  result='inconclusive')
+    with mock.patch.object(utils, 'METRICS_ENABLED', True), \
+         _DetectionHarness(own_uid=None):
+        utils.split_local_remote_contexts(['ctx-m'])
+        _wait_probes_drained()
+        utils.split_local_remote_contexts(['ctx-m'])
+    # First call served 'unknown'; the probe concluded nothing (no
+    # anchor), so the second call served 'unknown' again — and the
+    # worker recorded an inconclusive probe.
+    assert _sample(served, context='ctx-m',
+                   result='unknown') >= before_unknown + 2
+    assert _sample(detected, context='ctx-m',
+                   result='inconclusive') >= before_inconclusive + 1
+    assert _sample(served, context='ctx-m', result='remote') == before_remote
 
 
 class _IdentityUidHarness:

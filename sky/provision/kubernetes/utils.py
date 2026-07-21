@@ -208,6 +208,12 @@ MEMORY_SIZE_UNITS = {
 # or status.capacity fields to indicate the available resources on the node.
 SUPPORTED_GPU_RESOURCE_KEYS = {'amd': 'amd.com/gpu', 'nvidia': 'nvidia.com/gpu'}
 TPU_RESOURCE_KEY = 'google.com/tpu'
+# AWS Neuron (Trainium/Inferentia) is advertised by the Neuron k8s device
+# plugin under this resource key.
+NEURON_RESOURCE_KEY = 'aws.amazon.com/neuron'
+# AWS Neuron accelerator names, lowercased for case-insensitive matching
+# (see is_neuron_accelerator).
+NEURON_ACCELERATORS = {'trainium', 'trainium2', 'inferentia', 'inferentia2'}
 
 NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
@@ -843,12 +849,51 @@ def _accelerator_name_matches(requested_acc: str,
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
-    """Karpeneter label formatter
-    Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
-    the GPU type. Details: https://karpenter.sh/docs/reference/instance-types/
-    The naming scheme is same as the SkyPilot formatter, so we inherit from it.
+    """Karpenter label formatter.
+
+    Karpenter labels GPU nodes with `karpenter.k8s.aws/instance-gpu-name`
+    (value scheme is the same as the SkyPilot formatter, so GPU handling is
+    inherited) and labels AWS Neuron nodes (Trainium/Inferentia) with
+    `karpenter.k8s.aws/instance-accelerator-name`. We recognize both so a single
+    Karpenter cluster can expose GPUs and Neuron devices -- mirroring the way
+    GKELabelFormatter handles both GPU and TPU labels.
+    Details: https://karpenter.sh/docs/reference/instance-types/
     """
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
+    NEURON_LABEL_KEY = 'karpenter.k8s.aws/instance-accelerator-name'
+
+    # Karpenter's instance-accelerator-name values (derived from EC2
+    # AcceleratorInfo, generation-specific) -> SkyPilot canonical Neuron names.
+    _NEURON_VALUE_TO_ACC = {
+        'inferentia': 'Inferentia',
+        'inferentia2': 'Inferentia2',
+        'trainium': 'Trainium',
+        'trainium2': 'Trainium2',
+    }
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        if accelerator is not None and is_neuron_accelerator(accelerator):
+            return cls.NEURON_LABEL_KEY
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY, cls.NEURON_LABEL_KEY]
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key in cls.get_label_keys()
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        # Neuron nodes report e.g. 'trainium' / 'inferentia2' via the
+        # instance-accelerator-name label; map those to canonical names. GPU
+        # nodes fall through to the inherited value.upper().
+        neuron = cls._NEURON_VALUE_TO_ACC.get(value.lower())
+        if neuron is not None:
+            return neuron
+        return super().get_accelerator_from_label_value(value)
 
 
 class NebiusLabelFormatter(GPULabelFormatter):
@@ -1402,7 +1447,8 @@ def detect_accelerator_resource(
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
-                       TPU_RESOURCE_KEY in cluster_resources)
+                       TPU_RESOURCE_KEY in cluster_resources or
+                       NEURON_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
 
@@ -4253,7 +4299,10 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
 def get_handled_taint_keys() -> List[str]:
     """Get the taint keys that will be handled automatically by SkyPilot."""
-    keys = [TPU_RESOURCE_KEY, *SUPPORTED_GPU_RESOURCE_KEYS.values()]
+    keys = [
+        TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY,
+        *SUPPORTED_GPU_RESOURCE_KEYS.values()
+    ]
     custom_key = os.getenv('CUSTOM_GPU_RESOURCE_KEY', None)
     if custom_key:
         keys.append(custom_key)
@@ -4738,6 +4787,17 @@ def is_tpu_on_gke(accelerator: str, normalize: bool = True) -> bool:
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
+def is_neuron_accelerator(accelerator: Optional[str]) -> bool:
+    """Determines if the given accelerator is an AWS Neuron device.
+
+    AWS Trainium/Inferentia (Neuron) use their own k8s resource key
+    (aws.amazon.com/neuron) and node taint, distinct from nvidia/amd GPUs.
+    """
+    if accelerator is None:
+        return False
+    return accelerator.lower() in NEURON_ACCELERATORS
+
+
 def get_node_accelerator_count(context: Optional[str],
                                attribute_dict: dict) -> int:
     """Retrieves the count of accelerators from a node's resource dictionary.
@@ -4755,12 +4815,24 @@ def get_node_accelerator_count(context: Optional[str],
             resource is found, it returns 0.
     """
     gpu_resource_name = get_gpu_resource_key(context)
-    assert not (gpu_resource_name in attribute_dict and
-                TPU_RESOURCE_KEY in attribute_dict)
+    # A node is expected to advertise at most one accelerator family (GPU, TPU,
+    # or Neuron). Rather than assert on external cluster state (which would crash
+    # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
+    # hybrid state), warn and fall through to the first family found below.
+    present_keys = [
+        k for k in (gpu_resource_name, TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY)
+        if k in attribute_dict
+    ]
+    if len(present_keys) > 1:
+        logger.warning(
+            f'Node advertises multiple accelerator families {present_keys}; '
+            f'using {present_keys[0]}.')
     if gpu_resource_name in attribute_dict:
         return int(attribute_dict[gpu_resource_name])
     elif TPU_RESOURCE_KEY in attribute_dict:
         return int(attribute_dict[TPU_RESOURCE_KEY])
+    elif NEURON_RESOURCE_KEY in attribute_dict:
+        return int(attribute_dict[NEURON_RESOURCE_KEY])
     return 0
 
 

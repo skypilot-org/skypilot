@@ -912,6 +912,82 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
     @patch('sky.provision.kubernetes.network_utils.get_port_mode')
     @patch('sky.catalog.get_image_id_from_tag')
     @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_neuron_routes_to_neuron_resource_key(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_gpu_resource_key,
+            mock_get_accelerator_label_key_values,
+            mock_get_accelerator_label_keys, mock_get_namespace,
+            mock_get_current_context, mock_get_k8s_nodes):
+        """AWS Neuron (Trainium/Inferentia) routes to aws.amazon.com/neuron."""
+        neuron_resources = mock.MagicMock()
+        neuron_resources.instance_type = '8CPU--32GB--Trainium:16'
+        neuron_resources.accelerators = {'Trainium': 16}
+        neuron_resources.use_spot = False
+        neuron_resources.region = 'eks-context'
+        neuron_resources.zone = None
+        neuron_resources.cluster_config_overrides = {}
+        neuron_resources.image_id = None
+        setattr(neuron_resources, 'assert_launchable', lambda: neuron_resources)
+        neuron_resources.network_tier = resources_utils.NetworkTier.STANDARD
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+        mock_get_current_context.return_value = 'eks-context'
+        mock_get_namespace.return_value = 'default'
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+        # Karpenter surfaces Neuron via the instance-accelerator-name label
+        # (NOT the TPU label), so routing falls to the Neuron branch.
+        mock_get_accelerator_label_key_values.return_value = (
+            'karpenter.k8s.aws/instance-accelerator-name', ['trainium'
+                                                           ], None, None)
+        mock_get_gpu_resource_key.return_value = 'nvidia.com/gpu'
+        mock_get_cloud_config_value.side_effect = (
+            lambda cloud, keys, region, default_value=None, override_configs=
+            None: {
+                ('kubernetes', 'remote_identity'): 'SERVICE_ACCOUNT',
+                ('kubernetes', 'provision_timeout'): 10,
+                ('kubernetes', 'high_availability', 'storage_class_name'): None,
+            }.get((cloud,) + keys, default_value))
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = 'portforward'
+        mock_get_port_mode.return_value = mock_port_mode
+        mock_get_image.return_value = 'test-neuron-image:latest'
+
+        k8s_cloud = kubernetes.Kubernetes()
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=neuron_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name='test-neuron-cluster',
+                name_on_cloud='test-neuron-cluster'),
+            region=mock.MagicMock(name='eks-context'),
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        self.assertEqual(deploy_vars['accelerator_count'], '16')
+        self.assertEqual(deploy_vars['k8s_resource_key'],
+                         'aws.amazon.com/neuron')
+        # Neuron is neither GPU nor TPU.
+        self.assertFalse(deploy_vars['tpu_requested'])
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values')
+    @patch('sky.provision.kubernetes.utils.get_gpu_resource_key')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
     def test_oci_roce_network_tier_with_gpu_environment_variables(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_cloud_config_value,
