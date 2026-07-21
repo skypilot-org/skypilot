@@ -177,8 +177,13 @@ class OktaAutoLogin:
             logger.info(
                 "⏱️  wait_for_dashboard: %.2fs poll_trace(t,href,cur)=%s",
                 time.monotonic() - _t2, _trace)
-            logger.info("✅ Reached authenticated dashboard: %s",
-                        self.driver.current_url)
+            try:
+                _reached_url = self.driver.current_url
+            except Exception:  # pylint: disable=broad-except
+                # current_url can raise / return None mid-navigation (see the
+                # Step 3 comment above); it is only used for logging here.
+                _reached_url = '<unavailable>'
+            logger.info("✅ Reached authenticated dashboard: %s", _reached_url)
 
             # Navigate to the target page directly instead of relying on the
             # in-app /dashboard -> /dashboard/clusters redirect. A full-page
