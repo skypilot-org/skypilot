@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or HF buckets.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or the :ref:`Hugging Face Hub <huggingface-hub-storage>` (repos, datasets, and Buckets).
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -32,6 +32,19 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
+
+        You can also mount a `Hugging Face Hub <https://huggingface.co/docs/huggingface_hub>`_ repo, dataset, or Bucket with an ``hf://`` source:
+
+        .. code-block:: yaml
+
+          # Mount a Hugging Face model repo (read-only) or Bucket (read-write)
+          file_mounts:
+            /base-model:
+              source: hf://Qwen/Qwen2.5-3B
+            /checkpoints:
+              source: hf://buckets/my-org/my-bucket
+
+        See :ref:`Using Hugging Face Hub storage <huggingface-hub-storage>` for details.
 
 
     .. tab-item:: Create a bucket
@@ -356,6 +369,8 @@ without blocking the training loop.
 .. note::
     When using MOUNT_CACHED for checkpoints, ensure your checkpoint frequency allows each checkpoint to be completely flushed to the remote bucket before the next one is written. Otherwise, the local cache will continue to grow and may eventually fill the disk. New files will be automatically synced to the bucket in the background.
 
+
+.. _huggingface-hub-storage:
 
 Using Hugging Face Hub storage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
