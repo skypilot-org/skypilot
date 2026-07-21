@@ -46,8 +46,8 @@ html[data-theme="dark"] #kapa-widget-container button div {
    mode (relative URL resolves next to this file in _static/). The filter is
    a fallback for browsers without `content` support on img — it renders the
    default blue mark white, and is a no-op on the already-white logo. */
-html[data-theme="dark"] #kapa-widget-container img,
-html[data-theme="dark"] .mantine-Modal-root figure img {
+html[data-theme="dark"] #kapa-widget-container img[src*="skypilot-icon"],
+html[data-theme="dark"] .mantine-Modal-root img[src*="skypilot-icon"] {
   content: url("skypilot-icon-dark.svg");
   filter: brightness(0) invert(1);
 }
