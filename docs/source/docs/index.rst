@@ -4,15 +4,15 @@ SkyPilot: Manage all your AI compute
 =========================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg
-  :width: 50%
+  :width: 38%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link, only-dark
+  :class: no-scaled-link, only-dark, hero-logo
 .. image:: /_static/SkyPilot_wide_light.svg
-  :width: 50%
+  :width: 38%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link, only-light
+  :class: no-scaled-link, only-light, hero-logo
 
 .. raw:: html
 
@@ -35,11 +35,11 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
-    :class: only-light
+    :class: only-light, hero-diagram
 .. image:: ../images/skypilot-abstractions-long-2-dark.png
     :width: 90%
     :align: center
-    :class: only-dark
+    :class: only-dark, hero-diagram
 
 .. grid:: 1 1 1 1
     :gutter: 3
