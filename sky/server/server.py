@@ -2922,9 +2922,11 @@ async def _validate_cluster_for_ssh_proxy_ws(
     The websocket is accepted before this call, so a raised HTTPException
     cannot be turned into an HTTP response: Starlette would emit
     ``websocket.http.response.start``, which uvicorn rejects with a
-    RuntimeError that then propagates as an unhandled exception and gets
-    recorded as a 5xx server error (e.g. a client repeatedly reconnecting to
-    a deleted cluster spams the API server 5xx metrics). Instead, close the
+    ``RuntimeError``. On a websocket connection that error is unhandled and
+    surfaces as an ``Exception in ASGI application`` traceback in the server
+    logs, and the connection is dropped abnormally rather than closed
+    cleanly. This is easy to trigger, e.g. a client repeatedly reconnecting
+    to a deleted cluster spams the logs with tracebacks. Instead, close the
     websocket with the error detail as the close reason and return None so
     the caller can bail out cleanly.
     """
@@ -2938,7 +2940,7 @@ async def _validate_cluster_for_ssh_proxy_ws(
         # websocket close frame payload is capped at 125 bytes (RFC 6455) and
         # 2 bytes go to the status code, so truncate the reason to 123 bytes
         # to avoid a serialization error on long details (e.g. long cluster
-        # names) that would itself surface as an unhandled 5xx.
+        # names) that would itself surface as the same unhandled RuntimeError.
         reason = str(e.detail).encode('utf-8')[:123].decode('utf-8', 'ignore')
         await websocket.close(code=1008, reason=reason)
         return None

@@ -2,7 +2,7 @@
 
 These verify that an already-accepted SSH proxy websocket is closed
 gracefully (rather than raising an HTTPException, which would surface as an
-unhandled 5xx) when cluster validation fails.
+unhandled RuntimeError traceback) when cluster validation fails.
 """
 
 from unittest import mock
@@ -37,7 +37,7 @@ async def test_validate_cluster_for_ssh_proxy_ws_returns_handle():
 
 @pytest.mark.asyncio
 async def test_validate_cluster_for_ssh_proxy_ws_closes_on_not_found():
-    """A 404 must close the websocket with 1008, not raise (no 5xx)."""
+    """A 404 must close the websocket with 1008, not raise."""
     websocket = _make_websocket()
     exc = fastapi.HTTPException(status_code=404,
                                 detail='Cluster ghost not found')
@@ -74,7 +74,7 @@ async def test_validate_cluster_for_ssh_proxy_ws_truncates_long_reason():
     """A reason over 123 bytes must be truncated (RFC 6455 close frame limit).
 
     Otherwise the close frame serialization itself raises, re-introducing the
-    unhandled 5xx this helper exists to avoid.
+    unhandled RuntimeError this helper exists to avoid.
     """
     websocket = _make_websocket()
     exc = fastapi.HTTPException(status_code=400, detail='x' * 200)
