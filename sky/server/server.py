@@ -487,7 +487,11 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            token_row = global_user_state.get_service_account_token_by_hash(
+            # Offload the sync DB lookups to a thread so a slow/locked DB
+            # cannot stall the request event loop (this runs on the loop for
+            # every service-account-authenticated request).
+            token_row = await asyncio.to_thread(
+                global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
                 logger.warning(
@@ -503,7 +507,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = global_user_state.get_user(user_id)
+            user_info = await asyncio.to_thread(global_user_state.get_user,
+                                                user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -514,7 +519,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # DB row's token_id (not the JWT's): after rotation the JWT
             # carries a different token_id than the DB row.
             try:
-                global_user_state.update_service_account_token_last_used(
+                await asyncio.to_thread(
+                    global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to update token last used time: {e}')
