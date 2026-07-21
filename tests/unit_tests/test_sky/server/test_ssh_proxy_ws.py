@@ -67,3 +67,22 @@ async def test_validate_cluster_for_ssh_proxy_ws_closes_on_wrong_state():
     assert result is None
     websocket.close.assert_awaited_once_with(
         code=1008, reason='Cluster my-cluster is not running')
+
+
+@pytest.mark.asyncio
+async def test_validate_cluster_for_ssh_proxy_ws_truncates_long_reason():
+    """A reason over 123 bytes must be truncated (RFC 6455 close frame limit).
+
+    Otherwise the close frame serialization itself raises, re-introducing the
+    unhandled 5xx this helper exists to avoid.
+    """
+    websocket = _make_websocket()
+    exc = fastapi.HTTPException(status_code=400, detail='x' * 200)
+    with mock.patch.object(server,
+                           '_get_cluster_and_validate',
+                           new=mock.AsyncMock(side_effect=exc)):
+        result = await server._validate_cluster_for_ssh_proxy_ws(
+            websocket, 'my-cluster', clouds.Slurm)
+
+    assert result is None
+    websocket.close.assert_awaited_once_with(code=1008, reason='x' * 123)

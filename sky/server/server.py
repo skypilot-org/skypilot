@@ -2934,8 +2934,13 @@ async def _validate_cluster_for_ssh_proxy_ws(
         logger.info(f'Closing SSH proxy websocket for cluster '
                     f'{cluster_name}: {e.detail}')
         # 1008 (policy violation) signals the client that the connection
-        # cannot proceed; the reason carries the human-readable detail.
-        await websocket.close(code=1008, reason=str(e.detail))
+        # cannot proceed; the reason carries the human-readable detail. A
+        # websocket close frame payload is capped at 125 bytes (RFC 6455) and
+        # 2 bytes go to the status code, so truncate the reason to 123 bytes
+        # to avoid a serialization error on long details (e.g. long cluster
+        # names) that would itself surface as an unhandled 5xx.
+        reason = str(e.detail).encode('utf-8')[:123].decode('utf-8', 'ignore')
+        await websocket.close(code=1008, reason=reason)
         return None
 
 
