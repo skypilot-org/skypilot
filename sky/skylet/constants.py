@@ -355,9 +355,14 @@ RAY_INSTALLATION_COMMANDS = (
     # mentioned above are resolved.
     f'export PATH=$PATH:{SKY_RUNTIME_DIR}/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
+    # Run `command -v` under `sh -c`: SKY_UV_RUN_CMD ends in `uv run`, which
+    # spawns its first arg as an executable -- `command` is a shell builtin, not
+    # a binary, so bare `uv run command -v ray` fails to spawn on the default
+    # image's uv. `sh` is a real binary uv can spawn; `command -v` then resolves
+    # ray's path as a builtin (and needs no external `which`, unlike before).
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {SKY_UV_RUN_CMD} '
-    f'command -v ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+    f'sh -c "command -v ray" > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 # Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.
