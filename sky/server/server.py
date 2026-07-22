@@ -104,6 +104,7 @@ from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
+from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -2723,7 +2724,10 @@ async def dashboard_config() -> Dict[str, Any]:
     Exposes the optional `external_links` entries: `regex` entries that
     the dashboard matches against streamed logs, and `url` template
     entries that the dashboard resolves against cluster/job metadata to
-    render labeled external links on cluster and job detail pages. Also
+    render labeled external links on cluster and job detail pages. Each
+    entry may carry an optional `scope` (a subset of
+    schemas.DASHBOARD_EXTERNAL_LINK_SCOPES) restricting which pages
+    render the link; entries without a scope appear on all pages. Also
     exposes `local_contexts` (contexts pointing at the API server's own
     cluster); the field is omitted when detection raises, so the
     dashboard falls back to its ['in-cluster'] default instead of
@@ -2731,7 +2735,7 @@ async def dashboard_config() -> Dict[str, Any]:
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
-    sanitized: List[Dict[str, str]] = []
+    sanitized: List[Dict[str, Any]] = []
     if isinstance(external_links, list):
         for entry in external_links:
             if not isinstance(entry, dict):
@@ -2739,13 +2743,26 @@ async def dashboard_config() -> Dict[str, Any]:
             label = entry.get('label')
             if not isinstance(label, str):
                 continue
+            sanitized_entry: Optional[Dict[str, Any]] = None
             regex = entry.get('regex')
-            if isinstance(regex, str):
-                sanitized.append({'label': label, 'regex': regex})
-                continue
             url = entry.get('url')
-            if isinstance(url, str):
-                sanitized.append({'label': label, 'url': url})
+            if isinstance(regex, str):
+                sanitized_entry = {'label': label, 'regex': regex}
+            elif isinstance(url, str):
+                sanitized_entry = {'label': label, 'url': url}
+            if sanitized_entry is None:
+                continue
+            # Optional page scope; only known values are passed through so
+            # the dashboard never sees an unrecognized scope.
+            scope = entry.get('scope')
+            if isinstance(scope, list):
+                valid_scope = [
+                    s for s in scope
+                    if s in schemas.DASHBOARD_EXTERNAL_LINK_SCOPES
+                ]
+                if valid_scope:
+                    sanitized_entry['scope'] = valid_scope
+            sanitized.append(sanitized_entry)
     dashboard_settings: Dict[str, Any] = {'external_links': sanitized}
     try:
         # May probe each uncached context once (blocking k8s API calls);

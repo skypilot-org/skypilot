@@ -268,6 +268,12 @@ Below is the configuration syntax and some example values. See detailed explanat
     skypilot-status-refresh-daemon:
       log_level: DEBUG
 
+  :ref:`dashboard <config-yaml-dashboard>`:
+    :ref:`external_links <config-yaml-dashboard-external-links>`:
+      - label: "Ray Dashboard"
+        url: 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        scope: [cluster]
+
 Fields
 ----------
 
@@ -2883,3 +2889,48 @@ By default, SkyPilot federates from the Prometheus deployed by the SkyPilot Helm
 .. note::
 
     When a kubeconfig context points back at the cluster the API server itself runs in, SkyPilot auto-detects this (by comparing the UID of the ``kube-system`` namespace as seen through the context's credentials with the UID seen through the in-cluster credentials) and skips that context during federation: the central Prometheus (the one deployed next to the API server, e.g. by the SkyPilot Helm chart) already scrapes the local cluster's exporters directly, so federating it again would only duplicate the series. The dashboard queries the local cluster's series by their missing ``cluster`` label instead of a context name. If detection fails (e.g. the context's credentials cannot ``get`` the ``kube-system`` namespace), the context is treated as remote and federated over port-forward — the previous behavior for every context.
+
+.. _config-yaml-dashboard:
+
+``dashboard``
+~~~~~~~~~~~~~
+
+Dashboard configuration (optional). Not applicable to client side config.
+
+.. _config-yaml-dashboard-external-links:
+
+``dashboard.external_links``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Admin-configured links rendered in the "External Links" section of the dashboard's cluster and job detail pages (optional). See :ref:`External Links <external-links>` for a full guide.
+
+Each entry takes a ``label`` (the text shown to users) plus exactly one of:
+
+``regex``
+    A Python-style regex matched against URLs printed in streamed log output. The first matching URL is rendered as a clickable link.
+
+``url``
+    A URL template. ``${variable}`` placeholders (``cluster_name``, ``job_id``, ``job_name``, ``user``, ``workspace``) are substituted with URI-encoded values from the page being viewed. The link is only rendered on pages where all of its variables resolve.
+
+and optionally:
+
+``scope``
+    The pages the link may appear on: ``cluster`` (the cluster detail page) and/or ``jobs`` (job detail pages, both managed jobs and cluster jobs). If omitted, the link appears on every page where it can be produced. See :ref:`external-links-scope`.
+
+.. code-block:: yaml
+
+  dashboard:
+    external_links:
+      # Log-scanned link, shown wherever a matching URL appears in logs.
+      - label: "Grafana"
+        regex: 'https://grafana\.internal\.example\.com/d/[a-z0-9]+.*'
+      # Templated link, restricted to the cluster detail page.
+      - label: "Ray Dashboard"
+        url: 'https://ray.internal.example.com/dashboard/${cluster_name}'
+        scope: [cluster]
+      # Templated link, restricted to job detail pages.
+      - label: "Experiment Platform"
+        url: 'https://exp.internal.example.com/jobs/${job_id}'
+        scope: [jobs]
+
+Malformed entries (invalid regexes, unknown template variables, or unknown scope values) are rejected at config load time.

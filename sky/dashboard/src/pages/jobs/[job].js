@@ -63,8 +63,10 @@ import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
+  LINK_SCOPE_JOBS,
   normalizeUrl,
   useLogLinkExtractor,
+  useScopedLinks,
   useTemplateLinks,
 } from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
@@ -1170,7 +1172,7 @@ function JobDetailsContent({
   // it is handed to a plugin that owns the logs slot — the OSS streamer
   // does not run in that case, so the plugin forwards its own lines.
   const { extractedLinks: logExtractedLinks, scanLines } =
-    useLogLinkExtractor();
+    useLogLinkExtractor(LINK_SCOPE_JOBS);
 
   useEffect(() => {
     scanLines(logs);
@@ -1203,11 +1205,11 @@ function JobDetailsContent({
       jobData?.workspace,
     ]
   );
-  const templateLinks = useTemplateLinks(templateLinkContext);
+  const templateLinks = useTemplateLinks(templateLinkContext, LINK_SCOPE_JOBS);
 
   // Combine template links, database links, and log-extracted links.
   // Use logExtractedLinksFromParent if provided (for info tab), otherwise use local extraction
-  const combinedLinks = useMemo(() => {
+  const mergedLinks = useMemo(() => {
     // Template links are the base; database links take priority if there's
     // a conflict.
     const combined = { ...templateLinks, ...(links || {}) };
@@ -1221,6 +1223,9 @@ function JobDetailsContent({
     }
     return combined;
   }, [templateLinks, links, logExtractedLinks, logExtractedLinksFromParent]);
+  // Scope-filter the merged map so server-computed (DB) links honor entry
+  // scopes too.
+  const combinedLinks = useScopedLinks(mergedLinks, LINK_SCOPE_JOBS);
 
   // Auto-scroll to bottom when logs change or tab changes
   useEffect(() => {

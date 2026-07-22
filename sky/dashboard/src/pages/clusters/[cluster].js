@@ -38,8 +38,10 @@ import {
 import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
   extractLinksFromLogs,
+  LINK_SCOPE_CLUSTER,
   normalizeUrl,
   useCustomUrlPatterns,
+  useScopedLinks,
   useTemplateLinks,
 } from '@/utils/externalLinks';
 import {
@@ -331,14 +333,18 @@ function ActiveTab({
     }),
     [clusterData?.cluster, clusterData?.user, clusterData?.workspace]
   );
-  const templateLinks = useTemplateLinks(templateLinkContext);
+  const templateLinks = useTemplateLinks(
+    templateLinkContext,
+    LINK_SCOPE_CLUSTER
+  );
 
   // Merge order on label collision: template links are the base, persisted
   // DB-backed links override them, and live-scanned links only fill gaps,
   // same merge semantics the managed-job page uses (sky/dashboard/src/pages/
   // jobs/[job].js: combinedLinks). DB links currently come from
-  // instance_links.generate_instance_links() at launch time.
-  const combinedClusterLinks = useMemo(() => {
+  // instance_links.generate_instance_links() at launch time. The merged map
+  // is scope-filtered so server-computed links honor entry scopes too.
+  const mergedClusterLinks = useMemo(() => {
     const combined = { ...templateLinks, ...(clusterData?.links || {}) };
     for (const [label, url] of Object.entries(clusterExtractedLinks)) {
       if (!(label in combined)) {
@@ -347,6 +353,10 @@ function ActiveTab({
     }
     return combined;
   }, [templateLinks, clusterData?.links, clusterExtractedLinks]);
+  const combinedClusterLinks = useScopedLinks(
+    mergedClusterLinks,
+    LINK_SCOPE_CLUSTER
+  );
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
@@ -857,7 +867,7 @@ function ProvisionLogs({ clusterName, numNodes, onLinksExtracted }) {
   // Scan provision logs against the merged built-in plus admin-configured
   // URL patterns. Matches are reported up to the parent so the Details Card
   // can render a "Links" row.
-  const urlPatterns = useCustomUrlPatterns();
+  const urlPatterns = useCustomUrlPatterns(LINK_SCOPE_CLUSTER);
   const extractedLinksRef = useRef({});
   useEffect(() => {
     if (!displayLines || displayLines.length === 0) return;
@@ -989,7 +999,9 @@ function LatestJobLogLinkScanner({
   workspace,
   onLinksExtracted,
 }) {
-  const urlPatterns = useCustomUrlPatterns();
+  // The scanned matches surface on the cluster detail page, so cluster
+  // scope applies even though the scanned lines are a job's logs.
+  const urlPatterns = useCustomUrlPatterns(LINK_SCOPE_CLUSTER);
   const extractedLinksRef = useRef({});
 
   // Pick the latest job by max numeric id. Job ids are monotonically

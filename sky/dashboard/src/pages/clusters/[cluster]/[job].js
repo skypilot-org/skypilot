@@ -23,8 +23,10 @@ import PropTypes from 'prop-types';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import { useCallback } from 'react';
 import {
+  LINK_SCOPE_JOBS,
   normalizeUrl,
   useLogLinkExtractor,
+  useScopedLinks,
   useTemplateLinks,
 } from '@/utils/externalLinks';
 
@@ -136,7 +138,7 @@ export function JobDetailPage() {
 
   // Scan streamed logs against built-in plus admin-configured URL patterns
   // and surface matches in the Details card as an External Links row.
-  const { extractedLinks, scanLines } = useLogLinkExtractor();
+  const { extractedLinks, scanLines } = useLogLinkExtractor(LINK_SCOPE_JOBS);
   useEffect(() => {
     scanLines(displayLines);
   }, [displayLines, scanLines]);
@@ -157,13 +159,15 @@ export function JobDetailPage() {
     }),
     [cluster, job, jobRecord?.job, jobRecord?.user, jobRecord?.workspace]
   );
-  const templateLinks = useTemplateLinks(templateLinkContext);
+  const templateLinks = useTemplateLinks(templateLinkContext, LINK_SCOPE_JOBS);
 
   // Merge order on label collision: template links are the base,
   // server-computed links (extracted from the full log, authoritative)
   // override them, and client-extracted links only fill gaps, so a link
-  // surfaces even if the user never streamed the line it appeared on.
-  const combinedExternalLinks = useMemo(() => {
+  // surfaces even if the user never streamed the line it appeared on. The
+  // merged map is scope-filtered so server-computed links honor entry
+  // scopes too.
+  const mergedExternalLinks = useMemo(() => {
     const combined = { ...templateLinks, ...(jobRecord?.links || {}) };
     for (const [label, url] of Object.entries(extractedLinks)) {
       if (!(label in combined)) {
@@ -172,6 +176,10 @@ export function JobDetailPage() {
     }
     return combined;
   }, [templateLinks, jobRecord, extractedLinks]);
+  const combinedExternalLinks = useScopedLinks(
+    mergedExternalLinks,
+    LINK_SCOPE_JOBS
+  );
 
   const handleRefreshLogs = () => {
     setLogsRefreshToken((token) => token + 1);
