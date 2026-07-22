@@ -487,10 +487,17 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to a thread so a slow/locked DB
-            # cannot stall the request event loop (this runs on the loop for
-            # every service-account-authenticated request).
-            token_row = await asyncio.to_thread(
+            # Offload the sync DB lookups to the bounded request thread executor
+            # so a slow/locked DB cannot stall the request event loop (this runs
+            # on the loop for every service-account-authenticated request).
+            # Using the dedicated executor (not asyncio's shared default thread
+            # pool) avoids saturating that pool under DB slowness; when it is
+            # exhausted it raises ConcurrentWorkerExhaustedError, which the
+            # app-level handler turns into a 503 so the client retries.
+            loop = asyncio.get_running_loop()
+            request_executor = executor.get_request_thread_executor()
+            token_row = await loop.run_in_executor(
+                request_executor,
                 global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
@@ -507,8 +514,9 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = await asyncio.to_thread(global_user_state.get_user,
-                                                user_id)
+            user_info = await loop.run_in_executor(request_executor,
+                                                   global_user_state.get_user,
+                                                   user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -519,7 +527,8 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # DB row's token_id (not the JWT's): after rotation the JWT
             # carries a different token_id than the DB row.
             try:
-                await asyncio.to_thread(
+                await loop.run_in_executor(
+                    request_executor,
                     global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
@@ -532,6 +541,10 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             logger.debug(f'Authenticated service account: {user_id}')
 
+        except exceptions.ConcurrentWorkerExhaustedError:
+            # Request thread executor is full: let the app-level handler return
+            # 503 so the client retries, instead of masking it as a 401 below.
+            raise
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
