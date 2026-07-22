@@ -6,6 +6,7 @@ import { getClusters } from '@/data/connectors/clusters';
 import {
   getManagedJobs,
   getManagedJobsWithClientPagination,
+  MANAGED_JOBS_SUMMARY_ARGS,
 } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
@@ -45,10 +46,15 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
-    // For infra/users/workspaces pages - shared cache entry
+    // For infra/users/workspaces pages - shared cache entry.
+    // Field-trimmed via MANAGED_JOBS_SUMMARY_ARGS: the untrimmed fetch
+    // returns every non-finished job with full inline YAML (tens of MB at
+    // 10k+ jobs), and concurrent reads of that blob through the API
+    // server's serialized requests-DB reader degrade every page's
+    // critical-path /api/get calls.
     getManagedJobsForOtherPages: {
       fn: getManagedJobs,
-      args: [{ allUsers: true, skipFinished: true }],
+      args: [MANAGED_JOBS_SUMMARY_ARGS],
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },

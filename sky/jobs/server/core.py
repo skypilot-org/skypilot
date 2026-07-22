@@ -1254,6 +1254,18 @@ def queue_v2_api(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
         name_match, pool_match, page, limit, statuses, fields, sort_by,
         sort_order, submitted_after, submitted_before)
+    if fields:
+        # The queue records carry every known column (None for the ones the
+        # query didn't select). Callers that pass ``fields`` have declared
+        # exactly what they read, so drop the other keys here; the response
+        # encoder's exclude_unset then leaves them out of the payload
+        # entirely. On wide job tables the key/None overhead otherwise
+        # dominates the response size (~1.4KB per job — tens of MB at tens
+        # of thousands of jobs). ``job_id``, ``task_id`` and ``status`` are
+        # always kept: the server force-selects them (see _update_fields)
+        # and clients key records on them.
+        keep = set(fields) | {'job_id', 'task_id', 'status'}
+        jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 

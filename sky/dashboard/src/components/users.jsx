@@ -27,7 +27,10 @@ import {
   isServiceAccountTokensPaginationAvailable,
 } from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  MANAGED_JOBS_SUMMARY_ARGS,
+} from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
@@ -198,10 +201,8 @@ export const getJobGpuCount = (job) => {
 const fetchClustersAndJobs = async () => {
   const [clustersResult, jobsResult] = await Promise.allSettled([
     dashboardCache.get(getClusters),
-    // Use shared cache key (no field filtering) - preloader uses same args
-    dashboardCache.get(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]),
+    // Shared cache key — must match the preloader's args exactly
+    dashboardCache.get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]),
   ]);
 
   const clustersData =
@@ -549,9 +550,7 @@ export function Users() {
     trackUserAction('refresh');
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]);
+    dashboardCache.invalidate(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();

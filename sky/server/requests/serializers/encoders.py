@@ -174,7 +174,13 @@ def encode_jobs_queue_v2(
     else:
         jobs = jobs_or_tuple
         total = None
-    jobs_dict = [job.model_dump(by_alias=True) for job in jobs]
+    # exclude_unset: fields the server never populated (because the request's
+    # ``fields`` filter excluded them) are omitted from the payload instead of
+    # being emitted as explicit nulls. Requests without a ``fields`` filter
+    # populate every field, so their responses are unchanged.
+    jobs_dict = [
+        job.model_dump(by_alias=True, exclude_unset=True) for job in jobs
+    ]
     for job in jobs_dict:
         job['status'] = job['status'].value
     if total is None:

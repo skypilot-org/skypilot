@@ -116,6 +116,41 @@ export function computeJobGroupStatus(tasks) {
   return 'SUCCEEDED';
 }
 
+/**
+ * Shared fetch args for the cross-page managed-jobs summary cache entry
+ * (the `getManagedJobsForOtherPages` preload key, also read directly by the
+ * infra/users/workspaces pages).
+ *
+ * Every reader and the preloader MUST use this exact object so the cache key
+ * (function name + JSON.stringify(args), see lib/cache.js) stays shared.
+ *
+ * `fields` is the union of what those consumers actually read (plus the
+ * request fields the connector transform derives them from: `infra` and
+ * `resources_str_full` come from cloud/region/cluster_resources*). Without
+ * the trim, this fetch returns every non-finished job with its full inline
+ * YAML — tens of MB at 10k+ pending jobs — and each visit both writes that
+ * blob into the API server's requests DB and reads it back out through a
+ * per-process serialized reader, which is measurably what makes the
+ * dashboard's critical-path /api/get calls (and hence perceived page load)
+ * slow under concurrent use.
+ */
+export const MANAGED_JOBS_SUMMARY_ARGS = Object.freeze({
+  allUsers: true,
+  skipFinished: true,
+  fields: Object.freeze([
+    'job_id',
+    'job_name',
+    'status',
+    'user_hash',
+    'workspace',
+    'cloud',
+    'region',
+    'accelerators',
+    'cluster_resources',
+    'cluster_resources_full',
+  ]),
+});
+
 export async function getManagedJobs(options = {}) {
   try {
     const {
