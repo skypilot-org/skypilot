@@ -1342,8 +1342,18 @@ class PostgresRequestBackend(request_storage.RequestBackend):
                 f'requires {skylet_constants.ENV_VAR_DB_CONNECTION_URI} to be '
                 'set.')
         self._engine = db_utils.get_engine(None)
-        self._async_engine = db_utils.get_engine(None, async_engine=True)
         self._create_table()
+
+    @property
+    def _async_engine(self):
+        # Resolved lazily (never cached on the instance) so it is fetched from
+        # inside the running event loop. When async pooling is enabled
+        # (SKYPILOT_API_DB_ASYNC_POOL_SIZE > 0), db_utils caches one pooled
+        # engine per event loop; caching it once in __init__ would bind a
+        # single pool to whatever loop (or no loop) existed at construction
+        # time and leak connections across loops. The lookup is a cheap cached
+        # dict hit, so per-call resolution is fine.
+        return db_utils.get_engine(None, async_engine=True)
 
     @staticmethod
     def _lock_key(request_id: str) -> int:
@@ -1655,16 +1665,25 @@ class PostgresRequestBackend(request_storage.RequestBackend):
     @asyncio_utils.shield
     async def update_status_async(self, request_id: str,
                                   status: RequestStatus) -> None:
-        async with self.update_request_async(request_id) as request:
-            if request is not None:
-                request.status = status
+        # Blind single-column write: no read-modify-write, so skip the advisory
+        # lock + SELECT that update_request_async performs. One statement / one
+        # round-trip instead of BEGIN + advisory lock + SELECT + UPDATE +
+        # COMMIT. Setting status is idempotent and does not depend on the prior
+        # row, so this is safe across replicas.
+        where, params = _request_id_where(request_id)
+        await self._execute_async(
+            f'UPDATE {REQUEST_TABLE} SET status=? WHERE {where}',
+            (status.value, *params))
 
     @asyncio_utils.shield
     async def update_status_msg_async(self, request_id: str,
                                       status_msg: str) -> None:
-        async with self.update_request_async(request_id) as request:
-            if request is not None:
-                request.status_msg = status_msg
+        # Blind single-column write; see update_status_async for why the
+        # advisory lock + SELECT round-trips are unnecessary here.
+        where, params = _request_id_where(request_id)
+        await self._execute_async(
+            f'UPDATE {REQUEST_TABLE} SET {COL_STATUS_MSG}=? WHERE {where}',
+            (status_msg, *params))
 
     def kill_requests(self,
                       request_ids: Optional[List[str]] = None,
