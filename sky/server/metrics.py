@@ -340,17 +340,23 @@ class ManagedJobsCollector:
         # pylint: disable=import-outside-toplevel
         from sky.jobs import constants as managed_job_constants
         from sky.jobs import state as managed_job_state
-        self._cached_rows = (
-            managed_job_state.get_status_counts_by_workspace_user_cloud())
-        self._cached_recovery_rows = (
+
+        # Query into locals first, then assign: a failure mid-refresh
+        # (collect() logs it and serves the cache) must not leave a
+        # mixed-age cache where some metrics updated and others didn't.
+        rows = (managed_job_state.get_status_counts_by_workspace_user_cloud())
+        recovery_rows = (
             managed_job_state.get_recovery_event_counts_by_source_workspace())
-        self._cached_episode_rows = (
+        episode_rows = (
             managed_job_state.get_active_emergency_recovery_episodes(
                 now=time.time(),
                 window_seconds=managed_job_constants.
                 EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS,
                 limit=_EMERGENCY_EPISODES_MAX_SERIES,
             ))
+        self._cached_rows = rows
+        self._cached_recovery_rows = recovery_rows
+        self._cached_episode_rows = episode_rows
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
