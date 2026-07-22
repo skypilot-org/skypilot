@@ -118,9 +118,41 @@ const SkeletonBadge = () => (
   </span>
 );
 
-// Clean segmented utilization bar (not-ready / used / free) with no text baked
-// inside the segments — colors only, detail on hover. 14px tall, gray-100
-// track, gray-400 / yellow-500 / green-700 segments.
+// Single source of truth for the GPU utilization states, their labels, and
+// their segment colors. Both the bar and the legend derive from this so the
+// two can never drift. Order = left-to-right fill order in the bar.
+//
+// allocated = green-600 (#16a34a), not ready = amber-600 (#d97706, warmer
+// tone for the degraded state), free = gray-300 (#d1d5db) — a muted gray that
+// stays legible in this thin, label-less bar.
+const GPU_UTILIZATION_STATES = [
+  { key: 'used', label: 'allocated', colorClass: 'bg-green-600' },
+  { key: 'notReady', label: 'not ready', colorClass: 'bg-amber-600' },
+  { key: 'free', label: 'free', colorClass: 'bg-gray-300' },
+];
+
+// Color key for the utilization bar, rendered on the section header row:
+// a "Legend:" prefix, square swatches, and capitalized labels.
+const UtilizationLegend = ({ className = '' }) => (
+  <div className={`flex items-center gap-3 ${className}`.trim()}>
+    <span className="text-xs font-semibold text-gray-700">Legend:</span>
+    {GPU_UTILIZATION_STATES.map((s) => (
+      <span
+        key={s.key}
+        className="flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap"
+      >
+        <span
+          className={`inline-block w-3 h-3 rounded-sm border border-gray-300 ${s.colorClass}`}
+        />
+        {s.label.charAt(0).toUpperCase() + s.label.slice(1)}
+      </span>
+    ))}
+  </div>
+);
+
+// Clean segmented utilization bar (used / not-ready / free) with no text baked
+// inside the segments — colors only, detail on hover. 14px tall, gray track,
+// colors from GPU_UTILIZATION_STATES.
 const CleanUtilizationBar = ({
   gpu,
   className = '',
@@ -131,6 +163,7 @@ const CleanUtilizationBar = ({
   const notReady = gpu?.gpu_not_ready || 0;
   const free = gpu?.gpu_free || 0;
   const used = Math.max(0, total - free - notReady);
+  const valueByKey = { used, notReady, free };
   const pct = (v) => (total > 0 ? (v / total) * 100 : 0);
   // Each segment carries its own tooltip so hover reports exactly the
   // segment under the cursor ("552 used"), not a whole-bar summary. Dark
@@ -156,18 +189,18 @@ const CleanUtilizationBar = ({
       className={`bg-gray-200/70 flex overflow-hidden ${heightClass} ${roundedClass} ${className}`.trim()}
     >
       {/* Occupied capacity reads from the left; free is always rightmost. */}
-      {segment(used, 'used', 'bg-yellow-500')}
-      {segment(notReady, 'not ready', 'bg-gray-400')}
-      {segment(free, 'free', 'bg-green-700')}
+      {GPU_UTILIZATION_STATES.map((s) => {
+        const el = segment(valueByKey[s.key], s.label, s.colorClass);
+        return el ? React.cloneElement(el, { key: s.key }) : null;
+      })}
     </div>
   );
 };
 
 // Aggregated per-GPU-type summary rendered above the unified infrastructure
-// table: plain stat cards (type name + free/total count), deliberately with
-// NO utilization bar — the table below already carries per-context bars, and
-// a second layer of graphs reads as noise. Hover a card for the used /
-// not-ready breakdown. Sorted by capacity so the biggest fleets read first.
+// table: one compact card per GPU type (type name + free/total count + a slim
+// segmented utilization bar). Hover the bar for the allocated / not-ready /
+// free breakdown. Sorted by capacity so the biggest fleets read first.
 const GpuTypeSummaryStrip = ({ gpus }) => {
   if (!gpus || gpus.length === 0) {
     return null;
@@ -190,7 +223,7 @@ const GpuTypeSummaryStrip = ({ gpus }) => {
                 <span className="text-xs text-gray-400 whitespace-nowrap tabular-nums">
                   <span
                     className={`font-semibold ${
-                      free > 0 ? 'text-green-700' : 'text-gray-500'
+                      free > 0 ? 'text-gray-900' : 'text-gray-500'
                     }`}
                   >
                     {free.toLocaleString()}
@@ -373,7 +406,14 @@ export function InfrastructureSection({
                 {safeContexts.length === 1 ? contextNoun : `${contextNoun}s`}
               </span>
             </div>
-            {actionButton}
+            <div className="flex items-center gap-4">
+              {actionButton}
+              {/* Color key for the Utilization bars, pinned to the right end;
+                  only meaningful when the table has GPU rows to explain. */}
+              {gpus && gpus.length > 0 && (
+                <UtilizationLegend className="hidden sm:flex" />
+              )}
+            </div>
           </div>
           <GpuTypeSummaryStrip gpus={gpus} />
           {/* Desktop: unified full-width table. No inner vertical scroll —
@@ -387,32 +427,34 @@ export function InfrastructureSection({
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 text-left font-medium text-gray-600">
+                  {/* Fixed shares for the two anchor columns (Name 25%,
+                      Utilization 20%); the compact data columns share the
+                      rest. */}
+                  <th className="p-3 text-left font-medium text-gray-600 w-[25%]">
                     Name
                   </th>
-                  <th className="p-3 text-left font-medium text-gray-600">
+                  <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                     Nodes
                   </th>
                   {!isSlurm && (
-                    <th className="p-3 text-left font-medium text-gray-600">
+                    <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                       CPU
                     </th>
                   )}
                   {!isSlurm && (
-                    <th className="p-3 text-left font-medium text-gray-600">
+                    <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                       Memory
                     </th>
                   )}
-                  <th className="p-3 text-left font-medium text-gray-600">
+                  <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                     GPU Type
                   </th>
-                  <th className="p-3 text-left font-medium text-gray-600">
+                  <th className="p-3 text-left font-medium text-gray-600 whitespace-nowrap">
                     GPUs
                   </th>
-                  <th
-                    className="p-3 text-left font-medium text-gray-600"
-                    style={{ minWidth: '220px' }}
-                  >
+                  {/* Fixed 20% share: the bar reads at a consistent scale and
+                      the remaining columns arrange around it. */}
+                  <th className="p-3 text-left font-medium text-gray-600 w-[20%] min-w-[160px]">
                     Utilization
                   </th>
                   {/* Actions column fully collapses when no plugin fills it,
@@ -489,19 +531,15 @@ export function InfrastructureSection({
                             </span>
                           </NonCapitalizedTooltip>
                         </td>
-                        <td className="p-3 text-gray-700 tabular-nums">
-                          {typeEntry.gpu_total.toLocaleString()}
+                        <td className="p-3 text-gray-700 tabular-nums whitespace-nowrap">
+                          {typeEntry.gpu_free.toLocaleString()} of{' '}
+                          {typeEntry.gpu_total.toLocaleString()} free
                         </td>
                         <td className="p-3">
-                          <div className="flex items-center gap-2">
-                            <CleanUtilizationBar
-                              gpu={typeEntry}
-                              className="flex-1 min-w-[120px]"
-                            />
-                            <span className="text-xs text-gray-500 whitespace-nowrap w-16 text-right tabular-nums">
-                              {typeEntry.gpu_free.toLocaleString()} free
-                            </span>
-                          </div>
+                          <CleanUtilizationBar
+                            gpu={typeEntry}
+                            className="w-full min-w-[140px]"
+                          />
                         </td>
                       </>
                     );
@@ -570,14 +608,14 @@ export function InfrastructureSection({
                           )}
                         </td>
                         <td
-                          className={`${sharedCellClass} text-gray-700 tabular-nums`}
+                          className={`${sharedCellClass} text-gray-700 tabular-nums whitespace-nowrap`}
                           rowSpan={subRowCount}
                         >
                           {!hasNodeData ? <SkeletonBadge /> : nodes.length}
                         </td>
                         {!isSlurm && (
                           <td
-                            className={`${sharedCellClass} text-gray-700 tabular-nums`}
+                            className={`${sharedCellClass} text-gray-700 tabular-nums whitespace-nowrap`}
                             rowSpan={subRowCount}
                           >
                             {!hasNodeData ? (
@@ -589,7 +627,7 @@ export function InfrastructureSection({
                         )}
                         {!isSlurm && (
                           <td
-                            className={`${sharedCellClass} text-gray-700 tabular-nums`}
+                            className={`${sharedCellClass} text-gray-700 tabular-nums whitespace-nowrap`}
                             rowSpan={subRowCount}
                           >
                             {!hasNodeData ? (
@@ -931,8 +969,8 @@ export function ContextDetails({
                           </span>
                         </div>
                         <span className="text-xs font-medium">
-                          {gpu.gpu_free.toLocaleString()} of{' '}
-                          {gpu.gpu_total.toLocaleString()} free
+                          {(gpu.gpu_free ?? 0).toLocaleString()} of{' '}
+                          {(gpu.gpu_total ?? 0).toLocaleString()} free
                         </span>
                       </div>
                       <div className="w-full">
