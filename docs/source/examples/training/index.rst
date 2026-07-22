@@ -20,6 +20,7 @@ Training
    OpenRLHF <openrlhf.md>
    PyTorch Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
    Ray <ray.md>
+   slime (RL post-training) <slime.md>
    TorchTitan <torchtitan.md>
    Training on TPUs <tpu.md>
    Unsloth <unsloth.md>
