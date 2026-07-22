@@ -1,7 +1,6 @@
 # A minimal example.
 #
-# Runs a task that simply prints a message. Kept dependency-free (no conda/pip)
-# so it works on any image, including bare base images.
+# Runs a task that simply prints a message.
 #
 # Usage:
 #   sky launch -c min minimal.yaml
