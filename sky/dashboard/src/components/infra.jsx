@@ -132,10 +132,9 @@ const GPU_UTILIZATION_STATES = [
 ];
 
 // Color key for the utilization bar, rendered on the section header row:
-// a "Legend:" prefix, square swatches, and capitalized labels.
+// square swatches with capitalized labels.
 const UtilizationLegend = ({ className = '' }) => (
   <div className={`flex items-center gap-3 ${className}`.trim()}>
-    <span className="text-xs font-semibold text-gray-700">Legend:</span>
     {GPU_UTILIZATION_STATES.map((s) => (
       <span
         key={s.key}
@@ -220,7 +219,7 @@ const GpuTypeSummaryStrip = ({ gpus }) => {
                 <span className="text-[13px] font-medium text-gray-800 truncate">
                   {canonicalizeGpuName(gpu.gpu_name)}
                 </span>
-                <span className="text-xs text-gray-400 whitespace-nowrap tabular-nums">
+                <span className="text-xs text-gray-600 whitespace-nowrap tabular-nums">
                   <span
                     className={`font-semibold ${
                       free > 0 ? 'text-gray-900' : 'text-gray-500'
@@ -526,13 +525,22 @@ export function InfrastructureSection({
                             }
                             className="text-sm text-muted-foreground"
                           >
-                            <span className="font-mono text-xs text-gray-700 cursor-default">
+                            <span className="text-gray-500 cursor-default">
                               {typeEntry.gpu_name}
                             </span>
                           </NonCapitalizedTooltip>
                         </td>
-                        <td className="p-3 text-gray-700 tabular-nums whitespace-nowrap">
-                          {typeEntry.gpu_free.toLocaleString()} of{' '}
+                        <td className="p-3 text-gray-600 tabular-nums whitespace-nowrap">
+                          <span
+                            className={`font-semibold ${
+                              typeEntry.gpu_free > 0
+                                ? 'text-gray-900'
+                                : 'text-gray-500'
+                            }`}
+                          >
+                            {typeEntry.gpu_free.toLocaleString()}
+                          </span>
+                          {' of '}
                           {typeEntry.gpu_total.toLocaleString()} free
                         </td>
                         <td className="p-3">
@@ -556,6 +564,16 @@ export function InfrastructureSection({
                       >
                         <td className={sharedCellClass} rowSpan={subRowCount}>
                           <div className="flex items-center gap-2 flex-wrap">
+                            {/* Status dot, when a plugin supplies per-context
+                                status via this namePrefix slot. */}
+                            <PluginSlot
+                              name="infra.row.namePrefix"
+                              context={{
+                                id: rowId,
+                                kind: rowKind,
+                                status: statusByKey?.get(`${rowKind}:${rowId}`),
+                              }}
+                            />
                             <NonCapitalizedTooltip
                               content={displayName}
                               className="text-sm text-muted-foreground"
@@ -569,20 +587,6 @@ export function InfrastructureSection({
                                   : displayName}
                               </span>
                             </NonCapitalizedTooltip>
-                            {isClusterDataLoading ? (
-                              <SkeletonBadge />
-                            ) : (
-                              <span className="text-sm text-gray-500 whitespace-nowrap">
-                                {stats.clusters} clusters
-                              </span>
-                            )}
-                            {isJobsDataLoading ? (
-                              <SkeletonBadge />
-                            ) : (
-                              <span className="text-sm text-gray-500 whitespace-nowrap">
-                                {jobsData[contextStatsKey]?.jobs || 0} jobs
-                              </span>
-                            )}
                             {/* allowed_nodes filter badge (#10092): lived
                                 beside the GPU count in the old two-table
                                 layout; the name cell is its home in the
