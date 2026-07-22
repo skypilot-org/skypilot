@@ -327,6 +327,10 @@ export async function getManagedJobs(options = {}) {
         full_infra: full_infra,
         recoveries: job.recovery_count,
         details: job.details || job.failure_reason,
+        // Mirror the cluster INIT tooltip: surface the pending reason on
+        // the status badge so users can see why a job is stuck in PENDING
+        // without opening the job details view.
+        statusTooltip: job.status === 'PENDING' ? job.details || null : null,
         user: job.user_name,
         user_hash: job.user_hash,
         submitted_at: job.submitted_at

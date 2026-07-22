@@ -482,7 +482,10 @@ function JobDetails() {
                                 </Link>
                               </TableCell>
                               <TableCell>
-                                <StatusBadge status={task.status} />
+                                <StatusBadge
+                                  status={task.status}
+                                  statusTooltip={task.statusTooltip}
+                                />
                               </TableCell>
                               <TableCell>
                                 {formatDuration(task.job_duration)}
@@ -1392,7 +1395,16 @@ function JobDetailsContent({
               <PluginSlot
                 name="jobs.detail.status.badge"
                 context={jobData}
-                fallback={<StatusBadge status={computedStatus} />}
+                fallback={
+                  <StatusBadge
+                    status={computedStatus}
+                    statusTooltip={
+                      computedStatus === 'PENDING'
+                        ? jobData.statusTooltip
+                        : null
+                    }
+                  />
+                }
               />
             );
           })()}
