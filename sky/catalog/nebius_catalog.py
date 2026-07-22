@@ -3,6 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Nebius.
 """
+import dataclasses
 import os
 import threading
 import time
@@ -25,42 +26,101 @@ if typing.TYPE_CHECKING:
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-Nebius-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
+_PERSONAL_PRICING_RETRY_SECONDS = 5 * 60
 
 _vms_file = 'nebius/vms.csv'
 _vms_tenant_file = 'nebius/vms_{}.csv'
 
 _static_df = common.read_catalog(_vms_file,
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-_personal_df = {}
 
-_apply_personal_pricing_lock = threading.Lock()
+
+@dataclasses.dataclass(frozen=True)
+class _PersonalCatalogEntry:
+    df: Optional[pd.DataFrame]
+    expires_at: float
+    retry_after: float = 0.0
+
+
+_personal_catalogs: Dict[str, _PersonalCatalogEntry] = {}
+_personal_catalog_locks: Dict[str, typing.Any] = {}
+_personal_catalog_locks_guard = threading.Lock()
 logger = sky_logging.init_logger(__name__)
 
 
-# pylint: disable=import-outside-toplevel, broad-except
-def _get_df() -> 'pd.DataFrame':
+def _get_cached_df(
+        entry: Optional[_PersonalCatalogEntry],
+        now: float) -> Optional[Union[pd.DataFrame, common.LazyDataFrame]]:
+    if entry is None:
+        return None
+    if entry.df is not None and (now < entry.expires_at or
+                                 now < entry.retry_after):
+        return entry.df
+    if now < entry.retry_after:
+        return _static_df
+    return None
+
+
+def _get_personal_catalog_lock(tenant_id: str):
+    # Only lock the creation of per-tenant locks. Catalog fetches for different
+    # tenants should not block each other.
+    with _personal_catalog_locks_guard:
+        return _personal_catalog_locks.setdefault(tenant_id, threading.Lock())
+
+
+# pylint: disable=import-outside-toplevel
+def _get_df() -> Union[pd.DataFrame, common.LazyDataFrame]:
     if not skypilot_config.get_nested(
         ('nebius', 'use_personal_pricing'), default_value=True):
         return _static_df
 
     try:
-
         from sky.adaptors import nebius
         tenant_id = nebius.get_tenant_id()
-
-        with _apply_personal_pricing_lock:
-            if not tenant_id in _personal_df:
-                user_catalog = _fetch_user_catalog()
-                _personal_df[tenant_id] = pd.concat([
-                    _static_df, user_catalog
-                ]).drop_duplicates(subset=['InstanceType', 'Region'],
-                                   keep='last')
-
-        return _personal_df[tenant_id]
-    except Exception as e:
-        logger.warning('Failed to fetch personal pricing. '
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to get Nebius tenant ID. '
                        f'{common_utils.format_exception(e)}')
-    return _static_df
+        return _static_df
+
+    if tenant_id is None:
+        return _static_df
+
+    now = time.time()
+    entry = _personal_catalogs.get(tenant_id)
+    cached_df = _get_cached_df(entry, now)
+    if cached_df is not None:
+        return cached_df
+
+    with _get_personal_catalog_lock(tenant_id):
+        # Another request may have populated the cache while this request was
+        # waiting for the per-tenant lock.
+        now = time.time()
+        entry = _personal_catalogs.get(tenant_id)
+        cached_df = _get_cached_df(entry, now)
+        if cached_df is not None:
+            return cached_df
+
+        try:
+            user_catalog = _fetch_user_catalog()
+            personal_df = pd.concat([_static_df, user_catalog]).drop_duplicates(
+                subset=['InstanceType', 'Region'], keep='last')
+
+            catalog_path = common.get_catalog_path(
+                _vms_tenant_file.format(tenant_id))
+            expires_at = (os.path.getmtime(catalog_path) +
+                          _PULL_FREQUENCY_HOURS * 3600)
+            _personal_catalogs[tenant_id] = _PersonalCatalogEntry(
+                df=personal_df, expires_at=expires_at)
+            return personal_df
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to fetch personal pricing. '
+                           f'{common_utils.format_exception(e)}')
+            stale_df = entry.df if entry is not None else None
+            _personal_catalogs[tenant_id] = _PersonalCatalogEntry(
+                df=stale_df,
+                expires_at=0,
+                retry_after=time.time() + _PERSONAL_PRICING_RETRY_SECONDS)
+            return stale_df if stale_df is not None else _static_df
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -155,7 +215,7 @@ def _get_region_projects() -> Dict[str, str]:
 
 
 # pylint: disable=import-outside-toplevel
-def _fetch_user_catalog() -> pd.DataFrame:
+def _fetch_user_catalog() -> Union[pd.DataFrame, common.LazyDataFrame]:
     from sky.adaptors import nebius
     from sky.adaptors.nebius import billing
     from sky.catalog.data_fetchers import fetch_nebius
