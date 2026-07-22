@@ -77,7 +77,18 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Page-specific function requirements
   pages: {
     clusters: ['getClusters', 'getWorkspaces'],
-    jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
+    // getClusters is intentionally NOT a foreground requirement here. Its
+    // only /jobs consumer is the controller-stopped/launching banner
+    // (components/jobs.jsx), which runs only when the queue endpoint reports
+    // the controller unreachable — and fetchData already skips /status when
+    // it is reachable. Foreground-preloading it made every /jobs load await a
+    // /status -> /api/get round trip (and gate pagination re-fetches via
+    // preloadingComplete) to warm data a healthy page never reads. It is
+    // still warmed by _backgroundPreloadOtherPages (which always adds
+    // getClusters off the infra page), so the banner and Clusters-page
+    // navigation stay fast; a cold banner just falls back to an on-demand
+    // fetch.
+    jobs: ['getManagedJobs', 'getWorkspaces', 'getUsers'],
     infra: [
       // Empty - infra page uses progressive loading via fetchData()
       // All infra functions are background-preloaded from other pages
