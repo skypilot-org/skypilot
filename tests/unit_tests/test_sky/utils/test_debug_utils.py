@@ -1,4 +1,5 @@
 """Tests for sky.utils.debug_utils module."""
+import concurrent.futures
 import contextlib
 import datetime
 import json
@@ -55,6 +56,7 @@ def _make_context(
         request_ids_via_job=request_ids_via_job or set(),
         request_ids_via_cluster=request_ids_via_cluster or set(),
         errors=errors if errors is not None else [],
+        timed_out_ops=[],
     )
 
 
@@ -4292,6 +4294,81 @@ class TestDumpKubeContextsInfo:
 # ---------------------------------------------------------------------------
 # Tests for the best-effort overall deadline (FIX 4)
 # ---------------------------------------------------------------------------
+class TestRunWithDeadline:
+    """_run_with_deadline: success / timeout / orphan tracking / no leak."""
+
+    def test_success_returns_result(self):
+        ok, result = debug_utils._run_with_deadline(lambda: 42,
+                                                    timeout=5,
+                                                    component='c',
+                                                    resource='r')
+        assert ok is True
+        assert result == 42
+
+    def test_timeout_records_error_and_orphan(self):
+        """On timeout: (False, None), a partial-failure error, and the still-
+        running op registered in orphans (worker is not killed)."""
+        release = threading.Event()
+        errors: List[Dict[str, Any]] = []
+        orphans: List[Dict[str, Any]] = []
+        try:
+            ok, result = debug_utils._run_with_deadline(release.wait,
+                                                        timeout=0.05,
+                                                        component='comp',
+                                                        resource='res',
+                                                        errors=errors,
+                                                        orphans=orphans)
+            assert ok is False
+            assert result is None
+            assert len(errors) == 1
+            assert errors[0]['component'] == 'comp'
+            assert len(orphans) == 1
+            assert orphans[0]['resource'] == 'res'
+            # The worker thread is orphaned, still running (not killed).
+            assert not orphans[0]['future'].done()
+        finally:
+            release.set()  # let the orphaned worker exit promptly
+
+    def test_non_timeout_exception_propagates(self):
+        """A non-timeout error from fn propagates (each call site keeps its own
+        handling); the finally still shuts the executor down."""
+
+        def boom():
+            raise ValueError('boom')
+
+        with pytest.raises(ValueError, match='boom'):
+            debug_utils._run_with_deadline(boom,
+                                           timeout=5,
+                                           component='c',
+                                           resource='r')
+
+    def test_log_stragglers_warns_running_skips_done(self, monkeypatch):
+        running: concurrent.futures.Future = concurrent.futures.Future()
+        done: concurrent.futures.Future = concurrent.futures.Future()
+        done.set_result(None)
+        orphans = [
+            {
+                'component': 'still',
+                'resource': 'running',
+                'future': running,
+                'started': time.monotonic() - 2,
+            },
+            {
+                'component': 'already',
+                'resource': 'done',
+                'future': done,
+                'started': time.monotonic() - 2,
+            },
+        ]
+        calls = []
+        monkeypatch.setattr(debug_utils.logger, 'warning',
+                            lambda *a, **k: calls.append(a))
+        debug_utils._log_timed_out_stragglers(orphans)
+        # Exactly one warning, for the still-running op; the done one is skipped.
+        assert len(calls) == 1
+        assert 'still' in calls[0] and 'running' in calls[0]
+
+
 class TestOverallDeadlineHelpers:
     """Unit tests for the small deadline/budget helpers."""
 

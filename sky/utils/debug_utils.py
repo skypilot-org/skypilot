@@ -14,7 +14,8 @@ import re
 import shutil
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypedDict
+from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, TypedDict,
+                    TypeVar)
 import zipfile
 
 import sky
@@ -94,52 +95,91 @@ def _bounded_timeout(fixed: float, deadline: Optional[float]) -> float:
     return min(fixed, remaining)
 
 
+T = TypeVar('T')
+
+
 def _run_with_deadline(
-    fn: Callable[[], Any],
+    fn: Callable[[], T],
     timeout: Optional[float],
     *,
     component: str,
     resource: str,
     errors: Optional[List[Dict[str, str]]] = None,
-) -> Tuple[bool, Any]:
+    orphans: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[bool, Optional[T]]:
     """Run ``fn()`` in a worker thread bounded by a wall-clock timeout.
 
     Returns ``(True, result)`` if ``fn()`` completes within ``timeout``. On
-    timeout the worker is orphaned (``shutdown(wait=False)`` -- see below), a
-    partial-failure record is appended to ``errors`` (mirroring the shared
-    error-record shape used across the dump), and ``(False, None)`` is
-    returned. Any OTHER exception raised by ``fn()`` propagates to the caller,
-    so each call site keeps its own existing ``except`` handling for the
-    non-timeout failure modes it already handles.
+    timeout a partial-failure record is appended to ``errors`` (mirroring the
+    shared error-record shape) and ``(False, None)`` is returned -- but note
+    the worker is NOT stopped: Python can't kill a thread, and
+    ``future.result(timeout=)`` only stops us *waiting*, so ``fn`` keeps
+    running in the background until it returns on its own. The abandoned op is
+    appended to ``orphans`` (the per-dump list threaded alongside ``errors``)
+    so _log_timed_out_stragglers can report at dump end which ones are still
+    running (see there for why we don't reap). Any OTHER exception raised by
+    ``fn()`` propagates to the caller, so each call site keeps its own existing
+    non-timeout handling.
 
-    This is the same executor-deadline pattern the sky-check probe uses: we
-    deliberately do NOT use the executor as a context manager -- its
-    ``__exit__`` calls ``shutdown(wait=True)``, which would re-block on the
-    still-running worker and defeat the timeout. On timeout we shut it down
-    with ``wait=False`` and let the orphaned worker finish in the background
-    (the bounded operations here are read-only, so a lingering thread is
-    harmless for this one-shot dump).
+    Same executor-deadline pattern as the sky-check probe. We shut the executor
+    down with ``wait=False`` in a ``finally`` -- covering success, timeout, and
+    any other exception, so the executor object is never leaked -- while never
+    re-blocking on a still-running worker (which a ``with`` / the default
+    ``shutdown(wait=True)`` would do on timeout, defeating the whole point).
     """
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    started = time.monotonic()
     try:
         future = executor.submit(fn)
-        result = future.result(timeout=timeout)
+        try:
+            return True, future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            msg = (f'{component}/{resource} timed out after {timeout}s; '
+                   'recorded as a partial failure and skipped so the rest of '
+                   'the dump still completes.')
+            logger.warning(msg)
+            if errors is not None:
+                errors.append({
+                    'component': component,
+                    'resource': resource,
+                    'error': msg,
+                    'traceback': _full_traceback(),
+                })
+            if orphans is not None:
+                orphans.append({
+                    'component': component,
+                    'resource': resource,
+                    'future': future,
+                    'started': started,
+                })
+            return False, None
+    finally:
         executor.shutdown(wait=False)
-        return True, result
-    except concurrent.futures.TimeoutError:
-        executor.shutdown(wait=False)
-        msg = (f'{component}/{resource} timed out after {timeout}s; recorded '
-               'as a partial failure and skipped so the rest of the dump '
-               'still completes.')
-        logger.warning(msg)
-        if errors is not None:
-            errors.append({
-                'component': component,
-                'resource': resource,
-                'error': msg,
-                'traceback': _full_traceback(),
-            })
-        return False, None
+
+
+def _log_timed_out_stragglers(orphans: List[Dict[str, Any]]) -> None:
+    """Log any timed-out op in ``orphans`` whose worker thread is STILL running
+    at dump end.
+
+    Backstop visibility: Python can't kill the thread (see _run_with_deadline),
+    so we don't actively reap it here -- it exits when its underlying call
+    (typically a command-runner subprocess) returns. This surfaces what leaked
+    and for how long, so we can decide whether it's worth escalating (targeted
+    timeouts / subprocess isolation). Best-effort: logs and swallows its own
+    errors so it can never break the dump's final steps.
+    """
+    try:
+        now = time.monotonic()
+        for op in orphans:
+            if op['future'].done():
+                continue
+            logger.warning(
+                '[debug-dump] worker thread for %s/%s still running %.0fs '
+                'after it timed out; not stopped (Python cannot kill a thread) '
+                '-- it will exit when its underlying call returns.',
+                op['component'], op['resource'], now - op['started'])
+    except Exception:  # pylint: disable=broad-except
+        logger.exception('_log_timed_out_stragglers failed')
 
 
 # Persistent location for debug dumps
@@ -277,6 +317,10 @@ class DebugDumpContext(TypedDict):
     request_ids_via_job: Set[str]
     request_ids_via_cluster: Set[str]
     errors: List[Dict[str, str]]
+    # Per-dump accumulator (sibling of ``errors``) of deadline-timed-out ops
+    # whose worker thread was abandoned; see _run_with_deadline /
+    # _log_timed_out_stragglers.
+    timed_out_ops: List[Dict[str, Any]]
 
 
 def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
@@ -343,17 +387,17 @@ def _get_requests_from_managed_jobs(
             # _MANAGED_JOB_QUEUE_TIMEOUT): a timeout is recorded by the helper
             # and we degrade to no name/user matching, exactly as the except
             # below handles a queue_v2 failure.
-            ok, result = _run_with_deadline(functools.partial(
-                managed_jobs_core.queue_v2,
-                refresh=False,
-                job_ids=list(debug_dump_context['managed_job_ids']),
-                all_users=True),
-                                            _bounded_timeout(
-                                                _MANAGED_JOB_QUEUE_TIMEOUT,
-                                                deadline),
-                                            component='cross_link',
-                                            resource='managed_job_details',
-                                            errors=debug_dump_context['errors'])
+            ok, result = _run_with_deadline(
+                functools.partial(managed_jobs_core.queue_v2,
+                                  refresh=False,
+                                  job_ids=list(
+                                      debug_dump_context['managed_job_ids']),
+                                  all_users=True),
+                _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
+                component='cross_link',
+                resource='managed_job_details',
+                errors=debug_dump_context['errors'],
+                orphans=debug_dump_context['timed_out_ops'])
             if ok:
                 jobs, _, _, _ = result
                 for job in jobs:
@@ -631,7 +675,8 @@ def _get_managed_jobs_from_clusters(
             _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
             component='cross_link',
             resource='managed_jobs_from_clusters',
-            errors=debug_dump_context['errors'])
+            errors=debug_dump_context['errors'],
+            orphans=debug_dump_context['timed_out_ops'])
         if not ok:
             return
         jobs, _, _, _ = result
@@ -816,7 +861,8 @@ def _populate_recent_context(
                 _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
                 component='recent_context',
                 resource='managed_jobs',
-                errors=debug_dump_context['errors'])
+                errors=debug_dump_context['errors'],
+                orphans=debug_dump_context['timed_out_ops'])
             if ok:
                 jobs, _, _, _ = result
                 for job in jobs:
@@ -862,7 +908,8 @@ _SKY_CHECK_TIMEOUT = 30
 
 def _dump_server_info(dump_dir: str,
                       errors: Optional[List[Dict[str, str]]] = None,
-                      deadline: Optional[float] = None) -> None:
+                      deadline: Optional[float] = None,
+                      orphans: Optional[List[Dict[str, Any]]] = None) -> None:
     """Collect server metadata."""
     logger.debug('Entering _dump_server_info')
     server_info: Dict[str, Any] = {
@@ -936,7 +983,8 @@ def _dump_server_info(dump_dir: str,
                                                 sky_check_timeout,
                                                 component='server_info',
                                                 resource='cloud_status',
-                                                errors=errors)
+                                                errors=errors,
+                                                orphans=orphans)
         if ok:
             server_info['enabled_clouds'] = enabled_clouds
         else:
@@ -1770,11 +1818,13 @@ def _dump_cluster_info(cluster_names: Set[str],
     logger.debug('Exiting _dump_cluster_info')
 
 
-def _dump_managed_job_info(managed_job_ids: Set[int],
-                           dump_dir: str,
-                           reachability: '_KubeContextReachabilityChecker',
-                           errors: Optional[List[Dict[str, str]]] = None,
-                           deadline: Optional[float] = None) -> None:
+def _dump_managed_job_info(
+        managed_job_ids: Set[int],
+        dump_dir: str,
+        reachability: '_KubeContextReachabilityChecker',
+        errors: Optional[List[Dict[str, str]]] = None,
+        deadline: Optional[float] = None,
+        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
     """Collect managed job state and logs.
 
     Both phases exec into the jobs controller outside consolidation mode,
@@ -1804,7 +1854,8 @@ def _dump_managed_job_info(managed_job_ids: Set[int],
 
     # Phase 1: Queue info from queue_v2 (works in both consolidation and
     # non-consolidation modes via existing gRPC/SSH plumbing)
-    _dump_managed_job_queue_info(managed_job_ids, jobs_dir, errors, deadline)
+    _dump_managed_job_queue_info(managed_job_ids, jobs_dir, errors, deadline,
+                                 orphans)
 
     # Phase 2: Controller-side debug data (controller logs, events,
     # run logs, cluster info) via new gRPC RPC / CodeGen fallback
@@ -1814,10 +1865,12 @@ def _dump_managed_job_info(managed_job_ids: Set[int],
     logger.debug('Exiting _dump_managed_job_info')
 
 
-def _dump_managed_job_queue_info(managed_job_ids: Set[int],
-                                 jobs_dir: str,
-                                 errors: Optional[List[Dict[str, str]]] = None,
-                                 deadline: Optional[float] = None) -> None:
+def _dump_managed_job_queue_info(
+        managed_job_ids: Set[int],
+        jobs_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None,
+        deadline: Optional[float] = None,
+        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
     """Collect managed job info from queue_v2.
 
     This works in both consolidation and non-consolidation modes.
@@ -1835,7 +1888,8 @@ def _dump_managed_job_queue_info(managed_job_ids: Set[int],
             _bounded_timeout(_MANAGED_JOB_QUEUE_TIMEOUT, deadline),
             component='managed_jobs',
             resource='queue_v2_batch',
-            errors=errors)
+            errors=errors,
+            orphans=orphans)
         if not ok:
             return
         all_records, _, _, _ = result
@@ -2130,9 +2184,10 @@ def _build_debug_dump(
     # truth: existing_allowed_contexts, so a context with no SkyPilot clusters
     # is still captured).
     errors = debug_dump_context['errors']
+    orphans = debug_dump_context['timed_out_ops']
     sections: List[Tuple[str, Callable[[], None]]] = [
-        ('server_info',
-         lambda: _dump_server_info(dump_dir, errors=errors, deadline=deadline)),
+        ('server_info', lambda: _dump_server_info(
+            dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
         ('kubernetes_contexts',
          lambda: _dump_kube_contexts_info(dump_dir, errors=errors)),
         ('request_ids', lambda: _dump_request_id_info(
@@ -2148,7 +2203,8 @@ def _build_debug_dump(
                                         dump_dir,
                                         reachability,
                                         errors=errors,
-                                        deadline=deadline)),
+                                        deadline=deadline,
+                                        orphans=orphans)),
     ]
     budget = _remaining_budget(deadline)
     logger.info(f'debug dump: collecting {len(sections)} sections '
@@ -2290,6 +2346,7 @@ def create_debug_dump(
         request_ids_via_job=set(),
         request_ids_via_cluster=set(),
         errors=[],
+        timed_out_ops=[],
     )
 
     # Create persistent output directory
@@ -2341,6 +2398,9 @@ def create_debug_dump(
                               client_info,
                               requested=original_requested,
                               deadline=deadline)
+            # Report any op whose worker thread is still running (before we
+            # detach the handler, so it lands in debug_dump.log too).
+            _log_timed_out_stragglers(debug_dump_context['timed_out_ops'])
         finally:
             sky_root_logger.removeHandler(debug_handler)
             provision_logger.removeHandler(debug_handler)
