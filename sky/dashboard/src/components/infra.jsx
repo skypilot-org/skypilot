@@ -426,6 +426,10 @@ export function InfrastructureSection({
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
+                  {/* Leading status-dot column (plugin-filled): fixed narrow
+                      width, no header label. Collapses to nothing when no
+                      plugin fills the slot. */}
+                  <th className="w-0 p-0" aria-hidden="true" />
                   {/* Fixed shares for the two anchor columns (Name 25%,
                       Utilization 20%); the compact data columns share the
                       rest. */}
@@ -562,10 +566,18 @@ export function InfrastructureSection({
                             : ''
                         }
                       >
-                        <td className={sharedCellClass} rowSpan={subRowCount}>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {/* Status dot, when a plugin supplies per-context
-                                status via this namePrefix slot. */}
+                        {/* Leading status-dot column: its own cell before the
+                            name so a long name can't push the dot onto a second
+                            line. Plugin-filled; empty (zero-width) otherwise. */}
+                        <td
+                          className="w-0 px-0 py-3 align-top"
+                          rowSpan={subRowCount}
+                        >
+                          {/* h-5 matches the name link's line height so the dot
+                              centers on the name; pl-3 gives the left inset,
+                              empty:hidden drops it (and the gutter) entirely
+                              when no plugin fills the slot. */}
+                          <div className="flex h-5 items-center pl-3 empty:hidden">
                             <PluginSlot
                               name="infra.row.namePrefix"
                               context={{
@@ -574,6 +586,10 @@ export function InfrastructureSection({
                                 status: statusByKey?.get(`${rowKind}:${rowId}`),
                               }}
                             />
+                          </div>
+                        </td>
+                        <td className={sharedCellClass} rowSpan={subRowCount}>
+                          <div className="flex items-center gap-2 flex-wrap">
                             <NonCapitalizedTooltip
                               content={displayName}
                               className="text-sm text-muted-foreground"
@@ -718,12 +734,26 @@ export function InfrastructureSection({
                 >
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div className="min-w-0">
-                      <span
-                        className="text-blue-600 hover:underline cursor-pointer font-medium truncate block"
-                        onClick={() => handleContextClick(context)}
-                      >
-                        {displayName}
-                      </span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {/* Status dot (plugin-filled), before the name to match
+                            the desktop table's leading dot column. */}
+                        <div className="flex h-5 items-center flex-shrink-0 empty:hidden">
+                          <PluginSlot
+                            name="infra.row.namePrefix"
+                            context={{
+                              id: rowId,
+                              kind: rowKind,
+                              status: statusByKey?.get(`${rowKind}:${rowId}`),
+                            }}
+                          />
+                        </div>
+                        <span
+                          className="text-blue-600 hover:underline cursor-pointer font-medium truncate"
+                          onClick={() => handleContextClick(context)}
+                        >
+                          {displayName}
+                        </span>
+                      </div>
                       {workspaces.length > 0 && (
                         <div className="text-sm text-gray-500 mt-1.5 truncate">
                           (workspaces: {workspaces.join(', ')})
