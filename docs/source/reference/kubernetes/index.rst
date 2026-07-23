@@ -105,6 +105,7 @@ Table of contents
    kubernetes-priorities
    multi-kubernetes
    Configuring Pricing <kubernetes-pricing>
+   Speeding Up Image Pulls <kubernetes-image-prepull>
    SkyPilot vs. Vanilla Kubernetes <skypilot-and-vanilla-k8s>
    Examples <examples/index>
    kubernetes-troubleshooting
