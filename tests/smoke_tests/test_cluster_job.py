@@ -3671,9 +3671,17 @@ def test_resize(generic_cloud: str):
     stopped_resize_commands = []
     if generic_cloud != 'kubernetes':
         stopped_resize_commands = [
-            # Stop the (now 1-node) cluster.
+            # Stop the (now 1-node) cluster. Poll for STOPPED instead of
+            # checking `sky status` output once: a background status refresh
+            # that raced with the teardown (its per-cluster lock is
+            # force-unlocked by `sky stop`) can transiently overwrite the
+            # freshly-written STOPPED state with INIT/UNHEALTHY, which
+            # self-corrects on the next refresh.
             f'sky stop -y {name}',
-            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep STOPPED',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=120),
             # --- Resize a STOPPED cluster: scale up (restarts + grows) ---
             f'sky launch -y -c {name} --resize --num-nodes 2',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x" && echo "$s" | grep UP',
