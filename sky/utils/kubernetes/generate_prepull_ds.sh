@@ -120,13 +120,11 @@ spec:
 ${extra}      tolerations:
         - operator: "Exists"   # tolerate all taints (e.g. GPU nodes)...
       affinity:
-        nodeAffinity:          # ...but keep off control-plane / master nodes
+        nodeAffinity:          # ...but keep off control-plane nodes
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
-                    operator: DoesNotExist
-                  - key: node-role.kubernetes.io/master
                     operator: DoesNotExist
       initContainers:
 $(emit_init_containers "$@")

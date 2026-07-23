@@ -107,13 +107,11 @@ Duplicate the ``prepull-*`` init container block once per image.
           tolerations:
             - operator: "Exists"        # tolerate all taints (e.g. GPU nodes)...
           affinity:
-            nodeAffinity:               # ...but keep off control-plane / master nodes
+            nodeAffinity:               # ...but keep off control-plane nodes
               requiredDuringSchedulingIgnoredDuringExecution:
                 nodeSelectorTerms:
                   - matchExpressions:
                       - key: node-role.kubernetes.io/control-plane
-                        operator: DoesNotExist
-                      - key: node-role.kubernetes.io/master
                         operator: DoesNotExist
           initContainers:
             - name: prepull-0
