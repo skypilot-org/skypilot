@@ -590,6 +590,14 @@ class PortDoesNotExistError(Exception):
     """Raised when the port does not exist."""
 
 
+class PoolDoesNotExistError(Exception):
+    """Raised when the pool a managed job is bound to no longer exists.
+
+    This is unrecoverable for the job: it can never launch into the pool
+    again, so callers should fail the job instead of retrying.
+    """
+
+
 class UserRequestRejectedByPolicy(Exception):
     """Raised when a user request is rejected by an admin policy."""
     pass
