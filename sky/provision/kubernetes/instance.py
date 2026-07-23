@@ -2082,6 +2082,7 @@ def get_cluster_info(
 
     head_pod_name = None
     cpu_request = None
+    memory_request = None
     for pod_name, pod in running_pods.items():
         # Under hostNetwork the pod's network namespace is the host's, so
         # pod_ip is the K8s node's host IP. SkyPilot injects a required
@@ -2115,6 +2116,8 @@ def get_cluster_info(
             limits = (getattr(resources, 'limits', None) if resources else None)
             cpu_request = ((requests or {}).get('cpu') or
                            (limits or {}).get('cpu'))
+            memory_request = ((requests or {}).get('memory') or
+                              (limits or {}).get('memory'))
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
@@ -2154,6 +2157,14 @@ def get_cluster_info(
     # Keep consistent with the logic in clouds/kubernetes.py
     str_cpus = str(max(int(num_cpus), 1))
 
+    # Record the pod's actual resource requests so display paths can show
+    # what the scheduler sees, even when an admin policy has overridden
+    # them via pod_config (bypassing the SkyPilot resources spec).
+    actual_memory_gb = None
+    if memory_request is not None:
+        actual_memory_gb = kubernetes_utils.parse_memory_resource(
+            memory_request, unit='G')
+
     return common.ClusterInfo(
         instances=pods,
         head_instance_id=head_pod_name,
@@ -2166,7 +2177,9 @@ def get_cluster_info(
             'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
-        provider_config=provider_config)
+        provider_config=provider_config,
+        actual_cpus=num_cpus,
+        actual_memory_gb=actual_memory_gb)
 
 
 class NodeHealthInfo:
