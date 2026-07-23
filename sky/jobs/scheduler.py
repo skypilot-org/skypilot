@@ -181,7 +181,17 @@ def start_controller() -> None:
 
     logger.info(f'Running controller with command: {run_cmd}')
 
-    pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
+    # In non-consolidation mode the controller runs on the jobs-controller
+    # cluster, where cloud CLIs (e.g. gcloud) are installed at runtime and only
+    # exposed via ~/.bashrc. Source it so the controller's precheck
+    # (shutil.which('gcloud')) can find them. In consolidation mode the
+    # controller is a subprocess of the API server, which already has the cloud
+    # CLIs on PATH, so we skip sourcing to avoid the overhead and any risk of
+    # perturbing the API server environment.
+    source_bashrc = not managed_job_utils.is_consolidation_mode()
+    pid = subprocess_utils.launch_new_process_tree(run_cmd,
+                                                   log_output=log_path,
+                                                   source_bashrc=source_bashrc)
     pid_started_at = psutil.Process(pid).create_time()
     _append_controller_pid_record(pid, pid_started_at)
 
