@@ -2152,6 +2152,11 @@ KUBERNETES_FAILURE_HINTS: List[Tuple[List[str], str]] = [
     (['Insufficient'],
      'The cluster does not have enough free resources. To fix: View node '
      'allocations at {dashboard_url} or run `kubectl describe nodes`.'),
+    (['FailedMount', 'FailedAttachVolume'],
+     'A volume could not be attached or mounted to the pod. To fix: Verify '
+     'the volume/PVC configuration (existence, storage class, access mode) '
+     'and that any referenced secrets or configmaps exist; run '
+     '`kubectl describe pod <pod-name>` for the full mount error.'),
 ]
 
 

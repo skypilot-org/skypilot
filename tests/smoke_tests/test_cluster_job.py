@@ -2504,6 +2504,38 @@ def test_kubernetes_pod_pending_reason():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_pod_failed_mount_escalation():
+    """A persistent volume mount failure must FAIL provisioning (not hang
+    forever in ContainerCreating), and the error must carry the kubelet
+    FailedMount event message so the user can act on it."""
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pending_volume.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml_content)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_failed_mount_escalation',
+            [
+                # The launch must exit non-zero on its own (the
+                # mount-failure deadline, ~10 min) — a hang here trips the
+                # test timeout instead.
+                f's=$(sky launch -y -c {name} --infra kubernetes {f.name} '
+                f'2>&1); ret=$?; echo "$s"; [ $ret -ne 0 ] || exit 1; '
+                f'echo "$s" | grep "FailedMount" && '
+                f'echo "$s" | grep "MountVolume.SetUp failed"',
+            ],
+            f'sky down -y {name}',
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_pod_long_image_pull():
     """Ensure kubelet image pulling events are surfaced in provision logs."""
     name = smoke_tests_utils.get_cluster_name()
