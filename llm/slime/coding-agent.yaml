@@ -1,0 +1,93 @@
+# Coding-agent RL on SkyPilot Job Groups + Sandboxes — one disaggregated Job Group.
+#
+# A slime trainer (Megatron) and an external SGLang inference engine are
+# co-scheduled as ONE Job Group. The agentic rollout (mini-swe-agent) runs each
+# turn's untrusted code in a SkyPilot Sandbox and grades it for reward; the
+# trainer publishes updated weights over a shared RWX volume after each step.
+#
+# Each job's setup/run logic lives in scripts/ (engine-*.sh, trainer-*.sh) so
+# this file stays a declarative manifest of the jobs + their resources + env.
+#
+# Footprint: trainer H100:4 + engine H100:1 = 5 GPU on one cluster.
+# Scale the inference fleet with coding-agent-2engine.yaml / coding-agent-3engine.yaml.
+#
+# Prereq (once):  sky volumes apply policy-volume.yaml
+# Launch:
+#   sky jobs launch -n coding-agent coding-agent.yaml --secret WANDB_API_KEY   # secret optional (wandb)
+---
+name: coding-agent-rl
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: 60s
+---
+name: sglang
+resources:
+  infra: kubernetes          # your H100 Kubernetes context, e.g. kubernetes/my-cluster
+  accelerators: H100:1        # engine tensor-parallel = 1 (1 H100/engine; validated repro sizing)
+  image_id: docker:slimerl/slime:latest
+workdir: .                   # so the job can see scripts/
+volumes:
+  /shared/policy: slime-policy
+setup: bash scripts/engine-setup.sh
+run: bash scripts/engine-run.sh
+---
+name: trainer
+resources:
+  infra: kubernetes          # SAME context as the engine — jobs co-schedule on one cluster
+  accelerators: H100:4
+  image_id: docker:slimerl/slime:latest
+workdir: .
+volumes:
+  /shared/policy: slime-policy
+file_mounts:
+  # Sandboxes SDK wheel: a sandbox-enabled API server ships it to the client at
+  # ~/.sky/bin/wheels; mount it in so trainer-setup.sh can pip install it (not on PyPI).
+  /wheels: ~/.sky/bin/wheels
+envs:
+  # --- inference fleet: the SGLang Job Group job names (one per engine) ---
+  SGLANG_MEMBERS: "sglang"
+  # --- model ---
+  MODEL_SCRIPT: "qwen3-14B.sh"
+  MODEL_DIR: "Qwen3-14B"
+  TP: "4"
+  ROLLOUT_GPUS_PER_ENGINE: "1"
+  # --- SWE-smith subset (bare repo tokens; one warm sandbox pool per repo image) ---
+  SWESMITH_REPOS: "markupsafe"   # pinned subset -> one warm pool per repo image (fast, reliable)
+  SWESMITH_PER_REPO: "16"
+  SWESMITH_POOL_SUFFIX: ""
+  # Set SANDBOX_NO_POOL=1 to run WITHOUT warm pools — an on-demand ad-hoc sandbox is
+  # created per claim from the instance's own image. Prefer this for the FULL dataset
+  # (drop SWESMITH_REPOS): one pool per repo doesn't scale. See sandbox_env.py.
+  SANDBOX_NO_POOL: "0"
+  # --- agent loop ---
+  AGENT_WORKDIR: "/testbed"
+  AGENT_MAX_TURNS: "20"
+  AGENT_EVAL_TIMEOUT_SEC: "900"
+  # --- sizing: concurrent rollouts = ROLLOUT_BATCH_SIZE x N_SAMPLES_PER_PROMPT ---
+  # SANDBOX_POOL_REPLICAS must be >= that product (one sandbox claim per rollout)
+  # AND <= your cluster's sandbox (CPU) capacity. An oversized pool can't fully warm,
+  # so claims time out and rollouts fail — size it to the smaller of the two. 184 is
+  # our benchmarked sizing (warmed cleanly + held all ~184 concurrent claims); scale
+  # down if your sandbox cluster has less CPU headroom.
+  SANDBOX_POOL_REPLICAS: "184"
+  ROLLOUT_BATCH_SIZE: "23"       # prompts/step
+  N_SAMPLES_PER_PROMPT: "8"      # rollouts/prompt -> 23x8 = 184 concurrent rollouts (global batch derived)
+  NUM_ROLLOUT: "8"
+  ROLLOUT_SHUFFLE: "1"            # shuffle instance order across steps; 0 = deterministic (reproducible)
+  ROLLOUT_MAX_CONTEXT_LEN: "32768"
+  MSWEA_SILENT_STARTUP: "1"
+  # --- infra axes ---
+  SLIME_MODE: "async"              # async rollout/train overlap | "sync" serializes them
+  WEIGHT_TRANSPORT: "disk"         # disk (shared RWX volume) | nccl
+  WEIGHT_MODE: "delta"             # delta (changed bytes only) | full
+  # --- wandb (optional) ---
+  WANDB_PROJECT: "slime-coding-agent"
+  WANDB_GROUP: "coding-agent"
+secrets:
+  # Optional wandb logging; provide with `--secret WANDB_API_KEY` (picked up
+  # from your environment, redacted in logs/dashboard). Unset = wandb off.
+  # Sandbox-API auth needs no secret: managed jobs get API server credentials
+  # injected automatically (api_server_access, on by default).
+  WANDB_API_KEY: ""
+setup: bash scripts/trainer-setup.sh
+run: bash scripts/trainer-run.sh

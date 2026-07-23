@@ -1420,6 +1420,23 @@ def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
 
 
+def _summarize_probe_failure(e: exceptions.CommandError) -> str:
+    """Extract a concise, user-facing reason from a failed health probe.
+
+    str(e) embeds the entire remote ray-status command, which is too noisy
+    for the cluster event surfaced on the dashboard and CLI. The actionable
+    part is the last stderr line (e.g. 'ssh: connect to host 1.2.3.4 port
+    22: Operation timed out').
+    """
+    for source in (e.detailed_reason, e.error_msg):
+        if not source:
+            continue
+        lines = [line.strip() for line in source.splitlines() if line.strip()]
+        if lines:
+            return f'health probe failed: {lines[-1]}'
+    return f'health probe failed with return code {e.returncode}'
+
+
 def _count_healthy_nodes_from_ray(output: str,
                                   is_local_cloud: bool = False
                                  ) -> Tuple[int, int]:
@@ -2668,6 +2685,10 @@ def _update_cluster_status(
                                 f'If the cluster was restarted manually, try running: '
                                 f'{reset}{bright}sky start {cluster_name}{reset} '
                                 f'{yellow}to recover from INIT status.{reset}')
+                            # Record the probe failure so the cluster event
+                            # explains the INIT transition instead of showing
+                            # 'ray cluster is unhealthy (None)'.
+                            ray_status_details = _summarize_probe_failure(e)
                             return False
                         raise e
                     # We retry for kubernetes because coreweave can have a
@@ -2706,6 +2727,13 @@ def _update_cluster_status(
             if ray_status_details is None:
                 ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
+        except exceptions.CommandError as e:
+            # The health probe command itself failed (e.g. SSH to the head
+            # node is unreachable). Record the concise failure instead of
+            # str(e), which embeds the whole remote command.
+            ray_status_details = _summarize_probe_failure(e)
+            logger.debug(f'Refreshing status ({cluster_name!r}) probe failed: ',
+                         exc_info=e)
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.

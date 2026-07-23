@@ -12,6 +12,46 @@
   padding: 0 !important;
 }
 
+/* Solid "Ask AI" launcher: no transparency, plain text, no shadow.
+   Light mode: white button, black text. Dark mode: dark button, white text. */
+#kapa-widget-container button {
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+}
+#kapa-widget-container button,
+#kapa-widget-container button p,
+#kapa-widget-container button span,
+#kapa-widget-container button div {
+  text-shadow: none !important;
+}
+html:not([data-theme="dark"]) #kapa-widget-container button {
+  background-color: #FFFFFF !important;
+}
+html:not([data-theme="dark"]) #kapa-widget-container button,
+html:not([data-theme="dark"]) #kapa-widget-container button p,
+html:not([data-theme="dark"]) #kapa-widget-container button span,
+html:not([data-theme="dark"]) #kapa-widget-container button div {
+  color: #000000 !important;
+}
+html[data-theme="dark"] #kapa-widget-container button {
+  background-color: #1F242C !important;
+}
+html[data-theme="dark"] #kapa-widget-container button,
+html[data-theme="dark"] #kapa-widget-container button p,
+html[data-theme="dark"] #kapa-widget-container button span,
+html[data-theme="dark"] #kapa-widget-container button div {
+  color: #FFFFFF !important;
+}
+/* The widget has no dark-mode logo option; swap in the white logo in dark
+   mode (relative URL resolves next to this file in _static/). The filter is
+   a fallback for browsers without `content` support on img — it renders the
+   default blue mark white, and is a no-op on the already-white logo. */
+html[data-theme="dark"] #kapa-widget-container img[src*="skypilot-icon"],
+html[data-theme="dark"] .mantine-Modal-root img[src*="skypilot-icon"] {
+  content: url("skypilot-icon-dark.svg");
+  filter: brightness(0) invert(1);
+}
+
 .mantine-Modal-root figure {
   padding: 0 !important;
 }
@@ -45,7 +85,168 @@
     color: var(--pst-color-link) !important;
 }
 
+/*
+ * Launch announcement bar (the `announcement` theme option in conf.py).
+ *
+ * Scoped to .container-fluid, which the theme's own announcement markup carries,
+ * so these rules cannot leak onto any other .bd-header-announcement banner added
+ * later via a custom template.
+ */
+.bd-header-announcement.container-fluid {
+    background-color: var(--pst-color-surface) !important;
+    border-bottom: 1px solid var(--sky-announcement-border) !important;
+    padding: 9px 14px !important;
+}
+
+.bd-header-announcement a.sky-announcement {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    text-decoration: none !important;
+    color: var(--sky-announcement-text) !important;
+}
+
+.sky-announcement__pill {
+    background-color: var(--pst-color-primary);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 20px;
+}
+
+.sky-announcement__text {
+    font-weight: 600;
+}
+
+.bd-header-announcement a.sky-announcement:hover .sky-announcement__text {
+    text-decoration: underline;
+}
+
+.sky-announcement__arrow {
+    /* Own accent rather than --pst-color-primary: that blue only reaches
+       2.7:1 on the dark surface, below the 3:1 non-text contrast floor. */
+    color: var(--sky-announcement-accent);
+    font-weight: 700;
+    transition: transform 0.15s ease;
+}
+
+.bd-header-announcement a.sky-announcement:hover .sky-announcement__arrow {
+    transform: translateX(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sky-announcement__arrow {
+        transition: none;
+    }
+}
+
+/* On narrow screens the pill is what tips the headline onto a second line, so
+   drop it. Also switch from flex to inline flow: as flex items the text and the
+   arrow wrap independently, which orphans the arrow on a line of its own at
+   ~375px. Inline, the arrow simply follows the last word. */
+@media (max-width: 600px) {
+    .sky-announcement__pill {
+        display: none;
+    }
+
+    .bd-header-announcement a.sky-announcement {
+        display: block;
+        text-align: center;
+        font-size: 0.8125rem;
+    }
+
+    .sky-announcement__arrow {
+        margin-left: 6px;
+    }
+}
+
+/*
+ * "Try SkyPilot Platform" navbar call-to-action (_templates/try-platform-button.html).
+ *
+ * Below 960px the theme sets .navbar-header-items { display: none }, so this
+ * button is not shown in the header on small screens -- it is reached through
+ * the hamburger sidebar, which re-renders the navbar_end items.
+ */
+.sky-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1;
+    padding: 7px 13px;
+    border-radius: 6px;
+    background-color: var(--pst-color-primary);
+    color: #fff !important;
+    text-decoration: none !important;
+    transition: background-color 0.15s ease;
+}
+
+.sky-cta:hover {
+    background-color: var(--sky-cta-hover);
+}
+
+.sky-cta__arrow {
+    font-weight: 700;
+    opacity: 0.85;
+}
+
+/* Full label on wide viewports, short label where the navbar gets tight. */
+.sky-cta__label-short {
+    display: none;
+}
+
+@media (max-width: 1100px) {
+    .sky-cta__label-full {
+        display: none;
+    }
+    .sky-cta__label-short {
+        display: inline;
+    }
+}
+
+/*
+ * Hamburger menu (below 960px). The theme re-renders the navbar_end items into
+ * the slide-out sidebar alongside the theme switcher and icon links, which sit
+ * on one row. Give the button a row of its own, full width, with the full
+ * product name -- there is space here that the navbar does not have.
+ */
+.sidebar-header-items__end:has(.sky-cta) {
+    flex-wrap: wrap;
+}
+
+.sidebar-header-items__end .navbar-item:has(.sky-cta) {
+    flex: 0 0 100%;
+    margin-top: 0.75rem;
+}
+
+.sidebar-header-items__end .sky-cta {
+    width: 100%;
+    justify-content: center;
+    padding-block: 10px;
+}
+
+.sidebar-header-items__end .sky-cta__label-full {
+    display: inline;
+}
+
+.sidebar-header-items__end .sky-cta__label-short {
+    display: none;
+}
+
 html[data-theme="light"] {
+  --sky-cta-hover: #0f57bd;
+  --sky-announcement-text: #1f2328;
+  --sky-announcement-border: #e2e4e7;
+  --sky-announcement-accent: #176de8;
   --pst-color-link: #176de8;
   --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
@@ -54,6 +255,12 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
+  /* Hover darkens rather than lightens: white-on-blue drops below the 4.5:1
+     text-contrast floor as the blue gets lighter (#3f8cff is only 3.3:1). */
+  --sky-cta-hover: #2563d8;
+  --sky-announcement-text: #eef1f5;
+  --sky-announcement-border: #333b47;
+  --sky-announcement-accent: #6ea8ff;
   --pst-color-link: #176de8;
   --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
@@ -159,7 +366,7 @@ nav.bd-links li > a.reference.external.new-item::after {
 }
 
 .navbar-brand.logo>svg {
-  width: 120px;
+  width: 103px;
 }
 
 .navbar-brand.logo>svg .cls-6 {
@@ -290,6 +497,18 @@ svg.svg-inline--fa.fa-lg {
    copy-page button on a full-width laptop viewport. */
 .hero-title h1 {
   font-size: 2.1rem;
+}
+
+/* Index page hero logo — breathing room between the page title above and the
+   GitHub/Slack buttons below. */
+img.hero-logo {
+  margin-top: 1.75rem;
+  margin-bottom: 2.25rem;
+}
+
+/* Index page architecture diagram — adds spacing after the diagram. */
+img.hero-diagram {
+  margin-bottom: 2.25rem;
 }
 
 /* Copy page as Markdown — split button next to title */

@@ -136,6 +136,52 @@ def test_check_server_healthy_or_start_rechecks_status(
         versions.set_remote_version('unknown')
 
 
+@mock.patch('sky.server.common._start_api_server')
+@mock.patch('sky.server.common.filelock.FileLock')
+@mock.patch('sky.server.common.make_authenticated_request')
+@mock.patch('sky.server.common.is_api_server_local', return_value=True)
+@mock.patch('sky.server.common.get_server_url',
+            return_value='http://127.0.0.1:1111')
+def test_check_server_healthy_or_start_disabled_local_api_server(
+        unused_mock_server_url, unused_mock_is_local, mock_make_request,
+        mock_filelock, mock_start_server):
+    """SKYPILOT_DISABLE_LOCAL_API_SERVER=1 blocks the silent auto-start.
+
+    When no healthy API server is reachable at a local endpoint, the client
+    normally starts one in the background. With the env var set, it must
+    fail with an actionable error instead, and never attempt the start.
+    """
+    mock_make_request.side_effect = requests.exceptions.ConnectionError()
+
+    with mock.patch.dict(os.environ,
+                         {'SKYPILOT_DISABLE_LOCAL_API_SERVER': '1'}):
+        with pytest.raises(RuntimeError) as exc_info:
+            common.check_server_healthy_or_start_fn()
+
+    assert 'sky api login' in str(exc_info.value)
+    assert 'SKYPILOT_DISABLE_LOCAL_API_SERVER' in str(exc_info.value)
+    mock_start_server.assert_not_called()
+    # The guard fires before the server-creation lock is taken.
+    mock_filelock.assert_not_called()
+
+
+def test_start_api_server_disabled_by_env_var():
+    """_start_api_server itself is guarded (covers `sky api start` too)."""
+    with mock.patch.dict(os.environ,
+                         {'SKYPILOT_DISABLE_LOCAL_API_SERVER': '1'}):
+        with pytest.raises(RuntimeError) as exc_info:
+            common._start_api_server()
+    assert 'SKYPILOT_DISABLE_LOCAL_API_SERVER' in str(exc_info.value)
+
+
+def test_local_api_server_not_disabled_by_default():
+    """Without the env var, the guard is a no-op."""
+    env = os.environ.copy()
+    env.pop('SKYPILOT_DISABLE_LOCAL_API_SERVER', None)
+    with mock.patch.dict(os.environ, env, clear=True):
+        common.check_local_api_server_enabled_or_raise()
+
+
 @mock.patch('sky.server.common.get_api_server_status')
 @mock.patch('sky.server.common.is_api_server_local')
 def test_local_client_server_mismatch(mock_is_local, mock_get_status):

@@ -2259,7 +2259,8 @@ class TestCheckInstanceFits:
                           memory_capacity: str,
                           is_ready: bool = True,
                           labels: Optional[dict] = None,
-                          gpu_allocatable: Optional[str] = None):
+                          gpu_allocatable: Optional[str] = None,
+                          ephemeral_storage_capacity: Optional[str] = None):
         """Helper to create mock Kubernetes node."""
         mock_node = mock.MagicMock()
         mock_node.metadata.name = name
@@ -2272,6 +2273,9 @@ class TestCheckInstanceFits:
             'cpu': cpu_capacity,
             'memory': memory_capacity
         }
+        if ephemeral_storage_capacity is not None:
+            mock_node.status.capacity[
+                'ephemeral-storage'] = ephemeral_storage_capacity
         if gpu_allocatable is not None:
             mock_node.status.allocatable['nvidia.com/gpu'] = gpu_allocatable
         mock_node.is_ready.return_value = is_ready
@@ -2332,6 +2336,52 @@ class TestCheckInstanceFits:
             assert fits is False
             assert reason is not None
             assert 'No ready nodes' in reason
+
+    def test_cpu_instance_fits_with_ephemeral_storage(self):
+        """Test instance fits when ephemeral storage requirement is met."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi',
+                                           ephemeral_storage_capacity='200Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB',
+                                                     ephemeral_storage_gb=100)
+            assert fits is True
+            assert reason is None
+
+    def test_cpu_instance_does_not_fit_insufficient_ephemeral_storage(self):
+        """Test instance does not fit due to insufficient ephemeral storage."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi',
+                                           ephemeral_storage_capacity='50Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB',
+                                                     ephemeral_storage_gb=100)
+            assert fits is False
+            assert reason is not None
+            assert 'ephemeral storage' in reason.lower()
+
+    def test_cpu_instance_missing_ephemeral_storage_capacity(self):
+        """Test instance does not fit when node reports no ephemeral storage."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB',
+                                                     ephemeral_storage_gb=100)
+            assert fits is False
+            assert reason is not None
+            assert 'ephemeral storage' in reason.lower()
 
     def test_gpu_instance_fits_on_cluster(self):
         """Test GPU instance that fits on the cluster."""
@@ -5314,3 +5364,38 @@ def test_match_kubernetes_failure_hint_text_realistic_eviction_reason():
     hint = utils.match_kubernetes_failure_hint_text(reason)
     assert hint is not None
     assert 'resources.disk_size' in hint
+
+
+def test_get_node_accelerator_count_neuron():
+    """AWS Neuron count is read from the aws.amazon.com/neuron resource key."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # Neuron node: count from the Neuron resource key.
+        assert utils.get_node_accelerator_count(
+            None, {'aws.amazon.com/neuron': '16'}) == 16
+        # GPU / TPU paths unchanged.
+        assert utils.get_node_accelerator_count(None,
+                                                {'nvidia.com/gpu': '8'}) == 8
+        assert utils.get_node_accelerator_count(None,
+                                                {'google.com/tpu': '4'}) == 4
+        # No accelerator -> 0.
+        assert utils.get_node_accelerator_count(None, {'cpu': '4'}) == 0
+
+
+def test_get_node_accelerator_count_multiple_families_no_crash():
+    """A node advertising multiple accelerator families must not crash the
+    caller (e.g. sky status/show-gpus); it warns and returns the first family
+    found (GPU > TPU > Neuron)."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # GPU + Neuron on the same node -> GPU wins, no exception.
+        assert utils.get_node_accelerator_count(None, {
+            'nvidia.com/gpu': '8',
+            'aws.amazon.com/neuron': '16',
+        }) == 8
+
+
+def test_get_handled_taint_keys_includes_neuron():
+    assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()

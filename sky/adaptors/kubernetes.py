@@ -110,6 +110,20 @@ def _get_config_file() -> str:
     return os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
+def _enable_response_compression(client: Any) -> Any:
+    """Advertise gzip so the API server compresses large response bodies.
+
+    The Kubernetes API server gzip-compresses responses above a size threshold
+    when the client sends ``Accept-Encoding: gzip``. This substantially reduces
+    transfer time for large LIST responses (e.g. listing nodes or pods on large
+    clusters), which is especially impactful on high-latency or low-bandwidth
+    connections to the API server. urllib3 transparently decompresses the body,
+    including when the response is streamed with ``_preload_content=False``.
+    """
+    client.set_default_header('Accept-Encoding', 'gzip')
+    return client
+
+
 def _get_api_client(context: Optional[str] = None) -> Any:
     """Get an ApiClient for the given context without modifying global config.
 
@@ -200,14 +214,16 @@ def _get_api_client(context: Optional[str] = None) -> Any:
 
             config = kubernetes.client.Configuration()
             kubernetes.config.load_incluster_config(config)
-            return kubernetes.client.ApiClient(configuration=config)
+            return _enable_response_compression(
+                kubernetes.client.ApiClient(configuration=config))
         except kubernetes.config.config_exception.ConfigException:
             if context == in_cluster_context_name():
                 # Explicitly requested in-cluster context but not in a cluster
                 raise
             # Otherwise, if context is None, fall through to kubeconfig
 
-    return _get_api_client_from_kubeconfig(context)
+    return _enable_response_compression(
+        _get_api_client_from_kubeconfig(context))
 
 
 def list_kube_config_contexts():

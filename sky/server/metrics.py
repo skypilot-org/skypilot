@@ -779,10 +779,11 @@ async def gpu_metrics() -> fastapi.Response:
     # Prometheus scrapes the local cluster's exporters directly, so
     # federating them again would only duplicate the raw series under a
     # stamped copy. The dashboard matches the local cluster with cluster=""
-    # (see /dashboard_config local_contexts). Detection may probe each
-    # uncached context once; run in a thread to keep the event loop free.
-    _, remote_contexts = await asyncio.to_thread(
-        metrics_utils.split_local_remote_contexts, contexts)
+    # (see /dashboard_config local_contexts). Non-blocking: verdicts come
+    # from the detection cache and any probing happens in a background
+    # worker, so a slow or broken context cannot stall this scrape (or
+    # the co-located /metrics scrape) no matter how it fails.
+    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     # One stats record per context, filled in by get_metrics_for_context even
     # if the task is later cancelled by the wait_for timeout — so the timeout
     # log can report how far the attempt got (port-forward vs. federate).
@@ -826,9 +827,8 @@ async def endpoint_metrics() -> fastapi.Response:
     contexts = core.get_all_contexts()
     all_metrics: List[str] = []
 
-    # Same local-context handling as /gpu-metrics above.
-    _, remote_contexts = await asyncio.to_thread(
-        metrics_utils.split_local_remote_contexts, contexts)
+    # Same local-context handling as /gpu-metrics above (non-blocking).
+    _, remote_contexts = metrics_utils.split_local_remote_contexts(contexts)
     stats_list = [metrics_utils.FederationStats() for _ in remote_contexts]
     tasks = [
         asyncio.create_task(

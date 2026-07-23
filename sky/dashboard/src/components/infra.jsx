@@ -50,7 +50,10 @@ import {
   getEnabledCloudsBatch,
 } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  MANAGED_JOBS_SUMMARY_ARGS,
+} from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
 import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 import {
@@ -2359,9 +2362,9 @@ export function GPUs() {
     try {
       // Always use cache - it's already invalidated if refreshing
       // Jobs data doesn't depend on sky check, so no need to bypass cache
-      // Use shared cache key (no field filtering) - preloader uses same args
+      // Shared cache key — must match the preloader's args exactly
       const jobsData = await dashboardCache.get(getManagedJobs, [
-        { allUsers: true, skipFinished: true },
+        MANAGED_JOBS_SUMMARY_ARGS,
       ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
@@ -2621,9 +2624,7 @@ export function GPUs() {
     trackInfraAction('refresh');
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]);
+    dashboardCache.invalidate(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]);
     dashboardCache.invalidate(getWorkspaceContexts);
     dashboardCache.invalidate(getWorkspaceInfrastructure); // Keep for backwards compatibility
     dashboardCache.invalidate(getEnabledCloudsList);

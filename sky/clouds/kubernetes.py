@@ -473,8 +473,17 @@ class Kubernetes(clouds.Cloud):
         for r in regions:
             context = r.name
             try:
+                # On Kubernetes, disk_size maps to ephemeral-storage requests,
+                # but only when the user explicitly set it (see
+                # `make_deploy_resources_variables`). Only then do we check
+                # that a node can fit the requested ephemeral storage.
+                ephemeral_storage_gb = (resources.disk_size
+                                        if resources is not None and
+                                        resources.disk_size_specified else None)
                 fits, reason = kubernetes_utils.check_instance_fits(
-                    context, instance_type)
+                    context,
+                    instance_type,
+                    ephemeral_storage_gb=ephemeral_storage_gb)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
                 continue
@@ -771,6 +780,10 @@ class Kubernetes(clouds.Cloud):
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+            elif kubernetes_utils.is_neuron_accelerator(acc_type):
+                # AWS Neuron (Trainium/Inferentia) uses its own resource key;
+                # the pod requests aws.amazon.com/neuron instead of a GPU key.
+                k8s_resource_key = kubernetes_utils.NEURON_RESOURCE_KEY
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
                     context)

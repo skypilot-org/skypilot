@@ -11,6 +11,13 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import kubernetes_enums
 
+# Valid values for the `scope` field of a dashboard.external_links entry:
+# the dashboard pages a link may appear on. 'cluster' is the cluster detail
+# page; 'jobs' covers job detail pages (both cluster jobs and managed jobs).
+# Keep in sync with EXTERNAL_LINK_SCOPES in
+# sky/dashboard/src/utils/externalLinks.js.
+DASHBOARD_EXTERNAL_LINK_SCOPES = ('cluster', 'jobs')
+
 # Registry for plugin-provided job_recovery schema properties.
 # Plugins call register_job_recovery_property() to add strategy-specific
 # config fields. On the server, once plugins have loaded, their properties
@@ -2165,6 +2172,9 @@ def get_config_schema():
                 'domain': {
                     'type': 'string',
                 },
+                'use_personal_pricing': {
+                    'type': 'boolean',
+                },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'region_configs': {
@@ -2736,6 +2746,17 @@ def get_config_schema():
                         'url': {
                             'type': 'string',
                             'minLength': 1,
+                        },
+                        # Pages the link may appear on. Omitted means all
+                        # pages (subject to template-variable resolution).
+                        'scope': {
+                            'type': 'array',
+                            'minItems': 1,
+                            'uniqueItems': True,
+                            'items': {
+                                'type': 'string',
+                                'enum': list(DASHBOARD_EXTERNAL_LINK_SCOPES),
+                            },
                         },
                     },
                     # Each entry is either a log-scanning pattern (regex) or
