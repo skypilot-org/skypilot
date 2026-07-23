@@ -87,6 +87,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
@@ -2106,30 +2107,30 @@ async def download(download_body: payloads.DownloadBody,
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
         folder_str = str(folder_path)
-        expanded_str = str(folder_path.expanduser())
+        expanded_str = str(runtime_utils.expanduser_path(folder_path))
         if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp) or
-                expanded_str.startswith(os.path.expanduser(download_tmp))):
+                folder_str.startswith(download_tmp) or expanded_str.startswith(
+                    runtime_utils.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
                 f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
 
-        if not folder_path.expanduser().resolve().exists():
+        if not runtime_utils.expanduser_path(folder_path).resolve().exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
     # Create a temporary zip file
     log_id = str(uuid.uuid4().hex)
     zip_filename = f'folder_{log_id}.zip'
-    zip_path = pathlib.Path(
-        logs_dir_on_api_server).expanduser().resolve() / zip_filename
+    zip_path = runtime_utils.expanduser_path(
+        pathlib.Path(logs_dir_on_api_server)).resolve() / zip_filename
 
     try:
 
         def _zip_files_and_folders(folder_paths, zip_path):
             folders = [
-                str(folder_path.expanduser().resolve())
+                str(runtime_utils.expanduser_path(folder_path).resolve())
                 for folder_path in folder_paths
             ]
             # Check for optional query parameter to control zip entry structure
@@ -2517,8 +2518,8 @@ async def stream(
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
-            resolved_log_path = pathlib.Path(
-                constants.API_SERVER_LOGS).expanduser()
+            resolved_log_path = runtime_utils.expanduser_path(
+                pathlib.Path(constants.API_SERVER_LOGS))
             if not resolved_log_path.exists():
                 raise fastapi.HTTPException(
                     status_code=404,
@@ -3658,7 +3659,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', default=46580, type=int)
+    parser.add_argument('--port',
+                        default=common.get_local_api_server_port(),
+                        type=int)
     parser.add_argument('--deploy', action='store_true')
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.

@@ -387,16 +387,46 @@ def test_get_server_url_ipv6(monkeypatch):
     assert common.get_server_url('localhost') == 'http://localhost:46580'
 
 
+def test_local_port_env_var_override(monkeypatch):
+    """SKYPILOT_API_SERVER_LOCAL_PORT changes the local port everywhere."""
+    _isolate_server_url(monkeypatch)
+    monkeypatch.setenv(common.constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR,
+                       '46590')
+    common.get_server_url.cache_clear()
+    common.is_api_server_local.cache_clear()
+    assert common.get_local_api_server_port() == 46590
+    assert common.get_default_server_url() == 'http://127.0.0.1:46590'
+    assert common.get_server_url() == 'http://127.0.0.1:46590'
+    assert common.get_server_url('localhost') == 'http://localhost:46590'
+    urls = common.get_available_local_api_server_urls()
+    assert 'http://127.0.0.1:46590' in urls
+    assert all(url.endswith(':46590') for url in urls)
+    assert common.is_api_server_local('http://127.0.0.1:46590')
+    # The default port is no longer considered the local server.
+    assert not common.is_api_server_local('http://127.0.0.1:46580')
+    common.get_server_url.cache_clear()
+    common.is_api_server_local.cache_clear()
+
+
+def test_local_port_env_var_invalid(monkeypatch):
+    """A non-integer port override raises a clear error."""
+    monkeypatch.setenv(common.constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR,
+                       'not-a-port')
+    with pytest.raises(ValueError, match='SKYPILOT_API_SERVER_LOCAL_PORT'):
+        common.get_local_api_server_port()
+
+
 def test_available_local_api_server_urls_are_wellformed():
     """The precomputed local URLs bracket IPv6 and parse correctly."""
     from urllib.parse import urlparse
 
+    local_urls = common.get_available_local_api_server_urls()
     # IPv6 hosts are present and bracketed; IPv4 hosts are plain.
-    assert 'http://[::]:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
-    assert 'http://[::1]:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
-    assert 'http://127.0.0.1:46580' in common.AVAILABLE_LOCAL_API_SERVER_URLS
+    assert 'http://[::]:46580' in local_urls
+    assert 'http://[::1]:46580' in local_urls
+    assert 'http://127.0.0.1:46580' in local_urls
     # Every entry is a well-formed URL that urlparse can decompose.
-    for url in common.AVAILABLE_LOCAL_API_SERVER_URLS:
+    for url in local_urls:
         parsed = urlparse(url)
         assert parsed.scheme == 'http'
         assert parsed.port == 46580
