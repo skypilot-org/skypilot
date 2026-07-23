@@ -11,6 +11,7 @@ from sky import resources
 from sky.adaptors import kubernetes
 from sky.backends import cloud_vm_ray_backend
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import instance
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -3533,3 +3534,121 @@ class TestCreatePodFinalizerHandling:
         # Must not have touched the live pod.
         core_api_mock.patch_namespaced_pod.assert_not_called()
         core_api_mock.delete_namespaced_pod.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pod scheduling summary at provision failure (SKY-6227)
+# ---------------------------------------------------------------------------
+
+
+def _summary_pod(name, *, scheduled):
+    """A pod mock that _pod_is_scheduled classifies deterministically."""
+    pod = mock.MagicMock()
+    pod.metadata.name = name
+    pod._metadata._name = name  # pylint: disable=protected-access
+    if scheduled:
+        pod.status.phase = 'Running'
+    else:
+        pod.status.phase = 'Pending'
+        pod.spec.node_name = None
+        pod.spec.node_selector = None
+        pod.status.conditions = []
+    return pod
+
+
+def _failed_scheduling_event(message):
+    event = mock.MagicMock()
+    event.metadata.creation_timestamp = '2021-01-01T00:00:00Z'
+    event.reason = 'FailedScheduling'
+    event.message = message
+    return event
+
+
+def test_scheduling_summary_counts_scheduled_vs_pending(monkeypatch):
+    """The provision-failure path must record how many of the requested pods
+    were actually placed (X/N) and each unscheduled pod's reason — the raised
+    error alone only explains a single pod."""
+    reason = ('0/367 nodes are available: 1 cannot allocate all claims, '
+              '366 node(s) had untolerated taints.')
+    pods = {
+        'job-head': _summary_pod('job-head', scheduled=True),
+        'job-worker1': _summary_pod('job-worker1', scheduled=False),
+        'job-worker2': _summary_pod('job-worker2', scheduled=False),
+    }
+    new_nodes = []
+    for name in pods:
+        node = mock.MagicMock()
+        node.metadata.name = name
+        node.metadata.labels = {
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME: 'job'
+        }
+        new_nodes.append(node)
+
+    core_api_mock = mock.MagicMock()
+    # Pod state comes from a single label-selector list call, not N
+    # sequential per-pod reads (which would be a bottleneck on a large
+    # launch); the per-pod read path is exercised by the fallback test
+    # below.
+    core_api_mock.list_namespaced_pod.return_value = mock.MagicMock(
+        items=list(pods.values()))
+    events_mock = mock.MagicMock()
+    events_mock.items = [_failed_scheduling_event(reason)]
+    core_api_mock.list_namespaced_event.return_value = events_mock
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *args, **kwargs: core_api_mock)
+
+    info_output = []
+    monkeypatch.setattr(logger, 'info',
+                        lambda msg, *args: info_output.append(msg))
+
+    with pytest.raises(config_lib.KubernetesError) as e:
+        instance._raise_pod_scheduling_errors('ns', 'ctx', new_nodes)
+
+    # Pods were fetched via the batched list call, not per-pod reads.
+    core_api_mock.read_namespaced_pod.assert_not_called()
+    _, kwargs = core_api_mock.list_namespaced_pod.call_args
+    assert kwargs['label_selector'] == (
+        f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}=job')
+
+    # The X/N count is in the raised error, so it survives into failover
+    # handling and the job's failure reason.
+    assert '1/3 pods scheduled' in str(e.value)
+
+    # The full breakdown is logged (landing in provision.log at failure
+    # time), grouped by reason with the pods named.
+    summary = '\n'.join(info_output)
+    assert '1/3 pods scheduled at provision failure (2 unscheduled)' in summary
+    assert '2 pod(s) (job-worker1, job-worker2)' in summary
+    assert reason in summary
+
+
+def test_scheduling_summary_handles_no_failed_scheduling_event(monkeypatch):
+    """An unscheduled pod without a FailedScheduling event yet must still be
+    counted, with a placeholder reason.
+
+    This test's loose mocks (MagicMock labels, no list_namespaced_pod setup)
+    also exercise _read_pods_for_nodes' per-pod-read fallback path.
+    """
+    pods = {'job-head': _summary_pod('job-head', scheduled=False)}
+    node = mock.MagicMock()
+    node.metadata.name = 'job-head'
+
+    core_api_mock = mock.MagicMock()
+    core_api_mock.read_namespaced_pod.side_effect = (
+        lambda name, _namespace: pods[name])
+    events_mock = mock.MagicMock()
+    events_mock.items = []
+    core_api_mock.list_namespaced_event.return_value = events_mock
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *args, **kwargs: core_api_mock)
+
+    info_output = []
+    monkeypatch.setattr(logger, 'info',
+                        lambda msg, *args: info_output.append(msg))
+
+    with pytest.raises(config_lib.KubernetesError) as e:
+        instance._raise_pod_scheduling_errors('ns', 'ctx', [node])
+
+    assert '0/1 pods scheduled' in str(e.value)
+    summary = '\n'.join(info_output)
+    assert '(no FailedScheduling event)' in summary

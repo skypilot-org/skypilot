@@ -1460,19 +1460,29 @@ def _dump_one_cluster(
             'traceback': _full_traceback()
         })
 
-    # Copy the provision log if available. The path is recorded in
-    # cluster history, so this also works for terminated clusters.
+    # Copy the provision logs if available. The paths are recorded in
+    # cluster history, so this also works for terminated clusters. Every
+    # recorded try is collected, not just the most recent: when a managed job
+    # recovers, the re-launch overwrites the "latest" path, but the earlier
+    # (pre-recovery) try is often the one that explains the failure. The
+    # latest try keeps the plain 'provision.log' name; earlier tries get
+    # logrotate-style suffixes ('provision.log.1' is the previous try, higher
+    # numbers are older). Missing files are skipped silently — log retention
+    # may have reclaimed old tries.
     try:
-        provision_log_path = (
-            global_user_state.get_cluster_history_provision_log_path(
+        provision_log_paths = (
+            global_user_state.get_cluster_history_provision_log_paths(
                 cluster_name))
-        if provision_log_path:
-            provision_log = pathlib.Path(provision_log_path).expanduser()
-            if provision_log.is_file():
-                shutil.copy2(provision_log,
-                             os.path.join(cluster_dir, 'provision.log'))
-                logger.debug(
-                    f'Copied provision log for cluster {cluster_name!r}')
+        # Oldest first -> iterate newest first so suffixes grow with age.
+        for age, log_path in enumerate(reversed(provision_log_paths)):
+            provision_log = pathlib.Path(log_path).expanduser()
+            if not provision_log.is_file():
+                continue
+            suffix = f'.{age}' if age else ''
+            shutil.copy2(provision_log,
+                         os.path.join(cluster_dir, f'provision.log{suffix}'))
+            logger.debug(f'Copied provision log for cluster '
+                         f'{cluster_name!r} (try age {age})')
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to copy provision log for cluster '
                        f'{cluster_name}: {e}')

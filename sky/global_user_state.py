@@ -205,6 +205,14 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('provision_log_path',
                       sqlalchemy.Text,
                       server_default=None),
+    # JSON list of every provision log path recorded for this incarnation,
+    # oldest first. A managed job recovery re-launches the same cluster name
+    # in place, so the scalar provision_log_path only ever holds the latest
+    # try; this keeps the earlier (pre-recovery) tries so the debug dump can
+    # collect them too.
+    sqlalchemy.Column('provision_log_paths',
+                      sqlalchemy.Text,
+                      server_default=None),
     sqlalchemy.Column('last_activity_time',
                       sqlalchemy.Integer,
                       server_default=None,
@@ -674,6 +682,41 @@ def set_user_preferred_workspace(user_id: str,
         return result.rowcount > 0
 
 
+# Cap on the provision log paths retained per cluster-history row. A managed
+# job that keeps crash-recovering re-launches the same cluster name over and
+# over; keep the most recent tries (the old files are reclaimed by log
+# retention anyway) rather than growing the row without bound.
+_MAX_PROVISION_LOG_PATHS = 20
+
+
+def _merge_provision_log_paths(
+        existing_path: Optional[str], existing_paths_json: Optional[str],
+        new_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Merge a new provision log path into a history row's recorded paths.
+
+    Returns (latest_path, paths_json) for the row's ``provision_log_path``
+    (scalar, latest try — preserved rather than nulled when ``new_path`` is
+    None) and ``provision_log_paths`` (JSON list, oldest first, deduped).
+    ``existing_path`` is folded into the list so rows written before the list
+    column existed keep their recorded path.
+    """
+    paths: List[str] = []
+    if existing_paths_json:
+        try:
+            loaded = json.loads(existing_paths_json)
+            if isinstance(loaded, list):
+                paths = [p for p in loaded if isinstance(p, str)]
+        except json.JSONDecodeError:
+            pass
+    if existing_path and existing_path not in paths:
+        paths.append(existing_path)
+    if new_path and new_path not in paths:
+        paths.append(new_path)
+    paths = paths[-_MAX_PROVISION_LOG_PATHS:]
+    latest = new_path if new_path is not None else existing_path
+    return latest, json.dumps(paths) if paths else None
+
+
 @metrics_lib.time_me
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
@@ -911,6 +954,18 @@ def add_or_update_cluster(cluster_name: str,
             session.execute(insert_or_update_stmt)
 
         # Modify cluster history table
+        # Merge this launch's provision log path into the history row's
+        # append-only list instead of overwriting: a managed-job recovery
+        # re-launches the same cluster name in place (same cluster_hash), and
+        # post-provision calls pass provision_log_path=None — a plain
+        # overwrite would first lose the pre-recovery try, then null the
+        # column entirely.
+        history_row = session.query(cluster_history_table).filter_by(
+            cluster_hash=cluster_hash).first()
+        hist_log_path, hist_log_paths = (_merge_provision_log_paths(
+            getattr(history_row, 'provision_log_path', None),
+            getattr(history_row, 'provision_log_paths', None),
+            provision_log_path))
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
         if cluster_row and cluster_row.workspace:
@@ -939,7 +994,8 @@ def add_or_update_cluster(cluster_name: str,
             usage_intervals=pickle.dumps(usage_intervals),
             user_hash=user_hash,
             workspace=history_workspace,
-            provision_log_path=provision_log_path,
+            provision_log_path=hist_log_path,
+            provision_log_paths=hist_log_paths,
             last_activity_time=last_activity_time,
             launched_at=launched_at,
             cloud=cloud,
@@ -962,7 +1018,8 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(usage_intervals),
                 cluster_history_table.c.user_hash: history_hash,
                 cluster_history_table.c.workspace: history_workspace,
-                cluster_history_table.c.provision_log_path: provision_log_path,
+                cluster_history_table.c.provision_log_path: hist_log_path,
+                cluster_history_table.c.provision_log_paths: hist_log_paths,
                 cluster_history_table.c.last_activity_time: last_activity_time,
                 cluster_history_table.c.launched_at: launched_at,
                 cluster_history_table.c.cloud: cloud,
@@ -1497,13 +1554,27 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
         if provision_log_path:
             assert cluster_hash is not None, cluster_name
-            session.query(cluster_history_table).filter_by(
-                cluster_hash=cluster_hash
-            ).filter(
-                cluster_history_table.c.provision_log_path.is_(None)
-            ).update({
-                cluster_history_table.c.provision_log_path: provision_log_path
-            })
+            # Backfill from the clusters table for rows written before the
+            # launch-time history merge existed; fold the path into the list
+            # column as well so the dump's multi-try collection sees it.
+            history_row = session.query(cluster_history_table).filter_by(
+                cluster_hash=cluster_hash).first()
+            if history_row is not None:
+                existing_path = getattr(history_row, 'provision_log_path', None)
+                _, merged_paths = _merge_provision_log_paths(
+                    existing_path,
+                    getattr(history_row, 'provision_log_paths', None),
+                    provision_log_path)
+                updates = {
+                    cluster_history_table.c.provision_log_paths: merged_paths,
+                }
+                if existing_path is None:
+                    # Keep the recorded latest if one exists (the
+                    # clusters-table path is the same launch, never newer).
+                    updates[cluster_history_table.c.provision_log_path] = (
+                        provision_log_path)
+                session.query(cluster_history_table).filter_by(
+                    cluster_hash=cluster_hash).update(updates)
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
@@ -1752,6 +1823,62 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
         latest_row = max(rows,
                          key=lambda r: latest_timestamp(r.usage_intervals))
         return getattr(latest_row, 'provision_log_path', None)
+
+
+@metrics_lib.time_me
+def get_cluster_history_provision_log_paths(cluster_name: str) -> List[str]:
+    """Returns every recorded provision log path for this cluster name.
+
+    Ordered oldest first, deduped, latest try last. Spans all incarnations of
+    the name in cluster_history (a terminate-and-relaunch creates a new
+    cluster_hash and thus a new history row) plus each row's own
+    ``provision_log_paths`` list (an in-place re-launch, e.g. a managed-job
+    recovery, appends to the same row). The clusters-table path is folded in
+    last as the authoritative latest for a live cluster — it also covers rows
+    written before the list column existed.
+
+    Callers should treat entries best-effort: log retention may have removed
+    the older files from disk.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.query(cluster_history_table).filter_by(
+            name=cluster_name).all()
+
+    def latest_timestamp(usages_bin) -> int:
+        try:
+            intervals = pickle.loads(usages_bin)
+            if not intervals:
+                return -1
+            _, end = intervals[-1]
+            return end if end is not None else int(time.time())
+        except Exception:  # pylint: disable=broad-except
+            return -1
+
+    rows = sorted(rows, key=lambda r: latest_timestamp(r.usage_intervals))
+    paths: List[str] = []
+    for row in rows:
+        row_paths: List[str] = []
+        paths_json = getattr(row, 'provision_log_paths', None)
+        if paths_json:
+            try:
+                loaded = json.loads(paths_json)
+                if isinstance(loaded, list):
+                    row_paths = [p for p in loaded if isinstance(p, str)]
+            except json.JSONDecodeError:
+                pass
+        scalar = getattr(row, 'provision_log_path', None)
+        if scalar and scalar not in row_paths:
+            row_paths.append(scalar)
+        for path in row_paths:
+            if path not in paths:
+                paths.append(path)
+    live_path = get_cluster_provision_log_path(cluster_name)
+    if live_path:
+        if live_path in paths:
+            paths.remove(live_path)
+        paths.append(live_path)
+    return paths
 
 
 @metrics_lib.time_me

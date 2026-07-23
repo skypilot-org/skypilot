@@ -302,6 +302,82 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
     return None
 
 
+def _latest_failed_scheduling_message(namespace, context,
+                                      pod_name) -> Optional[str]:
+    """Return the pod's most recent FailedScheduling event message, if any."""
+    events = kubernetes.core_api(context).list_namespaced_event(
+        namespace,
+        field_selector=(f'involvedObject.name={pod_name},'
+                        'involvedObject.kind=Pod'))
+    # Events created in the past hours are kept by
+    # Kubernetes python client and we want to surface
+    # the latest event message
+    events_desc_by_time = sorted(events.items,
+                                 key=lambda e: e.metadata.creation_timestamp,
+                                 reverse=True)
+    for event in events_desc_by_time:
+        if event.reason == 'FailedScheduling':
+            return event.message
+    return None
+
+
+def _log_pod_scheduling_summary(pods, unscheduled_reasons) -> str:
+    """Summarize per-pod scheduling state at provision-failure time.
+
+    The error raised by _raise_pod_scheduling_errors surfaces only the FIRST
+    unscheduled pod's reason — which for a multi-node launch cannot tell "one
+    straggler pod hit X" apart from "no pod scheduled at all". Log a full
+    scheduled-vs-unscheduled breakdown (grouped by failure reason) so the
+    provision log records it at the moment of failure, and return the
+    one-line count for inclusion in the raised error.
+    """
+    n_scheduled = len(pods) - len(unscheduled_reasons)
+    headline = (f'{n_scheduled}/{len(pods)} pods scheduled at provision '
+                f'failure ({len(unscheduled_reasons)} unscheduled)')
+    lines = [f'Pod scheduling summary: {headline}.']
+    # Group unscheduled pods by failure reason: on a large launch most pods
+    # usually share one reason, and the distinct reasons are the signal.
+    pods_by_reason: Dict[str, List[str]] = {}
+    for pod_name, reason in unscheduled_reasons.items():
+        reason = reason or '(no FailedScheduling event)'
+        pods_by_reason.setdefault(reason, []).append(pod_name)
+    for reason, pod_names in pods_by_reason.items():
+        example_pods = ', '.join(sorted(pod_names)[:3])
+        more = (f', and {len(pod_names) - 3} more'
+                if len(pod_names) > 3 else '')
+        lines.append(f'  {len(pod_names)} pod(s) ({example_pods}{more}): '
+                     f'{reason}')
+    # logger.info: recorded in the provision log (its handler is DEBUG-level)
+    # without spamming the console (stream handler is WARNING-level).
+    logger.info('\n'.join(lines))
+    return headline
+
+
+def _read_pods_for_nodes(namespace, context, new_nodes) -> List[Any]:
+    """Fetch the current pod object for each of the given nodes.
+
+    Prefers a single label-selector list call — one round-trip instead of N
+    sequential reads, which matters for large launches (e.g. 96 pods) — and
+    falls back to per-pod reads if the list fails or comes back incomplete,
+    so this error path degrades to the previous behavior rather than
+    masking the scheduling failure it is trying to report.
+    """
+    try:
+        cluster_name_on_cloud = new_nodes[0].metadata.labels[
+            constants.TAG_SKYPILOT_CLUSTER_NAME]
+        all_pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            label_selector=(f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                            f'{cluster_name_on_cloud}')).items
+        pods_by_name = {pod.metadata.name: pod for pod in all_pods}
+        return [pods_by_name[node.metadata.name] for node in new_nodes]
+    except Exception:  # pylint: disable=broad-except
+        return [
+            kubernetes.core_api(context).read_namespaced_pod(
+                node.metadata.name, namespace) for node in new_nodes
+        ]
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -309,12 +385,25 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
+    # Read every pod's state and FailedScheduling reason first, and log the
+    # full breakdown into the provision log before raising: the raise below
+    # only surfaces one pod's reason, and post-hoc debugging (e.g. from a
+    # debug dump) needs to know how many of the requested pods had actually
+    # been placed when provisioning gave up.
+    pods = _read_pods_for_nodes(namespace, context, new_nodes)
+    unscheduled_reasons: Dict[str, Optional[str]] = {}
+    for pod in pods:
+        if not _pod_is_scheduled(pod):
+            pod_name = pod.metadata.name
+            unscheduled_reasons[pod_name] = _latest_failed_scheduling_message(
+                namespace, context, pod_name)
+    scheduling_headline = _log_pod_scheduling_summary(pods, unscheduled_reasons)
+
     timeout_err_msg = ('Timed out while waiting for nodes to start. '
                        'Cluster may be out of resources or '
-                       'may be too slow to autoscale.')
-    for new_node in new_nodes:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            new_node.metadata.name, namespace)
+                       'may be too slow to autoscale. '
+                       f'({scheduling_headline}.)')
+    for pod in pods:
         pod_status = pod.status.phase
         # When there are multiple pods involved while launching instance,
         # there may be a single pod causing issue while others are
@@ -323,23 +412,14 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
         if pod_status != 'Pending':
             continue
         pod_name = pod._metadata._name  # pylint: disable=protected-access
-        events = kubernetes.core_api(context).list_namespaced_event(
-            namespace,
-            field_selector=(f'involvedObject.name={pod_name},'
-                            'involvedObject.kind=Pod'))
-        # Events created in the past hours are kept by
-        # Kubernetes python client and we want to surface
-        # the latest event message
-        events_desc_by_time = sorted(
-            events.items,
-            key=lambda e: e.metadata.creation_timestamp,
-            reverse=True)
-
-        event_message = None
-        for event in events_desc_by_time:
-            if event.reason == 'FailedScheduling':
-                event_message = event.message
-                break
+        if pod_name in unscheduled_reasons:
+            event_message = unscheduled_reasons[pod_name]
+        else:
+            # Pending but already bound to a node (e.g. still pulling its
+            # image), so it isn't in the unscheduled set; keep the original
+            # per-pod event lookup for this raise path.
+            event_message = _latest_failed_scheduling_message(
+                namespace, context, pod_name)
         if event_message is not None:
             if pod_status == 'Pending':
                 out_of = {}
