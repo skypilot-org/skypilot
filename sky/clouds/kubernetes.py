@@ -892,8 +892,9 @@ class Kubernetes(clouds.Cloud):
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
                     not in unsupported_features:
                 # Add high-performance networking environment variables for
-                # clusters with high performance networking
-                network_env_vars = network_type.get_network_env_vars()
+                # clusters with high performance networking. Pass acc_type so
+                # OCI can pick a shape-specific NCCL profile (e.g. GB200).
+                network_env_vars = network_type.get_network_env_vars(acc_type)
                 k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too

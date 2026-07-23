@@ -5399,3 +5399,79 @@ def test_get_node_accelerator_count_multiple_families_no_crash():
 
 def test_get_handled_taint_keys_includes_neuron():
     assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()
+
+
+class TestOCINetworkEnvVars:
+    """OCI network_tier: best NCCL env-var injection per GPU shape."""
+
+    _NET = utils.KubernetesHighPerformanceNetworkType.OCI_ROCE
+
+    def test_gb200_profile(self):
+        """GB200 gets the MNNVL/NVLS InfiniBand profile, not RoCEv2."""
+        env = self._NET.get_network_env_vars('GB200')
+        # The rack-scale NVLink knobs that make GB200 distinct.
+        assert env['NCCL_MNNVL_ENABLE'] == '1'
+        assert env['NCCL_NVLS_ENABLE'] == '1'
+        assert env['NCCL_NET_PLUGIN'] == 'sys'
+        assert env['NCCL_CUMEM_ENABLE'] == '1'
+        assert env['NCCL_IB_HCA'] == 'mlx5_0,mlx5_1,mlx5_3,mlx5_4'
+        assert env['NCCL_SOCKET_IFNAME'] == 'eth0'
+
+    def test_gb200_is_replacement_not_union(self):
+        """GB200 must drop the RoCEv2-only knobs, not merge them in.
+
+        The official OCI GB200 configmap omits DSCP/GID/UCX; folding the
+        RoCE defaults in would inject values OCI does not ship for GB200.
+        """
+        env = self._NET.get_network_env_vars('GB200')
+        for absent in ('NCCL_IB_GID_INDEX', 'NCCL_IB_TC', 'UCX_TLS',
+                       'UCX_NET_DEVICES'):
+            assert absent not in env, absent
+
+    def test_gb200_case_insensitive(self):
+        env = self._NET.get_network_env_vars('gb200')
+        assert env['NCCL_MNNVL_ENABLE'] == '1'
+
+    def test_gb300_profile(self):
+        """GB300 is MNNVL/NVLS but keeps IB tuning and NET_PLUGIN=none."""
+        env = self._NET.get_network_env_vars('GB300')
+        assert env['NCCL_MNNVL_ENABLE'] == '1'
+        assert env['NCCL_NVLS_ENABLE'] == '1'
+        assert env['NCCL_NET_PLUGIN'] == 'none'
+        # Leading '=' is NCCL's exact-name-match prefix; must be preserved.
+        assert env['NCCL_IB_HCA'] == ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
+                                      'mlx5_5,mlx5_6,mlx5_7,mlx5_8')
+        # GB300-specific knobs absent from GB200.
+        assert env['NCCL_NET_GDR_C2C'] == '1'
+        assert env['NCCL_DMABUF_ENABLE'] == '1'
+        assert env['NCCL_IB_TIMEOUT'] == '22'
+
+    def test_gb200_and_gb300_are_distinct(self):
+        """The two GB profiles must not be identical (NET_PLUGIN differs)."""
+        gb200 = self._NET.get_network_env_vars('GB200')
+        gb300 = self._NET.get_network_env_vars('GB300')
+        assert gb200 != gb300
+        assert gb200['NCCL_NET_PLUGIN'] == 'sys'
+        assert gb300['NCCL_NET_PLUGIN'] == 'none'
+
+    def test_default_roce_profile_for_other_shapes(self):
+        """H100/None fall back to the existing RoCEv2 profile unchanged."""
+        expected = {
+            'NCCL_IB_HCA': 'mlx5',
+            'NCCL_IB_GID_INDEX': '3',
+            'NCCL_IB_TC': '41',
+            'NCCL_SOCKET_IFNAME': 'eth0',
+            'UCX_TLS': 'tcp',
+            'UCX_NET_DEVICES': 'eth0',
+        }
+        assert self._NET.get_network_env_vars('H100') == expected
+        assert self._NET.get_network_env_vars(None) == expected
+        # GB200/GB300 must NOT return the default RoCE profile.
+        assert self._NET.get_network_env_vars('GB200') != expected
+        assert self._NET.get_network_env_vars('GB300') != expected
+
+    def test_non_oci_types_ignore_acc_type(self):
+        """acc_type only affects OCI; other types return their fixed dict."""
+        coreweave = utils.KubernetesHighPerformanceNetworkType.COREWEAVE
+        assert (coreweave.get_network_env_vars('GB200') ==
+                coreweave.get_network_env_vars(None))
