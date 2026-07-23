@@ -141,10 +141,10 @@ Verify
 .. code-block:: bash
 
     # One pod per (matching) node; Running once all images are pulled
-    kubectl get pods -l app.kubernetes.io/name=skypilot-image-prepuller -o wide
+    kubectl -n default get pods -l app.kubernetes.io/name=skypilot-image-prepuller -o wide
 
     # Watch pull progress on a node
-    kubectl describe pod <prepuller-pod> | grep -A2 -iE "pulling|pulled"
+    kubectl -n default describe pod <prepuller-pod> | grep -A2 -iE "pulling|pulled"
 
 Once the pods are ``Running`` (init containers ``Completed``), the listed images
 are warm on every matching node and new tasks that use them skip the pull.
@@ -155,7 +155,7 @@ To remove the pre-puller:
 
 .. code-block:: bash
 
-    kubectl delete daemonset skypilot-image-prepuller -n default
+    kubectl -n default delete daemonset skypilot-image-prepuller
 
 Deleting the DaemonSet removes the pre-puller pods but does not evict the images
 already cached on the nodes -- those stay until the kubelet's image garbage
