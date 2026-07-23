@@ -398,7 +398,7 @@ def _get_requests_from_managed_jobs(
                 resource='managed_job_details',
                 errors=debug_dump_context['errors'],
                 orphans=debug_dump_context['timed_out_ops'])
-            if ok:
+            if ok and result is not None:
                 jobs, _, _, _ = result
                 for job in jobs:
                     name = job.get('job_name')
@@ -677,7 +677,7 @@ def _get_managed_jobs_from_clusters(
             resource='managed_jobs_from_clusters',
             errors=debug_dump_context['errors'],
             orphans=debug_dump_context['timed_out_ops'])
-        if not ok:
+        if not ok or result is None:
             return
         jobs, _, _, _ = result
         job_cluster_names = _managed_job_cluster_names_from_records(jobs)
@@ -863,7 +863,7 @@ def _populate_recent_context(
                 resource='managed_jobs',
                 errors=debug_dump_context['errors'],
                 orphans=debug_dump_context['timed_out_ops'])
-            if ok:
+            if ok and result is not None:
                 jobs, _, _, _ = result
                 for job in jobs:
                     submitted_at = job.get('submitted_at') or 0
@@ -1890,7 +1890,7 @@ def _dump_managed_job_queue_info(
             resource='queue_v2_batch',
             errors=errors,
             orphans=orphans)
-        if not ok:
+        if not ok or result is None:
             return
         all_records, _, _, _ = result
     except Exception as e:  # pylint: disable=broad-except
