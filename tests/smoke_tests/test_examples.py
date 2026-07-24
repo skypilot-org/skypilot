@@ -58,7 +58,7 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
     test = smoke_tests_utils.Test(
         'min_gpt',
         [
-            f'sky launch -y -c {name} --infra {generic_cloud} {dist_train_file}',
+            f'sky launch -y -c {name} --config provision.install_conda=true --infra {generic_cloud} {dist_train_file}',
             f'sky logs {name} 1 --status',
             f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "Epoch 1 | Iter 0 | Train Loss"',
         ],
@@ -116,7 +116,7 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         test = smoke_tests_utils.Test(
             'ray_train',
             [
-                f'sky launch -y -c {name} --infra {generic_cloud} --memory 8+ --gpus {accelerator} {yaml_file_path}',
+                f'sky launch -y -c {name} --config provision.install_conda=true --infra {generic_cloud} --memory 8+ --gpus {accelerator} {yaml_file_path}',
                 f'sky logs {name} 1 --status',
                 f'outputs=$(sky logs {name} 1); echo "$outputs" && echo "$outputs" | grep "Train Epoch 0:"',
             ],
@@ -126,10 +126,17 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Test ray basic ----------
+# ---------- Test ray basic (custom Docker image + install_conda opt-in) ----------
+# Runs the real 2-node distributed Ray example, but on a bring-your-own Docker
+# image (rayproject/ray CPU) with `provision.install_conda=true`. This exercises
+# the custom-image conda opt-in path now that conda is no longer installed in the
+# default images by default.
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
-@pytest.mark.no_seeweb  # Seeweb does not support multi-node
+@pytest.mark.no_hyperbolic  # Custom docker image_id not supported
+@pytest.mark.no_seeweb  # Custom docker image_id not supported
+@pytest.mark.no_vast  # Custom docker image_id not supported
+@pytest.mark.no_fluidstack  # Custom docker image_id not supported
+@pytest.mark.resource_heavy  # Large Ray image pull
 def test_ray_basic(generic_cloud: str) -> None:
     name = smoke_tests_utils.get_cluster_name()
 
@@ -145,6 +152,11 @@ def test_ray_basic(generic_cloud: str) -> None:
         with open('examples/ray_basic/ray.yaml', 'r', encoding='utf-8') as f:
             content = f.read()
         modified_content = content.replace('workdir: .', f'workdir: {temp_dir}')
+        # Run on a bring-your-own Ray Docker image to exercise the custom-image
+        # + install_conda opt-in path.
+        modified_content = modified_content.replace(
+            '  cpus: 2+',
+            '  cpus: 2+\n  image_id: docker:rayproject/ray:2.40.0-py310-cpu')
 
         # Create a temporary YAML file with the modified content
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
@@ -156,7 +168,7 @@ def test_ray_basic(generic_cloud: str) -> None:
         test = smoke_tests_utils.Test(
             'ray_basic',
             [
-                f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
+                f'sky launch -y -c {name} --config provision.install_conda=true --infra {generic_cloud} {yaml_file_path}',
                 f'sky logs {name} 1 --status',
                 f'outputs=$(sky logs {name} 1); echo "$outputs" && '
                 f'echo "$outputs" | grep "All 2 nodes have joined" && '
@@ -296,7 +308,7 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         test = smoke_tests_utils.Test(
             'nemorl',
             [
-                f'HF_TOKEN="" sky launch -y -c {name} --infra {infra} --gpus {accelerator} --cpus {cpu} --memory {memory} --secret HF_TOKEN {f.name}',
+                f'HF_TOKEN="" sky launch -y -c {name} --config provision.install_conda=true --infra {infra} --gpus {accelerator} --cpus {cpu} --memory {memory} --secret HF_TOKEN {f.name}',
                 f'sky logs {name} 1 --status',
             ],
             f'sky down -y {name}',
