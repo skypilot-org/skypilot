@@ -1037,11 +1037,17 @@ def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
     return data
 
 
-def _dump_request_id_info(
-        request_ids: Set[str],
-        dump_dir: str,
-        errors: Optional[List[Dict[str, str]]] = None) -> None:
-    """Collect request logs and metadata."""
+def _dump_request_id_info(request_ids: Set[str],
+                          dump_dir: str,
+                          errors: Optional[List[Dict[str, str]]] = None,
+                          deadline: Optional[float] = None) -> None:
+    """Collect request logs and metadata.
+
+    ``deadline`` (absolute monotonic) bounds the section: once the budget is
+    gone we stop starting new requests and record the rest as skipped, so the
+    dump still zips what it gathered. Per-request wall-clock is written to
+    ``requests/_timings.json``.
+    """
     if not request_ids:
         logger.debug('No requests to dump')
         return
@@ -1051,7 +1057,17 @@ def _dump_request_id_info(
     requests_dir = os.path.join(dump_dir, 'requests')
     os.makedirs(requests_dir, exist_ok=True)
 
+    timings: List[Dict[str, Any]] = []
     for request_id in request_ids:
+        if _deadline_exceeded(deadline):
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': request_id,
+                    'error': 'Skipped: overall debug-dump deadline exceeded.',
+                })
+            continue
+        request_start = time.monotonic()
         request_dir = os.path.join(requests_dir, request_id)
         os.makedirs(request_dir, exist_ok=True)
 
@@ -1149,6 +1165,18 @@ def _dump_request_id_info(
                     'traceback': _full_traceback()
                 })
 
+        timings.append({
+            'request_id': request_id,
+            'duration_s': round(time.monotonic() - request_start, 2),
+        })
+
+    try:
+        with open(os.path.join(requests_dir, '_timings.json'),
+                  'w',
+                  encoding='utf-8') as f:
+            json.dump(timings, f, indent=2)
+    except OSError as e:
+        logger.debug(f'Failed to write request timings: {e}')
     logger.debug('Exiting _dump_request_id_info')
 
 
@@ -1453,9 +1481,14 @@ def _collect_cluster_kubernetes_resources(
             })
 
 
-def _dump_kube_contexts_info(dump_dir: str,
-                             errors: Optional[List[Dict[str,
-                                                        str]]] = None) -> None:
+_KUBE_CONTEXTS_TIMEOUT = 120
+
+
+def _dump_kube_contexts_info(
+        dump_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None,
+        deadline: Optional[float] = None,
+        orphans: Optional[List[Dict[str, Any]]] = None) -> None:
     """Dump cluster-WIDE k8s objects once per allowed kube context.
 
     The GPU-metrics pods (Prometheus server, DCGM exporter) and the non-Workload
@@ -1476,10 +1509,18 @@ def _dump_kube_contexts_info(dump_dir: str,
     it, or ``SKYPILOT_ALL_KUBERNETES_CONTEXTS_INCLUDES_IN_CLUSTER=false`` hides
     it as a compute target. Its GPU-manager / Kueue config is worth dumping.
 
-    Robustness (tenants can have defunct contexts that time out): every call is
-    5s-bounded, the per-context fetch fast-fails on the first connection error,
-    and contexts are fetched in parallel -- so N dead contexts cost ~5s, not
-    ~5s*calls*N. Best-effort: errors are recorded, never aborts the dump.
+    Robustness: each internal call is short-timeout-bounded and the per-context
+    fetch fast-fails on the first connection error, so a *defunct* context costs
+    ~one timeout. But a *reachable-but-slow* context (live cluster, flaky
+    Prometheus) sails past the fast-fail gate and stacks several such calls --
+    and urllib3 can retry each ~4x -- so the section as a whole can run for
+    minutes. We therefore cap the whole parallel batch at
+    ``_bounded_timeout(_KUBE_CONTEXTS_TIMEOUT, deadline)``: with an overall
+    ``deadline`` it shrinks to the remaining budget (so a slow control plane
+    can't blow the dump's hard-kill deadline); without one it's still bounded by
+    the fixed cap. On timeout the batch is abandoned (its worker recorded in
+    ``orphans``) and whatever landed on disk is kept. Best-effort throughout:
+    errors are recorded, never aborts the dump.
     """
     try:
         contexts = clouds.Kubernetes.existing_allowed_contexts(silent=True)
@@ -1509,28 +1550,47 @@ def _dump_kube_contexts_info(dump_dir: str,
     contexts_root = os.path.join(dump_dir, 'kubernetes_contexts')
     os.makedirs(contexts_root, exist_ok=True)
 
-    def _dump_one(context: Optional[str]) -> List[Dict[str, str]]:
+    def _dump_one(context: Optional[str]) -> Tuple[List[Dict[str, str]], float]:
         # run_in_parallel re-raises the first exception, so swallow everything
-        # into the returned error list.
+        # into the returned error list. Time the per-context fetch too, so a
+        # slow context is visible in _timings.json.
+        start = time.monotonic()
         try:
             output_dir = os.path.join(contexts_root,
                                       _sanitize_context_name(context))
-            return kubernetes_debug.dump_context_resources(
+            ctx_errors = kubernetes_debug.dump_context_resources(
                 context=context, output_dir=output_dir)
         except Exception as e:  # pylint: disable=broad-except
-            return [{
+            ctx_errors = [{
                 'resource': 'kubernetes_contexts',
                 'error': str(e),
                 'traceback': _full_traceback(),
             }]
+        return ctx_errors, time.monotonic() - start
 
     num_threads = min(len(unique_contexts), 8)
-    results = subprocess_utils.run_in_parallel(_dump_one, unique_contexts,
-                                               num_threads)
+    ok, results = _run_with_deadline(
+        lambda: subprocess_utils.run_in_parallel(_dump_one, unique_contexts,
+                                                 num_threads),
+        _bounded_timeout(_KUBE_CONTEXTS_TIMEOUT, deadline),
+        component='kubernetes_contexts',
+        resource='all_contexts',
+        errors=errors,
+        orphans=orphans,
+    )
+    if not ok or results is None:
+        # Timed out: _run_with_deadline recorded the skip + orphan; per-context
+        # dirs written before the cutoff remain on disk as a partial.
+        return
 
-    if errors is not None:
-        for context, ctx_errors in zip(unique_contexts, results):
-            sanitized = _sanitize_context_name(context)
+    timings: List[Dict[str, Any]] = []
+    for context, (ctx_errors, duration_s) in zip(unique_contexts, results):
+        sanitized = _sanitize_context_name(context)
+        timings.append({
+            'context': sanitized,
+            'duration_s': round(duration_s, 2),
+        })
+        if errors is not None:
             for err in ctx_errors:
                 errors.append({
                     'component': 'kubernetes_contexts',
@@ -1538,6 +1598,14 @@ def _dump_kube_contexts_info(dump_dir: str,
                     'error': err['error'],
                     'traceback': err['traceback'],
                 })
+
+    try:
+        with open(os.path.join(contexts_root, '_timings.json'),
+                  'w',
+                  encoding='utf-8') as f:
+            json.dump(timings, f, indent=2)
+    except OSError as e:
+        logger.debug(f'Failed to write kube-context timings: {e}')
 
 
 _KubeContextReachabilityChecker = Callable[[Optional[str]], bool]
@@ -2185,13 +2253,22 @@ def _build_debug_dump(
     # is still captured).
     errors = debug_dump_context['errors']
     orphans = debug_dump_context['timed_out_ops']
+    # Section order matters under a deadline: the user-scoped sections (the
+    # requests / clusters / jobs the dump was actually filtered to) run first,
+    # and the always-on, cluster-wide kubernetes_contexts scrape runs LAST -- so
+    # a slow k8s control plane can only eat into its own collection, never
+    # starve the sections the caller asked for. Every section is now
+    # deadline-aware (its internal calls are bounded and it's skipped once the
+    # budget is gone), so the build always reaches the zip step with a coherent
+    # partial instead of being hard-killed mid-section.
     sections: List[Tuple[str, Callable[[], None]]] = [
         ('server_info', lambda: _dump_server_info(
             dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
-        ('kubernetes_contexts',
-         lambda: _dump_kube_contexts_info(dump_dir, errors=errors)),
-        ('request_ids', lambda: _dump_request_id_info(
-            debug_dump_context['request_ids'], dump_dir, errors=errors)),
+        ('request_ids',
+         lambda: _dump_request_id_info(debug_dump_context['request_ids'],
+                                       dump_dir,
+                                       errors=errors,
+                                       deadline=deadline)),
         ('clusters',
          lambda: _dump_cluster_info(debug_dump_context['cluster_names'],
                                     dump_dir,
@@ -2205,6 +2282,8 @@ def _build_debug_dump(
                                         errors=errors,
                                         deadline=deadline,
                                         orphans=orphans)),
+        ('kubernetes_contexts', lambda: _dump_kube_contexts_info(
+            dump_dir, errors=errors, deadline=deadline, orphans=orphans)),
     ]
     budget = _remaining_budget(deadline)
     logger.info(f'debug dump: collecting {len(sections)} sections '
@@ -2212,6 +2291,10 @@ def _build_debug_dump(
                 f'{len(debug_dump_context["cluster_names"])} clusters, '
                 f'{len(debug_dump_context["managed_job_ids"])} managed jobs); '
                 f'budget={"unbounded" if budget is None else f"{budget:.0f}s"}')
+    # Per-section wall-clock + status, surfaced in summary.json so a reader can
+    # see where the budget went (and which sections were skipped) without
+    # grepping the worker log.
+    section_timings: List[Dict[str, Any]] = []
     for name, dump_section in sections:
         if _deadline_exceeded(deadline):
             logger.warning(f'Skipping debug-dump section {name!r}: overall '
@@ -2220,6 +2303,11 @@ def _build_debug_dump(
                 'component': name,
                 'resource': 'section',
                 'error': 'Skipped: overall debug-dump deadline exceeded.',
+            })
+            section_timings.append({
+                'section': name,
+                'status': 'skipped_deadline',
+                'duration_s': 0.0,
             })
             continue
         # INFO (not debug) so the per-section trail lands in the executor
@@ -2233,8 +2321,13 @@ def _build_debug_dump(
         logger.info(f'debug dump: section {name!r} start' + (
             '' if remaining is None else f' ({remaining:.0f}s budget left)'))
         dump_section()
-        logger.info(f'debug dump: section {name!r} done in '
-                    f'{time.monotonic() - section_start:.1f}s')
+        duration = time.monotonic() - section_start
+        logger.info(f'debug dump: section {name!r} done in {duration:.1f}s')
+        section_timings.append({
+            'section': name,
+            'status': 'completed',
+            'duration_s': round(duration, 2),
+        })
 
     # Write client info if provided
     if client_info:
@@ -2261,6 +2354,7 @@ def _build_debug_dump(
             'cluster_names': sorted(debug_dump_context['cluster_names']),
             'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
         },
+        'section_timings': section_timings,
         'errors': errors,
     }
     summary_path = os.path.join(dump_dir, 'summary.json')
