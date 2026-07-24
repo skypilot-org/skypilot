@@ -4484,41 +4484,34 @@ class TestKubernetesEfaSameAzAffinity(unittest.TestCase):
             KubernetesHighPerformanceNetworkType as N)
         self.assertFalse(self._deploy_vars(2, N.NONE)['k8s_efa_same_az'])
 
-    def _render_same_az_affinity(self, same_az):
-        """Render just the k8s_efa_same_az podAffinity block from the live
-        template, so a wrong label or topologyKey is caught -- not only the
-        deploy var. Keeps the assertion coupled to the real template file."""
-        import jinja2
-
-        import sky
-        template_path = os.path.join(os.path.dirname(sky.__file__), 'templates',
-                                     'kubernetes-ray.yml.j2')
-        with open(template_path, 'r', encoding='utf-8') as fin:
-            full = fin.read()
-        begin_marker = '{% if k8s_efa_same_az %}'
-        end_marker = '{% endif %}'
-        begin = full.index(begin_marker)
-        end = full.index(end_marker, begin) + len(end_marker)
-        snippet = full[begin:end]
-        return jinja2.Template(snippet).render(
-            k8s_efa_same_az=same_az, cluster_name_on_cloud='my-cluster')
-
-    def test_same_az_affinity_renders_cluster_name_label_and_zone(self):
-        # When the flag is set the rendered podAffinity must carry the
-        # (non-deprecated) cluster-name label and the single-AZ topology key.
-        rendered = self._render_same_az_affinity(same_az=True)
-        self.assertIn('requiredDuringSchedulingIgnoredDuringExecution',
-                      rendered)
-        self.assertIn('skypilot-cluster-name: my-cluster', rendered)
-        self.assertIn('topologyKey: topology.kubernetes.io/zone', rendered)
-        # Must not use the deprecated skypilot-cluster label.
-        self.assertNotIn('skypilot-cluster:', rendered)
+    def test_same_az_affinity_sets_cluster_name_label_and_zone(self):
+        # Multi-node EFA sets a required same-zone podAffinity term keyed on the
+        # (non-deprecated) cluster-name label. Asserting on the k8s_pod_affinity
+        # deploy var catches a wrong label or topologyKey; full-template
+        # rendering of the term is covered by the snapshot goldens.
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        pod_affinity = self._deploy_vars(2, N.AWS_EFA)['k8s_pod_affinity']
+        required = pod_affinity[
+            'requiredDuringSchedulingIgnoredDuringExecution']
+        assert required == [{
+            'labelSelector': {
+                'matchLabels': {
+                    'skypilot-cluster-name': 'c',
+                },
+            },
+            'topologyKey': 'topology.kubernetes.io/zone',
+        }]
 
     def test_same_az_affinity_absent_when_flag_unset(self):
-        # When the flag is unset the same-AZ affinity must not be rendered.
-        rendered = self._render_same_az_affinity(same_az=False)
-        self.assertNotIn('topology.kubernetes.io/zone', rendered)
-        self.assertNotIn('skypilot-cluster-name', rendered)
+        # A multi-node non-EFA GPU job still bin-packs (preferred term) but has
+        # no required same-zone term.
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType as N)
+        pod_affinity = self._deploy_vars(2, N.NONE)['k8s_pod_affinity']
+        assert 'requiredDuringSchedulingIgnoredDuringExecution' not in (
+            pod_affinity)
+        assert 'preferredDuringSchedulingIgnoredDuringExecution' in pod_affinity
 
 
 class TestKubernetesSpotLabelContext(unittest.TestCase):
