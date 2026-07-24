@@ -2424,6 +2424,71 @@ def get_node_health_for_cluster(
     return result
 
 
+def get_missing_node_reason(node_names: List[str],
+                            provider_config: Dict[str, Any]) -> Optional[str]:
+    """Best-effort reason a cluster lost node(s), from current node state.
+
+    Answers "where did the node go" by asking Kubernetes about the nodes the
+    cluster's pods were placed on, rather than by replaying the pod's event
+    history. A node that no longer exists, or that exists but is NotReady or
+    cordoned, explains a pod that vanished from under the cluster.
+
+    Reporting current state (rather than a past event) keeps this idempotent:
+    it returns the same answer on every status refresh, with no dependence on
+    what a previous call already consumed.
+
+    Note this deliberately does not use the NodeInfoSource cache that
+    ``_check_nodes_health`` prefers: a node absent from that cache is
+    indistinguishable from a healthy one, and a deleted node is exactly the
+    case this needs to report.
+
+    Args:
+        node_names: The Kubernetes node names the cluster's pods were placed
+            on, e.g. from ``ClusterInfo.get_node_names()``.
+        provider_config: The Kubernetes provider config.
+
+    Returns:
+        A human-readable reason, or None when every node is present and
+        healthy (or none could be checked).
+    """
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    unique_names = sorted({name for name in node_names if name})
+    if not unique_names:
+        return None
+
+    def _inspect_node(name: str) -> Optional[str]:
+        """Returns an issue description for a node, or None if it is fine."""
+        try:
+            node = kubernetes.core_api(context).read_node(
+                name, _request_timeout=kubernetes.API_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                return 'no longer exists'
+            logger.debug(f'Failed to read node {name}: {e}')
+            return None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to read node {name}: {e}')
+            return None
+        # NotReady first: it is more severe than cordoned, and a cordoned
+        # node that has also gone NotReady is described by the former.
+        node_status = getattr(node, 'status', None)
+        for condition in (getattr(node_status, 'conditions', None) or []):
+            if condition.type == 'Ready' and condition.status != 'True':
+                return 'is NotReady'
+        if getattr(getattr(node, 'spec', None), 'unschedulable', False):
+            return 'is cordoned'
+        return None
+
+    issues = subprocess_utils.run_in_parallel(_inspect_node, unique_names)
+    parts = [
+        f'node {name} {issue}' for name, issue in zip(unique_names, issues)
+        if issue is not None
+    ]
+    if not parts:
+        return None
+    return '; '.join(parts)
+
+
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     """Get pod termination reason and write to cluster events.
 

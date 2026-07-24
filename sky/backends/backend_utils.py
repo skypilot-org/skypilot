@@ -2980,6 +2980,29 @@ def _update_cluster_status(
         ]
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
+            # Say where the node went. The pods are gone, so their live status
+            # explains nothing, but the Kubernetes nodes they were placed on
+            # still do: a node that no longer exists, or that is NotReady or
+            # cordoned, points at a cluster/cloud-side failure rather than a
+            # user-initiated teardown. K8s-only; other clouds keep the generic
+            # reason. Best-effort -- fall back to the generic message when the
+            # nodes are unknown or all look fine.
+            if not status_reason and isinstance(launched_resources.cloud,
+                                                clouds.Kubernetes):
+                try:
+                    cluster_info = handle.cached_cluster_info
+                    node_names = (cluster_info.get_node_names()
+                                  if cluster_info is not None else None)
+                    if node_names:
+                        ray_config = global_user_state.get_cluster_yaml_dict(
+                            handle.cluster_yaml)
+                        if ray_config and 'provider' in ray_config:
+                            status_reason = (
+                                k8s_instance.get_missing_node_reason(
+                                    node_names, ray_config['provider']) or '')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to get node state for '
+                                 f'{cluster_name!r}: {e}')
         elif ray_cluster_unhealthy:
             if status_reason:
                 # K8s diagnostics explain the issue — lead with that
