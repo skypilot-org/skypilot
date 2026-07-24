@@ -773,6 +773,35 @@ def reject_request_for_unauthorized_workspace(user: models.User) -> None:
     check_workspace_permission(user, skypilot_config.get_active_workspace())
 
 
+def check_cluster_write_permission(user: models.User,
+                                   cluster_name: str) -> None:
+    """Checks a user may perform a mutating operation on an existing cluster.
+
+    Unlike ``reject_request_for_unauthorized_workspace``, which checks the
+    request's *active* workspace, this checks the workspace the target cluster
+    actually belongs to. Mutating an existing cluster (down/stop/start/
+    autostop/cancel/exec/ssh) must be gated by that cluster's own workspace,
+    not the caller's active workspace: the active workspace is resolved from
+    the caller's own context and may differ from where the cluster lives, so
+    the active-workspace check does not protect the cluster.
+
+    A missing cluster is left to the caller's own not-found handling (there is
+    no workspace to enforce), so this does not raise for unknown names.
+
+    Args:
+        user: The user making the request.
+        cluster_name: The target cluster.
+
+    Raises:
+        PermissionDeniedError: If the user cannot access the cluster's
+            workspace.
+    """
+    workspace = global_user_state.get_cluster_workspace(cluster_name)
+    if workspace is None:
+        return
+    check_workspace_permission(user, workspace)
+
+
 def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
     """Check if a workspace is private.
 
