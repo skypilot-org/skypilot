@@ -74,17 +74,23 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 # to a user-writable location. SkyPilot's own runtime uses the separate
 # ~/skypilot-runtime venv.
 #
-# Auto-activate it for interactive login shells so `ssh <cluster>` lands in the
-# same writable env that task setup/run use (mirroring conda's base env), but
-# skip it for SkyPilot's own internal commands. Those run via
-# `bash --login -i -c '... source ~/.bashrc ...'` (command_runner source_bashrc),
-# which sets BASH_EXECUTION_STRING; activating the venv there would set
-# VIRTUAL_ENV for controller/serve/jobs ops and break them. User setup/run go
-# through make_task_bash_script (bash -i <file>, no -c) which activates the env
-# explicitly, so they are unaffected. The CONDA_PREFIX guard lets an opt-in
-# conda base (install_conda=true) take precedence.
+# Auto-activate it for real interactive login shells so `ssh <cluster>` lands in
+# the same writable env that task setup/run use (mirroring conda's base env),
+# but skip it everywhere else. The `[ -t 0 ]` (attached to a terminal) guard is
+# essential and must NOT be replaced by an interactive-shell check ($-): task
+# setup/run go through make_task_bash_script as `bash -i <file>` (no -c), which
+# IS an interactive shell ($- contains 'i') yet is NOT attached to a terminal.
+# Activating the venv there would `source activate`, which snapshots PATH into
+# _OLD_VIRTUAL_PATH *before* cloud-CLI paths are appended to ~/.bashrc (e.g.
+# gcloud's path.bash.inc, added at runtime by cloud-deps setup, always after
+# this line). A later venv (re)activation then runs `deactivate`, restoring that
+# pre-CLI PATH snapshot and dropping gcloud et al. -- which disables the cloud on
+# the jobs controller (e.g. "GCP access is disabled" on storage prechecks). Real
+# `ssh` sessions have a TTY, so they still get the venv; the task path relies on
+# make_task_bash_script's own explicit activation instead. The CONDA_PREFIX guard
+# lets an opt-in conda base (install_conda=true) take precedence.
 RUN python3 -m venv ~/sky-user-env && \
-    echo 'if [ -z "${BASH_EXECUTION_STRING:-}" ] && [ -z "${CONDA_PREFIX:-}" ] && [ -f ~/sky-user-env/bin/activate ]; then source ~/sky-user-env/bin/activate; fi' >> ~/.bashrc
+    echo 'if [ -t 0 ] && [ -z "${BASH_EXECUTION_STRING:-}" ] && [ -z "${CONDA_PREFIX:-}" ] && [ -f ~/sky-user-env/bin/activate ]; then source ~/sky-user-env/bin/activate; fi' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

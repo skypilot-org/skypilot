@@ -511,23 +511,13 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     )
 
 
-def launch_new_process_tree(cmd: str,
-                            log_output: str = '/dev/null',
-                            source_bashrc: bool = False) -> int:
+def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
     """Launch a new process that will not be a child of the current process.
 
     This will launch bash in a new session, which will launch the given cmd.
     This will ensure that cmd is in its own process tree, and once bash exits,
     will not be an ancestor of the current process. This is useful for job
     launching.
-
-    Args:
-        source_bashrc: Whether to source ~/.bashrc before running the cmd, so
-            that cloud CLIs (e.g. gcloud) installed at runtime and only exposed
-            via ~/.bashrc are on PATH for the launched process. Requires the
-            interactive (`-i`) shell, because ~/.bashrc typically returns early
-            for non-interactive shells. This adds a small overhead, so it is
-            off by default and only enabled by callers that need it.
 
     Returns the pid of the launched cmd.
     """
@@ -543,17 +533,8 @@ def launch_new_process_tree(cmd: str,
     # TODO(zhwu): A more elegant solution is to use another daemon process to be
     # in charge of starting these driver processes, instead of starting them in
     # the current process.
-    if source_bashrc:
-        # Use `bash -i` so the non-interactive guard at the top of ~/.bashrc
-        # does not skip the cloud CLI PATH setup (mirrors the `-i` usage in
-        # sky/utils/command_runner.py). Sourcing ~/.bashrc puts cloud CLIs
-        # (e.g. gcloud) on PATH for the launched process.
-        inner_cmd = f'source ~/.bashrc && {cmd}'
-        wrapped_cmd = (f'nohup bash -i -c {shlex.quote(inner_cmd)} '
-                       f'</dev/null >{log_output} 2>&1 & echo $!')
-    else:
-        wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
-                       f'</dev/null >{log_output} 2>&1 & echo $!')
+    wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
+                   f'</dev/null >{log_output} 2>&1 & echo $!')
     proc = subprocess.run(wrapped_cmd,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
