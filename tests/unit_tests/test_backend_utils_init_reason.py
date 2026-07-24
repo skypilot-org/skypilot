@@ -163,3 +163,40 @@ class TestUpdateClusterStatusInitReason:
         msg = _capture_init_log_message(
             {'pod-0': (status_lib.ClusterStatus.UP, None)}, launched_nodes=2)
         assert 'one or more nodes terminated' in msg, msg
+
+    def test_some_nodes_terminated_surfaces_k8s_reason(self):
+        # When a node disappears, the underlying Kubernetes cause (e.g. the
+        # node went NotReady) is surfaced alongside the generic message.
+        with mock.patch.object(
+                backend_utils.global_user_state,
+                'get_cluster_yaml_dict',
+                return_value={'provider': {
+                    'namespace': 'default',
+                    'context': 'ctx'
+                }}), \
+             mock.patch.object(
+                 backend_utils.k8s_instance,
+                 'get_terminated_pod_reasons',
+                 return_value={'pod-1': 'node node-1 NotReady'}):
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2)
+        assert 'one or more nodes terminated' in msg, msg
+        assert 'node node-1 NotReady' in msg, msg
+
+    def test_some_nodes_terminated_falls_back_when_no_reason(self):
+        # No determinable reason -> keep the generic message, no exception.
+        with mock.patch.object(
+                backend_utils.global_user_state,
+                'get_cluster_yaml_dict',
+                return_value={'provider': {
+                    'namespace': 'default',
+                    'context': 'ctx'
+                }}), \
+             mock.patch.object(backend_utils.k8s_instance,
+                               'get_terminated_pod_reasons',
+                               return_value={}):
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2)
+        assert 'one or more nodes terminated' in msg, msg

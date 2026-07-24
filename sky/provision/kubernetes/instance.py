@@ -3205,6 +3205,59 @@ def query_instances(
     return cluster_status
 
 
+def get_terminated_pod_reasons(
+        cluster_name: str, cluster_name_on_cloud: str,
+        provider_config: Dict[str, Any]) -> Dict[str, str]:
+    """Best-effort reasons for a cluster's expected-but-missing pods.
+
+    Mirrors ``query_instances``' detection of terminated nodes: the expected
+    pod names come from the provider config's service selectors, and any that
+    the Kubernetes API no longer returns is treated as terminated. For each
+    such pod the underlying cause (e.g. the node went NotReady, the node was
+    deleted, or the pod was evicted by the taint manager) is recovered from the
+    pod's and its node's events via ``_get_pod_missing_reason``.
+
+    This is a separate lookup so that callers can surface the reason without
+    re-adding the missing pods to the live status snapshot (which would break
+    the terminated-node detection that relies on those pods being absent).
+
+    Args:
+        cluster_name: The SkyPilot cluster name (used to record events).
+        cluster_name_on_cloud: The cluster name used for the pod label selector.
+        provider_config: The Kubernetes provider config.
+
+    Returns:
+        A mapping from missing pod name to a human-readable reason. Only pods
+        with a determinable reason are included; the map is empty when none can
+        be determined. Best-effort -- callers should treat a missing entry as
+        unknown and fall back to a generic message.
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    is_ssh = context.startswith('ssh-') if context else False
+    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
+    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                      f'{cluster_name_on_cloud}')
+    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
+                               is_ssh, identity, label_selector)
+    present_pod_names = {pod.metadata.name for pod in pods}
+    # Expected pod names, derived the same way as in query_instances.
+    target_pod_names = set(service['spec']['selector']['component']
+                           for service in provider_config.get('services', []))
+
+    reasons: Dict[str, str] = {}
+    first_pod = True
+    for target_pod_name in sorted(target_pod_names):
+        if target_pod_name in present_pod_names:
+            continue
+        reason = _get_pod_missing_reason(context, namespace, cluster_name,
+                                         target_pod_name, first_pod)
+        first_pod = False
+        if reason:
+            reasons[target_pod_name] = reason
+    return reasons
+
+
 def get_command_runners(
     cluster_info: common.ClusterInfo,
     **credentials: Dict[str, Any],
