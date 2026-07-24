@@ -1869,6 +1869,54 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+# Only run this test on Kubernetes since this test relies on
+# kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
+    """pod_config targeting the main container by name must merge into it.
+
+    The main container in SkyPilot Kubernetes pods is named ``ray-node``, and
+    user pod_configs commonly target it by that name (e.g. to add
+    volumeMounts). Container entries are patch-merged by name, so a named
+    entry must merge into the existing ``ray-node`` container rather than
+    being treated as a new container. The pod_config lives in the task YAML's
+    ``config`` section (tests/test_yamls/test_k8s_pod_config_ray_node.yaml),
+    which adds an env var and an emptyDir volume mount to the ``ray-node``
+    container; the test asserts both are visible from inside the job.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_ray_node.yaml'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_pod_config_ray_node_container',
+        [
+            # The task sleeps 60 so the job is still RUNNING when we tail its
+            # logs by name (same workaround as
+            # test_managed_jobs_env_isolation).
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+            f's=$(sky jobs logs -n {name} --no-follow) && echo "$s" && '
+            f'echo "$s" | grep "pod_env_check: ray-node-pod-config-merged" && '
+            f'echo "$s" | grep "mount_check: ok"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_remote_server
 @pytest.mark.managed_jobs
 def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
