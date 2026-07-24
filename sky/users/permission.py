@@ -638,6 +638,12 @@ class PermissionService:
                    non-members). Write access stays limited to ``users``.
         """
         with _policy_lock():
+            # Reload from the DB inside the lock before mutating: save_policy()
+            # rewrites the whole casbin_rule table from this enforcer's
+            # in-memory view, so a stale view (e.g. missing another workspace's
+            # policies added by a different worker) would clobber those rows on
+            # save. update_workspace_policy already does this; mirror it here.
+            self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
             for user in users:
                 logger.debug(f'Adding workspace policy: user={user}, '
