@@ -1140,7 +1140,20 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     workspaces = _load_workspaces()
     accessible_names = _accessible_workspace_names_for_user(
         user_id, set(workspaces.keys()))
-    return {name: workspaces[name] for name in accessible_names}
+    # A workspace is 'writable' if the user can mutate it (a member, or the
+    # workspace is open); read-only workspaces surfaced to non-members are not.
+    # Exposed so the dashboard can enable/disable per-workspace action controls
+    # without recomputing membership client-side.
+    writable_names = _accessible_workspace_names_for_user(user_id,
+                                                          accessible_names,
+                                                          action='write')
+    result: Dict[str, Any] = {}
+    for name in accessible_names:
+        # Copy so the request-cached config isn't mutated with computed state.
+        ws_config = dict(workspaces[name])
+        ws_config['writable'] = name in writable_names
+        result[name] = ws_config
+    return result
 
 
 # ===========================
