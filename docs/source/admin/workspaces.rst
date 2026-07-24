@@ -336,6 +336,38 @@ users who cannot access the workspace, they cannot see/access/operate on the wor
    The ``allowed_users`` field can be a list of user names or IDs. Note, if you
    have multiple users with the same name, you need to specify the user IDs instead.
 
+Read-only visibility for non-members
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default a private workspace is completely hidden from non-members. To instead
+make a private workspace *visible* (read-only) to users who are not in its
+``allowed_users``, set ``non_member_access: read-only``:
+
+.. code-block:: yaml
+
+   workspaces:
+     private-ws:
+       private: true
+       non_member_access: read-only
+       allowed_users:
+         - alice@example.com
+
+With ``read-only``, non-members can see the workspace and list the clusters and
+managed jobs running in it (including viewing their logs), but cannot launch,
+modify, cancel, or otherwise mutate anything in it — SSH and VS Code access to
+its clusters are also blocked, since those open an interactive shell. Members
+(the ``allowed_users``) and admins retain full access.
+
+``non_member_access`` accepts:
+
+- ``none`` (default): the workspace and its resources are hidden from
+  non-members (the behavior described above).
+- ``read-only``: non-members can view the workspace and its workloads but
+  cannot modify them.
+
+It only applies to private workspaces; an open (non-private) workspace is usable
+by everyone regardless.
+
 Service accounts in private workspaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
