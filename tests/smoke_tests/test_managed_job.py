@@ -1745,7 +1745,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test-managed-jobs-inline-env',
         [
-            rf'sky jobs launch -n {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
+            rf'sky jobs launch -n {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]] && [[ ! -z \"\$SKYPILOT_CLUSTER_INFO\" ]] && [[ ! -z \"\${constants.USER_ENV_VAR}\" ]] && [[ ! -z \"\${constants.TASK_ID_ENV_VAR}\" ]]) || exit 1"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
