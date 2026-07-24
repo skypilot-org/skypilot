@@ -109,6 +109,10 @@ def get_git_commit(path: Optional[str] = None) -> Optional[str]:
                                 cwd=path,
                                 check=True)
         return result.stdout.strip()
+    except FileNotFoundError as error:
+        if error.filename == 'git':
+            return None
+        raise
     except subprocess.CalledProcessError:
         return None
 
