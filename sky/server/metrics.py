@@ -271,6 +271,29 @@ def _label_or_default(value: Optional[str], default: str) -> str:
     return value if value else default
 
 
+# Hard upper bound on rows emitted by
+# sky_managed_job_emergency_recovery_attempts. Emergencies are rare by
+# construction (a bounded per-job retry budget), but a controller bug
+# hitting many jobs at once could otherwise produce one series per job;
+# capping defends Prometheus's series budget. The query orders by
+# attempt count (highest first, deterministic tiebreak) so the jobs
+# most likely to page survive the cap.
+_EMERGENCY_EPISODES_MAX_SERIES = 100
+
+_RECOVERY_EVENTS_HELP = (
+    'Count of managed-job RECOVERING events currently retained in '
+    'job_events, by recovery source and workspace. NOT monotone: '
+    'job_events has a retention window, so aged-out rows decrease the '
+    'value — use clamp_min(delta(...), 0) for rates, never increase(). '
+    'Events written before recovery_source existed (NULL) are excluded.')
+
+_EMERGENCY_ATTEMPTS_HELP = (
+    'Emergency-recovery attempts used in the managed job\'s current '
+    'episode. The series exists only while the episode is active (last '
+    'attempt within the controller\'s reset window) and the job is '
+    'non-terminal; capped at 100 series, highest attempt counts kept.')
+
+
 class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
@@ -287,6 +310,19 @@ class ManagedJobsCollector:
     window. A proper Counter incremented at the state-transition site
     would be more semantically correct than a gauge here, but is
     deferred.
+
+    Also emits two recovery-observability gauges:
+
+    * ``sky_managed_job_recovery_events_count{recovery_source,
+      workspace}`` — RECOVERING ``job_events`` rows currently retained,
+      by source (FAILURE / EMERGENCY / RESTART). Not monotone (event
+      retention prunes old rows), so rate queries must use
+      ``clamp_min(delta(...), 0)``, never ``increase(...)``.
+    * ``sky_managed_job_emergency_recovery_attempts{job_id, job_name,
+      workspace}`` — per-job attempts used in the job's current
+      emergency-recovery episode, emitted only while the episode is
+      active and the job is non-terminal, so the series (and any alert
+      on it) self-clears. Capped at ``_EMERGENCY_EPISODES_MAX_SERIES``.
     """
 
     def __init__(self):
@@ -295,18 +331,46 @@ class ManagedJobsCollector:
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
         # List of (workspace, user_hash, cloud, status, count) tuples.
         self._cached_rows: list = []
+        # List of (recovery_source, workspace, count) tuples.
+        self._cached_recovery_rows: list = []
+        # List of (spot_job_id, job_name, workspace, attempts) tuples.
+        self._cached_episode_rows: list = []
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
+        from sky.jobs import constants as managed_job_constants
         from sky.jobs import state as managed_job_state
-        self._cached_rows = (
-            managed_job_state.get_status_counts_by_workspace_user_cloud())
+
+        # Query into locals first, then assign: a failure mid-refresh
+        # (collect() logs it and serves the cache) must not leave a
+        # mixed-age cache where some metrics updated and others didn't.
+        rows = (managed_job_state.get_status_counts_by_workspace_user_cloud())
+        recovery_rows = (
+            managed_job_state.get_recovery_event_counts_by_source_workspace())
+        episode_rows = (
+            managed_job_state.get_active_emergency_recovery_episodes(
+                now=time.time(),
+                window_seconds=managed_job_constants.
+                EMERGENCY_RECOVERY_RESET_WINDOW_SECONDS,
+                limit=_EMERGENCY_EPISODES_MAX_SERIES,
+            ))
+        self._cached_rows = rows
+        self._cached_recovery_rows = recovery_rows
+        self._cached_episode_rows = episode_rows
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
             'sky_managed_jobs_count', ('Current count of managed job tasks by '
                                        'workspace, user, status, and cloud.'),
             labels=['workspace', 'user', 'status', 'cloud'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_recovery_events_count',
+            _RECOVERY_EVENTS_HELP,
+            labels=['recovery_source', 'workspace'])
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_job_emergency_recovery_attempts',
+            _EMERGENCY_ATTEMPTS_HELP,
+            labels=['job_id', 'job_name', 'workspace'])
 
     def collect(self):
         now = time.time()
@@ -318,6 +382,8 @@ class ManagedJobsCollector:
                     logger.exception('Failed to collect managed jobs metrics')
                 self._last_scrape_time = now
             rows = self._cached_rows
+            recovery_rows = self._cached_recovery_rows
+            episode_rows = self._cached_episode_rows
 
         counts: dict = {}
         for workspace, user_hash, cloud, status, count in rows:
@@ -334,6 +400,26 @@ class ManagedJobsCollector:
         for (workspace, user, status, cloud), count in counts.items():
             metric.add_metric([workspace, user, status, cloud], count)
         yield metric
+
+        recovery_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_job_recovery_events_count',
+            _RECOVERY_EVENTS_HELP,
+            labels=['recovery_source', 'workspace'])
+        for source, workspace, count in recovery_rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            recovery_metric.add_metric([source, ws_label], count)
+        yield recovery_metric
+
+        episode_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_job_emergency_recovery_attempts',
+            _EMERGENCY_ATTEMPTS_HELP,
+            labels=['job_id', 'job_name', 'workspace'])
+        for job_id, job_name, workspace, attempts in episode_rows:
+            ws_label = _label_or_default(workspace, _NULL_WORKSPACE_LABEL)
+            name_label = _label_or_default(job_name, _NULL_LABEL)
+            episode_metric.add_metric([str(job_id), name_label, ws_label],
+                                      attempts)
+        yield episode_metric
 
 
 # Transient statuses we report time-in-state for. UP / STOPPED are steady

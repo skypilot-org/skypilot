@@ -317,8 +317,51 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
-def format_resource(resource: 'resources_lib.Resources',
-                    simplified_only: bool = False) -> Tuple[str, Optional[str]]:
+# The Kubernetes pod template writes the spec memory as decimal gigabytes
+# ('{{memory}}G'), while the actual request read back from the pod is
+# normalized to GiB (2**30). A spec value of X GB therefore reads back as
+# X * this ratio even when nothing modified the pod, which must not be
+# reported as a divergence.
+_MEM_SPEC_GB_TO_POD_GIB = 1000**3 / 1024**3
+
+
+def _format_cpu_mem_element(
+        name: str,
+        spec_value: Optional[float],
+        actual_value: Optional[float],
+        spec_to_actual_ratio: float = 1.0) -> Optional[Tuple[str, str]]:
+    """Format a cpus=/mem= element, preferring the actual value.
+
+    Returns (simple, full) strings, or None if neither value is set. When
+    the actual value (e.g., the provisioned pod's resource request) differs
+    from the spec-derived value, the full string annotates the spec value
+    so the divergence (e.g., an admin policy override) stays visible.
+    """
+    if actual_value is None:
+        if spec_value is None:
+            return None
+        value_str = common_utils.format_float(spec_value)
+        return f'{name}={value_str}', f'{name}={value_str}'
+    actual_str = common_utils.format_float(actual_value)
+    if spec_value is not None:
+        spec_str = common_utils.format_float(spec_value)
+        if (spec_str == actual_str or math.isclose(
+                actual_value, spec_value * spec_to_actual_ratio, rel_tol=1e-3)):
+            # The actual value is the spec value, possibly written to the
+            # instance in the provisioner's unit convention: no divergence,
+            # keep displaying the spec value.
+            return f'{name}={spec_str}', f'{name}={spec_str}'
+        return (f'{name}={actual_str}',
+                f'{name}={actual_str} (requested: {spec_str})')
+    simple = f'{name}={actual_str}'
+    return simple, simple
+
+
+def format_resource(
+        resource: 'resources_lib.Resources',
+        simplified_only: bool = False,
+        actual_cpus: Optional[float] = None,
+        actual_memory_gb: Optional[float] = None) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
     is_k8s = resource.cloud.canonical_name() == 'kubernetes'
     vcpu, mem = None, None
@@ -334,18 +377,24 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_simple.append(f'gpus={acc}:{count}')
         elements_full.append(f'gpus={acc}:{count}')
 
+    cpu_element = _format_cpu_mem_element('cpus', vcpu, actual_cpus)
+    mem_element = _format_cpu_mem_element(
+        'mem',
+        mem,
+        actual_memory_gb,
+        spec_to_actual_ratio=_MEM_SPEC_GB_TO_POD_GIB)
     if (resource.accelerators is None or is_k8s):
-        if vcpu is not None:
-            elements_simple.append(f'cpus={common_utils.format_float(vcpu)}')
-            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
-        if mem is not None:
-            elements_simple.append(f'mem={common_utils.format_float(mem)}')
-            elements_full.append(f'mem={common_utils.format_float(mem)}')
+        if cpu_element is not None:
+            elements_simple.append(cpu_element[0])
+            elements_full.append(cpu_element[1])
+        if mem_element is not None:
+            elements_simple.append(mem_element[0])
+            elements_full.append(mem_element[1])
     elif not simplified_only:
-        if vcpu is not None:
-            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
-        if mem is not None:
-            elements_full.append(f'mem={common_utils.format_float(mem)}')
+        if cpu_element is not None:
+            elements_full.append(cpu_element[1])
+        if mem_element is not None:
+            elements_full.append(mem_element[1])
 
     is_slurm = resource.cloud.canonical_name() == 'slurm'
     if not is_k8s and not is_slurm:
@@ -384,8 +433,22 @@ def format_resource(resource: 'resources_lib.Resources',
 def get_readable_resources_repr(
         handle: 'backends.CloudVmRayResourceHandle',
         simplified_only: bool = False) -> Tuple[str, Optional[str]]:
+    # Prefer the actual resource requests captured at provision time
+    # (currently Kubernetes only), so the displayed values match what the
+    # scheduler sees even when an admin policy rewrote pod_config directly.
+    # getattr: handles/ClusterInfo pickled by older versions lack these
+    # attributes.
+    actual_cpus = None
+    actual_memory_gb = None
+    cluster_info = getattr(handle, 'cached_cluster_info', None)
+    if cluster_info is not None:
+        actual_cpus = getattr(cluster_info, 'actual_cpus', None)
+        actual_memory_gb = getattr(cluster_info, 'actual_memory_gb', None)
     resource_str_simple, resource_str_full = format_resource(
-        handle.launched_resources, simplified_only)
+        handle.launched_resources,
+        simplified_only,
+        actual_cpus=actual_cpus,
+        actual_memory_gb=actual_memory_gb)
     if not simplified_only:
         assert resource_str_full is not None
     if (handle.launched_nodes is not None and

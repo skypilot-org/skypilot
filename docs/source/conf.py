@@ -109,6 +109,7 @@ html_theme_options = {
     'navbar_end': [
         'theme-switcher',
         'navbar-icon-links',
+        'try-platform-button',
     ],
     'navbar_persistent': ['search-button-field'],
     'logo': {
@@ -128,7 +129,15 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': '',  # Put announcements such as meetups here.
+    # Put announcements such as meetups here.
+    # Styled by .sky-announcement* rules in _static/custom.css.
+    'announcement': ('<a class="sky-announcement" '
+                     'href="https://skypilot.ai/blog/skypilot-the-company">'
+                     '<span class="sky-announcement__pill">New</span>'
+                     '<span class="sky-announcement__text">'
+                     'Announcing SkyPilot Platform and our $20M seed</span>'
+                     '<span class="sky-announcement__arrow" aria-hidden="true">'
+                     '&rarr;</span></a>'),
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',
@@ -229,18 +238,6 @@ autosectionlabel_prefix_document = True
 
 suppress_warnings = ['autosectionlabel.*']
 
-# Adapted from vllm-project/vllm
-# see https://docs.readthedocs.io/en/stable/reference/environment-variables.html # noqa
-READTHEDOCS_VERSION_TYPE = os.environ.get('READTHEDOCS_VERSION_TYPE')
-if READTHEDOCS_VERSION_TYPE == "tag":
-    # remove the warning banner if the version is a tagged release
-    header_file = os.path.join(os.path.dirname(__file__),
-                               "_templates/header.html")
-    # The file might be removed already if the build is triggered multiple times
-    # (readthedocs build both HTML and PDF versions separately)
-    if os.path.exists(header_file):
-        os.remove(header_file)
-
 
 def copy_example_assets(app, exception):
     """Copy example assets to the build directory after HTML build."""
@@ -261,18 +258,34 @@ def copy_example_assets(app, exception):
         # Find all assets directories in examples
         for assets_dir in glob.glob(os.path.join(examples_dir, '*/assets')):
             if os.path.exists(assets_dir):
-                # Destination directory in the built HTML
-                dest_dir = os.path.join(app.outdir, 'examples', 'applications',
-                                        'assets')
-                os.makedirs(dest_dir, exist_ok=True)
+                # READMEs reference assets relatively ("assets/foo.png"), so the
+                # files have to land next to the generated page. Examples are
+                # grouped into category directories (agents/, applications/,
+                # ...), so resolve the category by locating the generated page
+                # rather than assuming one.
+                example_name = os.path.basename(os.path.dirname(assets_dir))
+                pages = glob.glob(
+                    os.path.join(app.outdir, 'examples', '*',
+                                 example_name + '.html'))
+                dest_dirs = {
+                    os.path.join(os.path.dirname(page), 'assets')
+                    for page in pages
+                }
+                if not dest_dirs:
+                    print(f'No generated page found for example '
+                          f'{example_name!r}; skipping its assets.')
+                    continue
 
-                # Copy all files from assets directory
-                for file in os.listdir(assets_dir):
-                    src = os.path.join(assets_dir, file)
-                    dst = os.path.join(dest_dir, file)
-                    if os.path.isfile(src):
-                        shutil.copy2(src, dst)
-                        print(f'Copied asset: {file}')
+                for dest_dir in dest_dirs:
+                    os.makedirs(dest_dir, exist_ok=True)
+
+                    # Copy all files from assets directory
+                    for file in os.listdir(assets_dir):
+                        src = os.path.join(assets_dir, file)
+                        dst = os.path.join(dest_dir, file)
+                        if os.path.isfile(src):
+                            shutil.copy2(src, dst)
+                            print(f'Copied asset: {file} -> {dest_dir}')
 
 
 def setup(app):

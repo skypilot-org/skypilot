@@ -539,7 +539,7 @@ that context in ``kubernetes.context_configs.<context>`` instead:
 
    - :ref:`volumes-all`: persistent storage you can mount into sandboxes.
    - :ref:`job-groups`: run many parallel jobs and sandboxes together for RL.
-   - :ref:`skypilot-frontier-ai`: SkyPilot Platform, including the Secrets
+   - :ref:`skypilot-platform`: SkyPilot Platform, including the Secrets
      Manager that injects credentials into sandboxes.
 
 .. tip::

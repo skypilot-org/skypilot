@@ -21,6 +21,7 @@ import pytest
 
 from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
 from sky.skylet import job_lib
@@ -1360,3 +1361,106 @@ class TestDunderMainDispatchesToImportedModule:
         # The imported module's `main` -- not the `__main__` copy's -- must be
         # the one that was called.
         mock_main.assert_called_once_with('test-uuid')
+
+
+class TestTransientJobStatusRecoveryWindow:
+    """Tests for the transient job-status-check retry window across recovery.
+
+    When the controller cannot fetch a task's job status but the cluster is
+    healthy, it retries for up to JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS before
+    recovering, to avoid a false alarm from a transient control-plane error.
+    That window (`transient_job_check_error_start_time`) must be reset after a
+    recovery; otherwise the first status-fetch failure after a recovery is
+    measured from before the recovery, exceeds the timeout immediately, and
+    triggers another recovery with no retries -- turning one transient error
+    into an unbounded recovery loop.
+    """
+
+    class _StopLoop(Exception):
+        """Sentinel to break the otherwise-infinite monitoring loop."""
+
+    @pytest.mark.asyncio
+    async def test_window_reset_after_recovery(self, monkeypatch):
+        """A transient failure after a recovery starts a fresh retry window.
+
+        Drives ``_monitor_one_task`` through: transient failure (retry) ->
+        transient failure past the timeout (recover) -> transient failure
+        again. With the window reset, the third failure retries instead of
+        recovering, so ``recover`` is called exactly once. Without the reset it
+        would recover a second time immediately.
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+
+        # A logical clock advanced at the top of each loop iteration (inside
+        # the get_job_status stub) so `elapsed` is fully deterministic:
+        #   iter 1: +0   -> elapsed 0   < 60 -> retry
+        #   iter 2: +100 -> elapsed 100 >= 60 -> recover (#1); window reset
+        #   iter 3: +50  -> fresh window, elapsed 0 < 60 -> retry
+        #   iter 4: stub raises _StopLoop to end the loop
+        clock = {'t': 1000.0}
+        deltas = iter([0.0, 100.0, 50.0])
+        recover_calls = 0
+
+        async def fake_get_job_status(*args, **kwargs):
+            try:
+                clock['t'] += next(deltas)
+            except StopIteration:
+                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            return None, 'Job status check timed out after 30s.'
+
+        async def fake_recover(*args, **kwargs):
+            nonlocal recover_calls
+            recover_calls += 1
+            return clock['t']
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        def fake_refresh(*args, **kwargs):
+            return status_lib.ClusterStatus.UP, handle
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(side_effect=fake_recover)
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          side_effect=fake_refresh), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+                await controller_module.JobController._monitor_one_task(
+                    mock_self,
+                    task_id=0,
+                    task=MagicMock(name='task'),
+                    cluster_name='cluster',
+                    executor=executor,
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=False)
+
+        assert recover_calls == 1, (
+            'expected exactly one recovery; a second recovery means the '
+            'transient retry window was not reset after the first recovery')

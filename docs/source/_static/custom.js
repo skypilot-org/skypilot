@@ -11,6 +11,25 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-website-id', '4223d017-a3d2-4b92-b191-ea4d425a23c3');
        script.setAttribute('data-project-name', 'SkyPilot');
        script.setAttribute('data-project-color', '#4C4C4D');
+       // Follow the docs theme toggle (pydata-sphinx-theme sets
+       // html[data-theme="dark"]) so the widget switches with the site.
+       script.setAttribute('data-color-scheme-selector', "html[data-theme='dark']");
+       // Light mode: solid white launcher button with black text, no shadow.
+       script.setAttribute('data-launcher-button-background-color', '#FFFFFF');
+       script.setAttribute('data-launcher-button-hover-background-color', '#FFFFFF');
+       script.setAttribute('data-launcher-button-border', 'none');
+       script.setAttribute('data-launcher-button-color', '#000000');
+       script.setAttribute('data-launcher-button-text-shadow', 'none');
+       script.setAttribute('data-launcher-button-label-color', '#000000');
+       script.setAttribute('data-launcher-button-label-text-shadow', 'none');
+       // Dark mode: dark launcher surface with white text.
+       script.setAttribute('data-launcher-button-background-color-dark', '#1F242C');
+       script.setAttribute('data-launcher-button-hover-background-color-dark', '#1F242C');
+       script.setAttribute('data-launcher-button-border-dark', 'none');
+       script.setAttribute('data-launcher-button-color-dark', '#FFFFFF');
+       script.setAttribute('data-launcher-button-text-shadow-dark', 'none');
+       script.setAttribute('data-launcher-button-label-color-dark', '#FFFFFF');
+       script.setAttribute('data-launcher-button-label-text-shadow-dark', 'none');
        script.setAttribute('data-project-logo', 'https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/_static/skypilot-icon.png');
        script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
@@ -59,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Batch Inference' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
-        { selector: '.toctree-l1 > a', text: 'For Frontier AI' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot Platform' },
         { selector: '.toctree-l2 > a', text: 'Agents' },
         { selector: '.toctree-l2 > a', text: 'Sandboxes' },
         { selector: '.toctree-l1 > a', text: 'Lifecycle hooks' },
@@ -74,12 +93,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Auto-expand the "For Frontier AI" section so its nested items (and their
+// Auto-expand the "SkyPilot Platform" section so its nested items (and their
 // "New" badges) are visible in the sidebar without a manual click.
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.toctree-l1').forEach((li) => {
         const link = li.querySelector(':scope > a');
-        if (link && link.textContent.includes('For Frontier AI')) {
+        if (link && link.textContent.includes('SkyPilot Platform')) {
             const checkbox = li.querySelector(':scope > input.toctree-checkbox');
             if (checkbox) checkbox.checked = true;
         }

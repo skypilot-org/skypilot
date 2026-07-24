@@ -8,8 +8,16 @@ import orjson
 import pandas as pd
 import pytest
 
+from sky import catalog
 from sky.catalog import common as catalog_common
 from sky.utils import annotations
+
+
+def test_rtxpro6000_in_common_gpus():
+    # RTXPRO6000 (NVIDIA RTX PRO 6000 Blackwell) must appear in the common GPU
+    # list so that `sky show-gpus` surfaces it across clouds. Naming matches
+    # the AWS and RunPod catalogs (no hyphens), not GCP's `nvidia-rtx-pro-6000`.
+    assert 'RTXPRO6000' in catalog.get_common_gpus()
 
 
 @mock.patch('sky.catalog.common.requests.get')

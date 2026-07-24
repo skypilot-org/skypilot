@@ -551,6 +551,10 @@ class JobController:
                 2. The cluster is preempted or failed before the job is
                 submitted.
                 3. Any unexpected error happens during the `sky.launch`.
+            exceptions.PoolDoesNotExistError: This will be raised when the
+                pool the job is bound to no longer exists (e.g. the pool was
+                deleted while the job was running or recovering). This is
+                unrecoverable for the job.
         Other exceptions may be raised depending on the backend.
         """
         _add_k8s_annotations(task, self._job_id)
@@ -1444,6 +1448,16 @@ class JobController:
 
             logger.info(f'Task {task.name} recovered, continuing monitoring')
 
+            # Recovery relaunches the cluster, so any pending
+            # status-fetch-failure window belongs to the previous cluster and
+            # must not carry over. If it did, the first status-fetch failure
+            # after recovery would measure `elapsed` from before the recovery,
+            # exceed JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS immediately, and
+            # trigger another recovery with no retries. One transient
+            # control-plane error would then become an unbounded recovery loop.
+            transient_job_check_error_start_time = None
+            job_check_backoff = None
+
             # Reset force flag after first recovery
             force_transit_to_recovering = False
 
@@ -2172,6 +2186,19 @@ class JobController:
                         managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                         failure_reason)
                     attempt_done = True
+                except exceptions.PoolDoesNotExistError as e:
+                    # The pool was deleted while the job was still bound to
+                    # it. The job can never launch into the pool again, so
+                    # mark it terminal with a clear reason instead of
+                    # retrying the launch forever.
+                    logger.error(f'Pool no longer exists for task {task_id}')
+                    failure_reason = common_utils.format_exception(e)
+                    logger.error(failure_reason)
+                    await self._update_failed_task_state(
+                        task_id,
+                        managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                        failure_reason)
+                    attempt_done = True
                 except exceptions.ClusterSetUpError as e:
                     # Raised by the launch path for a non-retryable setup
                     # failure, e.g. the job's pod was OOMKilled during
@@ -2573,9 +2600,20 @@ class ControllerManager:
                     if pool_cluster_name is not None:
                         cluster_name = pool_cluster_name
                         if job_id_on_pool_cluster is not None:
-                            core.cancel(cluster_name=cluster_name,
-                                        job_ids=[job_id_on_pool_cluster],
-                                        _try_cancel_if_cluster_is_init=True)
+                            try:
+                                core.cancel(cluster_name=cluster_name,
+                                            job_ids=[job_id_on_pool_cluster],
+                                            _try_cancel_if_cluster_is_init=True)
+                            except exceptions.ClusterDoesNotExist:
+                                # The pool worker is already gone (e.g. the
+                                # pool was torn down while the job was still
+                                # bound to it), so there is nothing to
+                                # cancel. Treat as cleaned up rather than
+                                # failing the job with a cleanup error.
+                                logger.info(
+                                    f'Pool worker {cluster_name} no longer '
+                                    'exists; skipping cancellation of the '
+                                    'pool submission.')
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(

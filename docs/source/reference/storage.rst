@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or HF buckets.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, VastData Object Storage, OCI Object Storage, IBM COS, or the :ref:`Hugging Face Hub <huggingface-hub-storage>` (repos, datasets, and Buckets).
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -32,6 +32,19 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
+
+        You can also mount a `Hugging Face Hub <https://huggingface.co/docs/huggingface_hub>`_ repo, dataset, or Bucket with an ``hf://`` source:
+
+        .. code-block:: yaml
+
+          # Mount a Hugging Face model repo (read-only) or Bucket (read-write)
+          file_mounts:
+            /base-model:
+              source: hf://Qwen/Qwen2.5-3B
+            /checkpoints:
+              source: hf://buckets/my-org/my-bucket
+
+        See :ref:`Using Hugging Face Hub storage <huggingface-hub-storage>` for details.
 
 
     .. tab-item:: Create a bucket
@@ -357,6 +370,54 @@ without blocking the training loop.
     When using MOUNT_CACHED for checkpoints, ensure your checkpoint frequency allows each checkpoint to be completely flushed to the remote bucket before the next one is written. Otherwise, the local cache will continue to grow and may eventually fill the disk. New files will be automatically synced to the bucket in the background.
 
 
+.. _huggingface-hub-storage:
+
+Using Hugging Face Hub storage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot can read and write data on the `Hugging Face Hub
+<https://huggingface.co/docs/huggingface_hub>`_ by setting ``store: hf``.
+`Hugging Face Buckets <https://huggingface.co/docs/huggingface_hub/guides/buckets>`_
+are read-write, while Hub repos, datasets, and spaces are mounted as read-only
+sources. The same bucket or repo is reachable from every cloud SkyPilot runs on,
+with no per-cloud copies.
+
+**💡 Example use case**: Streaming a base model and dataset from the Hub while
+writing checkpoints back to a Hugging Face Bucket.
+
+.. code-block:: yaml
+
+  file_mounts:
+    # Model repo, read-only. Optionally pin a revision with @<branch|tag|commit>.
+    /base-model:
+      source: hf://Qwen/Qwen2.5-3B
+      store: hf
+      mode: MOUNT
+    # Dataset repo, read-only.
+    /data:
+      source: hf://datasets/my-org/my-dataset
+      store: hf
+      mode: MOUNT
+    # Hugging Face Bucket, read-write, for checkpoints and logs.
+    /checkpoints:
+      source: hf://buckets/my-org/my-bucket
+      store: hf
+      mode: MOUNT
+
+The ``huggingface`` extra and a logged-in token are required; see
+:ref:`Hugging Face setup <huggingface-installation>`. ``store: hf`` may be
+omitted whenever ``source`` already uses the ``hf://`` scheme.
+
+.. tip::
+    ``MOUNT`` and ``MOUNT_CACHED`` behave identically for ``store: hf`` — the
+    `hf-mount <https://github.com/huggingface/hf-mount>`_ FUSE backend has its
+    own on-disk cache. To tune the mount via ``config.mount.hf_mount_args``,
+    use ``mode: MOUNT`` (those flags are only applied in ``MOUNT`` mode). The
+    backend also has a couple of environment requirements; if a mount fails,
+    see the Hugging Face entry in the FAQ below, or use ``mode: COPY`` (which
+    downloads via ``huggingface_hub`` and needs no FUSE).
+
+
 Using SkyPilot storage CLI
 --------------------------
 
@@ -500,13 +561,18 @@ Storage YAML reference
           - COPY: Files are copied at VM initialization and any writes to the
             mount path will not be replicated on the bucket.
           - MOUNT_CACHED: The bucket is mounted with a local VFS cache backed by
-            rclone. Writes are cached locally and asynchronously uploaded to the
-            bucket. See MOUNT_CACHED mode in detail above.
+            rclone; writes are cached locally and asynchronously uploaded to the
+            bucket. See MOUNT_CACHED mode in detail above. For store: hf,
+            MOUNT_CACHED is equivalent to MOUNT (hf-mount provides its own
+            on-disk cache); the rclone-specific tuning below (the type field and
+            the mount_cached parameters) does not apply. To tune an hf-mount,
+            use mode: MOUNT with config.mount.hf_mount_args.
 
         type: str; either of MODEL_CHECKPOINT_RO, MODEL_CHECKPOINT_RW, DATASET_RO, or DATASET_RW
           Optional. Only valid when mode is MOUNT_CACHED. Specifies a pre-tuned
           workload type that sets optimized rclone parameters. Individual
           parameters can still be overridden via config.mount_cached.
+          Not applicable to store: hf (silently ignored).
           - MODEL_CHECKPOINT_RO: Read-only model weights/checkpoints. Optimized
             for large sequential reads with parallel chunk streams.
           - MODEL_CHECKPOINT_RW: Read-write model checkpoints. Same read
@@ -530,6 +596,8 @@ Storage YAML reference
                 stores. See the hf-mount README for the full flag list.
           - mount_cached: dict of rclone parameters for MOUNT_CACHED mode.
             Any parameters set here override the defaults from the workload type.
+            Not applicable to store: hf (silently ignored; use
+            config.mount.hf_mount_args instead).
             Available parameters:
             - transfers: int; default: 4
                 Number of parallel file transfers.

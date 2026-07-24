@@ -1442,7 +1442,9 @@ def test_volumes_on_kubernetes():
                 'while [ $SECONDS -lt $end ]; do '
                 'if kubectl get pvc existing0; then exit 0; fi; '
                 'sleep 1; '
-                'done; exit 1'),
+                'done; '
+                'echo "Timeout waiting for PVC existing0 to appear"; '
+                'kubectl get pvc; exit 1'),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
             f'sky volumes apply -y -n vol-existing1 --type k8s-pvc --size 2GB --use-existing',
@@ -1460,20 +1462,38 @@ def test_volumes_on_kubernetes():
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
             f'sky logs {name} 1 --status',  # Ensure the first job on the new cluster succeeded.
             f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then echo "pvc1 not deleted" && exit 1; else echo "pvc1 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then echo "vol-existing1 not deleted" && exit 1; else echo "vol-existing1 deleted"; fi',
-            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "{name}"); if [ -n "$vol" ]; then echo "ephemeral volume for cluster {name} not deleted" && exit 1; else echo "ephemeral volume for cluster {name} deleted"; fi',
+            # Volume deletion is asynchronous, so poll until each deleted
+            # volume disappears from `sky volumes ls` instead of checking once.
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
+                'existing0'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found('pvc1'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(
+                'vol-existing1'),
+            smoke_tests_utils.get_cmd_wait_until_volume_is_not_found(name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
+                # PVC teardown for deleted volumes is asynchronous, so poll
+                # until the PVCs backing the deleted volumes disappear before
+                # asserting. The PVCs backing imported (use_existing) volumes
+                # must be preserved.
+                'end=$((SECONDS+120)); '
+                'while [ $SECONDS -lt $end ]; do '
+                'pvcs=$(kubectl get pvc); echo "$pvcs"; '
+                'if ! echo "$pvcs" | grep -q "pvc0" && '
+                '! echo "$pvcs" | grep -q "pvc1" && '
+                f'! echo "$pvcs" | grep -q "{name}"; then break; fi; '
+                'echo "Waiting for deleted volume PVCs to be removed..."; '
+                'sleep 5; '
+                'done && '
+                'pvcs=$(kubectl get pvc) && echo "$pvcs" && '
+                'if echo "$pvcs" | grep -q "pvc0"; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
+                'if echo "$pvcs" | grep -q "pvc1"; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
+                f'if echo "$pvcs" | grep -q "{name}"; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi && '
                 # existing0 was imported with use_existing=True; the underlying PVC is preserved on delete.
-                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -z "$pvc" ]; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
-                'pvc=$(echo "$pvcs" | grep "pvc1"); if [ -n "$pvc" ]; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
+                'if ! echo "$pvcs" | grep -q "existing0"; then echo "pvc for imported volume existing0 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume existing0 preserved"; fi && '
                 # vol-existing1 wraps an imported PVC named "existing1" (matched by label); that PVC is preserved on delete.
-                'pvc=$(echo "$pvcs" | grep "existing1"); if [ -z "$pvc" ]; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi && '
-                f'pvc=$(echo "$pvcs" | grep "{name}"); if [ -n "$pvc" ]; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi',
+                'if ! echo "$pvcs" | grep -q "existing1"; then echo "pvc for imported volume vol-existing1 was unexpectedly deleted" && exit 1; else echo "pvc for imported volume vol-existing1 preserved"; fi',
             ),
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then sky volumes delete pvc1 -y; fi && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then sky volumes delete vol-existing1 -y; fi',
@@ -1550,6 +1570,10 @@ def test_volume_env_mount_kubernetes():
         volumes:
           /mnt/test-data: ${{USERNAME}}-{pvc_name}
         run: |
+          set -e
+          df -h /mnt/test-data
+          touch /mnt/test-data/test.txt
+          ls -lart /mnt/test-data
           echo "Mounted volume"
     """)
     full_pvc_name = f'user-{pvc_name}'
@@ -2494,6 +2518,38 @@ def test_kubernetes_pod_pending_reason():
             ],
             f'sky down -y {name}',
             timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_failed_mount_escalation():
+    """A persistent volume mount failure must FAIL provisioning (not hang
+    forever in ContainerCreating), and the error must carry the kubelet
+    FailedMount event message so the user can act on it."""
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pending_volume.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml_content)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_failed_mount_escalation',
+            [
+                # The launch must exit non-zero on its own (the
+                # mount-failure deadline, ~10 min) — a hang here trips the
+                # test timeout instead.
+                f's=$(sky launch -y -c {name} --infra kubernetes {f.name} '
+                f'2>&1); ret=$?; echo "$s"; [ $ret -ne 0 ] || exit 1; '
+                f'echo "$s" | grep "FailedMount" && '
+                f'echo "$s" | grep "MountVolume.SetUp failed"',
+            ],
+            f'sky down -y {name}',
+            timeout=25 * 60,
         )
         smoke_tests_utils.run_one_test(test)
 

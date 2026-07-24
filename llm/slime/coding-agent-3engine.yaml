@@ -1,0 +1,105 @@
+# Coding-agent RL — 3-engine scale-out variant of coding-agent.yaml.
+#
+# Same Job Group, THREE external SGLang engines. Note how little changes vs the
+# 1- and 2-engine files: one more `sglang3` job (identical to the others) and
+# one more name in SGLANG_MEMBERS. trainer-run.sh and run-slime.sh are untouched —
+# scaling the inference fleet is purely declarative.
+#
+# In our benchmark this is roughly where co-scheduled inference stops paying off
+# for this workload (the queue is drained and the engine GPUs begin to idle) —
+# see the README's "Scaling the inference fleet" section.
+#
+# Footprint: trainer H100:4 + 3 x engine H100:1 = 7 GPU on one cluster.
+#
+# Prereq (once):  sky volumes apply policy-volume.yaml
+# Launch:
+#   sky jobs launch -n coding-agent-3eng coding-agent-3engine.yaml --secret WANDB_API_KEY   # secret optional (wandb)
+---
+name: coding-agent-rl-3eng
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: 60s
+---
+name: sglang
+resources:
+  infra: kubernetes          # your H100 Kubernetes context, e.g. kubernetes/my-cluster
+  accelerators: H100:1
+  image_id: docker:slimerl/slime:latest
+workdir: .
+volumes:
+  /shared/policy: slime-policy
+setup: bash scripts/engine-setup.sh
+run: bash scripts/engine-run.sh
+---
+name: sglang2
+resources:
+  infra: kubernetes
+  accelerators: H100:1
+  image_id: docker:slimerl/slime:latest
+workdir: .
+volumes:
+  /shared/policy: slime-policy
+setup: bash scripts/engine-setup.sh
+run: bash scripts/engine-run.sh
+---
+name: sglang3
+resources:
+  infra: kubernetes
+  accelerators: H100:1
+  image_id: docker:slimerl/slime:latest
+workdir: .
+volumes:
+  /shared/policy: slime-policy
+setup: bash scripts/engine-setup.sh
+run: bash scripts/engine-run.sh
+---
+name: trainer
+resources:
+  infra: kubernetes          # SAME context as the engines — jobs co-schedule on one cluster
+  accelerators: H100:4
+  image_id: docker:slimerl/slime:latest
+workdir: .
+volumes:
+  /shared/policy: slime-policy
+file_mounts:
+  # Sandboxes SDK wheel: a sandbox-enabled API server ships it to the client at
+  # ~/.sky/bin/wheels; mount it in so trainer-setup.sh can pip install it (not on PyPI).
+  /wheels: ~/.sky/bin/wheels
+envs:
+  SGLANG_MEMBERS: "sglang sglang2 sglang3"   # three engines -> all health-gated + discovered
+  MODEL_SCRIPT: "qwen3-14B.sh"
+  MODEL_DIR: "Qwen3-14B"
+  TP: "4"
+  ROLLOUT_GPUS_PER_ENGINE: "1"
+  SWESMITH_REPOS: "markupsafe"   # pinned subset -> one warm pool per repo image
+  SWESMITH_PER_REPO: "16"
+  SWESMITH_POOL_SUFFIX: ""
+  # SANDBOX_NO_POOL=1 -> no warm pools; on-demand ad-hoc sandbox per claim. Use for
+  # the full dataset (drop SWESMITH_REPOS). See coding-agent.yaml / sandbox_env.py.
+  SANDBOX_NO_POOL: "0"
+  AGENT_WORKDIR: "/testbed"
+  AGENT_MAX_TURNS: "20"
+  AGENT_EVAL_TIMEOUT_SEC: "900"
+  # SANDBOX_POOL_REPLICAS must be >= ROLLOUT_BATCH_SIZE x N_SAMPLES_PER_PROMPT and
+  # <= your cluster's sandbox (CPU) capacity (see coding-agent.yaml). 184 = our
+  # benchmarked sizing; scale down if your sandbox cluster has less CPU headroom.
+  SANDBOX_POOL_REPLICAS: "184"
+  ROLLOUT_BATCH_SIZE: "23"       # prompts/step
+  N_SAMPLES_PER_PROMPT: "8"      # rollouts/prompt -> 23x8 = 184 concurrent rollouts (global batch derived)
+  NUM_ROLLOUT: "8"
+  ROLLOUT_SHUFFLE: "1"            # shuffle instance order across steps; 0 = deterministic (reproducible)
+  ROLLOUT_MAX_CONTEXT_LEN: "32768"
+  MSWEA_SILENT_STARTUP: "1"
+  SLIME_MODE: "async"              # async rollout/train overlap | "sync" serializes them
+  WEIGHT_TRANSPORT: "disk"
+  WEIGHT_MODE: "delta"
+  WANDB_PROJECT: "slime-coding-agent"
+  WANDB_GROUP: "coding-agent-3eng"
+secrets:
+  # Optional wandb logging; provide with `--secret WANDB_API_KEY` (picked up
+  # from your environment, redacted in logs/dashboard). Unset = wandb off.
+  # Sandbox-API auth needs no secret: managed jobs get API server credentials
+  # injected automatically (api_server_access, on by default).
+  WANDB_API_KEY: ""
+setup: bash scripts/trainer-setup.sh
+run: bash scripts/trainer-run.sh

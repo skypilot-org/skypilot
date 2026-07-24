@@ -43,6 +43,7 @@ import {
 import {
   getClusters,
   getClusterHistory,
+  getOtherUsersClustersCount,
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -989,9 +990,9 @@ export function ClusterTable({
   // "All Clusters" would actually reveal. Used to gate the empty-state CTA so
   // we don't nudge to All when there's nothing to show. Because the table is
   // now scoped to the current user server-side, the scoped data no longer
-  // contains other users' clusters; probe the shared all-users cache (already
-  // warm from the preloader, so this is typically a free read) only when the
-  // "My Clusters" view comes back empty.
+  // contains other users' clusters; probe for the all-users count (a cheap
+  // single-row page on the server-pagination path, or the shared all-users
+  // cache otherwise) only when the "My Clusters" view comes back empty.
   const [othersTotal, setOthersTotal] = useState(0);
   const scopedEmpty = isServerPagination
     ? total === 0
@@ -1011,12 +1012,8 @@ export function ClusterTable({
     }
     (async () => {
       try {
-        const all = await dashboardCache.get(getClusters);
+        const others = await getOtherUsersClustersCount(currentUser);
         if (cancelled) return;
-        const others = (all || []).filter(
-          (item) =>
-            item.user_hash !== currentUser.id && item.user !== currentUser.name
-        ).length;
         setOthersTotal(others);
       } catch (e) {
         if (!cancelled) setOthersTotal(0);

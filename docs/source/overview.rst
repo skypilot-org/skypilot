@@ -401,7 +401,7 @@ For example, if you want to launch a cluster with 8 A100 GPUs, SkyPilot will try
 options in the given search space in the "cheapest and available" order,
 with auto-failover:
 
-.. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/failover.png
+.. figure:: images/k8s-failover.png
    :width: 95%
    :align: center
    :alt: SkyPilot auto-failover

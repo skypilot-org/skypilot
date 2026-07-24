@@ -780,6 +780,10 @@ class Kubernetes(clouds.Cloud):
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+            elif kubernetes_utils.is_neuron_accelerator(acc_type):
+                # AWS Neuron (Trainium/Inferentia) uses its own resource key;
+                # the pod requests aws.amazon.com/neuron instead of a GPU key.
+                k8s_resource_key = kubernetes_utils.NEURON_RESOURCE_KEY
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
                     context)
@@ -888,8 +892,9 @@ class Kubernetes(clouds.Cloud):
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
                     not in unsupported_features:
                 # Add high-performance networking environment variables for
-                # clusters with high performance networking
-                network_env_vars = network_type.get_network_env_vars()
+                # clusters with high performance networking. Pass acc_type so
+                # OCI can pick a shape-specific NCCL profile (e.g. GB200).
+                network_env_vars = network_type.get_network_env_vars(acc_type)
                 k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too

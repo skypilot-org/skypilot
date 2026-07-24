@@ -72,6 +72,20 @@ _PENDING_REASON_NORMAL_EVENT_ALLOWLIST = {
     'WaitForFirstConsumer',  # late-binding storage class
 }
 
+# Warning-type pod events (emitted by the kubelet, after scheduling) that
+# indicate a volume attach/mount failure. A pod hit by one of these stays in
+# the uninformative 'ContainerCreating' waiting state, so the failure is only
+# visible through events.
+_MOUNT_FAILURE_EVENT_REASONS = ('FailedMount', 'FailedAttachVolume')
+# How long a pod may continuously report a mount-failure event before
+# provisioning is failed. Mount failures are frequently transient — the
+# kubelet retries with backoff, and e.g. a CSI driver still starting on a
+# freshly scaled-up node or a slow first attach of a network volume resolves
+# on its own — so use a generous window. Persistent failures (mis-configured
+# PVC/storage class, missing secret/configmap) never resolve; without this
+# deadline they would hang provisioning forever with only a spinner update.
+_MOUNT_FAILURE_TIMEOUT_SECONDS = 600
+
 # Pattern to extract SSH user from command output, handling MOTD contamination
 _SSH_USER_PATTERN = re.compile(r'SKYPILOT_SSH_USER: ([^\s\n]+)')
 
@@ -863,6 +877,24 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
         # returned (False, None) silently, masking OOMKilled etc.
         return False, container_reason
 
+    # First time each pod was seen continuously reporting a mount-failure
+    # event, keyed by pod name. Cleared when the pod's pending reason moves
+    # on (the kubelet retry succeeded).
+    mount_failure_first_seen: Dict[str, float] = {}
+
+    def _raise_mount_failure(pod_name: str, reason: str) -> None:
+        # Re-fetch the newest event for the full kubelet message — the wait
+        # loop only tracks the bare reason (e.g. 'FailedMount').
+        detail = ''
+        pending_reason = _get_pod_pending_reason(context, namespace, pod_name)
+        if (pending_reason is not None and
+                pending_reason[0] in _MOUNT_FAILURE_EVENT_REASONS):
+            detail = f': {pending_reason[1]}'
+        raise config_lib.KubernetesError(
+            f'Pod {pod_name} has failed to attach or mount volumes for over '
+            f'{_MOUNT_FAILURE_TIMEOUT_SECONDS // 60} minutes: '
+            f'{reason}{detail}')
+
     missing_pods_retry = 0
     last_status_msg: Optional[str] = None
     while True:
@@ -916,12 +948,27 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
 
         all_pods_running = True
         pending_reasons_count: Dict[str, int] = {}
-        for is_running, pending_reason in pod_statuses:
+        now = time.time()
+        for pod, (is_running, pending_reason) in zip(pods_to_check,
+                                                     pod_statuses):
             if not is_running:
                 all_pods_running = False
             if pending_reason is not None:
                 pending_reasons_count[pending_reason] = (
                     pending_reasons_count.get(pending_reason, 0) + 1)
+            # Escalate a sustained volume attach/mount failure to a
+            # provisioning error. Unlike other kubelet-level failures (which
+            # show up in containerStatuses and raise in _inspect_pod_status),
+            # a mount failure leaves the container in 'ContainerCreating'
+            # indefinitely — without this deadline the loop would spin
+            # forever with only a spinner update.
+            pod_name = pod.metadata.name
+            if pending_reason in _MOUNT_FAILURE_EVENT_REASONS:
+                first_seen = mount_failure_first_seen.setdefault(pod_name, now)
+                if now - first_seen >= _MOUNT_FAILURE_TIMEOUT_SECONDS:
+                    _raise_mount_failure(pod_name, pending_reason)
+            else:
+                mount_failure_first_seen.pop(pod_name, None)
 
         if all_pods_running:
             break
@@ -1501,6 +1548,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     needs_gpus = False
     needs_gpus_nvidia = False
+    needs_neuron = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
@@ -1508,6 +1556,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                 0) > 0
         needs_gpus_nvidia = limits.get(
             kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
+        # AWS Neuron (Trainium/Inferentia) uses its own resource key.
+        needs_neuron = limits.get(kubernetes_utils.NEURON_RESOURCE_KEY, 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
@@ -1615,7 +1665,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 tpu_toleration
             ]
@@ -1631,9 +1682,25 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'effect': 'NoSchedule'
             }
             # Preserve existing tolerations if any
-            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
             pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
                 gpu_toleration
+            ]
+        # Add Neuron toleration if AWS Neuron (Trainium/Inferentia) is requested.
+        # The Neuron device plugin taints nodes aws.amazon.com/neuron:NoSchedule
+        # to keep non-Neuron workloads off them; tolerate it like the GPU case.
+        if needs_neuron:
+            neuron_toleration = {
+                'key': kubernetes_utils.NEURON_RESOURCE_KEY,
+                'operator': 'Exists',
+                'effect': 'NoSchedule'
+            }
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get(
+                'tolerations') or []
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                neuron_toleration
             ]
 
         # Apply allowed_nodes scheduling constraints to restrict pods to
@@ -2062,6 +2129,7 @@ def get_cluster_info(
 
     head_pod_name = None
     cpu_request = None
+    memory_request = None
     for pod_name, pod in running_pods.items():
         # Under hostNetwork the pod's network namespace is the host's, so
         # pod_ip is the K8s node's host IP. SkyPilot injects a required
@@ -2095,6 +2163,8 @@ def get_cluster_info(
             limits = (getattr(resources, 'limits', None) if resources else None)
             cpu_request = ((requests or {}).get('cpu') or
                            (limits or {}).get('cpu'))
+            memory_request = ((requests or {}).get('memory') or
+                              (limits or {}).get('memory'))
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
@@ -2134,6 +2204,14 @@ def get_cluster_info(
     # Keep consistent with the logic in clouds/kubernetes.py
     str_cpus = str(max(int(num_cpus), 1))
 
+    # Record the pod's actual resource requests so display paths can show
+    # what the scheduler sees, even when an admin policy has overridden
+    # them via pod_config (bypassing the SkyPilot resources spec).
+    actual_memory_gb = None
+    if memory_request is not None:
+        actual_memory_gb = kubernetes_utils.parse_memory_resource(
+            memory_request, unit='G')
+
     return common.ClusterInfo(
         instances=pods,
         head_instance_id=head_pod_name,
@@ -2146,7 +2224,9 @@ def get_cluster_info(
             'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
-        provider_config=provider_config)
+        provider_config=provider_config,
+        actual_cpus=num_cpus,
+        actual_memory_gb=actual_memory_gb)
 
 
 class NodeHealthInfo:
