@@ -208,5 +208,31 @@ class TestWorkspacePermissions(unittest.TestCase):
             users, [], "Should return empty list when no users exist in system")
 
 
+class TestReadOnlyForNonMembers(unittest.TestCase):
+    """Test the non_member_access read-only predicate."""
+
+    def test_private_read_only(self):
+        cfg = {'private': True, 'non_member_access': 'read-only'}
+        self.assertTrue(workspaces_utils.is_read_only_for_non_members(cfg))
+
+    def test_private_none_default(self):
+        # Private without non_member_access defaults to hidden (not read-only).
+        self.assertFalse(
+            workspaces_utils.is_read_only_for_non_members({'private': True}))
+        self.assertFalse(
+            workspaces_utils.is_read_only_for_non_members({
+                'private': True,
+                'non_member_access': 'none'
+            }))
+
+    def test_public_read_only_is_moot(self):
+        # An open workspace is usable by everyone; the flag doesn't apply.
+        cfg = {'private': False, 'non_member_access': 'read-only'}
+        self.assertFalse(workspaces_utils.is_read_only_for_non_members(cfg))
+
+    def test_empty_config(self):
+        self.assertFalse(workspaces_utils.is_read_only_for_non_members({}))
+
+
 if __name__ == '__main__':
     unittest.main()

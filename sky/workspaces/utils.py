@@ -2,6 +2,20 @@
 from typing import Any, Dict, List, Optional
 
 from sky.users import resolver as user_resolver
+from sky.workspaces import constants as workspace_constants
+
+
+def is_read_only_for_non_members(workspace_config: Dict[str, Any]) -> bool:
+    """Whether non-members may see this workspace read-only.
+
+    True only for a private workspace whose ``non_member_access`` is set to
+    ``read-only``. An open (non-private) workspace is usable by everyone, so
+    the flag is moot there and this returns False.
+    """
+    if not workspace_config.get('private', False):
+        return False
+    return (workspace_config.get('non_member_access') ==
+            workspace_constants.NON_MEMBER_ACCESS_READ_ONLY)
 
 
 def get_workspace_users(

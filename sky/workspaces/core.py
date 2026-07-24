@@ -87,10 +87,16 @@ def _load_workspaces() -> Dict[str, Any]:
 
 
 def _accessible_workspace_names_for_user(user_id: str,
-                                         workspace_names: Set[str]) -> Set[str]:
-    """Return the subset of workspace_names the user can access."""
+                                         workspace_names: Set[str],
+                                         action: str = 'read') -> Set[str]:
+    """Return the subset of workspace_names the user can access.
+
+    ``action='read'`` (default) includes read-only workspaces (for listing /
+    visibility); ``action='write'`` returns only workspaces the user can
+    mutate (used to pick the active workspace to operate in).
+    """
     return permission.permission_service.get_accessible_workspace_names(
-        user_id, workspace_names)
+        user_id, workspace_names, action=action)
 
 
 def get_accessible_workspace_names() -> Set[str]:
@@ -503,7 +509,10 @@ def update_workspace(workspace_name: str, config: Dict[str,
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
-        permission_service.update_workspace_policy(workspace_name, users)
+        permission_service.update_workspace_policy(
+            workspace_name,
+            users,
+            read_only=workspaces_utils.is_read_only_for_non_members(config))
 
     # Use the internal helper function to save
     result = _update_workspaces_config(update_workspace_fn)
@@ -552,7 +561,10 @@ def create_workspace(workspace_name: str, config: Dict[str,
         # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
-        permission_service.add_workspace_policy(workspace_name, users)
+        permission_service.add_workspace_policy(
+            workspace_name,
+            users,
+            read_only=workspaces_utils.is_read_only_for_non_members(config))
 
     # Use the internal helper function to save
     result = _update_workspaces_config(create_workspace_fn)
@@ -713,14 +725,17 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
             permission_service = permission.permission_service
+            new_workspaces_cfg = config.get('workspaces', {})
             for operation, workspaces in workspaces_to_check_policy.items():
                 for workspace_name, users in workspaces.items():
+                    read_only = workspaces_utils.is_read_only_for_non_members(
+                        new_workspaces_cfg.get(workspace_name, {}))
                     if operation == 'add':
                         permission_service.add_workspace_policy(
-                            workspace_name, users)
+                            workspace_name, users, read_only=read_only)
                     elif operation == 'update':
                         permission_service.update_workspace_policy(
-                            workspace_name, users)
+                            workspace_name, users, read_only=read_only)
                     elif operation == 'delete':
                         permission_service.remove_workspace_policy(
                             workspace_name)
@@ -916,7 +931,10 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 # user_id set we just computed, so reuse it instead of
                 # re-resolving (which would hit get_all_users() again).
                 permission_service.update_workspace_policy(
-                    workspace_name, list(resolved_current))
+                    workspace_name,
+                    list(resolved_current),
+                    read_only=workspaces_utils.is_read_only_for_non_members(
+                        new_config))
                 succeeded.append(workspace_name)
             except ValueError as e:
                 failed.append({
@@ -1089,7 +1107,9 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 # this doesn't re-hit get_all_users.
                 permission_service.update_workspace_policy(
                     workspace_name,
-                    resolver.resolve_workspace_users(new_ws_config))
+                    resolver.resolve_workspace_users(new_ws_config),
+                    read_only=workspaces_utils.is_read_only_for_non_members(
+                        new_ws_config))
                 succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(
@@ -1241,9 +1261,13 @@ def resolve_workspace_for_user(
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
 
+    # Write access: this resolves the *active* workspace the request will
+    # operate in, which must be one the user can mutate. Read-only workspaces
+    # (visible for listing) must not be auto-selected here.
     accessible = sorted(
         _accessible_workspace_names_for_user(user.id,
-                                             set(_load_workspaces().keys())))
+                                             set(_load_workspaces().keys()),
+                                             action='write'))
     if not accessible:
         # Zero accessible workspaces can mean the user's private-workspace
         # grant was never materialized: the new-user policy re-sync at first
@@ -1255,8 +1279,9 @@ def resolve_workspace_for_user(
         # records predate the re-sync.
         _try_resync_new_user_grants(user)
         accessible = sorted(
-            _accessible_workspace_names_for_user(
-                user.id, set(_load_workspaces().keys())))
+            _accessible_workspace_names_for_user(user.id,
+                                                 set(_load_workspaces().keys()),
+                                                 action='write'))
         if accessible:
             logger.info(f'Workspace access for user {user.name} ({user.id}) '
                         f'restored by policy re-sync: {accessible}')

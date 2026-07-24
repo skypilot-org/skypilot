@@ -27,3 +27,12 @@ WORKSPACE_SOURCE_SINGLE_MEMBERSHIP = 'single-membership'
 WORKSPACE_SOURCE_AMBIGUOUS = 'ambiguous'
 WORKSPACE_SOURCE_NO_ACCESS = 'no-access'
 WORKSPACE_SOURCE_PERMISSION_DENIED = 'permission-denied'
+
+# Values for the per-workspace ``non_member_access`` config key, which
+# controls what a non-member of a (private) workspace may do with it.
+# 'none' (default): the workspace and its resources are hidden from
+# non-members. 'read-only': non-members can see the workspace and its
+# clusters/jobs but cannot mutate anything. Only meaningful for private
+# workspaces; an open (non-private) workspace is usable by everyone.
+NON_MEMBER_ACCESS_NONE = 'none'
+NON_MEMBER_ACCESS_READ_ONLY = 'read-only'

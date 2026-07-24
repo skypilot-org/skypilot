@@ -2424,6 +2424,16 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                # What non-members of a (private) workspace may do with it.
+                # 'none' (default): the workspace and its resources are hidden
+                # from non-members (current behavior). 'read-only': non-members
+                # can see the workspace and its clusters/jobs but cannot mutate
+                # anything. Only meaningful for private workspaces; an open
+                # (non-private) workspace is usable by everyone regardless.
+                'non_member_access': {
+                    'type': 'string',
+                    'enum': ['none', 'read-only'],
+                },
                 'gcp': {
                     'type': 'object',
                     'properties': {

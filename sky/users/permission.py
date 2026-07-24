@@ -248,6 +248,11 @@ class PermissionService:
         for workspace_name, users in workspace_policy_permissions.items():
             for user in users:
                 expected_policies.append((user, workspace_name, '*'))
+        # Read-only workspaces additionally grant every user the 'read'
+        # action, so non-members can see (but not mutate) the workspace and
+        # its resources. Write access stays gated by the '*' policies above.
+        for workspace_name in rbac.get_read_only_workspace_names():
+            expected_policies.append(('*', workspace_name, 'read'))
         # Check if all expected policies already exist and find missing ones
         missing_policies = [
             p for p in expected_policies if p not in existing_policies
@@ -392,30 +397,43 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         return enforcer.get_users_for_role(role)
 
-    def get_accessible_workspace_names(self, user_id: str,
-                                       workspace_names: Set[str]) -> Set[str]:
+    def get_accessible_workspace_names(self,
+                                       user_id: str,
+                                       workspace_names: Set[str],
+                                       action: str = 'read') -> Set[str]:
         """Return workspace names the user can access (batch, O(1) enforcer).
 
         Use instead of check_workspace_permission in a loop when filtering
         many workspaces, to avoid N enforcer calls.
+
+        Args:
+            action: 'read' (default) returns workspaces the user can see,
+                including read-only workspaces (matched via the '*'/'read'
+                wildcard). 'write' returns only workspaces the user can mutate
+                (the member '*' grant) -- used e.g. for the dashboard's
+                per-workspace ``writable`` signal.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             return workspace_names
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
             return workspace_names
+        # Actions that satisfy the requested access. Write is granted by the
+        # member '*' policy; read is granted by '*' (write implies read) or the
+        # read-only wildcard 'read'.
+        allowed_actions = {'*'} if action == 'write' else {'*', 'read'}
         enforcer = self._ensure_enforcer()
         # Scan policy rules directly for workspace access.
-        # NOTE: this only matches direct (user_id, workspace, '*') and wildcard
-        # ('*', workspace, '*') policies.  It does NOT traverse casbin role
-        # hierarchies (the g() function in the model matcher).  If role-based
-        # workspace grants are ever added, this method must be updated to use
-        # enforcer.enforce() per workspace or expand roles via
+        # NOTE: this only matches direct (user_id, workspace, <act>) and
+        # wildcard ('*', workspace, <act>) policies.  It does NOT traverse
+        # casbin role hierarchies (the g() function in the model matcher).  If
+        # role-based workspace grants are ever added, this method must be
+        # updated to use enforcer.enforce() per workspace or expand roles via
         # enforcer.get_implicit_permissions_for_user().
         accessible = set()
         for rule in enforcer.get_policy():
-            if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
-                                                      rule[0] == '*'):
+            if len(rule) >= 3 and rule[2] in allowed_actions and (
+                    rule[0] == user_id or rule[0] == '*'):
                 if rule[1] in workspace_names:
                     accessible.add(rule[1])
         return accessible
@@ -475,11 +493,22 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
-    def _workspace_perm_cache_key(self, workspace_name: str,
-                                  user_id: str) -> str:
-        """Build a KV cache key for a workspace permission entry."""
+    def _workspace_perm_cache_key(self,
+                                  workspace_name: str,
+                                  user_id: str,
+                                  action: str = 'write') -> str:
+        """Build a KV cache key for a workspace permission entry.
+
+        The action is embedded between the workspace and the user so that both
+        the by-workspace prefix invalidation and the by-user suffix
+        invalidation keep matching. It must be part of the key: a 'read' result
+        and a 'write' result for the same (workspace, user) differ, and sharing
+        one entry would leak write access into a read check or vice versa.
+        """
         return (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
                 f'{workspace_name}'
+                f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
+                f'{action}'
                 f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
                 f'{user_id}')
 
@@ -497,8 +526,10 @@ class PermissionService:
             prefix=_WORKSPACE_PERM_CACHE_PREFIX,
             suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
 
-    def check_workspace_permission(self, user_id: str,
-                                   workspace_name: str) -> bool:
+    def check_workspace_permission(self,
+                                   user_id: str,
+                                   workspace_name: str,
+                                   action: str = 'write') -> bool:
         """Check workspace permission.
 
         This method checks if a user has permission to access a specific
@@ -509,6 +540,12 @@ class PermissionService:
 
         For public workspaces, the permission is granted via a wildcard policy
         ('*').
+
+        Args:
+            action: 'write' (default) checks membership -- write and read are
+                both granted by the member '*' policy. 'read' additionally
+                accepts the read-only wildcard ('*', ws, 'read'), so a
+                non-member can read a read-only workspace. Write implies read.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             # When it is not on API server, we allow all users to access all
@@ -516,7 +553,8 @@ class PermissionService:
             return True
 
         # Check DB-backed KV cache (covers both admin and non-admin results).
-        cache_key = self._workspace_perm_cache_key(workspace_name, user_id)
+        cache_key = self._workspace_perm_cache_key(workspace_name, user_id,
+                                                   action)
         cached = kv_cache.get_cache_entry(cache_key)
         if cached is not None:
             return cached == '1'
@@ -527,13 +565,14 @@ class PermissionService:
         if rbac.RoleName.ADMIN.value in role:
             result = True
         else:
-            # The Casbin model matcher already handles the wildcard '*' case:
-            # m = (g(r.sub, p.sub)|| p.sub == '*') && r.obj == p.obj &&
-            # r.act == p.act
-            # This means if there's a policy ('*', workspace_name, '*'), it
-            # will match any user
+            # Actions are matched exactly by the casbin model (r.act == p.act,
+            # no wildcard). The member policies use the '*' action, which grants
+            # write (and, implicitly, read). A 'read' check additionally accepts
+            # the read-only wildcard ('*', ws, 'read').
             enforcer = self._ensure_enforcer()
             result = enforcer.enforce(user_id, workspace_name, '*')
+            if not result and action == 'read':
+                result = enforcer.enforce(user_id, workspace_name, 'read')
 
         logger.debug(f'Workspace permission check: user={user_id}, '
                      f'workspace={workspace_name}, result={result}')
@@ -583,8 +622,10 @@ class PermissionService:
         # Regular users cannot manage tokens owned by others
         return False
 
-    def add_workspace_policy(self, workspace_name: str,
-                             users: List[str]) -> None:
+    def add_workspace_policy(self,
+                             workspace_name: str,
+                             users: List[str],
+                             read_only: bool = False) -> None:
         """Add workspace policy.
 
         Args:
@@ -592,6 +633,9 @@ class PermissionService:
             users: List of user IDs that should have access.
                    For public workspaces, this should be ['*'].
                    For private workspaces, this should be specific user IDs.
+            read_only: If True, additionally grant every user the 'read'
+                   action on this workspace (read-only visibility for
+                   non-members). Write access stays limited to ``users``.
         """
         with _policy_lock():
             enforcer = self._ensure_enforcer()
@@ -599,13 +643,17 @@ class PermissionService:
                 logger.debug(f'Adding workspace policy: user={user}, '
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
+            if read_only:
+                enforcer.add_policy('*', workspace_name, 'read')
             enforcer.save_policy()
             # Invalidate stale cached denials (e.g. from checks between a
             # workspace deletion and its re-creation with the same name).
             self.invalidate_workspace_permission_cache(workspace_name)
 
-    def update_workspace_policy(self, workspace_name: str,
-                                users: List[str]) -> None:
+    def update_workspace_policy(self,
+                                workspace_name: str,
+                                users: List[str],
+                                read_only: bool = False) -> None:
         """Update workspace policy.
 
         Args:
@@ -613,17 +661,23 @@ class PermissionService:
             users: List of user IDs that should have access.
                    For public workspaces, this should be ['*'].
                    For private workspaces, this should be specific user IDs.
+            read_only: If True, additionally grant every user the 'read'
+                   action on this workspace (read-only visibility for
+                   non-members). Write access stays limited to ``users``.
         """
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            # Remove all existing policies for this workspace
+            # Remove all existing policies for this workspace (both the '*'
+            # write grants and any stale ('*', ws, 'read') wildcard).
             enforcer.remove_filtered_policy(1, workspace_name)
             # Add new policies
             for user in users:
                 logger.debug(f'Updating workspace policy: user={user}, '
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
+            if read_only:
+                enforcer.add_policy('*', workspace_name, 'read')
             enforcer.save_policy()
             # Invalidate cached permission entries after the policy is
             # persisted so other processes re-compute permissions on next

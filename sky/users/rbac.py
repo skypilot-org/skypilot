@@ -1,7 +1,7 @@
 """RBAC (Role-Based Access Control) functionality for SkyPilot API Server."""
 
 import enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -514,3 +514,19 @@ def get_workspace_policy_permissions() -> Dict[str, List[str]]:
         workspaces_to_policy[workspace_name] = users
     logger.debug(f'Workspace policy permissions: {workspaces_to_policy}')
     return workspaces_to_policy
+
+
+def get_read_only_workspace_names() -> Set[str]:
+    """Names of workspaces that non-members may see read-only.
+
+    These get an extra ``('*', workspace, 'read')`` casbin policy so that any
+    user can read (but not mutate) the workspace and its resources. See
+    ``workspaces_utils.is_read_only_for_non_members``.
+    """
+    current_workspaces = skypilot_config.get_nested(('workspaces',),
+                                                    default_value={})
+    return {
+        workspace_name
+        for workspace_name, workspace_config in current_workspaces.items()
+        if workspaces_utils.is_read_only_for_non_members(workspace_config)
+    }

@@ -1204,7 +1204,13 @@ class TestPermissionService:
         service.enforcer = mock.Mock()
 
         key = service._workspace_perm_cache_key('my-workspace', 'user123')
-        assert key == 'perm:ws:my-workspace:user123'
+        # The action is embedded between workspace and user (defaults to
+        # 'write') so read and write results don't share a cache entry.
+        assert key == 'perm:ws:my-workspace:write:user123'
+        read_key = service._workspace_perm_cache_key('my-workspace', 'user123',
+                                                     'read')
+        assert read_key == 'perm:ws:my-workspace:read:user123'
+        assert read_key != key
 
     @mock.patch('sky.users.permission.kv_cache')
     @mock.patch('sky.users.permission._policy_lock')
@@ -1948,3 +1954,89 @@ class TestResyncWorkspacePoliciesForNewUser:
         mock_get_users.assert_not_called()
         mock_policy_lock.assert_not_called()
         mock_enforcer.add_policy.assert_not_called()
+
+
+class TestWorkspaceReadOnlyAccess:
+    """Read-only workspace visibility: read vs write action semantics.
+
+    A read-only workspace grants every user the ('*', ws, 'read') policy on
+    top of the member ('*') grants. Reads must accept it; writes must not.
+    """
+
+    def _service(self, enforce_fn=None, roles=('user',)):
+        service = permission.PermissionService()
+        mock_enforcer = mock.Mock()
+        if enforce_fn is not None:
+            mock_enforcer.enforce.side_effect = enforce_fn
+        service.enforcer = mock_enforcer
+        service.get_user_roles = mock.Mock(return_value=list(roles))
+        return service, mock_enforcer
+
+    @mock.patch('sky.users.permission.kv_cache')
+    def test_read_action_accepts_readonly_wildcard(self, mock_kv_cache):
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        mock_kv_cache.get_cache_entry.return_value = None
+        # Non-member: the member '*' policy denies, the read wildcard allows.
+        service, _ = self._service(enforce_fn=lambda u, w, act: act == 'read')
+        assert service.check_workspace_permission('u1', 'ws-ro',
+                                                  action='read') is True
+
+    @mock.patch('sky.users.permission.kv_cache')
+    def test_write_action_ignores_readonly_wildcard(self, mock_kv_cache):
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        mock_kv_cache.get_cache_entry.return_value = None
+        service, enf = self._service(enforce_fn=lambda u, w, act: act == 'read')
+        # The read-only wildcard must NOT grant write.
+        assert service.check_workspace_permission('u1', 'ws-ro',
+                                                  action='write') is False
+        # A write check never consults the 'read' action.
+        assert all(c.args[2] == '*' for c in enf.enforce.call_args_list)
+
+    @mock.patch('sky.users.permission.kv_cache')
+    def test_read_and_write_cached_under_distinct_keys(self, mock_kv_cache):
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        mock_kv_cache.get_cache_entry.return_value = None
+        service, _ = self._service(enforce_fn=lambda u, w, act: act == 'read')
+        service.check_workspace_permission('u1', 'ws-ro', action='read')
+        service.check_workspace_permission('u1', 'ws-ro', action='write')
+        keys = [
+            c.args[0]
+            for c in mock_kv_cache.add_or_update_cache_entry.call_args_list
+        ]
+        # Distinct cache entries for read vs write (else write=allow would leak
+        # into a read check or vice versa).
+        assert any(':read:' in k for k in keys)
+        assert any(':write:' in k for k in keys)
+        assert len(set(keys)) == 2
+
+    def test_get_accessible_read_includes_readonly_write_excludes(self):
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        service, enf = self._service()
+        enf.get_policy.return_value = [
+            ('u1', 'ws-mine', '*'),
+            ('*', 'ws-ro', 'read'),
+            ('*', 'ws-pub', '*'),
+        ]
+        names = {'ws-mine', 'ws-ro', 'ws-pub', 'ws-other'}
+        assert service.get_accessible_workspace_names(
+            'u1', names, action='read') == {'ws-mine', 'ws-ro', 'ws-pub'}
+        # Write excludes the read-only workspace.
+        assert service.get_accessible_workspace_names(
+            'u1', names, action='write') == {'ws-mine', 'ws-pub'}
+
+    def test_add_workspace_policy_read_only_writes_read_wildcard(self):
+        service, enf = self._service()
+        with mock.patch('sky.users.permission._policy_lock'):
+            service.add_workspace_policy('ws-ro', ['u1', 'u2'], read_only=True)
+        calls = [c.args for c in enf.add_policy.call_args_list]
+        assert ('u1', 'ws-ro', '*') in calls
+        assert ('u2', 'ws-ro', '*') in calls
+        assert ('*', 'ws-ro', 'read') in calls
+
+    def test_add_workspace_policy_default_no_read_wildcard(self):
+        service, enf = self._service()
+        with mock.patch('sky.users.permission._policy_lock'):
+            service.add_workspace_policy('ws', ['u1'])
+        calls = [c.args for c in enf.add_policy.call_args_list]
+        assert ('u1', 'ws', '*') in calls
+        assert ('*', 'ws', 'read') not in calls
