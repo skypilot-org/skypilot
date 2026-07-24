@@ -2998,32 +2998,94 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
         # return. Return None.
         return None
 
-    # Analyze the events for failure
-    failure_reason = None
-    failure_decisiveness = 0
+    return get_node_termination_reason(cluster_name)
 
-    def _record_failure_reason(reason: str, decisiveness: int):
-        nonlocal failure_reason, failure_decisiveness
-        if decisiveness > failure_decisiveness:
+
+def get_node_termination_reason(cluster_name: str,
+                                since: Optional[float] = None) -> Optional[str]:
+    """Best-effort cause of a cluster's node(s) going away.
+
+    Derives the cause from the pod and node events that
+    ``_get_pod_missing_reason`` records as DEBUG cluster events -- e.g. the
+    node went NotReady, the node was deleted, or the pod was evicted by the
+    taint manager.
+
+    This reads the *recorded* events rather than re-querying Kubernetes so it
+    stays callable after the events have been consumed. ``_get_pod_missing
+    _reason`` records each event at most once (duplicates hit the cluster
+    event table's primary key) and returns None when it recorded nothing new,
+    so a second pass over the Kubernetes API comes back empty.
+
+    Args:
+        cluster_name: The SkyPilot cluster name.
+        since: If given, ignore events older than this unix timestamp, so a
+            fresh failure is not explained by a previous incarnation of the
+            cluster.
+
+    Returns:
+        A human-readable reason, or None when no recorded event names one.
+    """
+    failure_reason: Optional[str] = None
+    failure_decisiveness = 0
+    failure_timestamp = -1.0
+
+    def _record_failure_reason(reason: str, decisiveness: int,
+                               timestamp: float):
+        nonlocal failure_reason, failure_decisiveness, failure_timestamp
+        # More decisive wins; between equally decisive events the latest one
+        # describes the most recent failure.
+        if (decisiveness > failure_decisiveness or
+            (decisiveness == failure_decisiveness and
+             timestamp >= failure_timestamp)):
             failure_reason = reason
             failure_decisiveness = decisiveness
+            failure_timestamp = timestamp
 
     cluster_events = global_user_state.get_cluster_events(
-        cluster_name, None, global_user_state.ClusterEventType.DEBUG)
-    for event in cluster_events:
+        cluster_name,
+        None,
+        global_user_state.ClusterEventType.DEBUG,
+        include_timestamps=True)
+    for cluster_event in cluster_events:
+        timestamp = float(cluster_event['transitioned_at'])
+        if since is not None and timestamp < since:
+            continue
+        event = str(cluster_event['reason'])
+        is_node_event = event.startswith('[kubernetes node')
         if event.startswith('[kubernetes pod'):
             event = event.split(']')[1].strip()
-        elif event.startswith('[kubernetes node'):
+        elif is_node_event:
             event = event.split(']')[1].strip()
 
         if event.startswith('NodeNotReady '):
-            _record_failure_reason(event[len('NodeNotReady '):], 1)
+            # The same condition is reported against both the node ("Node
+            # <name> status is now: NodeNotReady") and the pod ("Node is not
+            # ready"). Prefer the node-scoped one: it names the node that went
+            # away, which is the whole point of surfacing the reason.
+            _record_failure_reason(event[len('NodeNotReady '):],
+                                   3 if is_node_event else 2, timestamp)
         elif event.startswith('TaintManagerEviction '):
-            # usually the event message for TaintManagerEviction is not useful
-            # so we record a more generic message.
-            _record_failure_reason('pod was evicted by taint manager', 2)
+            # The taint manager emits TaintManagerEviction both when it marks
+            # a pod for deletion and when it cancels that deletion (the node
+            # came back before the toleration expired). Only the former is an
+            # eviction -- treating both as one reports a failure that was
+            # explicitly called off. The message is otherwise not useful, so
+            # we record a more generic one.
+            if event[len('TaintManagerEviction '):].startswith(
+                    'Marking for deletion'):
+                _record_failure_reason('pod was evicted by taint manager', 4,
+                                       timestamp)
         elif event.startswith('DeletingNode '):
-            _record_failure_reason(event[len('DeletingNode '):], 3)
+            _record_failure_reason(event[len('DeletingNode '):], 5, timestamp)
+        elif event.startswith('RemovingNode '):
+            # The node lifecycle controller emits RemovingNode when a node
+            # object disappears; the cloud node controller emits DeletingNode
+            # only when it can attribute the removal to the instance being
+            # gone. On a cluster with no cloud provider integration (e.g.
+            # kind, on-prem) RemovingNode is all we get. It reports controller
+            # bookkeeping rather than a cause, so it ranks below every reason
+            # that names one.
+            _record_failure_reason(event[len('RemovingNode '):], 1, timestamp)
     return failure_reason
 
 
@@ -3203,59 +3265,6 @@ def query_instances(
                 cluster_status[target_pod_name] = (None, reason)
 
     return cluster_status
-
-
-def get_terminated_pod_reasons(
-        cluster_name: str, cluster_name_on_cloud: str,
-        provider_config: Dict[str, Any]) -> Dict[str, str]:
-    """Best-effort reasons for a cluster's expected-but-missing pods.
-
-    Mirrors ``query_instances``' detection of terminated nodes: the expected
-    pod names come from the provider config's service selectors, and any that
-    the Kubernetes API no longer returns is treated as terminated. For each
-    such pod the underlying cause (e.g. the node went NotReady, the node was
-    deleted, or the pod was evicted by the taint manager) is recovered from the
-    pod's and its node's events via ``_get_pod_missing_reason``.
-
-    This is a separate lookup so that callers can surface the reason without
-    re-adding the missing pods to the live status snapshot (which would break
-    the terminated-node detection that relies on those pods being absent).
-
-    Args:
-        cluster_name: The SkyPilot cluster name (used to record events).
-        cluster_name_on_cloud: The cluster name used for the pod label selector.
-        provider_config: The Kubernetes provider config.
-
-    Returns:
-        A mapping from missing pod name to a human-readable reason. Only pods
-        with a determinable reason are included; the map is empty when none can
-        be determined. Best-effort -- callers should treat a missing entry as
-        unknown and fall back to a generic message.
-    """
-    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
-    context = kubernetes_utils.get_context_from_config(provider_config)
-    is_ssh = context.startswith('ssh-') if context else False
-    identity = 'SSH Node Pool' if is_ssh else 'Kubernetes cluster'
-    label_selector = (f'{constants.TAG_SKYPILOT_CLUSTER_NAME}='
-                      f'{cluster_name_on_cloud}')
-    pods = list_namespaced_pod(context, namespace, cluster_name_on_cloud,
-                               is_ssh, identity, label_selector)
-    present_pod_names = {pod.metadata.name for pod in pods}
-    # Expected pod names, derived the same way as in query_instances.
-    target_pod_names = set(service['spec']['selector']['component']
-                           for service in provider_config.get('services', []))
-
-    reasons: Dict[str, str] = {}
-    first_pod = True
-    for target_pod_name in sorted(target_pod_names):
-        if target_pod_name in present_pod_names:
-            continue
-        reason = _get_pod_missing_reason(context, namespace, cluster_name,
-                                         target_pod_name, first_pod)
-        first_pod = False
-        if reason:
-            reasons[target_pod_name] = reason
-    return reasons
 
 
 def get_command_runners(

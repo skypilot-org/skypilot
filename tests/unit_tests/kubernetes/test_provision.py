@@ -3667,3 +3667,110 @@ class TestCreatePodFinalizerHandling:
         # Must not have touched the live pod.
         core_api_mock.patch_namespaced_pod.assert_not_called()
         core_api_mock.delete_namespaced_pod.assert_not_called()
+
+
+class TestGetNodeTerminationReason:
+    """Tests for deriving the node-termination cause from recorded events."""
+
+    @staticmethod
+    def _events(*reasons, base_ts=1_000_000):
+        return [{
+            'reason': reason,
+            'transitioned_at': base_ts + i,
+        } for i, reason in enumerate(reasons)]
+
+    def _reason(self, *reasons, since=None):
+        with mock.patch.object(instance.global_user_state,
+                               'get_cluster_events',
+                               return_value=self._events(*reasons)):
+            return instance.get_node_termination_reason('c', since=since)
+
+    def test_node_not_ready(self):
+        assert self._reason(
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady') == 'Node node-1 status is now: NodeNotReady'
+
+    def test_no_events_returns_none(self):
+        assert self._reason() is None
+
+    def test_unrecognized_events_return_none(self):
+        assert self._reason(
+            '[kubernetes pod pod-1] Scheduled Successfully assigned pod-1',
+            '[kubernetes pod pod-1] Pulling Pulling image') is None
+
+    def test_cancelled_taint_eviction_is_not_an_eviction(self):
+        # Regression: the taint manager emits TaintManagerEviction both to
+        # mark a pod for deletion and to cancel that deletion. Reporting the
+        # cancellation as an eviction claims a failure that was called off,
+        # and outranked the NodeNotReady that names the real cause.
+        reason = self._reason(
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady',
+            '[kubernetes pod pod-1] TaintManagerEviction Cancelling deletion '
+            'of Pod default/pod-1')
+        assert reason == 'Node node-1 status is now: NodeNotReady'
+
+    def test_marked_taint_eviction_is_reported(self):
+        reason = self._reason(
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady',
+            '[kubernetes pod pod-1] TaintManagerEviction Marking for deletion '
+            'Pod default/pod-1')
+        assert reason == 'pod was evicted by taint manager'
+
+    def test_deleting_node_outranks_eviction(self):
+        reason = self._reason(
+            '[kubernetes pod pod-1] TaintManagerEviction Marking for deletion '
+            'Pod default/pod-1',
+            '[kubernetes node node-1] DeletingNode Deleting node node-1 '
+            'because it does not exist in the cloud provider')
+        assert reason == ('Deleting node node-1 because it does not exist in '
+                          'the cloud provider')
+
+    def test_removing_node_recognized(self):
+        # k8s clusters with no cloud provider integration emit RemovingNode
+        # rather than DeletingNode; without it there is no reason at all.
+        assert self._reason(
+            '[kubernetes node node-1] RemovingNode Node node-1 event: '
+            'Removing Node node-1 from Controller') == (
+                'Node node-1 event: Removing Node node-1 from Controller')
+
+    def test_removing_node_ranks_below_a_named_cause(self):
+        # RemovingNode is controller bookkeeping; NodeNotReady says why.
+        reason = self._reason(
+            '[kubernetes node node-1] RemovingNode Node node-1 event: '
+            'Removing Node node-1 from Controller',
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady')
+        assert reason == 'Node node-1 status is now: NodeNotReady'
+
+    def test_latest_wins_among_equally_decisive(self):
+        reason = self._reason(
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady',
+            '[kubernetes node node-2] NodeNotReady Node node-2 status is '
+            'now: NodeNotReady')
+        assert reason == 'Node node-2 status is now: NodeNotReady'
+
+    def test_since_filters_stale_events(self):
+        assert self._reason(
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady',
+            since=2_000_000) is None
+
+    def test_node_scoped_not_ready_preferred_over_pod_scoped(self):
+        # Both are emitted for the same condition at the same instant; the
+        # pod-scoped message is a bare "Node is not ready" that does not say
+        # which node went away.
+        reason = self._reason(
+            '[kubernetes pod pod-1] NodeNotReady Node is not ready',
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady')
+        assert reason == 'Node node-1 status is now: NodeNotReady'
+
+    def test_node_scoped_preference_is_order_independent(self):
+        reason = self._reason(
+            '[kubernetes node node-1] NodeNotReady Node node-1 status is '
+            'now: NodeNotReady',
+            '[kubernetes pod pod-1] NodeNotReady Node is not ready')
+        assert reason == 'Node node-1 status is now: NodeNotReady'

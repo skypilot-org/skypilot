@@ -2984,24 +2984,20 @@ def _update_cluster_status(
             # node went NotReady, the node was deleted, or the pod was evicted
             # by the taint manager -- so the event points at a cluster/cloud-
             # side failure instead of the generic message above. K8s-only;
-            # other clouds keep the generic reason. The detection above relies
-            # on the terminated pods being absent from node_statuses, so this
-            # is a separate lookup rather than re-querying with the terminated
-            # pods included. Best-effort: fall back to the generic message when
-            # no reason can be determined.
+            # other clouds keep the generic reason.
+            #
+            # The query_instances() call that produced node_statuses above has
+            # already recorded the missing pods' Kubernetes events, so read
+            # those back instead of querying Kubernetes again: the recording
+            # path suppresses duplicates and would report nothing on a second
+            # pass. Scoped to the current incarnation of the cluster so an
+            # older failure cannot explain this one. Best-effort: fall back to
+            # the generic message when no reason can be determined.
             if not status_reason and isinstance(launched_resources.cloud,
                                                 clouds.Kubernetes):
                 try:
-                    ray_config = global_user_state.get_cluster_yaml_dict(
-                        handle.cluster_yaml)
-                    if ray_config and 'provider' in ray_config:
-                        terminated_reasons = (
-                            k8s_instance.get_terminated_pod_reasons(
-                                cluster_name, handle.cluster_name_on_cloud,
-                                ray_config['provider']))
-                        if terminated_reasons:
-                            status_reason = '; '.join(
-                                sorted(set(terminated_reasons.values())))
+                    status_reason = (k8s_instance.get_node_termination_reason(
+                        cluster_name, since=record.get('launched_at')) or '')
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to get node termination reason for '
                                  f'{cluster_name!r}: {e}')

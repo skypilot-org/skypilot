@@ -167,36 +167,48 @@ class TestUpdateClusterStatusInitReason:
     def test_some_nodes_terminated_surfaces_k8s_reason(self):
         # When a node disappears, the underlying Kubernetes cause (e.g. the
         # node went NotReady) is surfaced alongside the generic message.
-        with mock.patch.object(
-                backend_utils.global_user_state,
-                'get_cluster_yaml_dict',
-                return_value={'provider': {
-                    'namespace': 'default',
-                    'context': 'ctx'
-                }}), \
-             mock.patch.object(
-                 backend_utils.k8s_instance,
-                 'get_terminated_pod_reasons',
-                 return_value={'pod-1': 'node node-1 NotReady'}):
+        #
+        # Patches the recorded cluster events rather than
+        # get_node_termination_reason, so the real reason-extraction runs. A
+        # test that stubs out the extraction cannot tell whether the reason
+        # ever reaches the event.
+        events = [{
+            'reason': ('[kubernetes node node-1] NodeNotReady Node node-1 '
+                       'status is now: NodeNotReady'),
+            'transitioned_at': int(time.time()),
+        }]
+        with mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_events',
+                               return_value=events):
             msg = _capture_init_log_message(
                 {'pod-0': (status_lib.ClusterStatus.UP, None)},
                 launched_nodes=2)
         assert 'one or more nodes terminated' in msg, msg
-        assert 'node node-1 NotReady' in msg, msg
+        assert 'Node node-1 status is now: NodeNotReady' in msg, msg
 
     def test_some_nodes_terminated_falls_back_when_no_reason(self):
         # No determinable reason -> keep the generic message, no exception.
-        with mock.patch.object(
-                backend_utils.global_user_state,
-                'get_cluster_yaml_dict',
-                return_value={'provider': {
-                    'namespace': 'default',
-                    'context': 'ctx'
-                }}), \
-             mock.patch.object(backend_utils.k8s_instance,
-                               'get_terminated_pod_reasons',
-                               return_value={}):
+        with mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_events',
+                               return_value=[]):
             msg = _capture_init_log_message(
                 {'pod-0': (status_lib.ClusterStatus.UP, None)},
                 launched_nodes=2)
         assert 'one or more nodes terminated' in msg, msg
+
+    def test_some_nodes_terminated_ignores_stale_reason(self):
+        # An event from a previous incarnation of the cluster (older than
+        # launched_at) must not explain the current failure.
+        events = [{
+            'reason': ('[kubernetes node node-0] NodeNotReady Node node-0 '
+                       'status is now: NodeNotReady'),
+            'transitioned_at': int(time.time()) - 7200,
+        }]
+        with mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_events',
+                               return_value=events):
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2)
+        assert 'one or more nodes terminated' in msg, msg
+        assert 'NodeNotReady' not in msg, msg
