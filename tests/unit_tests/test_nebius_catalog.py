@@ -1,6 +1,7 @@
 """Tests for the Nebius personalized pricing catalog cache."""
 
 # pylint: disable=protected-access
+import logging
 import threading
 from unittest import mock
 
@@ -170,3 +171,46 @@ def test_slow_tenant_fetch_does_not_block_other_tenant_cache_hit():
     assert not errors
     assert results['tenant-b'] is tenant_b_df
     assert results['tenant-a'].iloc[0]['Price'] == 0.5
+
+
+def test_personal_catalog_fetch_failure_is_quiet():
+    """A failing personal pricing fetch must not log at WARNING or above.
+
+    The fetch hits an external API mid `sky launch`; failures fall back to
+    the static catalog and must not pollute user-facing CLI output.
+    """
+    static_df = _catalog(1.0)
+    fetch = mock.Mock(side_effect=RuntimeError(
+        'RequestError INVALID_ARGUMENT: unresolved sku'))
+
+    records = []
+
+    class _CaptureHandler(logging.Handler):
+
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _CaptureHandler(level=logging.DEBUG)
+    logger = nebius_catalog.logger
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        with mock.patch.object(nebius_catalog, '_static_df', static_df), \
+             mock.patch.object(nebius_catalog.skypilot_config,
+                               'get_nested',
+                               return_value=True), \
+             mock.patch('sky.adaptors.nebius.get_tenant_id',
+                        return_value='tenant-a'), \
+             mock.patch.object(nebius_catalog, '_fetch_user_catalog', fetch):
+            assert nebius_catalog._get_df() is static_df
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    assert fetch.call_count == 1
+    loud_records = [r for r in records if r.levelno >= logging.WARNING]
+    assert not loud_records, [r.getMessage() for r in loud_records]
+    # The failure is still recorded at debug level for diagnostics.
+    assert any(
+        'Failed to fetch personal pricing' in r.getMessage() for r in records)
