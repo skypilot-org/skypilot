@@ -2987,8 +2987,15 @@ def _update_cluster_status(
             # user-initiated teardown. K8s-only; other clouds keep the generic
             # reason. Best-effort -- fall back to the generic message when the
             # nodes are unknown or all look fine.
-            if not status_reason and isinstance(launched_resources.cloud,
-                                                clouds.Kubernetes):
+            #
+            # Skipped once the cluster is already INIT, mirroring the guard on
+            # the event write below: a cluster stays INIT with the pod missing
+            # until it is downed or relaunched, so without this we would poll
+            # the K8s API once per node every refresh to build a string that
+            # is then discarded.
+            if (status != status_lib.ClusterStatus.INIT and
+                    not status_reason and
+                    isinstance(launched_resources.cloud, clouds.Kubernetes)):
                 try:
                     cluster_info = handle.cached_cluster_info
                     node_names = (cluster_info.get_node_names()

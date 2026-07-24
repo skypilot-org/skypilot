@@ -47,13 +47,14 @@ def _make_record(handle, status=status_lib.ClusterStatus.UP):
 
 def _capture_init_log_message(node_statuses,
                               launched_nodes=1,
-                              cached_cluster_info=None):
+                              cached_cluster_info=None,
+                              status=status_lib.ClusterStatus.UP):
     """Drive _update_cluster_status with a fake node_statuses and return
     the log_message passed to global_user_state.add_cluster_event when the
     cluster transitions to INIT."""
     handle = _make_handle(cached_cluster_info=cached_cluster_info)
     handle.launched_nodes = launched_nodes
-    record = _make_record(handle)
+    record = _make_record(handle, status=status)
 
     captured = {}
 
@@ -207,6 +208,21 @@ class TestUpdateClusterStatusInitReason:
                 launched_nodes=2,
                 cached_cluster_info=handle_info)
         assert 'one or more nodes terminated' in msg, msg
+
+    def test_some_nodes_terminated_skips_node_query_when_already_init(self):
+        # A cluster stays INIT with the pod missing until it is downed or
+        # relaunched, and the event is not re-written once it is INIT. Don't
+        # poll the K8s API every refresh to build a discarded string.
+        handle_info = mock.Mock()
+        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        with mock.patch.object(backend_utils.k8s_instance,
+                               'get_missing_node_reason') as mock_reason:
+            _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2,
+                cached_cluster_info=handle_info,
+                status=status_lib.ClusterStatus.INIT)
+        mock_reason.assert_not_called()
 
     def test_some_nodes_terminated_without_cached_cluster_info(self):
         # No cached ClusterInfo (e.g. an older cluster) -> generic message,
