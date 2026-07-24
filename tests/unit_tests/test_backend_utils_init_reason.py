@@ -163,3 +163,83 @@ class TestUpdateClusterStatusInitReason:
         msg = _capture_init_log_message(
             {'pod-0': (status_lib.ClusterStatus.UP, None)}, launched_nodes=2)
         assert 'one or more nodes terminated' in msg, msg
+
+
+class TestUpdateClusterStatusBareHandle:
+    """A bare pre-provision handle (no cached IPs, has_ray=False) must not
+    be promoted to UP by a status refresh.
+
+    `sky launch` persists such a handle at INIT before provisioning starts;
+    the completed handle is only persisted after runtime setup. If the launch
+    is interrupted in between while the nodes keep running (on Kubernetes,
+    pods report Running long before runtime setup finishes), a refresh used
+    to skip the ray health check (has_ray=False) and mark the cluster UP
+    with head_ip=None — making every subsequent operation (e.g. sky exec)
+    fail with ClusterNotUpError.
+    """
+
+    def _refresh(self, handle):
+        record = _make_record(handle, status=status_lib.ClusterStatus.INIT)
+
+        backend = mock.Mock(spec=backends.CloudVmRayBackend)
+        backend.is_definitely_autostopping.return_value = False
+
+        external_failure = mock.Mock()
+        external_failure.get.return_value = None
+
+        events = []
+
+        def _capture_event(cluster_name, new_status, message, event_type,
+                           **kwargs):
+            events.append((new_status, message))
+
+        add_or_update = mock.Mock()
+        with mock.patch.object(backend_utils,
+                               '_query_cluster_status_via_cloud_api',
+                               return_value={
+                                   'pod-0': (status_lib.ClusterStatus.UP, None)
+                               }), \
+             mock.patch.object(backend_utils, 'ExternalFailureSource',
+                               external_failure), \
+             mock.patch.object(backend_utils, 'get_backend_from_handle',
+                               return_value=backend), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'add_cluster_event',
+                               side_effect=_capture_event), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'add_or_update_cluster', add_or_update), \
+             mock.patch.object(backend_utils.global_user_state,
+                               'get_cluster_from_name',
+                               return_value=record):
+            backend_utils._update_cluster_status('test-cluster',
+                                                 record,
+                                                 retry_if_missing=False)
+        return add_or_update, events
+
+    def test_no_cached_ips_is_not_promoted_to_up(self):
+        handle = _make_handle()
+        handle.provision_runtime_metadata.has_ray = False
+        handle.head_ip = None
+
+        add_or_update, events = self._refresh(handle)
+
+        assert add_or_update.call_count == 1
+        assert add_or_update.call_args.kwargs['ready'] is False
+        # The cluster must not be marked UP (no UP status event either; the
+        # record is already INIT so no INIT event is re-added).
+        up_events = [e for e in events if e[0] == status_lib.ClusterStatus.UP]
+        assert not up_events, up_events
+
+    def test_cached_ips_without_ray_is_promoted_to_up(self):
+        # A fully provisioned cluster whose runtime legitimately has no ray
+        # (has_ray=False) but has cached IPs must still be marked UP.
+        handle = _make_handle()
+        handle.provision_runtime_metadata.has_ray = False
+        handle.head_ip = '1.2.3.4'
+
+        add_or_update, events = self._refresh(handle)
+
+        assert add_or_update.call_count == 1
+        assert add_or_update.call_args.kwargs['ready'] is True
+        assert any(status == status_lib.ClusterStatus.UP
+                   for status, _ in events), events
