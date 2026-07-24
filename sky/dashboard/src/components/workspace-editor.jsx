@@ -91,7 +91,11 @@ const WorkspaceConfigDescription = ({
 
   Object.entries(config).forEach(([cloud, cloudConfig]) => {
     // Skip non-cloud configuration keys
-    if (cloud === 'private' || cloud === 'allowed_users') {
+    if (
+      cloud === 'private' ||
+      cloud === 'allowed_users' ||
+      cloud === 'non_member_access'
+    ) {
       return;
     }
 
@@ -216,18 +220,32 @@ const WorkspaceConfigDescription = ({
   return null;
 };
 
-// Workspace badge component for private/public status
-const WorkspaceBadge = ({ isPrivate }) => {
-  if (isPrivate) {
-    return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
-        Private
-      </span>
-    );
-  }
+// Workspace badge component for private/public status. `readOnly` marks a
+// private workspace visible read-only to non-members (non_member_access).
+const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
+  const base =
+    'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border';
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
-      Public
+    <span className="inline-flex items-center gap-1">
+      {isPrivate ? (
+        <span className={`${base} bg-gray-100 text-gray-700 border-gray-300`}>
+          Private
+        </span>
+      ) : (
+        <span
+          className={`${base} bg-green-100 text-green-700 border-green-300`}
+        >
+          Public
+        </span>
+      )}
+      {readOnly && (
+        <span
+          className={`${base} bg-amber-100 text-amber-700 border-amber-300`}
+          title="Non-members can view this workspace and its workloads but cannot modify them"
+        >
+          Read-only
+        </span>
+      )}
     </span>
   );
 };
@@ -712,6 +730,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </div>
                           <WorkspaceBadge
                             isPrivate={originalConfig.private === true}
+                            readOnly={
+                              originalConfig.non_member_access === 'read-only'
+                            }
                           />
                         </div>
                       </CardTitle>

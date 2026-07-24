@@ -777,6 +777,25 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Per-workspace writability, so the per-row Connect/VSCode actions can be
+  // disabled for clusters in workspaces the user can only read (read-only
+  // visibility). Missing entry -> treated as writable (open/default).
+  const [workspacesConfig, setWorkspacesConfig] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    dashboardCache
+      .get(getWorkspaces)
+      .then((cfg) => {
+        if (!cancelled) setWorkspacesConfig(cfg || {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshInterval]);
+  const isWorkspaceWritable = (ws) =>
+    workspacesConfig[ws || 'default']?.writable !== false;
+
   // Read initial page/limit from URL
   const getInitialPage = () => {
     if (typeof window !== 'undefined') {
@@ -1358,6 +1377,7 @@ export function ClusterTable({
               status={item.status}
               onOpenSSHModal={onOpenSSHModal}
               onOpenVSCodeModal={onOpenVSCodeModal}
+              writable={isWorkspaceWritable(item.workspace)}
             />
           )}
         </TableCell>
@@ -1555,6 +1575,11 @@ export function Status2Actions({
   status,
   onOpenSSHModal,
   onOpenVSCodeModal,
+  // False when the cluster is in a workspace the current user cannot write to
+  // (e.g. a read-only workspace they are not a member of). Connect (SSH) and
+  // VSCode both open an interactive shell, so they are write operations and
+  // must be disabled for non-members.
+  writable = true,
 }) {
   const actions = enabledActions(status);
   const isMobile = useMobile();
@@ -1593,7 +1618,11 @@ export function Status2Actions({
           if (!withLabel) {
             label = '';
           }
-          if (actions.includes(actionName)) {
+          if (!writable) {
+            tooltipText =
+              'Read-only: you are not a member of this cluster’s workspace';
+          }
+          if (writable && actions.includes(actionName)) {
             return (
               <Tooltip
                 key={actionName}
