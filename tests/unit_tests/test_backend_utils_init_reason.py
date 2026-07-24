@@ -16,8 +16,9 @@ from sky.backends import backend_utils
 from sky.utils import status_lib
 
 
-def _make_handle():
+def _make_handle(cached_cluster_info=None):
     handle = mock.Mock(spec=backends.CloudVmRayResourceHandle)
+    handle.cached_cluster_info = cached_cluster_info
     handle.cluster_name = 'test-cluster'
     handle.cluster_name_on_cloud = 'test-cluster-1234'
     handle.cluster_yaml = '/fake/path/cluster.yaml'
@@ -44,13 +45,16 @@ def _make_record(handle, status=status_lib.ClusterStatus.UP):
     }
 
 
-def _capture_init_log_message(node_statuses, launched_nodes=1):
+def _capture_init_log_message(node_statuses,
+                              launched_nodes=1,
+                              cached_cluster_info=None,
+                              status=status_lib.ClusterStatus.UP):
     """Drive _update_cluster_status with a fake node_statuses and return
     the log_message passed to global_user_state.add_cluster_event when the
     cluster transitions to INIT."""
-    handle = _make_handle()
+    handle = _make_handle(cached_cluster_info=cached_cluster_info)
     handle.launched_nodes = launched_nodes
-    record = _make_record(handle)
+    record = _make_record(handle, status=status)
 
     captured = {}
 
@@ -163,3 +167,71 @@ class TestUpdateClusterStatusInitReason:
         msg = _capture_init_log_message(
             {'pod-0': (status_lib.ClusterStatus.UP, None)}, launched_nodes=2)
         assert 'one or more nodes terminated' in msg, msg
+
+    def test_some_nodes_terminated_surfaces_node_state(self):
+        # A node that vanished from under the cluster is named in the event.
+        handle_info = mock.Mock()
+        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        with mock.patch.object(
+                backend_utils.global_user_state,
+                'get_cluster_yaml_dict',
+                return_value={'provider': {
+                    'namespace': 'default',
+                    'context': 'ctx'
+                }}), \
+             mock.patch.object(backend_utils.k8s_instance,
+                               'get_missing_node_reason',
+                               return_value='node node-1 no longer exists'):
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2,
+                cached_cluster_info=handle_info)
+        assert 'one or more nodes terminated' in msg, msg
+        assert 'node node-1 no longer exists' in msg, msg
+
+    def test_some_nodes_terminated_falls_back_when_nodes_healthy(self):
+        # Nodes all present and healthy -> keep the generic message.
+        handle_info = mock.Mock()
+        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        with mock.patch.object(
+                backend_utils.global_user_state,
+                'get_cluster_yaml_dict',
+                return_value={'provider': {
+                    'namespace': 'default',
+                    'context': 'ctx'
+                }}), \
+             mock.patch.object(backend_utils.k8s_instance,
+                               'get_missing_node_reason',
+                               return_value=None):
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2,
+                cached_cluster_info=handle_info)
+        assert 'one or more nodes terminated' in msg, msg
+
+    def test_some_nodes_terminated_skips_node_query_when_already_init(self):
+        # A cluster stays INIT with the pod missing until it is downed or
+        # relaunched, and the event is not re-written once it is INIT. Don't
+        # poll the K8s API every refresh to build a discarded string.
+        handle_info = mock.Mock()
+        handle_info.get_node_names.return_value = ['node-0', 'node-1']
+        with mock.patch.object(backend_utils.k8s_instance,
+                               'get_missing_node_reason') as mock_reason:
+            _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2,
+                cached_cluster_info=handle_info,
+                status=status_lib.ClusterStatus.INIT)
+        mock_reason.assert_not_called()
+
+    def test_some_nodes_terminated_without_cached_cluster_info(self):
+        # No cached ClusterInfo (e.g. an older cluster) -> generic message,
+        # and no attempt to query Kubernetes.
+        with mock.patch.object(backend_utils.k8s_instance,
+                               'get_missing_node_reason') as mock_reason:
+            msg = _capture_init_log_message(
+                {'pod-0': (status_lib.ClusterStatus.UP, None)},
+                launched_nodes=2,
+                cached_cluster_info=None)
+        assert 'one or more nodes terminated' in msg, msg
+        mock_reason.assert_not_called()

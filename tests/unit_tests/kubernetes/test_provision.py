@@ -3667,3 +3667,90 @@ class TestCreatePodFinalizerHandling:
         # Must not have touched the live pod.
         core_api_mock.patch_namespaced_pod.assert_not_called()
         core_api_mock.delete_namespaced_pod.assert_not_called()
+
+
+def _fake_node(ready=True, unschedulable=False):
+    node = mock.Mock()
+    condition = mock.Mock()
+    condition.type = 'Ready'
+    condition.status = 'True' if ready else 'False'
+    node.status.conditions = [condition]
+    node.spec.unschedulable = unschedulable
+    return node
+
+
+class TestGetMissingNodeReason:
+    """Tests for explaining a lost node from current Kubernetes node state."""
+
+    def _reason(self, nodes):
+        """nodes: dict of node name -> fake node, or an Exception to raise."""
+
+        def _read_node(name, **kwargs):
+            del kwargs
+            value = nodes[name]
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        core_api = mock.Mock()
+        core_api.read_node.side_effect = _read_node
+        with mock.patch.object(instance.kubernetes,
+                               'core_api',
+                               return_value=core_api):
+            return instance.get_missing_node_reason(list(nodes),
+                                                    {'context': 'ctx'})
+
+    @staticmethod
+    def _not_found():
+        exc = kubernetes.api_exception()(status=404, reason='Not Found')
+        return exc
+
+    def test_no_node_names_returns_none(self):
+        assert instance.get_missing_node_reason([], {'context': 'ctx'}) is None
+        assert instance.get_missing_node_reason([None, ''],
+                                                {'context': 'ctx'}) is None
+
+    def test_healthy_nodes_return_none(self):
+        assert self._reason({'node-1': _fake_node()}) is None
+
+    def test_deleted_node_reported(self):
+        assert self._reason({'node-1': self._not_found()
+                            }) == 'node node-1 no longer exists'
+
+    def test_not_ready_node_reported(self):
+        assert self._reason({'node-1': _fake_node(ready=False)
+                            }) == 'node node-1 is NotReady'
+
+    def test_cordoned_node_reported(self):
+        assert self._reason({'node-1': _fake_node(unschedulable=True)
+                            }) == 'node node-1 is cordoned'
+
+    def test_not_ready_takes_precedence_over_cordoned(self):
+        assert self._reason({
+            'node-1': _fake_node(ready=False, unschedulable=True)
+        }) == 'node node-1 is NotReady'
+
+    def test_healthy_nodes_omitted_from_multi_node_result(self):
+        assert self._reason({
+            'node-1': _fake_node(),
+            'node-2': self._not_found(),
+        }) == 'node node-2 no longer exists'
+
+    def test_multiple_bad_nodes_joined(self):
+        assert self._reason({
+            'node-1': self._not_found(),
+            'node-2': _fake_node(ready=False),
+        }) == 'node node-1 no longer exists; node node-2 is NotReady'
+
+    def test_duplicate_node_names_reported_once(self):
+        # Several pods on one node yield the same name more than once.
+        assert self._reason({'node-1': self._not_found()
+                            }) == 'node node-1 no longer exists'
+
+    def test_non_404_api_error_is_swallowed(self):
+        # A transient API error must not be reported as a node problem.
+        err = kubernetes.api_exception()(status=500, reason='Server Error')
+        assert self._reason({'node-1': err}) is None
+
+    def test_unexpected_error_is_swallowed(self):
+        assert self._reason({'node-1': RuntimeError('boom')}) is None
