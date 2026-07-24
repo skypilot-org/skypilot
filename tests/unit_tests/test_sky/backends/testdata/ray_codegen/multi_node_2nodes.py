@@ -420,7 +420,14 @@ def make_task_bash_script(codegen: str,
             # user commands get a writable python/pip. DEACTIVATE above unsets
             # VIRTUAL_ENV, so re-activate here to keep it consistent (a venv
             # uses VIRTUAL_ENV, unlike conda which uses CONDA_PREFIX).
-            {constants.ACTIVATE_SKY_USER_ENV}
+            # Use getattr with a fallback: this function is embedded into the
+            # on-cluster job program via inspect.getsource (see
+            # sky/backends/task_codegen.py) and evaluated at runtime against the
+            # cluster's own sky.skylet.constants. Older clusters predate
+            # ACTIVATE_SKY_USER_ENV, so referencing it directly would raise
+            # AttributeError; those clusters have no ~/sky-user-env anyway, so an
+            # empty string is the correct no-op.
+            {getattr(constants, 'ACTIVATE_SKY_USER_ENV', '')}
             export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
