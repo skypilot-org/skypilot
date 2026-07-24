@@ -233,6 +233,23 @@ class TestReadOnlyForNonMembers(unittest.TestCase):
     def test_empty_config(self):
         self.assertFalse(workspaces_utils.is_read_only_for_non_members({}))
 
+    @mock.patch('sky.skypilot_config.get_nested')
+    def test_global_default_applies_when_unset(self, mock_get_nested):
+        # With the org-wide default set to read-only, a private workspace that
+        # doesn't set its own non_member_access inherits it.
+        mock_get_nested.return_value = 'read-only'
+        self.assertTrue(
+            workspaces_utils.is_read_only_for_non_members({'private': True}))
+        # A per-workspace value overrides the global default.
+        self.assertFalse(
+            workspaces_utils.is_read_only_for_non_members({
+                'private': True,
+                'non_member_access': 'none'
+            }))
+        # The global default is moot for an open (non-private) workspace.
+        self.assertFalse(
+            workspaces_utils.is_read_only_for_non_members({'private': False}))
+
 
 if __name__ == '__main__':
     unittest.main()

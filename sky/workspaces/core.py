@@ -757,35 +757,48 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def check_workspace_permission(user: models.User, workspace: str) -> None:
+def check_workspace_permission(user: models.User,
+                               workspace: str,
+                               action: str = 'write') -> None:
     """Checks that a user has permission to access the given workspace.
 
     Args:
         user: The user making the request.
         workspace: The workspace name to check.
+        action: 'write' (default, membership) or 'read' (also satisfied by a
+            read-only workspace).
 
     Raises:
         PermissionDeniedError: If the user does not have permission to access
             the workspace.
     """
     if not permission.permission_service.check_workspace_permission(
-            user.id, workspace):
+            user.id, workspace, action=action):
         raise exceptions.PermissionDeniedError(
             f'User {user.name} ({user.id}) does not have '
             f'permission to access workspace {workspace!r}')
 
 
-def reject_request_for_unauthorized_workspace(user: models.User) -> None:
+def reject_request_for_unauthorized_workspace(user: models.User,
+                                              action: str = 'write') -> None:
     """Rejects a request that has no permission to access active workspace.
 
     Args:
         user: The user making the request.
+        action: 'write' (default) requires membership of the active workspace
+            (used for resource-creating / mutating requests, which write into
+            the active workspace). 'read' also accepts a read-only workspace,
+            so a non-member whose active workspace is read-only (e.g. a user
+            whose only accessible workspaces are read-only) can still issue
+            read requests.
 
     Raises:
         PermissionDeniedError: If the user does not have permission to access
             the active workspace.
     """
-    check_workspace_permission(user, skypilot_config.get_active_workspace())
+    check_workspace_permission(user,
+                               skypilot_config.get_active_workspace(),
+                               action=action)
 
 
 def check_cluster_write_permission(user: models.User,
@@ -1219,10 +1232,18 @@ def _try_resync_new_user_grants(user: models.User) -> None:
                      f'{common_utils.format_exception(e)}')
 
 
-def resolve_workspace_for_user(
-        user: models.User,
-        requested: Optional[str] = None) -> WorkspaceResolution:
+def resolve_workspace_for_user(user: models.User,
+                               requested: Optional[str] = None,
+                               action: str = 'write') -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
+
+    ``action`` controls which workspaces count as accessible when picking the
+    active workspace. 'write' (default) considers only workspaces the user can
+    mutate, so a resource-creating request never lands in a read-only
+    workspace. 'read' also considers read-only workspaces, so a user whose only
+    accessible workspaces are read-only (e.g. `default` is private and they are
+    not a member of any writable workspace) can still resolve an active
+    workspace for read requests instead of hitting NoWorkspaceAccessError.
 
     Precedence (a future admin-assignment tier can splice in between
     `preferred_workspace` and the default-fallback step without changing
@@ -1263,24 +1284,26 @@ def resolve_workspace_for_user(
     """
     if requested is not None:
         try:
-            check_workspace_permission(user, requested)
+            check_workspace_permission(user, requested, action=action)
         except exceptions.PermissionDeniedError:
             # The denial can be a first-login grant that was never
             # materialized (see the zero-accessible branch below); re-sync
             # once and re-check before denying for real.
             _try_resync_new_user_grants(user)
-            check_workspace_permission(user, requested)
+            check_workspace_permission(user, requested, action=action)
         return WorkspaceResolution(
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
 
-    # Write access: this resolves the *active* workspace the request will
-    # operate in, which must be one the user can mutate. Read-only workspaces
-    # (visible for listing) must not be auto-selected here.
+    # For write requests this resolves the *active* workspace the request will
+    # operate in, which must be one the user can mutate -- read-only workspaces
+    # are not auto-selected. For read requests, read-only workspaces are also
+    # considered, so a user whose only accessible workspaces are read-only can
+    # still resolve an active workspace instead of being denied everything.
     accessible = sorted(
         _accessible_workspace_names_for_user(user.id,
                                              set(_load_workspaces().keys()),
-                                             action='write'))
+                                             action=action))
     if not accessible:
         # Zero accessible workspaces can mean the user's private-workspace
         # grant was never materialized: the new-user policy re-sync at first
@@ -1294,7 +1317,7 @@ def resolve_workspace_for_user(
         accessible = sorted(
             _accessible_workspace_names_for_user(user.id,
                                                  set(_load_workspaces().keys()),
-                                                 action='write'))
+                                                 action=action))
         if accessible:
             logger.info(f'Workspace access for user {user.name} ({user.id}) '
                         f'restored by policy re-sync: {accessible}')

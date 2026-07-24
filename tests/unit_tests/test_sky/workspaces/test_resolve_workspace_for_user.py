@@ -676,8 +676,8 @@ class TestResyncEdgeCases(unittest.TestCase):
         denied -> re-sync -> re-check passes."""
         check_calls = []
 
-        def _check(user, workspace):
-            del user  # Signature mirrors check_workspace_permission.
+        def _check(user, workspace, action='write'):
+            del user, action  # Signature mirrors check_workspace_permission.
             check_calls.append(workspace)
             if len(check_calls) == 1:
                 raise exceptions.PermissionDeniedError('no access')
@@ -723,6 +723,49 @@ class TestNoWorkspaceAccessError(unittest.TestCase):
         self.assertTrue(
             issubclass(exceptions.NoWorkspaceAccessError,
                        exceptions.PermissionDeniedError))
+
+
+class TestReadOnlyOnlyUser(unittest.TestCase):
+    """A user with no writable workspace, only read-only visibility.
+
+    Reproduces the common locked-down-`default` case: the user is not a member
+    of any writable workspace but can read a read-only one. Read requests must
+    resolve an active workspace (so listing works); write requests must not.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='bob', name='bob')
+
+    def _patches(self):
+        # write -> nothing accessible; read -> the read-only workspace.
+        def _acc(user_id, names, action='read'):
+            del user_id, names
+            return {'ws-ro'} if action == 'read' else set()
+
+        return [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value={'ws-ro': {
+                                  'private': True
+                              }}),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+
+    def test_read_resolves_the_read_only_workspace(self):
+        with _Patcher(self._patches()):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        self.assertEqual(res.workspace, 'ws-ro')
+
+    def test_write_is_denied(self):
+        with _Patcher(self._patches()):
+            with self.assertRaises(exceptions.NoWorkspaceAccessError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='write')
 
 
 if __name__ == '__main__':

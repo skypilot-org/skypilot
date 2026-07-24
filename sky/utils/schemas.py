@@ -2807,6 +2807,13 @@ def get_config_schema():
             'api_server': api_server,
             'active_workspace': workspace_schema,
             'workspaces': workspaces_schema,
+            # Org-wide default for a private workspace's non_member_access,
+            # applied when the workspace does not set its own. Per-workspace
+            # non_member_access overrides this.
+            'default_non_member_access': {
+                'type': 'string',
+                'enum': ['none', 'read-only'],
+            },
             'provision': provision_configs,
             'rbac': rbac_schema,
             'logs': logs_schema,

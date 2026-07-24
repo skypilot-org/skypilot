@@ -368,6 +368,28 @@ its clusters are also blocked, since those open an interactive shell. Members
 It only applies to private workspaces; an open (non-private) workspace is usable
 by everyone regardless.
 
+To make read-only the org-wide default for private workspaces (each workspace
+can still override with its own ``non_member_access``), set the top-level
+``default_non_member_access``:
+
+.. code-block:: yaml
+
+   default_non_member_access: read-only   # org-wide default
+
+   workspaces:
+     locked-ws:
+       private: true
+       non_member_access: none            # opt this one back to hidden
+       allowed_users:
+         - alice@example.com
+
+.. note::
+
+   Read-only visibility assumes each user has at least one workspace they can
+   write to (e.g. an open ``default``), which becomes their active workspace.
+   Users are still able to browse read-only workspaces even if their own
+   ``default`` is private and they are not a member of any writable workspace.
+
 Service accounts in private workspaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

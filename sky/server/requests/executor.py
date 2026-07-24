@@ -439,6 +439,55 @@ _RESOURCE_CREATING_REQUEST_NAMES_FOR_RESOLUTION_LOG = {
     request_names.RequestName.JOBS_LAUNCH.value,
 }
 
+# Workspace-scoped read requests. For these the active-workspace gate is
+# relaxed to a 'read' check (see
+# workspaces_core.reject_request_for_unauthorized_workspace), so a user whose
+# only accessible workspaces are read-only -- e.g. `default` is private and they
+# are not a member of any writable workspace -- can still list/view them.
+# Everything NOT listed here (creates, mutations, and unknown / plugin request
+# names) defaults to 'write': fail-safe, so an unlisted request can never
+# create/mutate in a read-only active workspace.
+_WORKSPACE_READ_REQUEST_NAMES = frozenset(
+    server_constants.REQUEST_NAME_PREFIX + req.value for req in (
+        request_names.RequestName.CHECK,
+        request_names.RequestName.ENABLED_CLOUDS,
+        request_names.RequestName.ENABLED_CLOUDS_BATCH,
+        request_names.RequestName.KUBERNETES_NODE_INFO,
+        request_names.RequestName.REALTIME_SLURM_GPU_AVAILABILITY,
+        request_names.RequestName.SLURM_NODE_INFO,
+        request_names.RequestName.STATUS_KUBERNETES,
+        request_names.RequestName.LIST_ACCELERATORS,
+        request_names.RequestName.LIST_ACCELERATOR_COUNTS,
+        request_names.RequestName.OPTIMIZE,
+        request_names.RequestName.ALL_CONTEXTS,
+        request_names.RequestName.CLUSTER_STATUS,
+        request_names.RequestName.CLUSTER_ENDPOINTS,
+        request_names.RequestName.CLUSTER_QUEUE,
+        request_names.RequestName.CLUSTER_JOB_STATUS,
+        request_names.RequestName.CLUSTER_JOB_LOGS,
+        request_names.RequestName.CLUSTER_JOB_DOWNLOAD_LOGS,
+        request_names.RequestName.CLUSTER_HOOK_LOGS,
+        request_names.RequestName.CLUSTER_COST_REPORT,
+        request_names.RequestName.CLUSTER_EVENTS,
+        request_names.RequestName.STORAGE_LS,
+        request_names.RequestName.JOBS_QUEUE,
+        request_names.RequestName.JOBS_QUEUE_V2,
+        request_names.RequestName.JOBS_LOGS,
+        request_names.RequestName.JOBS_WAIT,
+        request_names.RequestName.JOBS_DOWNLOAD_LOGS,
+        request_names.RequestName.JOBS_POOL_STATUS,
+        request_names.RequestName.JOBS_POOL_LOGS,
+        request_names.RequestName.JOBS_POOL_SYNC_DOWN_LOGS,
+        request_names.RequestName.JOBS_EVENTS,
+        request_names.RequestName.SERVE_STATUS,
+        request_names.RequestName.SERVE_LOGS,
+        request_names.RequestName.SERVE_SYNC_DOWN_LOGS,
+        request_names.RequestName.VOLUME_LIST,
+        request_names.RequestName.WORKSPACES_GET_CONFIG,
+        request_names.RequestName.RECIPE_LIST,
+        request_names.RequestName.RECIPE_GET,
+    ))
+
 # Sources we DON'T announce, even on a resource-creating request:
 #   EXPLICIT          — the user already named the workspace; repeating
 #                       it in the log is noise.
@@ -578,10 +627,17 @@ def override_request_env_and_config(
                 # processes (BurstableExecutor = ProcessPoolExecutor).
                 client_api_version = getattr(request_body, 'client_api_version',
                                              None)
+                # Read requests only need read access to the active workspace;
+                # everything else (creates/mutations/unknown) requires write.
+                # This lets a user whose only accessible workspaces are
+                # read-only still issue reads, while never letting a
+                # create/mutation land in a read-only active workspace.
+                ws_action = ('read' if request_name
+                             in _WORKSPACE_READ_REQUEST_NAMES else 'write')
                 if _should_apply_workspace_resolver(is_daemon,
                                                     client_api_version):
                     resolution = workspaces_core.resolve_workspace_for_user(
-                        user)
+                        user, action=ws_action)
                     workspace_ctx = (skypilot_config.local_active_workspace_ctx(
                         resolution.workspace))
                     logger.debug(f'{request_id} resolved workspace '
@@ -608,7 +664,7 @@ def override_request_env_and_config(
                         # Reject requests that the user does not have
                         # permission to access.
                         workspaces_core.reject_request_for_unauthorized_workspace(  # pylint: disable=line-too-long
-                            user)
+                            user, ws_action)
                     except exceptions.PermissionDeniedError as e:
                         logger.debug(
                             f'{request_id} permission denied to workspace: '

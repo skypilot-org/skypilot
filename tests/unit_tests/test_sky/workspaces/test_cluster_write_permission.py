@@ -35,7 +35,7 @@ class TestCheckClusterWritePermission(unittest.TestCase):
 
         # The check must consult the *cluster's* workspace, not the active one.
         mock_get_ws.assert_called_once_with('other-users-cluster')
-        mock_check.assert_called_once_with('user1', 'ws-b')
+        mock_check.assert_called_once_with('user1', 'ws-b', action='write')
 
     @mock.patch('sky.users.permission.permission_service.'
                 'check_workspace_permission')
@@ -48,7 +48,7 @@ class TestCheckClusterWritePermission(unittest.TestCase):
 
         # Should not raise.
         workspaces_core.check_cluster_write_permission(self.user, 'my-cluster')
-        mock_check.assert_called_once_with('user1', 'ws-a')
+        mock_check.assert_called_once_with('user1', 'ws-a', action='write')
 
     @mock.patch('sky.users.permission.permission_service.'
                 'check_workspace_permission')
