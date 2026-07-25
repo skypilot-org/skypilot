@@ -657,6 +657,75 @@ def test_add_cluster_name_label_basic():
     assert lines[4] == 'no_labels_metric 2.0'
 
 
+def test_add_cluster_name_label_does_not_block_the_event_loop():
+    """Stamping must not stall the loop that also serves /metrics.
+
+    The metrics server answers /metrics, /gpu-metrics and
+    /endpoints-metrics from one event loop. A large fleet's federated
+    payload takes tens of seconds of pure CPU to rewrite; done inline
+    that starves the concurrent /metrics scrape into a timeout. The
+    rewrite therefore has to happen off the loop.
+    """
+    # Big enough that inline stamping would be clearly visible as a stall.
+    text = '\n'.join(
+        f'metric_{i}{{label="value{i}"}} {i}' for i in range(200_000))
+    served = []
+
+    async def main():
+        stop = asyncio.Event()
+
+        async def loop_consumer():
+            # Stands in for the /metrics handler: needs the loop to
+            # wake it up promptly.
+            while not stop.is_set():
+                await asyncio.sleep(0)
+                served.append(1)
+                await asyncio.sleep(0.001)
+
+        consumer = asyncio.create_task(loop_consumer())
+        await asyncio.sleep(0.05)
+        served.clear()
+        result = await utils.add_cluster_name_label(text, 'ctx-a')
+        stop.set()
+        await consumer
+        return result
+
+    result = asyncio.run(main())
+    # The loop kept running while the payload was rewritten.
+    assert served, 'event loop was starved for the whole stamping duration'
+    # ...and the output is still correct.
+    first = result.split('\n', 1)[0]
+    assert first == 'metric_0{cluster="ctx-a",label="value0"} 0'
+
+
+def test_add_cluster_name_label_prefilter_matches_regex():
+    """The cheap substring pre-filter never changes the verdict.
+
+    Stamping skips already-labeled lines via a literal `cluster="` test
+    before the regex. The literal is a necessary condition for the regex,
+    so the two must agree on every line — including the tricky cases the
+    regex exists to get right (a `cluster` suffix on another label name).
+    """
+    cases = [
+        'foo{cluster="x"} 1',  # labeled -> skip
+        'foo{bar="1",cluster="x"} 1',  # labeled, not first -> skip
+        'foo{my_cluster="x"} 1',  # suffix only -> must still stamp
+        'foo{clusterish="x"} 1',  # prefix only -> must still stamp
+        'foo{bar="baz"} 1',  # unlabeled -> stamp
+        'foo{} 1',  # no labels -> stamp
+    ]
+    for line in cases:
+        brace_start = line.find('{')
+        brace_end = line.rfind('}')
+        labels = line[brace_start + 1:brace_end]
+        regex_hit = bool(utils._CLUSTER_LABEL_RE.search(labels))  # pylint: disable=protected-access
+        prefilter = utils._CLUSTER_LABEL_LITERAL in labels  # pylint: disable=protected-access
+        # The pre-filter may only ever be a superset of the regex.
+        assert regex_hit <= prefilter, line
+        # Combined verdict (what the code actually evaluates) == regex.
+        assert (prefilter and regex_hit) == regex_hit, line
+
+
 def test_add_cluster_name_label_skips_already_labeled():
     """Lines already carrying a cluster label are left untouched.
 
