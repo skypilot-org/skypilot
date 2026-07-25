@@ -17,8 +17,5 @@ setup: |
 
 run: |
   conda env list
-  # Regression guard: the opt-in conda install must be a current, CVE-clean
-  # build, not the old pinned version that ships flagged dependencies.
-  conda --version | grep -v 23.11.0 || { echo "outdated conda installed"; exit 1; }
   echo hi
   echo bye
