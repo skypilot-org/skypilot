@@ -1092,29 +1092,30 @@ async def send_metrics_request_with_port_forward(
 # substring `cluster="` can only start an actual label; the lookbehind keeps
 # names like `k8s_cluster` from matching.
 _CLUSTER_LABEL_RE = re.compile(r'(?<![A-Za-z0-9_])cluster="')
+# Cheap necessary condition for _CLUSTER_LABEL_RE to match. The regex only
+# differs from this literal by rejecting a preceding word character, so a
+# line without the literal can never match — the substring test is a
+# false-negative-free pre-filter. It matters because the regex runs once
+# per federated series: at multi-hundred-MiB payloads the regex dominates
+# this loop, while the (almost always false) substring test is a C-level
+# scan an order of magnitude cheaper.
+_CLUSTER_LABEL_LITERAL = 'cluster="'
 
 
-async def add_cluster_name_label(metrics_text: str, context: str) -> str:
-    """Adds a cluster label to each metric line.
+def _stamp_cluster_label(metrics_text: str, context: str) -> str:
+    """Body of add_cluster_name_label(); see it for semantics.
 
-    Skips lines that already carry a `cluster` label (stamped by a
-    previous federation pass, or labeled at the source): re-stamping
-    would produce two `cluster` labels on one line, which is a hard
-    duplicate-label error that makes Prometheus roll back the entire
-    /gpu-metrics scrape body. This is the safety net for the fail-safe
-    path in split_local_remote_contexts(): if a local context is ever
-    misdetected as remote (missing RBAC, cold start, transient probe
-    error), its already-stamped series are federated back here, and
-    skipping keeps them byte-identical to the stored series so ingestion
-    collapses them to a no-op instead of poisoning the scrape.
-
-    Args:
-        metrics_text: The text containing the metrics
-        context: The cluster name
+    Split out as a plain sync function so it can be handed to a worker
+    thread: it is CPU-bound with no await points, and a federated payload
+    can be hundreds of MiB, so running it on the event loop would stall
+    every other endpoint served by the metrics server (notably /metrics)
+    for as long as the stamping takes.
     """
     lines = metrics_text.strip().split('\n')
     modified_lines = []
     already_labeled = 0
+    prefix = f'cluster="{context}",'
+    only_label = f'cluster="{context}"'
 
     for line in lines:
         # keep comment lines and empty lines as-is
@@ -1131,7 +1132,8 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
             existing_labels = line[brace_start + 1:brace_end]
             rest_of_line = line[brace_end + 1:]
 
-            if _CLUSTER_LABEL_RE.search(existing_labels):
+            if (_CLUSTER_LABEL_LITERAL in existing_labels and
+                    _CLUSTER_LABEL_RE.search(existing_labels)):
                 # Already attributed; re-stamping would duplicate the
                 # cluster label and invalidate the whole scrape body.
                 already_labeled += 1
@@ -1139,9 +1141,9 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
                 continue
 
             if existing_labels:
-                new_labels = f'cluster="{context}",{existing_labels}'
+                new_labels = f'{prefix}{existing_labels}'
             else:
-                new_labels = f'cluster="{context}"'
+                new_labels = only_label
 
             modified_line = f'{metric_name}{{{new_labels}}}{rest_of_line}'
             modified_lines.append(modified_line)
@@ -1160,6 +1162,35 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
             f'unstamped.')
 
     return '\n'.join(modified_lines)
+
+
+async def add_cluster_name_label(metrics_text: str, context: str) -> str:
+    """Adds a cluster label to each metric line.
+
+    Skips lines that already carry a `cluster` label (stamped by a
+    previous federation pass, or labeled at the source): re-stamping
+    would produce two `cluster` labels on one line, which is a hard
+    duplicate-label error that makes Prometheus roll back the entire
+    /gpu-metrics scrape body. This is the safety net for the fail-safe
+    path in split_local_remote_contexts(): if a local context is ever
+    misdetected as remote (missing RBAC, cold start, transient probe
+    error), its already-stamped series are federated back here, and
+    skipping keeps them byte-identical to the stored series so ingestion
+    collapses them to a no-op instead of poisoning the scrape.
+
+    Runs in a worker thread: the metrics server serves /metrics,
+    /gpu-metrics and /endpoints-metrics from a single event loop, and a
+    large fleet's federated payload takes tens of seconds of pure CPU to
+    rewrite. Done inline that stalls the loop outright and the
+    concurrent /metrics scrape times out (up == 0) once per federation
+    cycle; in a thread the loop keeps accepting and answering requests
+    while the rewrite proceeds.
+
+    Args:
+        metrics_text: The text containing the metrics
+        context: The cluster name
+    """
+    return await asyncio.to_thread(_stamp_cluster_label, metrics_text, context)
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
