@@ -411,7 +411,7 @@ def make_task_bash_script(codegen: str,
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
-            source ~/.bashrc
+            [ -f ~/.bashrc ] && source ~/.bashrc
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a

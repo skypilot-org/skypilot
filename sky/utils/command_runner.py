@@ -384,9 +384,14 @@ class CommandRunner:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
                 # Sourcing bashrc may take a few seconds causing overheads.
+                # Guard on existence: ~/.bashrc may be absent (e.g. envs
+                # without conda, which used to create it via `conda init`).
+                # `source` of a missing file returns non-zero, which would
+                # break this `&&` chain.
                 '-i',
                 shlex.quote(
-                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                    f'true && ([ -f ~/.bashrc ] && source ~/.bashrc || true)'
+                    f' && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
             ]
         else:
