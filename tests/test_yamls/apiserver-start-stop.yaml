@@ -7,11 +7,15 @@ workdir: .
 setup: |
   set -e
   sudo apt update
-  # Install into the default user venv (activated by SkyPilot), not --system:
-  # conda is no longer installed by default, so the system python is not
-  # writable by the non-root cluster user.
-  uv pip install --prerelease allow "azure-cli<2.87.0"
-  uv pip install -e '.[all]'
+  # On images where SkyPilot activates a writable user venv (e.g. the default
+  # Kubernetes images, where the system Python is read-only for the non-root
+  # user), `uv pip install` targets that venv. On images with no active venv
+  # (bare cloud VMs), fall back to `--system`, otherwise `uv pip install` aborts
+  # with "No virtual environment found".
+  uv_system_flag=""
+  [ -z "${VIRTUAL_ENV:-}" ] && uv_system_flag="--system"
+  uv pip install ${uv_system_flag} --prerelease allow "azure-cli<2.87.0"
+  uv pip install ${uv_system_flag} -e '.[all]'
 
 run: |
   set -euo pipefail
