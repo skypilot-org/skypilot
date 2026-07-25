@@ -1096,9 +1096,18 @@ class JobController:
                         force_refresh_statuses=set(status_lib.ClusterStatus)))
             except exceptions.ClusterStatusFetchingError as e:
                 # The refresh kept failing after retries. Treat it as a
-                # transient condition and back off, reusing the same window as
-                # a transient job-status check error so a sustained outage
-                # still surfaces cleanly once the total timeout is exceeded.
+                # transient condition and back off, reusing the transient
+                # job-status-check window. Sharing the window (rather than
+                # keeping a separate one for this handler) is deliberate: a
+                # successful get_job_status resets it, so while the job-status
+                # probe keeps returning a healthy status -- a direct positive
+                # liveness signal -- the loop keeps retrying instead of
+                # escalating. Restarting a demonstrably running job is exactly
+                # the false alarm this handler exists to prevent, and recovery
+                # could not relaunch anyway while the provider API is
+                # unreachable. Only when both get_job_status and this refresh
+                # keep failing for JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS is
+                # the error re-raised, escalating to emergency recovery.
                 if transient_job_check_error_start_time is None:
                     transient_job_check_error_start_time = time.time()
                     job_check_backoff = common_utils.Backoff(
