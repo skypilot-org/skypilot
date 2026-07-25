@@ -5,6 +5,7 @@ sky api status -o json, sky queue -o json, and sky cost-report -o json.
 """
 import datetime
 import json
+import sys
 import time
 from unittest import mock
 
@@ -636,3 +637,90 @@ class TestCostReportJsonOutput:
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
         assert parsed == []
+
+
+class TestJsonOutputExcludesRequestLogs:
+    """`-o json` keeps stdout parseable for commands that stream logs.
+
+    The API server can prepend text to a request's log stream — a
+    client-upgrade banner, for one — so a command that streams to stdout
+    before printing its JSON emits a document no parser accepts.
+    """
+
+    BANNER = '\x1b[33m⚠ Upgrade your SkyPilot client\x1b[0m\n'
+
+    def _fake_stream_and_get(self, result):
+        """Returns a stream_and_get that emits a log line, then `result`.
+
+        Mirrors the real one: the line goes to `output_stream` when the
+        caller passes one, and to stdout when it does not.
+        """
+
+        def fake(*args, output_stream=None, **kwargs):
+            del args, kwargs  # Unused.
+            (output_stream or sys.stdout).write(self.BANNER)
+            return result
+
+        return fake
+
+    def _assert_only_json(self, result, expected):
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout) == expected
+        assert 'Upgrade' not in result.stdout
+
+    def test_status(self, monkeypatch):
+        monkeypatch.setattr('sky.client.sdk.status', lambda *a, **kw: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            self._fake_stream_and_get([]))
+
+        result = cli_testing.CliRunner(mix_stderr=False).invoke(
+            command.status, ['-o', 'json'])
+
+        self._assert_only_json(result, [])
+
+    def test_queue(self, monkeypatch):
+        monkeypatch.setattr('sky.client.sdk.queue', lambda *a, **kw: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            self._fake_stream_and_get([]))
+
+        result = cli_testing.CliRunner(mix_stderr=False).invoke(
+            command.queue, ['mycluster', '-o', 'json'])
+
+        self._assert_only_json(result, {'mycluster': []})
+
+    def test_jobs_queue(self, monkeypatch):
+        monkeypatch.setattr(
+            'sky.client.cli.utils.get_managed_job_queue', lambda **kw:
+            ('req-1', mock.MagicMock(v2=lambda: True)))
+        monkeypatch.setattr('sky.jobs.pool_status', lambda **kw: None)
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            self._fake_stream_and_get(([], 0, {}, 0)))
+
+        result = cli_testing.CliRunner(mix_stderr=False).invoke(
+            command.jobs_queue, ['-o', 'json'])
+
+        self._assert_only_json(result, [])
+
+    def test_gpus_list(self, monkeypatch):
+        monkeypatch.setattr('sky.client.sdk.enabled_clouds',
+                            lambda *a, **kw: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.get', lambda *a, **kw: [])
+        monkeypatch.setattr('sky.client.sdk.list_accelerators',
+                            lambda *a, **kw: 'req-2')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            self._fake_stream_and_get({}))
+
+        result = cli_testing.CliRunner(mix_stderr=False).invoke(
+            command.gpus_list, ['V100', '-o', 'json'])
+
+        self._assert_only_json(result, {})
+
+    def test_check(self, monkeypatch):
+        monkeypatch.setattr('sky.client.sdk.check', lambda *a, **kw: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            self._fake_stream_and_get({}))
+
+        result = cli_testing.CliRunner(mix_stderr=False).invoke(
+            command.check, ['-o', 'json'])
+
+        self._assert_only_json(result, {})

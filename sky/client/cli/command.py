@@ -250,11 +250,23 @@ def _set_ssh_config_from_launch_response(handle: Any,
     _write_ssh_config_for_cluster(handle, credentials, ws_proxy_cmd)
 
 
+def _get_without_logs(request_id: server_common.RequestId[T]) -> T:
+    """Waits for a request and returns its result, printing no logs.
+
+    Commands rendering ``-o json`` use this instead of ``sdk.stream_and_get``:
+    stdout must carry only the JSON document, and a request's streamed logs —
+    which the API server may prepend text to, such as a client-upgrade banner —
+    would corrupt it.
+    """
+    return sdk.stream_and_get(request_id, output_stream=io.StringIO())
+
+
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
     verbose: bool = False,
+    stream_logs: bool = True,
 ) -> List[responses.StatusResponse]:
     """Returns a list of clusters that match the glob pattern.
 
@@ -264,6 +276,7 @@ def _get_cluster_records_and_set_ssh_config(
         all_users: Whether to query clusters from all users.
             If clusters is not None, this field is ignored because cluster list
             can include other users' clusters.
+        stream_logs: Whether to print the status request's logs to stdout.
     """
     # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
@@ -274,7 +287,8 @@ def _get_cluster_records_and_set_ssh_config(
                             all_users=all_users,
                             _include_credentials=True,
                             _summary_response=not verbose)
-    cluster_records = sdk.stream_and_get(request_id)
+    cluster_records = (sdk.stream_and_get(request_id)
+                       if stream_logs else _get_without_logs(request_id))
     # Cache the ws-proxy command (constant across clusters).
     ws_proxy_cmd = _get_ws_proxy_command()
     # Update the SSH config for all clusters
@@ -2312,7 +2326,11 @@ def status(verbose: bool,
 
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
-        query_clusters, refresh_mode, all_users, verbose)
+        query_clusters,
+        refresh_mode,
+        all_users,
+        verbose,
+        stream_logs=output_format != flags.OUTPUT_FORMAT_JSON)
 
     if output_format == flags.OUTPUT_FORMAT_JSON:
         click.echo(
@@ -2637,11 +2655,12 @@ def queue(clusters: List[str],
           output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    if output_format != flags.OUTPUT_FORMAT_JSON:
+    json_output = output_format == flags.OUTPUT_FORMAT_JSON
+    if not json_output:
         click.secho('Fetching and parsing job queue...', fg='cyan')
     if not clusters:
         cluster_records = _get_cluster_records_and_set_ssh_config(
-            None, all_users=all_users)
+            None, all_users=all_users, stream_logs=not json_output)
         clusters = [cluster['name'] for cluster in cluster_records]
 
     unsupported_clusters = []
@@ -2651,19 +2670,23 @@ def queue(clusters: List[str],
 
     def _get_job_queue(cluster):
         try:
-            job_table = sdk.stream_and_get(
-                sdk.queue(cluster, skip_finished, all_users))
+            request_id = sdk.queue(cluster, skip_finished, all_users)
+            job_table = (_get_without_logs(request_id)
+                         if json_output else sdk.stream_and_get(request_id))
         except (RuntimeError, exceptions.CommandError, ValueError,
                 exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             if isinstance(e, exceptions.NotSupportedError):
                 unsupported_clusters.append(cluster)
-            click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
-                       f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
-                       f'  {common_utils.format_exception(e)}')
+            # stderr keeps stdout parseable under `-o json`.
+            click.echo(
+                f'{colorama.Fore.YELLOW}Failed to get the job queue for '
+                f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
+                f'  {common_utils.format_exception(e)}',
+                err=True)
             return
-        if output_format == flags.OUTPUT_FORMAT_JSON:
+        if json_output:
             job_records[cluster] = [
                 r.model_dump(mode='json') for r in job_table
             ]
@@ -2672,7 +2695,7 @@ def queue(clusters: List[str],
 
     subprocess_utils.run_in_parallel(_get_job_queue, clusters)
 
-    if output_format == flags.OUTPUT_FORMAT_JSON:
+    if json_output:
         click.echo(json.dumps(job_records, indent=2))
         return
 
@@ -4050,9 +4073,7 @@ def check(infra_list: Tuple[str],
                            workspace=workspace)
 
     if output_format == flags.OUTPUT_FORMAT_JSON:
-        # Suppress streamed output and print the result as JSON
-        null_stream = io.StringIO()
-        result = sdk.stream_and_get(request_id, output_stream=null_stream)
+        result = _get_without_logs(request_id)
         click.echo(json.dumps(result, indent=2))
     else:
         sdk.stream_and_get(request_id)
@@ -4232,7 +4253,7 @@ def _show_gpus_impl(
             name = parts[0]
             if len(parts) == 2:
                 quantity = int(parts[1])
-        result = sdk.stream_and_get(
+        result = _get_without_logs(
             sdk.list_accelerators(gpus_only=True,
                                   name_filter=name,
                                   quantity_filter=quantity,
@@ -6295,7 +6316,7 @@ def jobs_queue(verbose: bool,
             pool_status_request_id = pool_status_future.result()
 
         if output_format == flags.OUTPUT_FORMAT_JSON:
-            result = sdk.stream_and_get(managed_jobs_request_id)
+            result = _get_without_logs(managed_jobs_request_id)
             if queue_result_version.v2():
                 managed_jobs_, _, _, _ = result
             else:
