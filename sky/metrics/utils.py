@@ -1101,8 +1101,17 @@ _CLUSTER_LABEL_RE = re.compile(r'(?<![A-Za-z0-9_])cluster="')
 # scan an order of magnitude cheaper.
 _CLUSTER_LABEL_LITERAL = 'cluster="'
 
+# How many lines the stamping loop rewrites between cancellation checks.
+# The check is per chunk rather than per line because the inner loop is
+# the hot path: polling inside it (even masked to 1-in-8192) measurably
+# slows every line, while one check per chunk is close to free and still
+# reacts within a few milliseconds of the caller giving up.
+_CANCEL_CHECK_LINES = 8192
 
-def _stamp_cluster_label(metrics_text: str, context: str) -> str:
+
+def _stamp_cluster_label(metrics_text: str,
+                         context: str,
+                         cancelled: Optional[threading.Event] = None) -> str:
     """Body of add_cluster_name_label(); see it for semantics.
 
     Split out as a plain sync function so it can be handed to a worker
@@ -1110,6 +1119,15 @@ def _stamp_cluster_label(metrics_text: str, context: str) -> str:
     can be hundreds of MiB, so running it on the event loop would stall
     every other endpoint served by the metrics server (notably /metrics)
     for as long as the stamping takes.
+
+    Python cannot kill a running thread, so when the caller's deadline
+    fires the thread would otherwise keep rewriting a payload nobody will
+    read -- holding its pool slot and, because this is pure Python, taking
+    GIL turns away from the contexts that can still finish in time. The
+    caller signals `cancelled` on its way out and this loop stops at the
+    next chunk boundary. The check is hoisted out of the per-line path on
+    purpose: polling per line (even masked to 1-in-N) measurably slows the
+    inner loop, while one check per chunk is close to free.
     """
     lines = metrics_text.strip().split('\n')
     modified_lines = []
@@ -1117,39 +1135,44 @@ def _stamp_cluster_label(metrics_text: str, context: str) -> str:
     prefix = f'cluster="{context}",'
     only_label = f'cluster="{context}"'
 
-    for line in lines:
-        # keep comment lines and empty lines as-is
-        if line.startswith('#') or not line.strip():
-            modified_lines.append(line)
-            continue
-        # if line is a metric line with labels, add cluster label. rfind
-        # for the closing brace: label values may legitimately contain '}'
-        # (the sample value/timestamp after the label section cannot).
-        brace_start = line.find('{')
-        brace_end = line.rfind('}')
-        if brace_start != -1 and brace_end > brace_start:
-            metric_name = line[:brace_start]
-            existing_labels = line[brace_start + 1:brace_end]
-            rest_of_line = line[brace_end + 1:]
-
-            if (_CLUSTER_LABEL_LITERAL in existing_labels and
-                    _CLUSTER_LABEL_RE.search(existing_labels)):
-                # Already attributed; re-stamping would duplicate the
-                # cluster label and invalidate the whole scrape body.
-                already_labeled += 1
+    for chunk_start in range(0, len(lines), _CANCEL_CHECK_LINES):
+        if cancelled is not None and cancelled.is_set():
+            raise asyncio.CancelledError()
+        for line in lines[chunk_start:chunk_start + _CANCEL_CHECK_LINES]:
+            # keep comment lines and empty lines as-is
+            if line.startswith('#') or not line.strip():
                 modified_lines.append(line)
                 continue
+            # if line is a metric line with labels, add cluster label.
+            # rfind for the closing brace: label values may legitimately
+            # contain '}' (the sample value/timestamp after the label
+            # section cannot).
+            brace_start = line.find('{')
+            brace_end = line.rfind('}')
+            if brace_start != -1 and brace_end > brace_start:
+                metric_name = line[:brace_start]
+                existing_labels = line[brace_start + 1:brace_end]
+                rest_of_line = line[brace_end + 1:]
 
-            if existing_labels:
-                new_labels = f'{prefix}{existing_labels}'
+                if (_CLUSTER_LABEL_LITERAL in existing_labels and
+                        _CLUSTER_LABEL_RE.search(existing_labels)):
+                    # Already attributed; re-stamping would duplicate the
+                    # cluster label and invalidate the whole scrape body.
+                    already_labeled += 1
+                    modified_lines.append(line)
+                    continue
+
+                if existing_labels:
+                    new_labels = f'{prefix}{existing_labels}'
+                else:
+                    new_labels = only_label
+
+                modified_line = (f'{metric_name}{{{new_labels}}}'
+                                 f'{rest_of_line}')
+                modified_lines.append(modified_line)
             else:
-                new_labels = only_label
-
-            modified_line = f'{metric_name}{{{new_labels}}}{rest_of_line}'
-            modified_lines.append(modified_line)
-        else:
-            # keep other lines as-is
-            modified_lines.append(line)
+                # keep other lines as-is
+                modified_lines.append(line)
 
     if already_labeled:
         # Aggregated (never per line): during real self-federation nearly
@@ -1186,11 +1209,23 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
     cycle; in a thread the loop keeps accepting and answering requests
     while the rewrite proceeds.
 
+    The caller (the federation routes) bounds each context with its own
+    timeout. When that fires the coroutine is cancelled but the worker
+    thread cannot be, so it is asked to stop cooperatively -- otherwise
+    it would keep rewriting a payload that will be discarded, competing
+    for the GIL with the contexts that can still make their deadline.
+
     Args:
         metrics_text: The text containing the metrics
         context: The cluster name
     """
-    return await asyncio.to_thread(_stamp_cluster_label, metrics_text, context)
+    cancelled = threading.Event()
+    try:
+        return await asyncio.to_thread(_stamp_cluster_label, metrics_text,
+                                       context, cancelled)
+    except asyncio.CancelledError:
+        cancelled.set()
+        raise
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
