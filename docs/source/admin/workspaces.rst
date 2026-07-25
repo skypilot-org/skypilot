@@ -369,12 +369,13 @@ It only applies to private workspaces; an open (non-private) workspace is usable
 by everyone regardless.
 
 To make read-only the org-wide default for private workspaces (each workspace
-can still override with its own ``non_member_access``), set the top-level
-``default_non_member_access``:
+can still override with its own ``non_member_access``), set
+``workspace_config.non_member_access``:
 
 .. code-block:: yaml
 
-   default_non_member_access: read-only   # org-wide default
+   workspace_config:
+     non_member_access: read-only         # org-wide default
 
    workspaces:
      locked-ws:

@@ -240,6 +240,9 @@ class TestReadOnlyForNonMembers(unittest.TestCase):
         mock_get_nested.return_value = 'read-only'
         self.assertTrue(
             workspaces_utils.is_read_only_for_non_members({'private': True}))
+        # The org-wide default is read from workspace_config.non_member_access.
+        self.assertEqual(mock_get_nested.call_args.args[0],
+                         ('workspace_config', 'non_member_access'))
         # A per-workspace value overrides the global default.
         self.assertFalse(
             workspaces_utils.is_read_only_for_non_members({
