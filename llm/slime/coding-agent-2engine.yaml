@@ -22,7 +22,7 @@ name: sglang
 resources:
   infra: kubernetes          # your H100 Kubernetes context, e.g. kubernetes/my-cluster
   accelerators: H100:1
-  image_id: docker:slimerl/slime:latest
+  image_id: docker:slimerl/slime:nightly-dev-20260707a
 workdir: .
 volumes:
   /shared/policy: slime-policy
@@ -33,7 +33,7 @@ name: sglang2
 resources:
   infra: kubernetes
   accelerators: H100:1
-  image_id: docker:slimerl/slime:latest
+  image_id: docker:slimerl/slime:nightly-dev-20260707a
 workdir: .
 volumes:
   /shared/policy: slime-policy
@@ -44,7 +44,7 @@ name: trainer
 resources:
   infra: kubernetes          # SAME context as the engines — jobs co-schedule on one cluster
   accelerators: H100:4
-  image_id: docker:slimerl/slime:latest
+  image_id: docker:slimerl/slime:nightly-dev-20260707a
 workdir: .
 volumes:
   /shared/policy: slime-policy

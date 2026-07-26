@@ -24,7 +24,7 @@ name: sglang
 resources:
   infra: kubernetes          # your H100 Kubernetes context, e.g. kubernetes/my-cluster
   accelerators: H100:1        # engine tensor-parallel = 1 (1 H100/engine; validated repro sizing)
-  image_id: docker:slimerl/slime:latest
+  image_id: docker:slimerl/slime:nightly-dev-20260707a
 workdir: .                   # so the job can see scripts/
 volumes:
   /shared/policy: slime-policy
@@ -35,7 +35,7 @@ name: trainer
 resources:
   infra: kubernetes          # SAME context as the engine — jobs co-schedule on one cluster
   accelerators: H100:4
-  image_id: docker:slimerl/slime:latest
+  image_id: docker:slimerl/slime:nightly-dev-20260707a
 workdir: .
 volumes:
   /shared/policy: slime-policy
