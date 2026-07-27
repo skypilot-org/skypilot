@@ -44,6 +44,7 @@ from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import cloud_api_retries
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context
@@ -551,6 +552,10 @@ class JobController:
                 2. The cluster is preempted or failed before the job is
                 submitted.
                 3. Any unexpected error happens during the `sky.launch`.
+            exceptions.PoolDoesNotExistError: This will be raised when the
+                pool the job is bound to no longer exists (e.g. the pool was
+                deleted while the job was running or recovering). This is
+                unrecoverable for the job.
         Other exceptions may be raised depending on the backend.
         """
         _add_k8s_annotations(task, self._job_id)
@@ -1075,10 +1080,58 @@ class JobController:
             # depending on the cloud, which can also cause failure of the job.
             # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status, handle) = await asyncio.to_thread(
-                backend_utils.refresh_cluster_status_handle,
-                cluster_name,
-                force_refresh_statuses=set(status_lib.ClusterStatus))
+            # A transient provider-API error (e.g. an HTTP 503 from the
+            # Kubernetes API server) during this refresh raises
+            # ClusterStatusFetchingError. Retry it a few times so a momentary
+            # blip is absorbed transparently; if it still fails, fall through
+            # to the transient-error handling below and retry on the next
+            # iteration rather than escalating to run()'s unexpected-error
+            # handling (emergency recovery), which would tear down and
+            # relaunch a healthy cluster.
+            try:
+                (cluster_status, handle) = await asyncio.to_thread(
+                    cloud_api_retries.with_cloud_api_retries,
+                    lambda: backend_utils.refresh_cluster_status_handle(
+                        cluster_name,
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
+            except exceptions.ClusterStatusFetchingError as e:
+                # The refresh kept failing after retries. Treat it as a
+                # transient condition and back off, reusing the transient
+                # job-status-check window. Sharing the window (rather than
+                # keeping a separate one for this handler) is deliberate: a
+                # successful get_job_status resets it, so while the job-status
+                # probe keeps returning a healthy status -- a direct positive
+                # liveness signal -- the loop keeps retrying instead of
+                # escalating. Restarting a demonstrably running job is exactly
+                # the false alarm this handler exists to prevent, and recovery
+                # could not relaunch anyway while the provider API is
+                # unreachable. Only when both get_job_status and this refresh
+                # keep failing for JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS is
+                # the error re-raised, escalating to emergency recovery.
+                if transient_job_check_error_start_time is None:
+                    transient_job_check_error_start_time = time.time()
+                    job_check_backoff = common_utils.Backoff(
+                        initial_backoff=1, max_backoff_factor=5)
+                elapsed = time.time() - transient_job_check_error_start_time
+                timeout = (
+                    managed_job_utils.JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS)
+                if elapsed >= timeout:
+                    logger.error(
+                        'Failed to refresh cluster status after retrying for '
+                        f'{elapsed:.1f} seconds: '
+                        f'{common_utils.format_exception(e)}')
+                    raise
+                assert job_check_backoff is not None, (
+                    transient_job_check_error_start_time, job_check_backoff)
+                backoff_time = min(job_check_backoff.current_backoff(),
+                                   timeout - elapsed)
+                logger.info(
+                    'Failed to refresh cluster status, likely due to a '
+                    'transient provider API error. Retrying to avoid a false '
+                    f'alarm for job failure. Retrying in {backoff_time:.1f} '
+                    f'seconds: {common_utils.format_exception(e)}')
+                await asyncio.sleep(backoff_time)
+                continue
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
@@ -1443,6 +1496,16 @@ class JobController:
                 await on_recovery()
 
             logger.info(f'Task {task.name} recovered, continuing monitoring')
+
+            # Recovery relaunches the cluster, so any pending
+            # status-fetch-failure window belongs to the previous cluster and
+            # must not carry over. If it did, the first status-fetch failure
+            # after recovery would measure `elapsed` from before the recovery,
+            # exceed JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS immediately, and
+            # trigger another recovery with no retries. One transient
+            # control-plane error would then become an unbounded recovery loop.
+            transient_job_check_error_start_time = None
+            job_check_backoff = None
 
             # Reset force flag after first recovery
             force_transit_to_recovering = False
@@ -2172,6 +2235,19 @@ class JobController:
                         managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                         failure_reason)
                     attempt_done = True
+                except exceptions.PoolDoesNotExistError as e:
+                    # The pool was deleted while the job was still bound to
+                    # it. The job can never launch into the pool again, so
+                    # mark it terminal with a clear reason instead of
+                    # retrying the launch forever.
+                    logger.error(f'Pool no longer exists for task {task_id}')
+                    failure_reason = common_utils.format_exception(e)
+                    logger.error(failure_reason)
+                    await self._update_failed_task_state(
+                        task_id,
+                        managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                        failure_reason)
+                    attempt_done = True
                 except exceptions.ClusterSetUpError as e:
                     # Raised by the launch path for a non-retryable setup
                     # failure, e.g. the job's pod was OOMKilled during
@@ -2573,9 +2649,20 @@ class ControllerManager:
                     if pool_cluster_name is not None:
                         cluster_name = pool_cluster_name
                         if job_id_on_pool_cluster is not None:
-                            core.cancel(cluster_name=cluster_name,
-                                        job_ids=[job_id_on_pool_cluster],
-                                        _try_cancel_if_cluster_is_init=True)
+                            try:
+                                core.cancel(cluster_name=cluster_name,
+                                            job_ids=[job_id_on_pool_cluster],
+                                            _try_cancel_if_cluster_is_init=True)
+                            except exceptions.ClusterDoesNotExist:
+                                # The pool worker is already gone (e.g. the
+                                # pool was torn down while the job was still
+                                # bound to it), so there is nothing to
+                                # cancel. Treat as cleaned up rather than
+                                # failing the job with a cleanup error.
+                                logger.info(
+                                    f'Pool worker {cluster_name} no longer '
+                                    'exists; skipping cancellation of the '
+                                    'pool submission.')
             except Exception as e:  # pylint: disable=broad-except
                 error = e
                 logger.warning(

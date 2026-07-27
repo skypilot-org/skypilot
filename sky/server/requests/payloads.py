@@ -823,6 +823,7 @@ class LocalUpBody(RequestBody):
     gpus: bool = True
     name: Optional[str] = None
     port_start: Optional[int] = None
+    num_nodes: int = 1
 
 
 class LocalDownBody(RequestBody):
@@ -1003,6 +1004,13 @@ class CreateDebugDumpBody(RequestBody):
     recent_minutes: Optional[float] = None
     # Client-side info for troubleshooting (version, config, environment)
     client_info: Optional[Dict[str, Any]] = None
+    # Best-effort absolute wall-clock (time.time()) instant to stop the whole
+    # collection by. When reached, collection stops early and a partial dump is
+    # returned. None (the default) means no deadline == previous behavior. An
+    # absolute deadline (rather than a relative timeout) is used because this
+    # request is scheduled out-of-process: it charges executor queue wait
+    # before the build starts against the budget rather than ignoring it.
+    overall_deadline: Optional[float] = None
 
 
 class RequestPayload(BasePayload):

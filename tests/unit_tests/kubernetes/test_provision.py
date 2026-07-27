@@ -2887,6 +2887,140 @@ class TestInspectPodStatusTierIntegration:
         assert not lp_calls
 
 
+class TestWaitForPodsToRunMountFailureEscalation:
+    """A sustained FailedMount/FailedAttachVolume pending reason must escalate
+    to a KubernetesError once _MOUNT_FAILURE_TIMEOUT_SECONDS elapses, instead
+    of spinning in _wait_for_pods_to_run forever. Transient mount failures
+    (which the kubelet retries and resolves) must NOT raise, and the timer
+    must reset when the pod's pending reason moves on.
+    """
+
+    _MOUNT_MSG = ('MountVolume.MountDevice failed for volume "csi-fss-123" : '
+                  'rpc error: code = DeadlineExceeded desc = context deadline '
+                  'exceeded')
+
+    @staticmethod
+    def _make_pod(*, phase, running=False, name='pod-0'):
+        from sky.provision import constants as prov_constants
+        pod = mock.MagicMock()
+        pod.metadata.name = name
+        pod.metadata.deletion_timestamp = None
+        pod.metadata.labels = {
+            prov_constants.TAG_SKYPILOT_CLUSTER_NAME: 'cn-on-cloud',
+        }
+        pod.status.phase = phase
+        cs = mock.MagicMock()
+        cs.ready = running
+        cs.state.waiting = (None if running else mock.MagicMock(
+            reason='ContainerCreating', message=None))
+        cs.state.terminated = None
+        cs.state.running = mock.MagicMock() if running else None
+        cs.last_state.terminated = None
+        pod.status.container_statuses = [cs]
+        return pod
+
+    def _run_wait(self,
+                  monkeypatch,
+                  *,
+                  pending_reasons,
+                  clock_step=301.0,
+                  healthy_after=None):
+        """Drive _wait_for_pods_to_run with a scripted pending reason per
+        iteration (the last entry repeats). The fake clock advances by
+        `clock_step` seconds at each end-of-iteration sleep. If
+        `healthy_after` is set, that iteration (0-based) lists an all-Running
+        pod so the loop exits cleanly.
+        """
+        pending_pod = self._make_pod(phase='Pending')
+        healthy_pod = self._make_pod(phase='Running', running=True)
+        iteration = {'n': -1}
+
+        core_api = mock.MagicMock()
+
+        def _list_pods(*args, **kwargs):
+            iteration['n'] += 1
+            if healthy_after is not None and iteration['n'] >= healthy_after:
+                return mock.MagicMock(items=[healthy_pod])
+            return mock.MagicMock(items=[pending_pod])
+
+        core_api.list_namespaced_pod.side_effect = _list_pods
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+
+        def _pending_reason(context, namespace, pod_name):
+            del context, namespace, pod_name  # unused
+            idx = min(max(iteration['n'], 0), len(pending_reasons) - 1)
+            reason = pending_reasons[idx]
+            if reason is None:
+                return None
+            if reason in instance._MOUNT_FAILURE_EVENT_REASONS:
+                return reason, self._MOUNT_MSG
+            return reason, ''
+
+        monkeypatch.setattr(instance, '_get_pod_pending_reason',
+                            _pending_reason)
+
+        clock = {'t': 1000.0}
+        monkeypatch.setattr(instance.time, 'time', lambda: clock['t'])
+
+        def _sleep(seconds):
+            del seconds  # unused
+            clock['t'] += clock_step
+
+        monkeypatch.setattr(instance.time, 'sleep', _sleep)
+        monkeypatch.setattr('sky.utils.subprocess_utils.run_in_parallel',
+                            lambda fn, items, n: [fn(p) for p in items])
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+
+        instance._wait_for_pods_to_run(namespace='ns',
+                                       context='ctx',
+                                       cluster_name='cn',
+                                       new_pods=[pending_pod])
+
+    @pytest.mark.parametrize('reason', ['FailedMount', 'FailedAttachVolume'])
+    def test_sustained_mount_failure_raises_with_event_message(
+            self, monkeypatch, reason):
+        """Mount failure persisting past the deadline raises, and the error
+        carries both the event reason (for the failure-hint table) and the
+        kubelet's full event message."""
+        with pytest.raises(config_lib.KubernetesError) as exc_info:
+            self._run_wait(monkeypatch, pending_reasons=[reason])
+        msg = str(exc_info.value)
+        assert reason in msg
+        assert 'DeadlineExceeded' in msg
+        assert 'pod-0' in msg
+
+    def test_transient_mount_failure_does_not_raise(self, monkeypatch):
+        """A FailedMount that resolves before the deadline (kubelet retry
+        succeeded, pod goes Running) must not raise."""
+        self._run_wait(monkeypatch,
+                       pending_reasons=['FailedMount'],
+                       healthy_after=2)
+
+    def test_timer_resets_when_pending_reason_moves_on(self, monkeypatch):
+        """FailedMount -> Pulling -> FailedMount: the deadline is measured
+        from the most recent onset, not the first. Total elapsed exceeds the
+        deadline, but no single sustained window does -- must not raise."""
+        self._run_wait(monkeypatch,
+                       pending_reasons=[
+                           'FailedMount', 'Pulling', 'FailedMount',
+                           'FailedMount'
+                       ],
+                       healthy_after=4)
+
+    def test_mount_failure_error_matches_failure_hint(self):
+        """The raised message must trip the KUBERNETES_FAILURE_HINTS entry so
+        provision-failure formatting appends the remediation hint."""
+        message = ('Pod pod-0 has failed to attach or mount volumes for over '
+                   f'10 minutes: FailedMount: {self._MOUNT_MSG}')
+        hint = kubernetes_utils.match_kubernetes_failure_hint(message)
+        assert hint is not None
+        assert 'kubectl describe pod' in hint
+
+
 class TestCheckInitContainersEnrichedRaise:
     """Tests the enriched raise message in _check_init_containers when an
     init container is in CrashLoopBackOff."""
@@ -3533,3 +3667,90 @@ class TestCreatePodFinalizerHandling:
         # Must not have touched the live pod.
         core_api_mock.patch_namespaced_pod.assert_not_called()
         core_api_mock.delete_namespaced_pod.assert_not_called()
+
+
+def _fake_node(ready=True, unschedulable=False):
+    node = mock.Mock()
+    condition = mock.Mock()
+    condition.type = 'Ready'
+    condition.status = 'True' if ready else 'False'
+    node.status.conditions = [condition]
+    node.spec.unschedulable = unschedulable
+    return node
+
+
+class TestGetMissingNodeReason:
+    """Tests for explaining a lost node from current Kubernetes node state."""
+
+    def _reason(self, nodes):
+        """nodes: dict of node name -> fake node, or an Exception to raise."""
+
+        def _read_node(name, **kwargs):
+            del kwargs
+            value = nodes[name]
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        core_api = mock.Mock()
+        core_api.read_node.side_effect = _read_node
+        with mock.patch.object(instance.kubernetes,
+                               'core_api',
+                               return_value=core_api):
+            return instance.get_missing_node_reason(list(nodes),
+                                                    {'context': 'ctx'})
+
+    @staticmethod
+    def _not_found():
+        exc = kubernetes.api_exception()(status=404, reason='Not Found')
+        return exc
+
+    def test_no_node_names_returns_none(self):
+        assert instance.get_missing_node_reason([], {'context': 'ctx'}) is None
+        assert instance.get_missing_node_reason([None, ''],
+                                                {'context': 'ctx'}) is None
+
+    def test_healthy_nodes_return_none(self):
+        assert self._reason({'node-1': _fake_node()}) is None
+
+    def test_deleted_node_reported(self):
+        assert self._reason({'node-1': self._not_found()
+                            }) == 'node node-1 no longer exists'
+
+    def test_not_ready_node_reported(self):
+        assert self._reason({'node-1': _fake_node(ready=False)
+                            }) == 'node node-1 is NotReady'
+
+    def test_cordoned_node_reported(self):
+        assert self._reason({'node-1': _fake_node(unschedulable=True)
+                            }) == 'node node-1 is cordoned'
+
+    def test_not_ready_takes_precedence_over_cordoned(self):
+        assert self._reason({
+            'node-1': _fake_node(ready=False, unschedulable=True)
+        }) == 'node node-1 is NotReady'
+
+    def test_healthy_nodes_omitted_from_multi_node_result(self):
+        assert self._reason({
+            'node-1': _fake_node(),
+            'node-2': self._not_found(),
+        }) == 'node node-2 no longer exists'
+
+    def test_multiple_bad_nodes_joined(self):
+        assert self._reason({
+            'node-1': self._not_found(),
+            'node-2': _fake_node(ready=False),
+        }) == 'node node-1 no longer exists; node node-2 is NotReady'
+
+    def test_duplicate_node_names_reported_once(self):
+        # Several pods on one node yield the same name more than once.
+        assert self._reason({'node-1': self._not_found()
+                            }) == 'node node-1 no longer exists'
+
+    def test_non_404_api_error_is_swallowed(self):
+        # A transient API error must not be reported as a node problem.
+        err = kubernetes.api_exception()(status=500, reason='Server Error')
+        assert self._reason({'node-1': err}) is None
+
+    def test_unexpected_error_is_swallowed(self):
+        assert self._reason({'node-1': RuntimeError('boom')}) is None

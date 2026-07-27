@@ -43,6 +43,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
@@ -694,6 +695,27 @@ def get_stream_request_id(
     return None
 
 
+def check_local_api_server_enabled_or_raise() -> None:
+    """Raises if starting a local API server is disabled via env var.
+
+    Guards every code path that would start a local API server (both the
+    implicit auto-start when no healthy server is found at a local endpoint,
+    and the explicit `sky api start`) when
+    SKYPILOT_DISABLE_LOCAL_API_SERVER=1 is set.
+
+    Raises:
+        RuntimeError: if the local API server is disabled.
+    """
+    if env_options.Options.DISABLE_LOCAL_API_SERVER.get():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'No SkyPilot API server endpoint is configured, and starting '
+                'a local API server on this machine is disabled '
+                f'({env_options.Options.DISABLE_LOCAL_API_SERVER.env_var}=1).'
+                ' To connect to a SkyPilot API server, run: '
+                'sky api login -e <endpoint>')
+
+
 def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False,
@@ -701,6 +723,7 @@ def _start_api_server(deploy: bool = False,
                       metrics_port: Optional[int] = None,
                       enable_basic_auth: bool = False):
     """Starts a SkyPilot API server locally."""
+    check_local_api_server_enabled_or_raise()
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
@@ -963,6 +986,9 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
         if not is_api_server_local(endpoint):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
+        # Fail early (before taking the creation lock) if silently starting
+        # a local API server is disabled on this machine.
+        check_local_api_server_enabled_or_raise()
         # Lock to prevent multiple processes from starting the server at the
         # same time, causing issues with database initialization.
         with filelock.FileLock(

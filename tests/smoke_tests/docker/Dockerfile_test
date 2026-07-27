@@ -116,22 +116,28 @@ RUN mkdir -p ~/sky_workdir ~/log ~/tmp-workdir && \
 
 WORKDIR /home/${USERNAME}/sky_workdir
 
-# Install Miniconda
+# Install Miniforge (conda-forge as the only channel). We use Miniforge rather
+# than Miniconda to avoid the Anaconda `defaults` Terms-of-Service gate, matching
+# the runtime conda install in skylet.constants. Installed into ~/miniconda3 to
+# keep the rest of this file's paths unchanged.
 RUN MINICONDA_ARCH=$(case "$(uname -m)" in \
         "x86_64") echo "x86_64" ;; \
         "aarch64") echo "aarch64" ;; \
         *) echo "$(uname -m)" ;; \
     esac) && \
-    echo "Installing Miniconda for architecture: $MINICONDA_ARCH" && \
-    curl -fsSL "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-${MINICONDA_ARCH}.sh" -o miniconda.sh && \
+    echo "Installing Miniforge for architecture: $MINICONDA_ARCH" && \
+    curl -fsSL "https://github.com/conda-forge/miniforge/releases/download/26.3.2-3/Miniforge3-26.3.2-3-Linux-${MINICONDA_ARCH}.sh" -o miniconda.sh && \
     chmod +x miniconda.sh && \
     ./miniconda.sh -b -p ~/miniconda3 && \
     rm miniconda.sh
 
-# Initialize conda & install Python
+# Initialize conda & pin the base env to Python 3.10. Miniforge's base ships a
+# newer Python, but SkyPilot (installed into base below) supports 3.8-3.11; the
+# downgrade uses conda-forge, so there is no `defaults` ToS gate.
 RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     conda init bash && \
-    conda config --set auto_activate_base true
+    conda config --set auto_activate_base true && \
+    conda install -n base -y python=3.10
 
 # Add conda initialization to .bashrc (for interactive shells)
 RUN echo "source /home/${USERNAME}/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc

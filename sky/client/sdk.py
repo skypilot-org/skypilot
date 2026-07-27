@@ -2115,7 +2115,8 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @annotations.client_api
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -2129,7 +2130,10 @@ def local_up(gpus: bool,
             raise ValueError('`sky local up` is only supported when '
                              'running SkyPilot locally.')
 
-    body = payloads.LocalUpBody(gpus=gpus, name=name, port_start=port_start)
+    body = payloads.LocalUpBody(gpus=gpus,
+                                name=name,
+                                port_start=port_start,
+                                num_nodes=num_nodes)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)

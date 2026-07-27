@@ -1375,7 +1375,7 @@ Tears down the Kubernetes cluster started by local_up.
 ### `sky.local_up`
 
 ```python
-sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None) -> server_common.RequestId[None]
+sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None, num_nodes: int = 1) -> server_common.RequestId[None]
 ```
 
 Launches a Kubernetes cluster on local machines.

@@ -7824,14 +7824,23 @@ def local():
     help='Starting port range for the local kind cluster. Needs to be a '
     'multiple of 100. If not given, a random range will be used. '
     'Used without ip list.')
+@click.option(
+    '--num-nodes',
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    required=False,
+    help='Number of nodes in the local kind cluster. A value greater than 1 '
+    'adds worker nodes, useful for testing multi-node scheduling locally. '
+    'Used without ip list.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
-             async_call: bool):
+             num_nodes: int, async_call: bool):
     """Creates a local cluster."""
-    request_id = sdk.local_up(gpus, name, port_start)
+    request_id = sdk.local_up(gpus, name, port_start, num_nodes)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 

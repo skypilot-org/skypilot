@@ -2,14 +2,23 @@ import { act, renderHook } from '@testing-library/react';
 
 import {
   BUILTIN_URL_PATTERNS,
+  compileCustomPatterns,
   extractLinksFromLogs,
+  filterLinksByScope,
+  isEntryInScope,
+  LINK_SCOPE_CLUSTER,
+  LINK_SCOPE_JOBS,
   resolveTemplateLinks,
   useLogLinkExtractor,
+  useScopedLinks,
   useTemplateLinks,
 } from '@/utils/externalLinks';
 import { getDashboardConfig } from '@/data/connectors/dashboard_config';
 
 jest.mock('@/data/connectors/dashboard_config', () => ({
+  // The scope constants are real values, not test doubles; only the
+  // network-touching fetch is mocked.
+  ...jest.requireActual('@/data/connectors/dashboard_config'),
   getDashboardConfig: jest.fn().mockResolvedValue({ externalLinks: [] }),
 }));
 
@@ -214,6 +223,170 @@ describe('useTemplateLinks', () => {
     await flushConfigFetch();
     expect(result.current).toEqual({
       'Ray Dashboard': 'https://ray.internal.example.com/dashboard/my-cluster',
+    });
+  });
+
+  it('excludes entries scoped to other pages', async () => {
+    getDashboardConfig.mockResolvedValueOnce({
+      externalLinks: [
+        {
+          label: 'Ray Dashboard',
+          url: 'https://ray.internal.example.com/dashboard/${cluster_name}',
+          scope: [LINK_SCOPE_CLUSTER],
+        },
+        {
+          label: 'Wiki',
+          url: 'https://wiki.internal/skypilot',
+        },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useTemplateLinks({ cluster_name: 'my-cluster' }, LINK_SCOPE_JOBS)
+    );
+    await flushConfigFetch();
+    expect(result.current).toEqual({
+      Wiki: 'https://wiki.internal/skypilot',
+    });
+  });
+});
+
+describe('isEntryInScope', () => {
+  it('treats entries without a scope as visible everywhere', () => {
+    expect(isEntryInScope({ label: 'X' }, LINK_SCOPE_CLUSTER)).toBe(true);
+    expect(isEntryInScope({ label: 'X', scope: [] }, LINK_SCOPE_JOBS)).toBe(
+      true
+    );
+    expect(isEntryInScope(null, LINK_SCOPE_CLUSTER)).toBe(true);
+  });
+
+  it('disables filtering when no page scope is given', () => {
+    expect(isEntryInScope({ scope: [LINK_SCOPE_CLUSTER] }, undefined)).toBe(
+      true
+    );
+  });
+
+  it('matches the page scope against the scope list', () => {
+    const entry = { scope: [LINK_SCOPE_CLUSTER] };
+    expect(isEntryInScope(entry, LINK_SCOPE_CLUSTER)).toBe(true);
+    expect(isEntryInScope(entry, LINK_SCOPE_JOBS)).toBe(false);
+    const both = { scope: [LINK_SCOPE_CLUSTER, LINK_SCOPE_JOBS] };
+    expect(isEntryInScope(both, LINK_SCOPE_JOBS)).toBe(true);
+  });
+});
+
+describe('scope filtering', () => {
+  const CLUSTER_ONLY_URL = {
+    label: 'Ray Dashboard',
+    url: 'https://ray.internal.example.com/dashboard/${cluster_name}',
+    scope: [LINK_SCOPE_CLUSTER],
+  };
+  const JOBS_ONLY_REGEX = {
+    label: 'Experiment',
+    regex: 'https://exp\\.internal/.*',
+    scope: [LINK_SCOPE_JOBS],
+  };
+  const UNSCOPED_REGEX = {
+    label: 'Grafana',
+    regex: 'https://grafana\\.internal/.*',
+  };
+
+  it('compileCustomPatterns skips entries scoped to other pages', () => {
+    const entries = [JOBS_ONLY_REGEX, UNSCOPED_REGEX];
+    expect(
+      Object.keys(compileCustomPatterns(entries, LINK_SCOPE_CLUSTER))
+    ).toEqual(['Grafana']);
+    expect(
+      Object.keys(compileCustomPatterns(entries, LINK_SCOPE_JOBS))
+    ).toEqual(['Experiment', 'Grafana']);
+    // No page scope: no filtering (back-compat).
+    expect(Object.keys(compileCustomPatterns(entries))).toEqual([
+      'Experiment',
+      'Grafana',
+    ]);
+  });
+
+  it('resolveTemplateLinks skips entries scoped to other pages even when all variables resolve', () => {
+    const context = { cluster_name: 'my-cluster' };
+    expect(
+      resolveTemplateLinks([CLUSTER_ONLY_URL], context, LINK_SCOPE_JOBS)
+    ).toEqual({});
+    expect(
+      resolveTemplateLinks([CLUSTER_ONLY_URL], context, LINK_SCOPE_CLUSTER)
+    ).toEqual({
+      'Ray Dashboard': 'https://ray.internal.example.com/dashboard/my-cluster',
+    });
+    // No page scope: no filtering (back-compat).
+    expect(resolveTemplateLinks([CLUSTER_ONLY_URL], context)).toEqual({
+      'Ray Dashboard': 'https://ray.internal.example.com/dashboard/my-cluster',
+    });
+  });
+
+  describe('filterLinksByScope', () => {
+    const DB_LINKS = {
+      Experiment: 'https://exp.internal/run/1',
+      Grafana: 'https://grafana.internal/d/abc',
+      'AWS Console': 'https://console.aws.amazon.com/ec2',
+    };
+
+    it('removes links whose configured entries are all out of scope', () => {
+      const filtered = filterLinksByScope(
+        DB_LINKS,
+        [JOBS_ONLY_REGEX, UNSCOPED_REGEX],
+        LINK_SCOPE_CLUSTER
+      );
+      // 'Experiment' is jobs-only; unscoped and unconfigured labels stay.
+      expect(filtered).toEqual({
+        Grafana: 'https://grafana.internal/d/abc',
+        'AWS Console': 'https://console.aws.amazon.com/ec2',
+      });
+    });
+
+    it('keeps a label when any duplicate entry is in scope', () => {
+      const filtered = filterLinksByScope(
+        { Experiment: 'https://exp.internal/run/1' },
+        [
+          JOBS_ONLY_REGEX,
+          { label: 'Experiment', regex: 'x', scope: [LINK_SCOPE_CLUSTER] },
+        ],
+        LINK_SCOPE_CLUSTER
+      );
+      expect(filtered).toEqual({ Experiment: 'https://exp.internal/run/1' });
+    });
+
+    it('is a no-op without a page scope or entries', () => {
+      expect(filterLinksByScope(DB_LINKS, [JOBS_ONLY_REGEX], undefined)).toBe(
+        DB_LINKS
+      );
+      expect(filterLinksByScope(DB_LINKS, null, LINK_SCOPE_CLUSTER)).toBe(
+        DB_LINKS
+      );
+      expect(
+        filterLinksByScope(null, [JOBS_ONLY_REGEX], LINK_SCOPE_JOBS)
+      ).toEqual({});
+    });
+
+    it('preserves referential identity when nothing is removed', () => {
+      const filtered = filterLinksByScope(
+        DB_LINKS,
+        [UNSCOPED_REGEX],
+        LINK_SCOPE_CLUSTER
+      );
+      expect(filtered).toBe(DB_LINKS);
+    });
+  });
+
+  it('useScopedLinks filters server-computed links by scope', async () => {
+    getDashboardConfig.mockResolvedValueOnce({
+      externalLinks: [CLUSTER_ONLY_URL, UNSCOPED_REGEX],
+    });
+    const links = {
+      'Ray Dashboard': 'https://ray.internal.example.com/dashboard/c1',
+      Grafana: 'https://grafana.internal/d/abc',
+    };
+    const { result } = renderHook(() => useScopedLinks(links, LINK_SCOPE_JOBS));
+    await act(async () => {});
+    expect(result.current).toEqual({
+      Grafana: 'https://grafana.internal/d/abc',
     });
   });
 });

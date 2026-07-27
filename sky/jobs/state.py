@@ -1837,6 +1837,99 @@ def get_status_counts_by_workspace_user_cloud(
     return [(row[0], row[1], row[2], str(row[3]), int(row[4])) for row in rows]
 
 
+def get_recovery_event_counts_by_source_workspace(
+) -> List[Tuple[str, Optional[str], int]]:
+    """Return RECOVERING job_events counts grouped by source/workspace.
+
+    Each tuple is (recovery_source, workspace, count). Counts the
+    RECOVERING events currently retained in ``job_events``; the table
+    has a retention window (see the job-event retention daemon), so the
+    numbers are NOT monotone — rows aging out decrease them. Consumers
+    that want rates must window with ``delta`` and clamp, never
+    ``increase``.
+
+    Rows written before the ``recovery_source`` column existed carry
+    NULL and are excluded: user-facing consumers treat NULL as FAILURE
+    for back-compat, but the metric only counts classified recoveries
+    (the ambiguity ages out with the retention window anyway).
+
+    Used by the Prometheus collector to emit per-source labeled gauges.
+    """
+    query = sqlalchemy.select(
+        job_events_table.c.recovery_source,
+        job_info_table.c.workspace,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).select_from(
+        job_events_table.outerjoin(
+            job_info_table,
+            job_events_table.c.spot_job_id == job_info_table.c.spot_job_id,
+        )).where(
+            job_events_table.c.new_status == ManagedJobStatus.RECOVERING.value,
+            job_events_table.c.recovery_source.isnot(None),
+        ).group_by(
+            job_events_table.c.recovery_source,
+            job_info_table.c.workspace,
+        )
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return [(str(row[0]), row[1], int(row[2])) for row in rows]
+
+
+def get_active_emergency_recovery_episodes(
+    now: float,
+    window_seconds: float,
+    limit: int,
+) -> List[Tuple[int, Optional[str], Optional[str], int]]:
+    """Return jobs currently inside an active emergency-recovery episode.
+
+    Each tuple is (spot_job_id, job_name, workspace,
+    emergency_recovery_count). A job qualifies while its most recent
+    emergency attempt is younger than *window_seconds* (the same window
+    the controller uses to reset the retry budget — an episode "ends"
+    after that much quiet) AND at least one of its tasks is
+    non-terminal: a job that reached a terminal status should stop
+    reporting immediately instead of lingering for the rest of the
+    window.
+
+    Ordered by attempt count (highest first) with a deterministic
+    tiebreak (oldest last-attempt first, then job id) so that when a
+    caller truncates to *limit*, the surviving set is stable across
+    calls — an unstable order would rotate which jobs a capped metric
+    reports, flapping alerts built on it.
+    """
+    cutoff = now - window_seconds
+    terminal_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
+    non_terminal_exists = sqlalchemy.exists().where(
+        spot_table.c.spot_job_id == job_info_table.c.spot_job_id,
+        spot_table.c.status.notin_(terminal_values),
+    )
+    query = sqlalchemy.select(
+        job_info_table.c.spot_job_id,
+        job_info_table.c.name,
+        job_info_table.c.workspace,
+        job_info_table.c.emergency_recovery_count,
+    ).where(
+        job_info_table.c.last_emergency_recovery_at.isnot(None),
+        job_info_table.c.last_emergency_recovery_at >= cutoff,
+        job_info_table.c.emergency_recovery_count.isnot(None),
+        job_info_table.c.emergency_recovery_count > 0,
+        non_terminal_exists,
+    ).order_by(
+        job_info_table.c.emergency_recovery_count.desc(),
+        job_info_table.c.last_emergency_recovery_at.asc(),
+        job_info_table.c.spot_job_id.asc(),
+    ).limit(limit)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    return [(int(row[0]), row[1], row[2], int(row[3])) for row in rows]
+
+
 def get_managed_jobs_with_filters(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,

@@ -80,6 +80,10 @@ ENV_VARS_TO_CLEAR = [
     # If this is set, get_server_url() returns a non-local URL and
     # api_start refuses to start a local server. Always start local here.
     constants.SKY_API_SERVER_URL_ENV_VAR,
+    # If this is set, api_start refuses to start a local server even when the
+    # server URL is local (check_local_api_server_enabled_or_raise). The
+    # controller always needs to start a local server here, so clear it too.
+    env_options.Options.DISABLE_LOCAL_API_SERVER.env_key,
 ]
 
 # Interval to poll the status of the underlying sky.launch request while
@@ -811,6 +815,10 @@ class StrategyExecutor:
                 unavailability.
                 2. The cluster is preempted before the job is submitted.
                 3. Any unexpected error happens during the `sky.launch`.
+            exceptions.PoolDoesNotExistError: This will be raised when the
+                pool the job is bound to no longer exists. This is raised
+                regardless of raise_on_failure, since the launch can never
+                succeed and the job should be failed instead of retried.
         Other exceptions may be raised depending on the backend.
         """
         # On recovery, re-read the persisted DAG so an out-of-band priority
@@ -1073,6 +1081,14 @@ class StrategyExecutor:
                         # parked. Notably, this must not fall through to the
                         # teardown/backoff path below: the parked launch keeps
                         # its partially provisioned resources.
+                        raise
+                    except exceptions.PoolDoesNotExistError as e:
+                        # The pool was deleted while this job is still bound
+                        # to it. Launching can never succeed, so propagate
+                        # regardless of raise_on_failure to fail the job
+                        # instead of retrying forever.
+                        logger.error('The pool no longer exists: '
+                                     f'{common_utils.format_exception(e)}')
                         raise
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,

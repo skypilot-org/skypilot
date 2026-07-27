@@ -866,6 +866,8 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
         }, {
             'label': 'Malformed entry without regex or url',
         }])
+    monkeypatch.setattr(server, '_get_local_contexts',
+                        lambda: ['kind-local-named'])
 
     client = TestClient(server.app)
     response = client.get('/dashboard_config')
@@ -879,8 +881,90 @@ def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):
         }, {
             'label': 'Ray Dashboard',
             'url': 'https://ray.internal.example.com/dashboard/${cluster_name}'
-        }]
+        }],
+        'local_contexts': ['kind-local-named'],
     }
+
+
+def test_dashboard_config_endpoint_sanitizes_scope(monkeypatch):
+    """/dashboard_config passes through valid scopes and drops bad ones.
+
+    Unknown scope values are filtered out and a scope with no valid values
+    left (or of the wrong type) is omitted entirely, so the dashboard only
+    ever sees recognized scopes.
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import skypilot_config
+
+    monkeypatch.setattr(
+        skypilot_config, 'get_nested', lambda keys, default: [{
+            'label': 'Ray Dashboard',
+            'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+            'scope': ['cluster'],
+        }, {
+            'label': 'Experiment Platform',
+            'url': 'https://exp.internal.example.com/jobs/${job_id}',
+            'scope': ['jobs', 'not-a-page'],
+        }, {
+            'label': 'Grafana',
+            'regex': 'https://grafana.example.com/.*',
+            'scope': ['not-a-page'],
+        }, {
+            'label': 'Wiki',
+            'url': 'https://wiki.internal.example.com',
+            'scope': 'cluster',
+        }])
+    monkeypatch.setattr(server, '_get_local_contexts', lambda: [])
+
+    client = TestClient(server.app)
+    response = client.get('/dashboard_config')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['external_links'] == [{
+        'label': 'Ray Dashboard',
+        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+        'scope': ['cluster'],
+    }, {
+        'label': 'Experiment Platform',
+        'url': 'https://exp.internal.example.com/jobs/${job_id}',
+        'scope': ['jobs'],
+    }, {
+        'label': 'Grafana',
+        'regex': 'https://grafana.example.com/.*',
+    }, {
+        'label': 'Wiki',
+        'url': 'https://wiki.internal.example.com',
+    }]
+
+
+def test_dashboard_config_endpoint_omits_local_contexts_on_failure(monkeypatch):
+    """A broken local-context detection must not break /dashboard_config.
+
+    The key is omitted (rather than returned as []) so the dashboard can
+    distinguish "detection failed, use the in-cluster default" from
+    "there are genuinely no local contexts".
+    """
+    from fastapi.testclient import TestClient
+
+    from sky import skypilot_config
+
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        lambda keys, default: default)
+
+    def _boom():
+        raise RuntimeError('kubeconfig exploded')
+
+    monkeypatch.setattr(server, '_get_local_contexts', _boom)
+
+    client = TestClient(server.app)
+    response = client.get('/dashboard_config')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {'external_links': []}
+    assert 'local_contexts' not in data
 
 
 # --- Tests for _prune_sky_logs (~/sky_logs GC) ---
