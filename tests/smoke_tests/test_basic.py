@@ -2936,26 +2936,34 @@ def test_nebius_sg_reaped_after_down():
         # `cluster_name_on_cloud` is `name` plus a user-hash suffix added
         # by `make_cluster_name_on_cloud`, so the SG name can't be
         # computed from `name` alone. Recover it from the head VM's name
-        # (`<cluster_name_on_cloud>-head`) instead.
+        # instead: `utils.launch` names nodes
+        # `<cluster_name_on_cloud>-<4-hex-uuid>-<node_type>`, so drop the
+        # last two dash-separated segments.
         project_id = nebius_utils.get_project_by_region(region)
         instances = nebius_utils.list_instances(project_id)
-        head_names = [
-            info['name']
-            for info in instances.values()
+        heads = [
+            info for info in instances.values()
             if info.get('name', '').startswith(name) and
             info['name'].endswith('-head')
         ]
-        assert len(head_names) == 1, (
+        assert len(heads) == 1, (
             f'expected exactly one head VM with name prefix {name!r}, '
-            f'got {head_names}; all VM names in project: '
+            f'got {[h["name"] for h in heads]}; all VM names in project: '
             f'{[i.get("name") for i in instances.values()]}')
-        cluster_name_on_cloud = head_names[0][:-len('-head')]
+        cluster_name_on_cloud = heads[0]['name'].rsplit('-', 2)[0]
         sg_name = nebius_utils.SECURITY_GROUP_TEMPLATE.format(
             cluster_name_on_cloud)
         sg_id = nebius_utils.get_security_group_by_name(project_id, sg_name)
         assert sg_id is not None, (
             f'managed SG {sg_name!r} not found while the cluster is up; '
-            f'cannot verify its post-down reaping.')
+            f'cannot verify its post-down reaping. Head VM: '
+            f'{heads[0]["name"]!r}, attached SGs: '
+            f'{heads[0].get("security_group_ids")}')
+        attached = heads[0].get('security_group_ids') or []
+        assert sg_id in attached, (
+            f'SG {sg_name!r} ({sg_id}) exists but is not attached to the '
+            f'head VM (attached: {attached}); the name-derivation in this '
+            f'test is probably stale vs. `utils.launch` naming.')
         state['project_id'] = project_id
         state['sg_name'] = sg_name
 
