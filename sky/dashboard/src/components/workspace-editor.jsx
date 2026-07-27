@@ -851,6 +851,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
   private: true
+  non_member_access: none  # or 'read-only' to let non-members view
   allowed_users:
   - user1@mydomain.com
   - user2@mydomain.com
