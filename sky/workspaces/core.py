@@ -99,15 +99,21 @@ def _accessible_workspace_names_for_user(user_id: str,
         user_id, workspace_names, action=action)
 
 
-def get_accessible_workspace_names() -> Set[str]:
+def get_accessible_workspace_names(action: str = 'read') -> Set[str]:
     """Returns workspace names the current user can access (no config dict).
 
     Use this when only workspace names are needed (e.g. filtering clusters/jobs)
     to avoid building the full workspace config dict.
+
+    ``action='read'`` (default) includes read-only workspaces; ``action=
+    'write'`` returns only workspaces the user can mutate (member/open),
+    e.g. to distinguish read-only visibility from writable access.
     """
     workspaces = _load_workspaces()
     return _accessible_workspace_names_for_user(
-        common_utils.get_current_user().id, set(workspaces.keys()))
+        common_utils.get_current_user().id,
+        set(workspaces.keys()),
+        action=action)
 
 
 def _update_workspaces_config(
@@ -510,10 +516,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
         workspaces[workspace_name] = config
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
-        permission_service.update_workspace_policy(
-            workspace_name,
-            users,
-            read_only=workspaces_utils.is_read_only_for_non_members(config))
+        permission_service.update_workspace_policy(workspace_name, users)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(update_workspace_fn)
@@ -562,10 +565,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
         # Add policy for the workspace and allowed users
         users = workspaces_utils.get_workspace_users(config)
         permission_service = permission.permission_service
-        permission_service.add_workspace_policy(
-            workspace_name,
-            users,
-            read_only=workspaces_utils.is_read_only_for_non_members(config))
+        permission_service.add_workspace_policy(workspace_name, users)
 
     # Use the internal helper function to save
     result = _update_workspaces_config(create_workspace_fn)
@@ -726,17 +726,14 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
             config_obj = config_utils.Config.from_dict(config)
             skypilot_config.update_api_server_config_no_lock(config_obj)
             permission_service = permission.permission_service
-            new_workspaces_cfg = config.get('workspaces', {})
             for operation, workspaces in workspaces_to_check_policy.items():
                 for workspace_name, users in workspaces.items():
-                    read_only = workspaces_utils.is_read_only_for_non_members(
-                        new_workspaces_cfg.get(workspace_name, {}))
                     if operation == 'add':
                         permission_service.add_workspace_policy(
-                            workspace_name, users, read_only=read_only)
+                            workspace_name, users)
                     elif operation == 'update':
                         permission_service.update_workspace_policy(
-                            workspace_name, users, read_only=read_only)
+                            workspace_name, users)
                     elif operation == 'delete':
                         permission_service.remove_workspace_policy(
                             workspace_name)
@@ -945,10 +942,7 @@ def batch_add_users_to_workspaces(workspace_names: List[str],
                 # user_id set we just computed, so reuse it instead of
                 # re-resolving (which would hit get_all_users() again).
                 permission_service.update_workspace_policy(
-                    workspace_name,
-                    list(resolved_current),
-                    read_only=workspaces_utils.is_read_only_for_non_members(
-                        new_config))
+                    workspace_name, list(resolved_current))
                 succeeded.append(workspace_name)
             except ValueError as e:
                 failed.append({
@@ -1121,9 +1115,7 @@ def batch_remove_users_from_workspaces(workspace_names: List[str],
                 # this doesn't re-hit get_all_users.
                 permission_service.update_workspace_policy(
                     workspace_name,
-                    resolver.resolve_workspace_users(new_ws_config),
-                    read_only=workspaces_utils.is_read_only_for_non_members(
-                        new_ws_config))
+                    resolver.resolve_workspace_users(new_ws_config))
                 succeeded.append(workspace_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.exception(

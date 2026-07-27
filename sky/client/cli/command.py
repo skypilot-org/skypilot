@@ -8333,8 +8333,10 @@ def workspace_info(output_format: str):
     preferred = info.get('preferred')
     preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
     accessible = info.get('accessible') or []
+    read_only = set(info.get('read_only') or [])
     accessible_str = (', '.join(
-        repr(w) for w in accessible) if accessible else '(none)')
+        f'{w!r} (read-only)' if w in read_only else repr(w) for w in accessible)
+                      if accessible else '(none)')
     note = info.get('note')
     lines = [
         f'Workspace: {workspace_str}',

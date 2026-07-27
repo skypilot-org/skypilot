@@ -215,8 +215,13 @@ class TestReadOnlyForNonMembers(unittest.TestCase):
         cfg = {'private': True, 'non_member_access': 'read-only'}
         self.assertTrue(workspaces_utils.is_read_only_for_non_members(cfg))
 
-    def test_private_none_default(self):
-        # Private without non_member_access defaults to hidden (not read-only).
+    @mock.patch('sky.skypilot_config.get_nested')
+    def test_private_none_default(self, mock_get_nested):
+        # With no org-wide default set (workspace_config.non_member_access),
+        # a private workspace without its own non_member_access is hidden (not
+        # read-only). Mock get_nested so the test is hermetic and doesn't read
+        # the ambient ~/.sky/config.yaml.
+        mock_get_nested.return_value = 'none'
         self.assertFalse(
             workspaces_utils.is_read_only_for_non_members({'private': True}))
         self.assertFalse(
@@ -252,6 +257,69 @@ class TestReadOnlyForNonMembers(unittest.TestCase):
         # The global default is moot for an open (non-private) workspace.
         self.assertFalse(
             workspaces_utils.is_read_only_for_non_members({'private': False}))
+
+
+class TestReadOnlyWorkspaceQueries(unittest.TestCase):
+    """get_read_only_workspace_names / is_read_only_workspace read live config.
+
+    These live in workspaces.utils (moved from users.rbac) and drive the
+    permission service's live read-only evaluation.
+    """
+
+    @staticmethod
+    def _config(workspaces, global_default):
+
+        def _get_nested(keys, default_value=None):
+            if keys == ('workspaces',):
+                return workspaces
+            if keys == ('workspace_config', 'non_member_access'):
+                return global_default
+            return default_value
+
+        return _get_nested
+
+    @mock.patch('sky.skypilot_config.get_nested')
+    def test_per_workspace_override(self, mock_get_nested):
+        # Global default 'none': only the workspace with its own read-only
+        # override is read-only-visible.
+        mock_get_nested.side_effect = self._config(
+            {
+                'w-ro': {
+                    'private': True,
+                    'non_member_access': 'read-only'
+                },
+                'w-priv': {
+                    'private': True
+                },
+                'w-pub': {
+                    'private': False
+                },
+            }, 'none')
+        self.assertEqual(workspaces_utils.get_read_only_workspace_names(),
+                         {'w-ro'})
+        self.assertTrue(workspaces_utils.is_read_only_workspace('w-ro'))
+        self.assertFalse(workspaces_utils.is_read_only_workspace('w-priv'))
+        self.assertFalse(workspaces_utils.is_read_only_workspace('w-pub'))
+        self.assertFalse(workspaces_utils.is_read_only_workspace('nonexistent'))
+
+    @mock.patch('sky.skypilot_config.get_nested')
+    def test_global_default_read_only(self, mock_get_nested):
+        # Global default 'read-only': a private workspace with no override
+        # inherits it; a per-workspace 'none' opts back out.
+        mock_get_nested.side_effect = self._config(
+            {
+                'w-priv': {
+                    'private': True
+                },
+                'w-none': {
+                    'private': True,
+                    'non_member_access': 'none'
+                },
+            }, 'read-only')
+        self.assertEqual(workspaces_utils.get_read_only_workspace_names(),
+                         {'w-priv'})
+        self.assertTrue(workspaces_utils.is_read_only_workspace('w-priv'))
+        self.assertFalse(workspaces_utils.is_read_only_workspace('w-none'))
 
 
 if __name__ == '__main__':

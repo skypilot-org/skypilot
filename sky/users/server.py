@@ -265,8 +265,12 @@ def get_user_workspace(
         response['workspace'] = resolution.workspace
         response['source'] = resolution.source
         response['note'] = resolution.note
-    response['accessible'] = sorted(
-        workspaces_core.get_accessible_workspace_names())
+    accessible = workspaces_core.get_accessible_workspace_names()
+    writable = workspaces_core.get_accessible_workspace_names(action='write')
+    response['accessible'] = sorted(accessible)
+    # Workspaces the user can only view (read-only visibility for non-members):
+    # accessible for read but not writable. Lets the CLI/dashboard flag them.
+    response['read_only'] = sorted(accessible - writable)
     return response
 
 

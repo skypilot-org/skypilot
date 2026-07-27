@@ -1643,7 +1643,12 @@ export function Status2Actions({
             <Tooltip
               key={actionName}
               content={tooltipText}
-              className="capitalize text-sm text-muted-foreground"
+              // The read-only hint (shown when !writable) is a full sentence,
+              // so render it normal-case; the short action labels keep
+              // capitalize.
+              className={`${
+                !writable ? 'normal-case' : 'capitalize'
+              } text-sm text-muted-foreground`}
             >
               <span
                 className="opacity-30 flex items-center cursor-not-allowed text-sm"
