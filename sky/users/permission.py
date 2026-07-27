@@ -403,10 +403,11 @@ class PermissionService:
         many workspaces, to avoid N enforcer calls.
 
         Args:
-            action: 'read' (default) returns workspaces the user can see,
-                including read-only workspaces (matched via the '*'/'read'
-                wildcard). 'write' returns only workspaces the user can mutate
-                (the member '*' grant) -- used e.g. for the dashboard's
+            action: 'read' (default) returns workspaces the user can see: the
+                member '*' grants plus workspaces that are read-only-visible to
+                non-members (evaluated live from config, not a materialized
+                grant). 'write' returns only workspaces the user can mutate (the
+                member '*' grants) -- used e.g. for the dashboard's
                 per-workspace ``writable`` signal.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
@@ -530,13 +531,11 @@ class PermissionService:
         """Check workspace permission.
 
         This method checks if a user has permission to access a specific
-        workspace.  Results are cached in a DB-backed KV cache so that all
-        server/executor processes share the same view.
-
-        For private workspaces, the user must have explicit permission.
-
-        For public workspaces, the permission is granted via a wildcard policy
-        ('*').
+        workspace. Membership (write) is granted by the member '*' policy
+        (a direct grant for private workspaces, the ('*', ws, '*') wildcard for
+        public ones) and its result is cached in a DB-backed KV cache so all
+        server/executor processes share one view. Read-only visibility is not
+        cached -- see the 'read' branch below.
 
         Args:
             action: 'write' (default) checks membership -- write and read are
@@ -679,9 +678,7 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
-            # Remove all existing policies for this workspace (the '*' member
-            # grants, plus any legacy ('*', ws, 'read') wildcard from older
-            # versions, which is now inert and cleaned up here).
+            # Remove all existing policies for this workspace
             enforcer.remove_filtered_policy(1, workspace_name)
             # Add new policies
             for user in users:
