@@ -1747,13 +1747,18 @@ class TestWaitForPodsToScheduleQueueGating:
         pod.spec.scheduling_gates = [gate]
         return pod
 
-    def _setup(self, monkeypatch, pod_timeline):
+    def _setup(self, monkeypatch, pod_timeline, admission_timeout=None):
         """Wire up mocks; pods are served according to *pod_timeline*, a
         list of (since_simulated_time, pod) — the pod with the largest
-        `since` <= now is returned by the k8s API mock."""
+        `since` <= now is returned by the k8s API mock. If
+        *admission_timeout* is given, it is served as the
+        kubernetes.kueue.admission_timeout config value."""
 
         def mock_config(cloud, region, keys, default_value=None, **kwargs):
-            del cloud, region, keys, kwargs  # unused; no autoscaler
+            del cloud, region, kwargs  # unused; no autoscaler
+            if (keys == ('kueue', 'admission_timeout') and
+                    admission_timeout is not None):
+                return admission_timeout
             return default_value
 
         monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
@@ -1857,15 +1862,15 @@ class TestWaitForPodsToScheduleQueueGating:
         assert raise_errors.called
 
     def test_admission_wait_is_bounded(self, monkeypatch):
-        """A pod gated forever fails with a queue-admission error once
-        _QUEUE_ADMISSION_TIMEOUT_SECONDS elapses — bounded, not infinite."""
+        """A pod gated forever fails with a queue-admission error once the
+        admission timeout elapses — bounded, not infinite. The bound is the
+        kubernetes.kueue.admission_timeout config value (default
+        _QUEUE_ADMISSION_TIMEOUT_SECONDS)."""
         cluster = 'my-cluster'
         gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
         clock, raise_errors, _ = self._setup(monkeypatch,
-                                             pod_timeline=[(0.0, gated)])
-        # Shrink the admission bound so the loop doesn't run 86400
-        # simulated iterations.
-        monkeypatch.setattr(instance, '_QUEUE_ADMISSION_TIMEOUT_SECONDS', 30)
+                                             pod_timeline=[(0.0, gated)],
+                                             admission_timeout=30)
 
         node = self._make_node('pod-0', cluster)
         import datetime  # pylint: disable=import-outside-toplevel
