@@ -1068,6 +1068,54 @@ class Optimizer:
             logger.info(
                 f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
 
+        # A job is "pinned" when every one of its resource options
+        # specifies a concrete infra (cloud+region). If the pinned jobs
+        # share no common infra option, the common-infra search below can
+        # never succeed: the placement is deliberately cross-infra.
+        # Whether that is allowed depends on inter_connection (in-group
+        # networking does not work across infras today):
+        # - explicitly required (true): error;
+        # - unset (default): allowed, networking degrades to off with a
+        #   warning;
+        # - false: allowed silently.
+        pinned_task_infras: List[Set[Tuple[str, str]]] = []
+        for task in tasks:
+            resource_infras: Set[Tuple[str, str]] = set()
+            fully_pinned = True
+            for resource in task.resources:
+                if resource.cloud is None or resource.region is None:
+                    fully_pinned = False
+                    break
+                resource_infras.add((str(resource.cloud), resource.region))
+            if fully_pinned and resource_infras:
+                pinned_task_infras.append(resource_infras)
+        pins_conflict = (len(pinned_task_infras) > 1 and
+                         not set.intersection(*pinned_task_infras))
+        if pins_conflict:
+            pinned_infras = set.union(*pinned_task_infras)
+            if dag.inter_connection is True:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'Jobs in JobGroup "{dag.name}" pin different '
+                        f'infrastructures ({sorted(pinned_infras)}), but '
+                        '`inter_connection: true` requires in-group '
+                        'networking, which does not work across '
+                        'infrastructures. Unify the infra pins, or set '
+                        '`inter_connection: false` if the jobs do not need '
+                        'to reach each other by hostname.')
+            if dag.inter_connection is None:
+                logger.warning(
+                    f'Jobs in JobGroup "{dag.name}" pin different '
+                    'infrastructures; in-group networking will not be set '
+                    'up and jobs cannot reach each other by hostname. Set '
+                    '`inter_connection: false` to silence this warning.')
+            elif not quiet:
+                logger.info(f'Jobs in JobGroup "{dag.name}" pin different '
+                            'infrastructures; optimizing each job '
+                            'independently.')
+            return Optimizer._optimize_independent(dag, minimize,
+                                                   blocked_resources, quiet)
+
         # Find common infrastructure for all tasks in the JobGroup
         return Optimizer._optimize_same_infra(dag, minimize, blocked_resources,
                                               quiet)
@@ -1125,16 +1173,53 @@ class Optimizer:
                 for res in launchable_list:
                     if res.cloud is not None:
                         cloud_launchables[res.cloud].append(res)
+
+            if dag.inter_connection is True:
+                # In-group networking is only supported on Kubernetes, so
+                # explicitly requiring it constrains placement to
+                # Kubernetes candidates.
+                cloud_launchables = collections.defaultdict(
+                    list, {
+                        cloud: res_list
+                        for cloud, res_list in cloud_launchables.items()
+                        if str(cloud).lower() == 'kubernetes'
+                    })
+                if not any(cloud_launchables.values()):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(
+                            f'Job "{task.name}" in JobGroup "{dag.name}" '
+                            'has no feasible Kubernetes placement, but '
+                            '`inter_connection: true` requires in-group '
+                            'networking, which is only supported on '
+                            'Kubernetes.')
+
             task_launchables[task] = cloud_launchables
 
         # Step 2: Find common cloud+region combinations
         common_infras = Optimizer._find_common_infras(task_launchables)
 
         if not common_infras:
-            # If no common infra, fallback to independent optimization
+            if dag.inter_connection_enabled():
+                # The group requires in-group networking (the default),
+                # which needs all jobs co-located on one infrastructure.
+                # No single infrastructure can host every job, so fail
+                # fast instead of silently spreading the group.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'No single infrastructure can host all jobs in '
+                        f'JobGroup "{dag.name}", and in-group networking '
+                        '(inter_connection, enabled by default) requires '
+                        'all jobs to be co-located. Set '
+                        '`inter_connection: false` to allow jobs to be '
+                        'placed on different infrastructures without '
+                        'hostname connectivity, or pin each job\'s infra '
+                        'explicitly.')
+            # inter_connection: false — cross-infra placement is allowed;
+            # place each job independently.
             if not quiet:
-                logger.warning('No common infrastructure found for all jobs. '
-                               'Falling back to independent optimization.')
+                logger.info(f'No common infrastructure for all jobs in '
+                            f'JobGroup "{dag.name}"; placing jobs '
+                            'independently (inter_connection: false).')
             return Optimizer._optimize_independent(dag, minimize,
                                                    blocked_resources, quiet)
 

@@ -731,12 +731,23 @@ def launch(
                         override_params['region'] = best_region
                     task_.set_resources_override(override_params)
 
-        # Warn if job group is not running on Kubernetes (networking won't work)
+        # In-group networking (hostname-based service discovery) is only
+        # supported on Kubernetes. Explicit `inter_connection: true` groups
+        # never get placed elsewhere (the optimizer constrains their
+        # candidates to Kubernetes); for unset (default) groups placed on
+        # other clouds, networking degrades to off with a warning, and no
+        # networking machinery is set up on the controller.
         first_task = dag.tasks[0]
         if first_task.best_resources is not None:
             best_cloud = first_task.best_resources.cloud
             if best_cloud is not None and str(
                     best_cloud).lower() != 'kubernetes':
+                # Load-time validation and the optimizer's candidate
+                # filtering guarantee explicit `inter_connection: true`
+                # groups are never placed off Kubernetes.
+                assert dag.inter_connection is not True, (
+                    f'JobGroup {dag.name!r} requires inter_connection but '
+                    f'was placed on {best_cloud}')
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Job group service discovery '
                     f'(hostname-based networking) is only supported on '
