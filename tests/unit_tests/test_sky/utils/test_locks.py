@@ -590,6 +590,85 @@ class TestPostgresLock:
         assert 'shared' in error_msg
 
 
+class _RaisingAutocommitDriverConn:
+    """Driver connection stub whose autocommit setter raises (dead conn)."""
+
+    @property
+    def autocommit(self):
+        return True
+
+    @autocommit.setter
+    def autocommit(self, value):
+        raise RuntimeError('server closed the connection unexpectedly')
+
+
+class TestPostgresLockAutocommit:
+    """Test that lock connections run in autocommit mode.
+
+    Session-level advisory locks need no transaction; without autocommit
+    the first lock statement opens an implicit transaction that stays open
+    for the whole lock hold, leaving the session 'idle in transaction'.
+    """
+
+    @mock.patch.object(global_user_state, 'initialize_and_get_db')
+    def test_get_connection_enables_autocommit(self, mock_init_db):
+        """_get_connection puts the borrowed connection in autocommit."""
+        mock_engine = mock.Mock()
+        mock_engine.dialect.name = db_utils.SQLAlchemyDialect.POSTGRESQL.value
+        mock_connection = mock.Mock()
+        mock_engine.raw_connection.return_value = mock_connection
+        mock_init_db.return_value = mock_engine
+
+        lock = locks.PostgresLock('test_lock')
+        result = lock._get_connection()
+
+        assert result is mock_connection
+        assert result.driver_connection.autocommit is True
+
+    def test_close_connection_restores_transactional_mode(self):
+        """_close_connection restores autocommit=False before returning the
+        connection to the pool (other borrowers expect transactional mode)."""
+        connection = mock.Mock()
+        lock = locks.PostgresLock('test_lock')
+        lock._connection = connection
+
+        lock._close_connection()
+
+        assert connection.driver_connection.autocommit is False
+        connection.close.assert_called_once()
+        connection.invalidate.assert_not_called()
+        assert lock._connection is None
+
+    def test_close_connection_invalidate_skips_restore(self):
+        """The invalidate path discards the connection without touching
+        autocommit (the connection never returns to the pool)."""
+        connection = mock.Mock()
+        lock = locks.PostgresLock('test_lock')
+        lock._connection = connection
+
+        lock._close_connection(invalidate=True)
+
+        connection.invalidate.assert_called_once()
+        connection.close.assert_not_called()
+        # autocommit must not have been assigned a bool by the restore path.
+        assert not isinstance(connection.driver_connection.autocommit, bool)
+
+    def test_close_connection_restore_failure_invalidates(self):
+        """If restoring transactional mode fails (dead connection), the
+        connection is invalidated instead of being returned to the pool in
+        autocommit mode."""
+        connection = mock.Mock()
+        connection.driver_connection = _RaisingAutocommitDriverConn()
+        lock = locks.PostgresLock('test_lock')
+        lock._connection = connection
+
+        lock._close_connection()
+
+        connection.invalidate.assert_called_once()
+        connection.close.assert_not_called()
+        assert lock._connection is None
+
+
 class TestGetLock:
     """Test get_lock factory function."""
 
