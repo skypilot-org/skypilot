@@ -262,17 +262,18 @@ def _compare_workspace_configs(
     removed_users = list(old_users_set - new_users_set)
     added_users = list(new_users_set - old_users_set)
 
-    # Check if only user access related fields changed
-    # Create copies without the user access fields for comparison
+    # Check if only user access related fields changed. `non_member_access`
+    # is an access-control field like `private`/`allowed_users`: changing it
+    # adds/removes no member and touches no infra, so it must not be treated
+    # as an "other" change that requires the workspace to have no active
+    # resources. Exclude it here so a non_member_access-only change is
+    # classified as a (safe) user-access change.
+    access_fields = ['private', 'allowed_users', 'non_member_access']
     current_without_access = {
-        k: v
-        for k, v in current_config.items()
-        if k not in ['private', 'allowed_users']
+        k: v for k, v in current_config.items() if k not in access_fields
     }
     new_without_access = {
-        k: v
-        for k, v in new_config.items()
-        if k not in ['private', 'allowed_users']
+        k: v for k, v in new_config.items() if k not in access_fields
     }
 
     only_user_access_changes = current_without_access == new_without_access

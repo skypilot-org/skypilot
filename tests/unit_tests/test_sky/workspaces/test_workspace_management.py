@@ -405,6 +405,69 @@ class TestWorkspaceManagement(unittest.TestCase):
         self.assertFalse(result.private_changed)
         self.assertFalse(result.allowed_users_changed)
 
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_compare_workspace_configs_non_member_access_only(
+            self, mock_get_users, mock_get_users_for_role):
+        """Only non_member_access changed -> classified as a user-access change.
+
+        non_member_access is an access-control field like private/allowed_users,
+        so changing it alone must not be treated as an "other" (infra) change
+        that requires the workspace to have no active resources.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+
+        current_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'non_member_access': 'none',
+        }
+        new_config = {
+            'private': True,
+            'allowed_users': ['user1'],
+            'non_member_access': 'read-only',
+        }
+
+        result = core._compare_workspace_configs(current_config, new_config)
+
+        self.assertTrue(result.only_user_access_changes)
+        self.assertFalse(result.private_changed)
+        self.assertFalse(result.allowed_users_changed)
+
+    @mock.patch(
+        'sky.utils.resource_checker.check_no_active_resources_for_workspaces')
+    @mock.patch(
+        'sky.utils.resource_checker.check_users_workspaces_active_resources')
+    @mock.patch('sky.users.permission.permission_service.get_users_for_role')
+    @mock.patch('sky.workspaces.utils.get_workspace_users')
+    def test_validate_non_member_access_change_allowed_with_active_resources(
+            self, mock_get_users, mock_get_users_for_role, mock_check_users,
+            mock_check_no_active):
+        """A non_member_access-only change is allowed even when the workspace
+        has active resources: it removes no member and touches no infra, so it
+        must not reach the strict no-active-resources check.
+        """
+        mock_get_users_for_role.return_value = []
+        mock_get_users.return_value = ['user1']
+        mock_check_users.return_value = ('', [], {})
+        # Simulate active resources: fail loudly if the strict check is reached.
+        mock_check_no_active.side_effect = ValueError('has active resources')
+
+        base = {'private': True, 'allowed_users': ['user1']}
+        # Both directions must be allowed without raising.
+        core._validate_workspace_config_changes('ws', {
+            **base, 'non_member_access': 'none'
+        }, {
+            **base, 'non_member_access': 'read-only'
+        })
+        core._validate_workspace_config_changes('ws', {
+            **base, 'non_member_access': 'read-only'
+        }, {
+            **base, 'non_member_access': 'none'
+        })
+        mock_check_no_active.assert_not_called()
+
     @mock.patch('sky.workspaces.utils.get_workspace_users')
     def test_compare_workspace_configs_wildcard_users(self, mock_get_users):
         """Test handling wildcard users in allowed_users."""
