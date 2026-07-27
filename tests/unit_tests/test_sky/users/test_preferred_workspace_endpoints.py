@@ -362,7 +362,7 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
             order.append('resolve')
             return resolution
 
-        def _accessible():
+        def _accessible(action='read'):
             order.append('accessible')
             return {'private-ws'}
 
@@ -388,7 +388,11 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         finally:
             for p_ in patches:
                 p_.stop()
-        self.assertEqual(order, ['resolve', 'accessible'])
+        # Resolution must happen before the accessible/writable sets are
+        # computed; the writable set (action='write') is fetched to derive
+        # `read_only`, so there is a second accessible call after resolve.
+        self.assertEqual(order[0], 'resolve')
+        self.assertEqual(set(order[1:]), {'accessible'})
         self.assertEqual(resp['workspace'], 'private-ws')
         self.assertEqual(resp['accessible'], ['private-ws'])
 

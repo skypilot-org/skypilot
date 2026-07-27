@@ -384,13 +384,6 @@ can still override with its own ``non_member_access``), set
        allowed_users:
          - alice@example.com
 
-.. note::
-
-   Read-only visibility assumes each user has at least one workspace they can
-   write to (e.g. an open ``default``), which becomes their active workspace.
-   Users are still able to browse read-only workspaces even if their own
-   ``default`` is private and they are not a member of any writable workspace.
-
 Service accounts in private workspaces
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
