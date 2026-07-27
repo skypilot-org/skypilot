@@ -440,14 +440,99 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
+class JobStatusLogger:
+    """Logs job-status poll results, collapsing consecutive identical ones.
+
+    The controller polls the status of its job every
+    JOB_STATUS_CHECK_GAP_SECONDS and logs the result, which for a long-running
+    job is the same on almost every poll. Logging every one of them dominates
+    the controller log and pushes the loglines that are actually useful for
+    debugging the job (recovery reasons, transient cloud API errors,
+    cluster-fetch failures, user-job exit codes) far out of the visible window
+    of the log viewer. So for each run of identical results we keep:
+
+    - the first occurrence, logged as-is;
+    - the last occurrence, logged when the run ends, carrying how long the
+      status was unchanged and over how many checks, so that the time the
+      status was last observed stays recoverable from the log. A run ends when
+      the status changes, when the caller is about to log something interesting
+      (``reset``), or when the polling loop exits (``flush``);
+    - nothing in between. A periodic reminder that the status is still the
+      same would add lines without adding information; the two kept lines
+      already bound the run at both ends.
+
+    One instance tracks one polling loop; it is not thread-safe.
+    """
+
+    def __init__(self) -> None:
+        # Message of the current run of identical results, None if no run is
+        # in progress.
+        self._message: Optional[str] = None
+        self._first_seen = 0.
+        self._last_seen = 0.
+        self._count = 0
+        # Whether the tail of the current run has already been logged, so that
+        # flushing twice (e.g. reset() and then the polling loop exiting) does
+        # not repeat it.
+        self._tail_logged = False
+
+    def log(self, message: str) -> None:
+        """Logs a poll result, collapsing it if it repeats the previous one."""
+        now = time.time()
+        if message != self._message:
+            self.flush()
+            self._message = message
+            self._first_seen = now
+            self._last_seen = now
+            self._count = 1
+            self._tail_logged = False
+            logger.info(message)
+            return
+        self._count += 1
+        self._last_seen = now
+        self._tail_logged = False
+
+    def flush(self) -> None:
+        """Logs the last observation of the current run, if not logged yet."""
+        if self._message is None or self._tail_logged:
+            return
+        if self._count == 1:
+            # The run's only observation was already logged in full.
+            return
+        duration = log_utils.readable_time_duration(self._first_seen,
+                                                    self._last_seen,
+                                                    absolute=True)
+        logger.info(f'{self._message} (unchanged for {duration}, '
+                    f'{self._count} checks)')
+        self._tail_logged = True
+
+    def reset(self) -> None:
+        """Flushes and forgets the current run.
+
+        The next poll result is then logged in full even if it is identical to
+        the last one. Callers use this after something noteworthy happened
+        (e.g. a recovery), so that the status observed afterwards is visible in
+        the log instead of being collapsed into the previous run.
+        """
+        self.flush()
+        self._message = None
+
+
 async def get_job_status(
-    backend: 'backends.CloudVmRayBackend', cluster_name: str,
-    job_id: Optional[int]
+    backend: 'backends.CloudVmRayBackend',
+    cluster_name: str,
+    job_id: Optional[int],
+    status_logger: Optional[JobStatusLogger] = None,
 ) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
+
+    Args:
+        status_logger: If provided, the result is logged through it, so that
+            consecutive identical results are collapsed into one logline. If
+            None, every result is logged.
 
     Returns:
         job_status: The status of the job.
@@ -460,14 +545,14 @@ async def get_job_status(
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
 
-    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
-        if status is None:
-            logger.info('No job found.')
+    def _log(message: str) -> None:
+        if status_logger is not None:
+            status_logger.log(message)
         else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+            logger.info(message)
 
-    logger.info('=== Checking the job status... ===')
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        _log('No job found.' if status is None else f'Job status: {status}')
 
     if managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
@@ -480,7 +565,7 @@ async def get_job_status(
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        _log(f'Cluster {cluster_name} not found.')
         return None, None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
