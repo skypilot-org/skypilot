@@ -587,6 +587,30 @@ def to_dict() -> config_utils.Config:
     return copy.deepcopy(_get_loaded_config())
 
 
+def resolved_config() -> config_utils.Config:
+    """Returns the config with the resolved active workspace surfaced.
+
+    `to_dict()` reflects only the file-level config. The active workspace can
+    additionally be resolved into a thread-local context (e.g. by the
+    server-side workspace resolver in
+    `executor.override_request_env_and_config`), which `to_dict()` does not
+    reflect. This returns a copy of the config with `active_workspace` set to
+    the effective value from `get_active_workspace()` (thread-local first,
+    then file config, then the default fallback), so callers that need the
+    resolved workspace — e.g. admin policies — read it reliably.
+
+    Do NOT fold this into `to_dict()`: `to_dict()` feeds the client's
+    `override_skypilot_config` on the wire (see
+    `payloads.get_override_skypilot_config_from_client`). Stamping
+    `active_workspace` there would make `is_active_workspace_set()` always
+    return True, disabling the per-user workspace resolver
+    (`_should_apply_workspace_resolver`).
+    """
+    config = to_dict()
+    config['active_workspace'] = get_active_workspace()
+    return config
+
+
 def _get_config_file_path(envvar: str) -> Optional[str]:
     config_path_via_env_var = os.environ.get(envvar)
     if config_path_via_env_var is not None:

@@ -26,23 +26,6 @@ if typing.TYPE_CHECKING:
     from sky import models
 
 
-def _get_config_with_resolved_workspace() -> config_utils.Config:
-    """Returns the current config with the resolved active workspace surfaced.
-
-    The active workspace may be resolved into a thread-local context (e.g. by
-    the server-side workspace resolver in
-    `executor.override_request_env_and_config`) rather than being written into
-    the config file. `skypilot_config.to_dict()` only reflects the file-level
-    config, so an admin policy reading `active_workspace` from it would see
-    `None` even though a workspace was resolved for the request. Inject the
-    resolved value so both in-process and external (RESTful) admin policies can
-    read `active_workspace` reliably.
-    """
-    config = skypilot_config.to_dict()
-    config['active_workspace'] = skypilot_config.get_active_workspace()
-    return config
-
-
 def _is_url(policy_string: str) -> bool:
     """Check if the policy string is a URL."""
     try:
@@ -113,7 +96,7 @@ def apply_and_use_config_in_current_request(
     # comparison below only triggers a config replacement when the policy
     # actually mutated the config, not merely because `apply()` surfaced the
     # resolved active workspace.
-    original_config = _get_config_with_resolved_workspace()
+    original_config = skypilot_config.resolved_config()
     dag, mutated_config = apply(entrypoint, request_name, request_options,
                                 at_client_side)
     if mutated_config != original_config:
@@ -154,7 +137,7 @@ def apply(
     policy_location = skypilot_config.get_nested(('admin_policy',), None)
     policy = _get_policy_impl(policy_location)
     if policy is None:
-        return dag, _get_config_with_resolved_workspace()
+        return dag, skypilot_config.resolved_config()
 
     user = None
     client_api_version = None
@@ -169,7 +152,7 @@ def apply(
         client_api_version = versions.get_remote_api_version()
         client_version = versions.get_remote_version()
         logger.info(f'Applying server admin policy: {policy}')
-    config = copy.deepcopy(_get_config_with_resolved_workspace())
+    config = copy.deepcopy(skypilot_config.resolved_config())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
     # Preserve DAG execution properties if set
