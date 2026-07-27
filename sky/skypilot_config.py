@@ -583,8 +583,34 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
 
 def to_dict() -> config_utils.Config:
-    """Returns a deep-copied version of the current config."""
+    """Returns a deep-copied version of the current config.
+
+    `active_workspace` here is only what the config itself sets; use
+    `resolved_config()` for the workspace the request actually runs in.
+    """
     return copy.deepcopy(_get_loaded_config())
+
+
+def resolved_config() -> config_utils.Config:
+    """Returns the config with the effective `active_workspace` filled in.
+
+    The active workspace can be resolved into a thread-local context instead
+    of the config (the server-side resolver in
+    `executor.override_request_env_and_config` sets it there), so
+    `active_workspace` is taken from `get_active_workspace()`. Callers that
+    need the workspace a request actually runs in — e.g. admin policies —
+    should use this rather than `to_dict()`.
+
+    Keep this separate from `to_dict()`, which also feeds the client's
+    `override_skypilot_config` on the wire
+    (`payloads.get_override_skypilot_config_from_client`): stamping
+    `active_workspace` there would make `is_active_workspace_set()` always
+    return True and disable the per-user workspace resolver
+    (`_should_apply_workspace_resolver`).
+    """
+    config = to_dict()
+    config['active_workspace'] = get_active_workspace()
+    return config
 
 
 def _get_config_file_path(envvar: str) -> Optional[str]:
