@@ -18,7 +18,8 @@ logger = sky_logging.init_logger(__name__)
 
 # JobGroup header fields
 _JOB_GROUP_HEADER_FIELDS = {
-    'name', 'execution', 'primary_tasks', 'termination_delay'
+    'name', 'execution', 'primary_tasks', 'termination_delay',
+    'inter_connection'
 }
 _JOB_GROUP_REQUIRED_HEADER_FIELDS = {'name'}
 
@@ -644,6 +645,17 @@ def _load_job_group(
                     f'termination_delay must be a string, int, or dict, '
                     f'got {type(termination_delay).__name__}')
 
+    # Parse and validate inter_connection
+    inter_connection = header.get('inter_connection')
+    if inter_connection is not None:
+        if not isinstance(inter_connection, bool):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'inter_connection must be a boolean, '
+                    f'got {type(inter_connection).__name__}: '
+                    f'{inter_connection!r}')
+        dag.inter_connection = inter_connection
+
     logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
                 f'{[t.name for t in dag.tasks]}')
 
@@ -692,6 +704,8 @@ def dump_job_group_to_yaml_str(dag: dag_lib.Dag,
         header['primary_tasks'] = dag.primary_tasks
     if dag.termination_delay is not None:
         header['termination_delay'] = dag.termination_delay
+    if dag.inter_connection is not None:
+        header['inter_connection'] = dag.inter_connection
 
     # Build job configs
     configs: List[Dict[str, Any]] = [header]
