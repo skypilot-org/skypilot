@@ -2604,6 +2604,54 @@ def check_instance_fits(
         return fits, reason
 
 
+def get_node_affinity(
+    acc_label_key: Optional[str],
+    acc_label_values: Optional[List[str]],
+    avoid_label_keys: Optional[List[str]],
+) -> Optional[Dict[str, Any]]:
+    """Builds the pod ``nodeAffinity`` for accelerator scheduling.
+
+    Two independent terms, either of which may be absent:
+
+    * When an accelerator label key/values are given, a required term pins the
+      pod to nodes whose ``acc_label_key`` is one of ``acc_label_values``.
+    * When ``avoid_label_keys`` are given (a CPU-only task), a preferred term
+      steers the pod away from accelerator nodes so they stay free for GPU/TPU
+      work.
+
+    Args:
+        acc_label_key: Node label key identifying the accelerator type, or None.
+        acc_label_values: Accepted values for ``acc_label_key``, or None.
+        avoid_label_keys: Node label keys the pod should prefer not to have set,
+            or None.
+
+    Returns:
+        A ``nodeAffinity`` dict, or None when neither term applies.
+    """
+    node_affinity: Dict[str, Any] = {}
+    if acc_label_key is not None and acc_label_values is not None:
+        node_affinity['requiredDuringSchedulingIgnoredDuringExecution'] = {
+            'nodeSelectorTerms': [{
+                'matchExpressions': [{
+                    'key': acc_label_key,
+                    'operator': 'In',
+                    'values': list(acc_label_values),
+                }],
+            }],
+        }
+    if avoid_label_keys is not None:
+        node_affinity['preferredDuringSchedulingIgnoredDuringExecution'] = [{
+            'weight': 1,
+            'preference': {
+                'matchExpressions': [{
+                    'key': avoid_label_key,
+                    'operator': 'DoesNotExist',
+                } for avoid_label_key in avoid_label_keys],
+            },
+        }]
+    return node_affinity or None
+
+
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
     """Returns the label keys that should be avoided for scheduling
     CPU-only tasks.

@@ -1025,6 +1025,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
+            'k8s_node_affinity': kubernetes_utils.get_node_affinity(
+                k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,

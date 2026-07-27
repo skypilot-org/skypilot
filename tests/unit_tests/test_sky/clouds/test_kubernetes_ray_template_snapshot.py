@@ -82,6 +82,7 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 
 TEMPLATE_NAME = 'kubernetes-ray.yml.j2'
@@ -433,6 +434,25 @@ CASES: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _build_variables(case_name: str) -> Dict[str, Any]:
+    """Merges a case onto the base and derives the computed template vars.
+
+    ``k8s_node_affinity`` is built by calling the same production helper
+    (``kubernetes_utils.get_node_affinity``) that
+    ``make_deploy_resources_variables`` uses, from the raw accelerator-label
+    vars the case carries. Deriving it here rather than hard-coding it is what
+    makes the goldens a semantic-identity proof for the Python lift.
+    """
+    variables = base_variables()
+    variables.update(CASES[case_name])
+    variables['k8s_node_affinity'] = kubernetes_utils.get_node_affinity(
+        variables['k8s_acc_label_key'],
+        variables['k8s_acc_label_values'],
+        variables['avoid_label_keys'],
+    )
+    return variables
+
+
 def _render(variables: Dict[str, Any]) -> str:
     """Render the template through the production fill_template helper."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -510,8 +530,7 @@ def _assert_matches_snapshot(case_name: str, normalized: str) -> None:
 @pytest.mark.parametrize('case_name', list(CASES.keys()))
 def test_kubernetes_ray_template_snapshot(case_name: str) -> None:
     """Rendered manifest matches the golden for each input permutation."""
-    variables = base_variables()
-    variables.update(CASES[case_name])
+    variables = _build_variables(case_name)
     rendered = _render(variables)
     _assert_matches_snapshot(case_name, _normalize(rendered))
 
@@ -524,8 +543,7 @@ def test_kubernetes_ray_template_render_is_deterministic(
     Guards against nondeterminism (unordered iteration, time/random values)
     leaking into the goldens.
     """
-    variables = base_variables()
-    variables.update(CASES[case_name])
+    variables = _build_variables(case_name)
     first = _normalize(_render(copy.deepcopy(variables)))
     second = _normalize(_render(copy.deepcopy(variables)))
     assert first == second
