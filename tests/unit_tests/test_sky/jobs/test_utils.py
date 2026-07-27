@@ -1088,6 +1088,100 @@ class TestStreamLogsByIdTaskFiltering:
         assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg
 
 
+class TestStreamLogsByIdNoFollow:
+    """Snapshot reads do not enter managed-job status polling."""
+
+    def _patch_nonterminal_job(self, monkeypatch, status, handle):
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = 1
+        mock_state.get_status.return_value = status
+        mock_state.is_batch_job.return_value = False
+        # End an accidental polling loop on its second iteration so a
+        # regression fails assertions below instead of hanging the test.
+        mock_state.get_latest_task_id_status.side_effect = [
+            (0, status),
+            (0, managed_job_state.ManagedJobStatus.SUCCEEDED),
+        ]
+        mock_state.get_pool_from_job_id.return_value = None
+        mock_state.get_task_name.return_value = 'task'
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+
+        status_display = MagicMock()
+        status_display.__enter__.return_value = status_display
+        monkeypatch.setattr(
+            jobs_utils.rich_utils,
+            'safe_status',
+            lambda _: status_display,
+        )
+        monkeypatch.setattr(
+            jobs_utils.global_user_state,
+            'get_handle_from_cluster_name',
+            lambda _: handle,
+        )
+        monkeypatch.setattr(jobs_utils, 'JOB_STATUS_CHECK_GAP_SECONDS', 0)
+
+        backend = MagicMock()
+        backend.tail_logs.return_value = exceptions.JobExitCode.SUCCEEDED.value
+        backend.get_job_status.side_effect = AssertionError(
+            'follow=False must not query remote job status after its snapshot')
+        monkeypatch.setattr(jobs_utils.backends, 'CloudVmRayBackend',
+                            lambda: backend)
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+        return backend, mock_state, status_display
+
+    def test_pending_without_handle_returns_immediately(self, monkeypatch):
+        backend, mock_state, status_display = self._patch_nonterminal_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.PENDING,
+            handle=None,
+        )
+
+        message, code = jobs_utils.stream_logs_by_id(1, follow=False)
+
+        assert message == ''
+        assert code == exceptions.JobExitCode.SUCCEEDED
+        backend.tail_logs.assert_not_called()
+        mock_state.get_latest_task_id_status.assert_called_once_with(1)
+        status_display.update.assert_not_called()
+
+    def test_starting_with_handle_reads_one_snapshot(self, monkeypatch):
+        handle = MagicMock(spec=jobs_utils.backends.CloudVmRayResourceHandle)
+        backend, mock_state, status_display = self._patch_nonterminal_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.STARTING,
+            handle=handle,
+        )
+
+        message, code = jobs_utils.stream_logs_by_id(1, follow=False, tail=20)
+
+        assert message == ''
+        assert code == exceptions.JobExitCode.SUCCEEDED
+        backend.tail_logs.assert_called_once_with(handle,
+                                                  job_id=None,
+                                                  managed_job_id=1,
+                                                  follow=False,
+                                                  tail=20,
+                                                  tail_offset=None)
+        backend.get_job_status.assert_not_called()
+        mock_state.get_latest_task_id_status.assert_called_once_with(1)
+        status_display.update.assert_not_called()
+
+    def test_follow_still_polls_for_pending_worker(self, monkeypatch):
+        backend, mock_state, status_display = self._patch_nonterminal_job(
+            monkeypatch,
+            managed_job_state.ManagedJobStatus.PENDING,
+            handle=None,
+        )
+
+        jobs_utils.stream_logs_by_id(1, follow=True)
+
+        assert mock_state.get_latest_task_id_status.call_count == 2
+        status_display.update.assert_called_once()
+        backend.tail_logs.assert_not_called()
+
+
 class TestFormatJobDetails:
     """Tests for _format_job_details (the 'details' column)."""
 
