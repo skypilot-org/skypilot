@@ -368,6 +368,29 @@ def test_get_cloud_dependencies_installation_commands_azure_only(
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_get_cloud_dependencies_installation_commands_rejects_azure_and_vast(
+        controller_type: str, monkeypatch):
+    """Azure and Vast cannot share a controller Python environment."""
+    mock_azure = mock.Mock(spec=clouds.Azure)
+    mock_azure.canonical_name.return_value = 'azure'
+    mock_vast = mock.Mock(spec=clouds.Vast)
+    mock_vast.canonical_name.return_value = 'vast'
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils.sky_check.get_cached_enabled_clouds_or_refresh',
+        lambda _cloud_capability: [mock_azure, mock_vast])
+    monkeypatch.setattr(
+        'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
+        lambda: [])
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+    with pytest.raises(exceptions.NotSupportedError,
+                       match='Azure and Vast are not supported together'):
+        controller_utils._get_cloud_dependencies_installation_commands(
+            controller)
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
 def test_get_cloud_dependencies_installation_commands_kubernetes_only(
         controller_type: str, monkeypatch):
     """Test dependencies installation with only Kubernetes enabled."""
@@ -588,7 +611,8 @@ def test_get_cloud_dependencies_installation_commands_vast_only(
     # Should include Vast dependencies
     combined_commands = ' '.join(commands)
     assert 'Vast' in combined_commands
-    assert 'vastai_sdk' in combined_commands
+    assert 'pip install --upgrade "vastai-sdk==1.5.0"' in combined_commands
+    assert 'vastai_sdk>=0.1.12' not in combined_commands
 
 
 @pytest.mark.parametrize('controller_type', ['jobs', 'serve'])

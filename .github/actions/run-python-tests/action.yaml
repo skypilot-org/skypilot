@@ -11,6 +11,14 @@ inputs:
   test-name:
     description: "Name of the test"
     required: true
+  extras:
+    description: "SkyPilot extras to install"
+    required: false
+    default: all
+  install-azure-cli:
+    description: "Whether to install Azure CLI before SkyPilot"
+    required: false
+    default: "true"
   buildkite-analytics-token:
     description: "Buildkite analytics token"
     required: true
@@ -23,15 +31,22 @@ runs:
       with:
         version: "latest"
         python-version: ${{ inputs.python-version }}
+    - name: Create virtual environment
+      shell: bash
+      run: uv venv --seed ~/test-env
+    - name: Install Azure CLI
+      if: ${{ inputs.install-azure-cli == 'true' }}
+      shell: bash
+      run: |
+        source ~/test-env/bin/activate
+        uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0"
     - name: Install dependencies
       shell: bash
       run: |
-        uv venv --seed ~/test-env
         source ~/test-env/bin/activate
-        uv pip install --prerelease=allow "azure-cli>=2.65.0,<2.87.0"
         # Use -e to include examples and tests folder in the path for unit
         # tests to access them.
-        uv pip install -e ".[all]"
+        uv pip install -e ".[${{ inputs.extras }}]"
         uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
     - name: Set branch name and commit message
       id: set_env

@@ -1,6 +1,7 @@
 """Regression tests for stable Vast resource identities."""
 
 import importlib.util
+import sys
 from typing import List
 from unittest import mock
 
@@ -9,6 +10,7 @@ import pytest
 from sky import exceptions
 from sky.catalog import common
 from sky.catalog import vast_catalog
+from sky.clouds import vast as vast_cloud
 from sky.provision.vast import utils as vast_utils
 from sky.utils import annotations
 
@@ -22,6 +24,28 @@ def clear_request_catalog_cache():
     annotations.clear_request_level_cache()
     yield
     annotations.clear_request_level_cache()
+
+
+def test_vast_sdk_exposes_launcher_api_key_contract():
+    if sys.version_info < (3, 10):
+        pytest.skip("Vast SDK requires Python >=3.10.")
+
+    from vastai_sdk import VastAI  # pylint: disable=import-outside-toplevel
+
+    client = VastAI(api_key="test-api-key")
+
+    assert client.client.api_key == "test-api-key"
+
+
+def test_vast_missing_credentials_does_not_suggest_unpinned_sdk(monkeypatch):
+    monkeypatch.setattr(vast_cloud.common, "can_import_modules",
+                        lambda _modules: True)
+    monkeypatch.setattr(vast_cloud.os.path, "exists", lambda _path: False)
+
+    credentials_valid, guidance = vast_cloud.Vast._check_compute_credentials()
+
+    assert not credentials_valid
+    assert "pip install vastai" not in guidance
 
 
 def _make_vast_client(*methods: str) -> mock.Mock:
