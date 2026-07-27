@@ -75,7 +75,7 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.10.19-slim
+FROM python:3.10.19-slim AS runtime
 
 ARG INSTALL_FROM_SOURCE=true
 
@@ -162,3 +162,16 @@ RUN cd /skypilot && \
     if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         rm -rf /skypilot; \
     fi
+
+# Test-only target.  compose.test.yml bind-mounts the working tree so test
+# files remain excluded from the production image.
+FROM runtime AS test
+
+RUN cd /skypilot && \
+    ~/.local/bin/uv pip install --prerelease allow \
+        "azure-cli>=2.65.0,<2.87.0" --system && \
+    ~/.local/bin/uv pip install -e ".[all]" --system && \
+    ~/.local/bin/uv pip install -r requirements-dev.txt --system
+
+# Keep the existing production runtime as Docker's default final target.
+FROM runtime
