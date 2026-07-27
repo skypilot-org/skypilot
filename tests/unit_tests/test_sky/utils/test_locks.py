@@ -833,3 +833,68 @@ class TestDistributedLockIntegration:
             assert isinstance(lock, locks.FileLock)
 
         mock_detect.assert_called_once()
+
+
+class TestLockAcquirableCondition:
+    """LockAcquirableCondition: resume a paused request when a lock frees."""
+
+    @staticmethod
+    def _acquirable_lock():
+        """A lock whose non-blocking acquire succeeds, as a context manager."""
+        lock = mock.MagicMock()
+        proxy = mock.MagicMock()
+        proxy.__enter__ = mock.MagicMock(return_value=lock)
+        proxy.__exit__ = mock.MagicMock(return_value=None)
+        lock.acquire.return_value = proxy
+        return lock, proxy
+
+    def test_resumes_when_lock_free(self, monkeypatch):
+        held_probes = 2
+        lock, proxy = self._acquirable_lock()
+        probes = []
+
+        def fake_get_lock(lock_id):
+            probes.append(lock_id)
+            if len(probes) <= held_probes:
+                held = mock.MagicMock()
+                held.acquire.side_effect = locks.LockTimeout('held')
+                return held
+            return lock
+
+        monkeypatch.setattr(locks, 'get_lock', fake_get_lock)
+        monkeypatch.setattr(locks.time, 'sleep', lambda s: None)
+
+        cond = locks.LockAcquirableCondition('my-cluster_status')
+        assert cond.wait(is_cancelled=lambda: False,
+                         fallback_wait_seconds=30) is True
+        assert probes == ['my-cluster_status'] * (held_probes + 1)
+        # The probe must release the lock immediately: it is a probe, not a
+        # reservation; the resumed request re-acquires the lock itself.
+        lock.acquire.assert_called_once_with(blocking=False)
+        proxy.__exit__.assert_called_once()
+
+    def test_drops_when_cancelled(self, monkeypatch):
+        held = mock.MagicMock()
+        held.acquire.side_effect = locks.LockTimeout('held')
+        monkeypatch.setattr(locks, 'get_lock', lambda lock_id: held)
+        monkeypatch.setattr(locks.time, 'sleep', lambda s: None)
+
+        calls = []
+
+        def is_cancelled():
+            calls.append(None)
+            return len(calls) > 3
+
+        cond = locks.LockAcquirableCondition('my-cluster_status')
+        assert cond.wait(is_cancelled=is_cancelled,
+                         fallback_wait_seconds=30) is False
+
+    def test_is_picklable(self):
+        # Pickled onto ExecutionPausedError; crosses the worker/scheduler
+        # process boundary.
+        import pickle
+        cond = locks.LockAcquirableCondition('my-cluster_status',
+                                             poll_interval_seconds=1.0)
+        restored = pickle.loads(pickle.dumps(cond))
+        assert restored._lock_id == 'my-cluster_status'
+        assert restored._poll_interval_seconds == 1.0
