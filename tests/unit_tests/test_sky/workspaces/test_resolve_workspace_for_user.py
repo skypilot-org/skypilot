@@ -768,5 +768,65 @@ class TestReadOnlyOnlyUser(unittest.TestCase):
                                                            action='write')
 
 
+class TestReadOnlyExcludedFromActiveSelection(unittest.TestCase):
+    """Auto-selecting the active workspace considers only WRITABLE workspaces.
+
+    A read-only workspace (a non-member's read-only visibility) is visible but
+    can never be a user's active workspace, so it must not count toward
+    auto-select or cause a spurious WorkspaceAmbiguousError when the user has
+    exactly one writable workspace. Regression test for a read command failing
+    with "You belong to multiple workspaces" when one of them is only
+    read-only.
+    """
+
+    def setUp(self):
+        self.user = models.User(id='alice', name='alice')
+
+    def _patches(self, writable, readable):
+        workspaces = {ws: {'private': True} for ws in readable}
+
+        def _acc(user_id, names, action='write'):
+            del user_id, names
+            return set(readable) if action == 'read' else set(writable)
+
+        return [
+            mock.patch.object(workspaces_core,
+                              '_load_workspaces',
+                              return_value=workspaces),
+            mock.patch.object(workspaces_core,
+                              '_accessible_workspace_names_for_user',
+                              side_effect=_acc),
+            mock.patch.object(workspaces_core.permission.permission_service,
+                              'resync_workspace_policies_for_new_user'),
+        ]
+
+    def test_read_only_not_counted_in_ambiguity(self):
+        # One writable ('pub') + one read-only ('pub1'). A read request must
+        # auto-select the single writable, NOT raise ambiguity over both.
+        with _Patcher(self._patches(writable=['pub'], readable=['pub',
+                                                                'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='read')
+        self.assertEqual(res.workspace, 'pub')
+
+    def test_multiple_writable_still_ambiguous(self):
+        # Two genuinely writable workspaces still can't be auto-picked.
+        with _Patcher(
+                self._patches(writable=['pub', 'pub1'],
+                              readable=['pub', 'pub1'])):
+            with self.assertRaises(exceptions.WorkspaceAmbiguousError):
+                workspaces_core.resolve_workspace_for_user(self.user,
+                                                           action='read')
+
+    def test_write_request_ignores_read_only(self):
+        # A write request with one writable + one read-only resolves to the
+        # writable and never the read-only.
+        with _Patcher(self._patches(writable=['pub'], readable=['pub',
+                                                                'pub1'])):
+            res = workspaces_core.resolve_workspace_for_user(self.user,
+                                                             action='write')
+        self.assertEqual(res.workspace, 'pub')
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

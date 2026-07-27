@@ -353,7 +353,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           getUsers(),
         ]);
 
-        const config = allWorkspaces[workspaceName] || {};
+        // `writable` is a server-computed, per-user flag (not persisted
+        // config). Strip it so it doesn't render in the YAML, get flagged as
+        // an unknown infra key, or get written back on save.
+        const { writable: _writable, ...config } =
+          allWorkspaces[workspaceName] || {};
         setWorkspaceConfig(config);
         setOriginalConfig(config);
         setAllUsers(usersResponse || []);
@@ -851,7 +855,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
   private: true
-  non_member_access: none  # or 'read-only' to let non-members view
+  # non-members can view but not modify (default: none = hidden)
+  non_member_access: read-only
   allowed_users:
   - user1@mydomain.com
   - user2@mydomain.com

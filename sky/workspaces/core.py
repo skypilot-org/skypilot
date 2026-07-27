@@ -1237,13 +1237,14 @@ def resolve_workspace_for_user(user: models.User,
                                action: str = 'write') -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
-    ``action`` controls which workspaces count as accessible when picking the
-    active workspace. 'write' (default) considers only workspaces the user can
-    mutate, so a resource-creating request never lands in a read-only
-    workspace. 'read' also considers read-only workspaces, so a user whose only
-    accessible workspaces are read-only (e.g. `default` is private and they are
-    not a member of any writable workspace) can still resolve an active
-    workspace for read requests instead of hitting NoWorkspaceAccessError.
+    Auto-selection always considers only WRITABLE workspaces: the active
+    workspace is one the request operates in, and a read-only workspace (a
+    non-member's read-only visibility) can never be a user's active workspace,
+    so it must not count toward auto-select or ambiguity. ``action`` only
+    affects the fallback: for 'read' (vs the 'write' default), when the user
+    has *no* writable workspace at all, read-only workspaces are considered so
+    a read-only-only user can still resolve an active workspace instead of
+    hitting NoWorkspaceAccessError.
 
     Precedence (a future admin-assignment tier can splice in between
     `preferred_workspace` and the default-fallback step without changing
@@ -1295,15 +1296,26 @@ def resolve_workspace_for_user(user: models.User,
             workspace=requested,
             source=workspace_constants.WORKSPACE_SOURCE_EXPLICIT)
 
-    # For write requests this resolves the *active* workspace the request will
-    # operate in, which must be one the user can mutate -- read-only workspaces
-    # are not auto-selected. For read requests, read-only workspaces are also
-    # considered, so a user whose only accessible workspaces are read-only can
-    # still resolve an active workspace instead of being denied everything.
-    accessible = sorted(
-        _accessible_workspace_names_for_user(user.id,
-                                             set(_load_workspaces().keys()),
-                                             action=action))
+    # The active workspace is the one the request *operates in*, so
+    # auto-selection considers only WRITABLE workspaces: a read-only workspace
+    # is visible to a non-member but can never be their active workspace (they
+    # can't use it), so it must not count toward auto-select / ambiguity. For a
+    # read request we fall back to the read-accessible set only when the user
+    # has no writable workspace at all, so a read-only-only user can still
+    # resolve an active workspace (read-relaxation) instead of being denied.
+    def _active_candidates() -> List[str]:
+        all_ws = set(_load_workspaces().keys())
+        writable = _accessible_workspace_names_for_user(user.id,
+                                                        all_ws,
+                                                        action='write')
+        if not writable and action == 'read':
+            return sorted(
+                _accessible_workspace_names_for_user(user.id,
+                                                     all_ws,
+                                                     action='read'))
+        return sorted(writable)
+
+    accessible = _active_candidates()
     if not accessible:
         # Zero accessible workspaces can mean the user's private-workspace
         # grant was never materialized: the new-user policy re-sync at first
@@ -1314,10 +1326,7 @@ def resolve_workspace_for_user(user: models.User,
         # idempotent and race-safe, so the retry also heals users whose
         # records predate the re-sync.
         _try_resync_new_user_grants(user)
-        accessible = sorted(
-            _accessible_workspace_names_for_user(user.id,
-                                                 set(_load_workspaces().keys()),
-                                                 action=action))
+        accessible = _active_candidates()
         if accessible:
             logger.info(f'Workspace access for user {user.name} ({user.id}) '
                         f'restored by policy re-sync: {accessible}')
