@@ -1160,6 +1160,12 @@ Vast |community-badge|
 
 `Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access:
 
+.. important::
+
+  Vast integration requires Python 3.10 or later.
+  Vast is intentionally excluded from ``skypilot[all]``; install it explicitly
+  with ``skypilot[vast]``.
+
 Install the necessary dependencies for Vast.
 
 .. tab-set::
@@ -1198,11 +1204,10 @@ Install the necessary dependencies for Vast.
       # From source
       pip install -e ".[vast]"
 
-Go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
+The ``skypilot[vast]`` extra installs the supported pinned Vast SDK. Go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, create its credential file:
 
 .. code-block:: shell
 
-  pip install "vastai-sdk>=0.1.12"
   mkdir -p ~/.config/vastai
   echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 

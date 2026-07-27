@@ -319,7 +319,6 @@ class Vast(clouds.Cloud):
             return False, (
                 'error \n'  # First line is indented by 4 spaces
                 '    Credentials can be set up by running: \n'
-                '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
                 '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
