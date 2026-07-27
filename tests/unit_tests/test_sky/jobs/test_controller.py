@@ -1302,6 +1302,139 @@ class TestUserJobStatusClassification:
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
 
 
+class TestUserJobFailureRecoveryEventReason:
+    """The RECOVERING job event must state the real trigger (SKY-6411).
+
+    When recovery is triggered by the user job exiting non-zero on a healthy
+    cluster (max_restarts_on_errors / recover_on_exit_codes), the RECOVERING
+    event must carry the exit code and a pointer to the job logs instead of
+    the generic 'Cluster preempted or failed, recovering' copy, which is
+    misleading (the cluster was not preempted) and unactionable.
+    """
+
+    class _StopLoop(Exception):
+        """Sentinel raised from recover() to end the monitoring loop."""
+
+    def _make_controller(self, exit_codes):
+        controller = JobController.__new__(JobController)
+        controller._job_id = 42
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = MagicMock()
+        controller._get_cluster_job_exit_codes = AsyncMock(
+            return_value=exit_codes)
+        controller._cleanup_cluster = AsyncMock()
+        return controller
+
+    def _make_executor(self, recover_on_exit_codes=None):
+        executor = MagicMock()
+        executor.should_restart_on_failure.return_value = True
+        executor.max_restarts_on_errors = 3
+        executor.restart_cnt_on_failure = 1
+        executor.recover_on_exit_codes = recover_on_exit_codes
+        executor.recover = AsyncMock(
+            side_effect=TestUserJobFailureRecoveryEventReason._StopLoop())
+        return executor
+
+    async def _run_recovery(self,
+                            controller,
+                            executor,
+                            cluster_status=status_lib.ClusterStatus.UP):
+        """Drive _monitor_one_task through one failed-job iteration up to
+        set_recovering_async, returning its call kwargs."""
+        mock_task = MagicMock()
+        mock_task.name = 'test-task'
+        mock_task.num_nodes = 1
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        state = controller_module.managed_job_state
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.async_check_network_connection',
+                   new=AsyncMock()), \
+             patch('sky.jobs.utils.get_job_status',
+                   new=AsyncMock(
+                       return_value=(job_lib.JobStatus.FAILED, None))), \
+             patch('sky.jobs.utils.try_to_get_job_end_time',
+                   return_value=12345.0), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   return_value=(cluster_status, handle)), \
+             patch.object(controller_module.global_user_state,
+                          'get_cluster_events', return_value=[]), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock()) as mock_set_recovering:
+            with pytest.raises(TestUserJobFailureRecoveryEventReason._StopLoop):
+                await controller._monitor_one_task(
+                    task_id=0,
+                    task=mock_task,
+                    cluster_name='test-cluster',
+                    executor=executor,
+                    callback_func=MagicMock(),
+                )
+
+        mock_set_recovering.assert_awaited_once()
+        return mock_set_recovering.await_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_reason_has_exit_code_and_log_pointer(self):
+        controller = self._make_controller(exit_codes=[137])
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(controller, executor)
+
+        reason = kwargs['user_job_failure_reason']
+        assert 'exit code 137' in reason
+        assert 'sky jobs logs --controller 42' in reason
+        assert 'restart 1 of 3' in reason
+        # The event must not claim the cluster was preempted.
+        assert 'preempted' not in reason
+        assert (kwargs['recovery_source'] ==
+                managed_job_state.RecoverySource.FAILURE)
+
+    @pytest.mark.asyncio
+    async def test_multiple_exit_codes(self):
+        controller = self._make_controller(exit_codes=[137, 1])
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(controller, executor)
+
+        assert 'exit codes [137, 1]' in kwargs['user_job_failure_reason']
+
+    @pytest.mark.asyncio
+    async def test_recover_on_exit_codes_match(self):
+        controller = self._make_controller(exit_codes=[137])
+        executor = self._make_executor(recover_on_exit_codes=[137])
+        kwargs = await self._run_recovery(controller, executor)
+
+        reason = kwargs['user_job_failure_reason']
+        assert 'exit code 137' in reason
+        assert 'recover_on_exit_codes' in reason
+
+    @pytest.mark.asyncio
+    async def test_no_exit_codes_falls_back_to_job_status(self):
+        controller = self._make_controller(exit_codes=None)
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(controller, executor)
+
+        reason = kwargs['user_job_failure_reason']
+        assert 'Job failed (FAILED)' in reason
+        assert 'sky jobs logs --controller 42' in reason
+
+    @pytest.mark.asyncio
+    async def test_preemption_path_has_no_user_job_failure_reason(self):
+        """A real preemption (cluster not UP) keeps the preemption copy."""
+        controller = self._make_controller(exit_codes=[137])
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(
+            controller, executor, cluster_status=status_lib.ClusterStatus.INIT)
+
+        assert kwargs['user_job_failure_reason'] is None
+
+
 class TestDunderMainDispatchesToImportedModule:
     """Regression: running this file as `__main__` must dispatch into the
     IMPORTED `sky.jobs.controller` module, not into a second copy of it.

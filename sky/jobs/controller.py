@@ -1136,6 +1136,10 @@ class JobController:
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
             cluster_event_reason = None
+            # Set when recovery is triggered by the user job exiting non-zero
+            # (cluster still UP), so the RECOVERING job event can say what
+            # actually happened instead of the generic preemption copy.
+            user_job_failure_reason: Optional[str] = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -1260,6 +1264,9 @@ class JobController:
                             f'max_restarts_on_errors is set to {max_restarts}. '
                             f'[{executor.restart_cnt_on_failure}'
                             f'/{max_restarts}])')
+                        restart_detail = (
+                            f'restart {executor.restart_cnt_on_failure} of '
+                            f'{max_restarts} on errors')
                         if exit_codes and executor.recover_on_exit_codes:
                             recover_codes = executor.recover_on_exit_codes
                             matching_codes = [
@@ -1270,9 +1277,34 @@ class JobController:
                                     f'(Exit code(s) {matching_codes} matched '
                                     'recover_on_exit_codes '
                                     f'[{recover_codes}])')
+                                restart_detail = (
+                                    f'exit code(s) {matching_codes} matched '
+                                    f'recover_on_exit_codes {recover_codes}')
                         logger.info(
                             'User program crashed '
                             f'({managed_job_status.value}). {exit_code_msg}')
+                        # The cluster is UP; recovery is happening because
+                        # the user job exited non-zero. Record that on the
+                        # RECOVERING event (with the exit code and a log
+                        # pointer) instead of the generic "Cluster preempted
+                        # or failed" copy, which would be misleading here.
+                        if exit_codes:
+                            if len(exit_codes) == 1:
+                                failure_desc = ('Job exited with exit code '
+                                                f'{exit_codes[0]}')
+                            else:
+                                failure_desc = ('Job exited with exit codes '
+                                                f'{exit_codes}')
+                        else:
+                            # job_status is non-None here: this branch is
+                            # only entered for user-code-failure statuses.
+                            assert job_status is not None
+                            failure_desc = f'Job failed ({job_status.value})'
+                        user_job_failure_reason = (
+                            f'{failure_desc}. Restarting the job '
+                            f'({restart_detail}). To see the job error '
+                            'output, run: sky jobs logs '
+                            f'--controller {self._job_id}')
                         # Fall through to recovery
                     else:
                         logger.info(
@@ -1411,6 +1443,7 @@ class JobController:
                         callback_func=callback_func,
                         external_failures=external_failures,
                         cluster_event_reason=cluster_event_reason,
+                        user_job_failure_reason=user_job_failure_reason,
                         recovery_source=managed_job_state.RecoverySource.
                         RESTART,
                     )
@@ -1422,6 +1455,7 @@ class JobController:
                     callback_func=callback_func,
                     external_failures=external_failures,
                     cluster_event_reason=cluster_event_reason,
+                    user_job_failure_reason=user_job_failure_reason,
                     recovery_source=managed_job_state.RecoverySource.FAILURE,
                 )
 

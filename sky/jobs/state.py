@@ -3073,9 +3073,15 @@ async def set_recovering_async(
     callback_func: AsyncCallbackType,
     external_failures: Optional[List[ExternalClusterFailure]] = None,
     cluster_event_reason: Optional[str] = None,
+    user_job_failure_reason: Optional[str] = None,
     recovery_source: RecoverySource = RecoverySource.FAILURE,
 ):
     """Set the task to recovering state, and update the job duration.
+
+    user_job_failure_reason is set when the recovery was triggered by the
+    user job exiting non-zero on a healthy cluster (max_restarts_on_errors /
+    recover_on_exit_codes), so the event tells the user their program
+    failed instead of claiming the cluster was preempted.
 
     recovery_source records why the job is recovering (defaults to FAILURE,
     i.e. preemption/failure). It is stored on the RECOVERING job event so
@@ -3091,6 +3097,8 @@ async def set_recovering_async(
     if external_failures:
         code = '; '.join(f.code for f in external_failures)
         reason = '; '.join(f.reason for f in external_failures)
+    elif user_job_failure_reason:
+        reason = user_job_failure_reason
     elif cluster_event_reason:
         reason = cluster_event_reason
     else:
