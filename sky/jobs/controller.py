@@ -43,6 +43,7 @@ from sky.metrics import utils as metrics_lib
 from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import cloud_api_retries
 from sky.utils import common
@@ -3067,7 +3068,8 @@ class ControllerManager:
             job_id: The ID of the job to start.
         """
         # Create log file path for job output redirection
-        log_dir = os.path.expanduser(jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
+        log_dir = runtime_utils.expanduser(
+            jobs_constants.JOBS_CONTROLLER_LOGS_DIR)
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f'{job_id}.log')
 

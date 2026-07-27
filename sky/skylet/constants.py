@@ -527,6 +527,14 @@ API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
 # API server.
 SKY_API_SERVER_URL_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_ENDPOINT'
 
+# The name for the environment variable that overrides the port of the local
+# SkyPilot API server (default: 46580). Both the server and the client honor
+# it, so exporting it in a shell yields a self-consistent environment. Useful
+# together with SKY_RUNTIME_DIR to run multiple isolated API servers on one
+# machine (e.g., for development).
+SKY_API_SERVER_LOCAL_PORT_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_LOCAL_PORT')
+
 # The name for the environment variable that stores the SkyPilot service
 # account token on client side.
 SERVICE_ACCOUNT_TOKEN_ENV_VAR = (

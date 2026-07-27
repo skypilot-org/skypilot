@@ -49,6 +49,7 @@ from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import auth_utils
 from sky.utils import cluster_utils
@@ -312,8 +313,8 @@ def is_ip(s: str) -> bool:
 def _get_yaml_path_from_cluster_name(cluster_name: str,
                                      prefix: str = constants.SKY_USER_FILE_PATH
                                     ) -> str:
-    output_path = pathlib.Path(
-        prefix).expanduser().resolve() / f'{cluster_name}.yml'
+    output_path = runtime_utils.expanduser_path(
+        pathlib.Path(prefix)).resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
 

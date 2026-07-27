@@ -49,6 +49,7 @@ from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
@@ -1036,8 +1037,8 @@ def _collect_job_debug_manifest(
     # shared controller_system/*.log set to only the controllers that
     # actually ran this job.
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
-        controller_logs_dir = pathlib.Path(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        controller_logs_dir = runtime_utils.expanduser_path(
+            pathlib.Path(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR))
         log_file = controller_logs_dir / f'{job_id}.log'
         if log_file.is_file():
             file_paths.append({
@@ -1182,8 +1183,8 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
     if not relevant_uuids:
         return
     with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
-        controller_logs_dir = pathlib.Path(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        controller_logs_dir = runtime_utils.expanduser_path(
+            pathlib.Path(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR))
         if not controller_logs_dir.exists():
             return
         for uuid_str in relevant_uuids:
@@ -1489,7 +1490,8 @@ def cancel_managed_jobs(
 
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
-    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    log_dir = runtime_utils.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
         os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f'{job_id}.log')
