@@ -90,6 +90,7 @@ from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
+from sky.users import rbac
 from sky.users import server as users_rest
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
@@ -103,6 +104,7 @@ from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
+from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -486,7 +488,18 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            token_row = global_user_state.get_service_account_token_by_hash(
+            # Offload the sync DB lookups to the bounded request thread executor
+            # so a slow/locked DB cannot stall the request event loop (this runs
+            # on the loop for every service-account-authenticated request).
+            # Using the dedicated executor (not asyncio's shared default thread
+            # pool) avoids saturating that pool under DB slowness; when it is
+            # exhausted it raises ConcurrentWorkerExhaustedError, which the
+            # app-level handler turns into a 503 so the client retries.
+            loop = asyncio.get_running_loop()
+            request_executor = executor.get_request_thread_executor()
+            token_row = await loop.run_in_executor(
+                request_executor,
+                global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
                 logger.warning(
@@ -502,7 +515,9 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = global_user_state.get_user(user_id)
+            user_info = await loop.run_in_executor(request_executor,
+                                                   global_user_state.get_user,
+                                                   user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -513,7 +528,9 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # DB row's token_id (not the JWT's): after rotation the JWT
             # carries a different token_id than the DB row.
             try:
-                global_user_state.update_service_account_token_last_used(
+                await loop.run_in_executor(
+                    request_executor,
+                    global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to update token last used time: {e}')
@@ -525,6 +542,10 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             logger.debug(f'Authenticated service account: {user_id}')
 
+        except exceptions.ConcurrentWorkerExhaustedError:
+            # Request thread executor is full: let the app-level handler return
+            # 503 so the client retries, instead of masking it as a 401 below.
+            raise
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
@@ -575,8 +596,13 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             newly_added = global_user_state.add_or_update_user(auth_user)
             if newly_added:
-                permission.permission_service.add_user_if_not_exists(
-                    auth_user.id)
+                # Offload the blocking config reload + role seed to a worker
+                # thread so this async middleware doesn't block the event loop.
+                # The reload lets a runtime `rbac.default_role` change take
+                # effect for this new user without a restart (the main
+                # API-server process does not reload config per request).
+                await asyncio.to_thread(permission.seed_new_user_role,
+                                        auth_user.id)
 
         # Store user info in request.state for access by GET endpoints
         if auth_user is not None:
@@ -688,6 +714,68 @@ async def cleanup_download_tmp():
         except Exception as e:  # pylint: disable=broad-except
             logger.error('Error in cleanup_download_tmp: '
                          f'{common_utils.format_exception(e)}')
+
+
+def _prune_sky_logs(cutoff: float) -> int:
+    """Remove ~/sky_logs artifacts older than cutoff; returns count removed.
+
+    Only sky-* dirs are swept, sparing the job/request log trees that share
+    ~/sky_logs (api_server/, jobs_controller/, managed_jobs/, <job_id>-*).
+    Dirs holding the provision log of an existing cluster are kept regardless
+    of age so /provision_logs keeps serving live clusters; once the cluster
+    is terminated its logs fall back to the age-based retention.
+    """
+    sky_logs_dir = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+    if not os.path.isdir(sky_logs_dir):
+        return 0
+    protected_dirs = {
+        os.path.basename(os.path.dirname(path))
+        for path in global_user_state.get_all_cluster_provision_log_paths()
+    }
+    removed = 0
+    for entry in os.scandir(sky_logs_dir):
+        if not entry.name.startswith('sky-') or entry.name in protected_dirs:
+            continue
+        try:
+            if (entry.is_dir(follow_symlinks=False) and
+                    entry.stat().st_mtime < cutoff):
+                shutil.rmtree(entry.path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            pass
+    # sky.client.common.FILE_UPLOAD_LOGS_DIR; not imported since the server
+    # should not depend on the client.
+    file_uploads_dir = os.path.join(sky_logs_dir, 'file_uploads')
+    if os.path.isdir(file_uploads_dir):
+        for entry in os.scandir(file_uploads_dir):
+            try:
+                if (entry.is_file(follow_symlinks=False) and
+                        entry.stat().st_mtime < cutoff):
+                    os.remove(entry.path)
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+async def cleanup_sky_logs():
+    """Hourly GC of expired per-operation ~/sky_logs artifacts."""
+    while True:
+        try:
+            skypilot_config.reload_config()
+            retention_hours = skypilot_config.get_nested(
+                ('api_server', 'logs_retention_hours'),
+                server_constants.DEFAULT_LOGS_RETENTION_HOURS)
+            if retention_hours >= 0:
+                cutoff = time.time() - retention_hours * 3600
+                removed = await asyncio.to_thread(_prune_sky_logs, cutoff)
+                if removed:
+                    logger.info(f'Cleaned up {removed} ~/sky_logs artifact(s) '
+                                f'older than {retention_hours} hours')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Error in cleanup_sky_logs: '
+                         f'{common_utils.format_exception(e)}')
+        await asyncio.sleep(3600)
 
 
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
@@ -2609,26 +2697,102 @@ async def api_status(
         return encoded_request_tasks
 
 
+def _get_local_contexts() -> List[str]:
+    """Kubeconfig contexts that point at the API server's own cluster.
+
+    Uses the same detection as the metrics federation routes, so the
+    dashboard and the federation always agree on which contexts are
+    local (their series are queried with cluster="" instead of a
+    context name). Non-blocking: verdicts come from the detection cache,
+    so this never stalls the event loop on a slow context.
+    """
+    local_contexts, _ = metrics_utils.split_local_remote_contexts(
+        core.get_all_contexts())
+    return local_contexts
+
+
+@app.get('/kubernetes/allowed_nodes')
+async def kubernetes_allowed_nodes(k8s_context: str) -> Dict[str, Any]:
+    """Whether a K8s context's node list is filtered by ``allowed_nodes``.
+
+    Drives the infra-page hint that tells users the node list for this
+    context is filtered by an ``allowed_nodes`` config — so a node they
+    expect to see but is missing isn't mistaken for a bug. Reads the loaded
+    config directly (a cheap in-memory lookup with the same context-override
+    resolution the provisioner uses), so it runs in the event loop without
+    the request-id machinery.
+
+    Fails closed: any error resolving the config yields ``configured: False``
+    so the dashboard never shows a misleading banner.
+    """
+    try:
+        allowed_nodes = kubernetes_utils.get_allowed_nodes_config(
+            context=k8s_context)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Failed to resolve allowed_nodes for context %r',
+                     k8s_context,
+                     exc_info=True)
+        return {'configured': False}
+    return {'configured': bool(allowed_nodes)}
+
+
 @app.get('/dashboard_config')
 async def dashboard_config() -> Dict[str, Any]:
     """Returns admin-configured dashboard settings consumed by the UI.
 
-    Currently exposes the optional `external_links` allowlist that the dashboard
-    matches against streamed logs to render labeled external links on cluster
-    and job detail pages.
+    Exposes the optional `external_links` entries: `regex` entries that
+    the dashboard matches against streamed logs, and `url` template
+    entries that the dashboard resolves against cluster/job metadata to
+    render labeled external links on cluster and job detail pages. Each
+    entry may carry an optional `scope` (a subset of
+    schemas.DASHBOARD_EXTERNAL_LINK_SCOPES) restricting which pages
+    render the link; entries without a scope appear on all pages. Also
+    exposes `local_contexts` (contexts pointing at the API server's own
+    cluster); the field is omitted when detection raises, so the
+    dashboard falls back to its ['in-cluster'] default instead of
+    treating an error as "no local contexts".
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
-    sanitized: List[Dict[str, str]] = []
+    sanitized: List[Dict[str, Any]] = []
     if isinstance(external_links, list):
         for entry in external_links:
             if not isinstance(entry, dict):
                 continue
             label = entry.get('label')
+            if not isinstance(label, str):
+                continue
+            sanitized_entry: Optional[Dict[str, Any]] = None
             regex = entry.get('regex')
-            if isinstance(label, str) and isinstance(regex, str):
-                sanitized.append({'label': label, 'regex': regex})
-    return {'external_links': sanitized}
+            url = entry.get('url')
+            if isinstance(regex, str):
+                sanitized_entry = {'label': label, 'regex': regex}
+            elif isinstance(url, str):
+                sanitized_entry = {'label': label, 'url': url}
+            if sanitized_entry is None:
+                continue
+            # Optional page scope; only known values are passed through so
+            # the dashboard never sees an unrecognized scope.
+            scope = entry.get('scope')
+            if isinstance(scope, list):
+                valid_scope = [
+                    s for s in scope
+                    if s in schemas.DASHBOARD_EXTERNAL_LINK_SCOPES
+                ]
+                if valid_scope:
+                    sanitized_entry['scope'] = valid_scope
+            sanitized.append(sanitized_entry)
+    dashboard_settings: Dict[str, Any] = {'external_links': sanitized}
+    try:
+        # May probe each uncached context once (blocking k8s API calls);
+        # keep it off the event loop. Failures must not break the rest of
+        # the dashboard config.
+        dashboard_settings['local_contexts'] = await asyncio.to_thread(
+            _get_local_contexts)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning('Failed to determine local Kubernetes contexts for '
+                       f'the dashboard: {common_utils.format_exception(e)}')
+    return dashboard_settings
 
 
 @app.get('/api/plugins')
@@ -2730,6 +2894,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         latest_version=latest_version,
         # Whether telemetry/usage collection is enabled
         telemetry_enabled=not env_options.Options.DISABLE_LOGGING.get(),
+        # Whether GET /workspaces/config is restricted to admins (so the
+        # dashboard can hide the config UI for non-admins when enabled)
+        restrict_config_to_admins=rbac.restrict_config_to_admins(),
     )
 
 
@@ -2781,6 +2948,40 @@ async def _get_cluster_and_validate(
     return handle
 
 
+async def _validate_cluster_for_ssh_proxy_ws(
+    websocket: fastapi.WebSocket,
+    cluster_name: str,
+    cloud_type: Type[clouds.Cloud],
+) -> Optional['backends.CloudVmRayResourceHandle']:
+    """Validate the cluster for an already-accepted SSH proxy websocket.
+
+    The websocket is accepted before this call, so a raised HTTPException
+    cannot be turned into an HTTP response: Starlette would emit
+    ``websocket.http.response.start``, which uvicorn rejects with a
+    ``RuntimeError``. On a websocket connection that error is unhandled and
+    surfaces as an ``Exception in ASGI application`` traceback in the server
+    logs, and the connection is dropped abnormally rather than closed
+    cleanly. This is easy to trigger, e.g. a client repeatedly reconnecting
+    to a deleted cluster spams the logs with tracebacks. Instead, close the
+    websocket with the error detail as the close reason and return None so
+    the caller can bail out cleanly.
+    """
+    try:
+        return await _get_cluster_and_validate(cluster_name, cloud_type)
+    except fastapi.HTTPException as e:
+        logger.info(f'Closing SSH proxy websocket for cluster '
+                    f'{cluster_name}: {e.detail}')
+        # 1008 (policy violation) signals the client that the connection
+        # cannot proceed; the reason carries the human-readable detail. A
+        # websocket close frame payload is capped at 125 bytes (RFC 6455) and
+        # 2 bytes go to the status code, so truncate the reason to 123 bytes
+        # to avoid a serialization error on long details (e.g. long cluster
+        # names) that would itself surface as the same unhandled RuntimeError.
+        reason = str(e.detail).encode('utf-8')[:123].decode('utf-8', 'ignore')
+        await websocket.close(code=1008, reason=reason)
+        return None
+
+
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                                    cluster_name: str,
@@ -2811,7 +3012,10 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             await websocket.close()
             return
 
-    handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
+    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
+                                                      clouds.Kubernetes)
+    if handle is None:
+        return
 
     # Under hostNetwork the pod's sshd binds a probed port (not 22,
     # which is owned by the K8s node's own sshd). head_ssh_port flows
@@ -2947,7 +3151,10 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
 
-    handle = await _get_cluster_and_validate(cluster_name, clouds.Slurm)
+    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
+                                                      clouds.Slurm)
+    if handle is None:
+        return
 
     assert handle.cached_cluster_info is not None, 'Cached cluster info is None'
     provider_config = handle.cached_cluster_info.provider_config
@@ -3557,6 +3764,7 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(cleanup_unreferenced_file_mounts()))
         global_tasks.append(background.create_task(cleanup_download_tmp()))
+        global_tasks.append(background.create_task(cleanup_sky_logs()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         # managed-job-status-refresh runs as a thread inside this

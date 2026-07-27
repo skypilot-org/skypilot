@@ -1153,14 +1153,22 @@ def get_next_cluster_name(
 
     Returns:
         The cluster name if a suitable replica is found, None otherwise.
+
+    Raises:
+        exceptions.PoolDoesNotExistError: If the pool does not exist (e.g. it
+            was deleted while a job bound to it was still running). This is
+            unrecoverable for the calling job, unlike the None return which
+            means no worker is currently free.
     """
     # Check if service exists
     service_status = _get_service_status(service_name,
                                          pool=True,
                                          with_replica_info=False)
     if service_status is None:
-        logger.error(f'Service {service_name!r} does not exist.')
-        return None
+        logger.error(f'Pool {service_name!r} does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.PoolDoesNotExistError(
+                f'Pool {service_name!r} does not exist.')
     if not service_status['pool']:
         logger.error(f'Service {service_name!r} is not a pool.')
         return None

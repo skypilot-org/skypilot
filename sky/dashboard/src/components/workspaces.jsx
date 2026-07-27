@@ -21,7 +21,10 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CircularProgress } from '@mui/material';
 import yaml from 'js-yaml';
@@ -55,7 +58,10 @@ import {
   CLUSTER_NOT_UP_ERROR,
 } from '@/data/connectors/constants';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  MANAGED_JOBS_SUMMARY_ARGS,
+} from '@/data/connectors/jobs';
 import Link from 'next/link';
 
 // Workspace-aware API functions - use cached global data and filter by workspace
@@ -82,7 +88,7 @@ export async function getWorkspaceManagedJobs(workspaceName) {
     // Use cached global managed jobs data and filter by workspace
     // This avoids making separate API calls per workspace
     const allJobsData = await dashboardCache.get(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
+      MANAGED_JOBS_SUMMARY_ARGS,
     ]);
 
     const allJobs = allJobsData?.jobs || [];
@@ -419,7 +425,7 @@ export function Workspaces() {
   const fetchJobsData = useCallback(async (workspaceNames) => {
     try {
       const allJobsData = await dashboardCache.get(getManagedJobs, [
-        { allUsers: true, skipFinished: true },
+        MANAGED_JOBS_SUMMARY_ARGS,
       ]);
       const jobs = allJobsData?.jobs || [];
 
@@ -892,13 +898,14 @@ export function Workspaces() {
       </div>
 
       {/* Workspaces Table */}
-      {workspaceDetails.length === 0 && !isInitialLoad ? (
-        <div className="text-center py-10">
-          <p className="text-lg text-gray-600">No workspaces found.</p>
-          <p className="text-sm text-gray-500 mt-2">
-            Create a cluster to see its workspace here.
-          </p>
-        </div>
+      {(workspaceDetails.length === 0 || isForceEmpty()) && !isInitialLoad ? (
+        <Card>
+          <EmptyState
+            icon={<BookDocIcon className="w-5 h-5" />}
+            title="No workspaces found"
+            description="Create a workspace to organize your clusters and jobs"
+          />
+        </Card>
       ) : (
         <Card>
           <div className="overflow-x-auto rounded-lg">
@@ -1059,14 +1066,12 @@ export function Workspaces() {
                     );
                   })
                 ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-6 text-gray-500"
-                    >
-                      No workspaces found
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableState
+                    colSpan={5}
+                    icon={<BookDocIcon className="w-5 h-5" />}
+                    title="No workspaces found"
+                    description="Create a workspace to organize your clusters and jobs"
+                  />
                 )}
               </TableBody>
             </Table>

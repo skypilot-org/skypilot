@@ -13,6 +13,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.jobs import constants as managed_job_constants
 from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
@@ -171,7 +172,8 @@ def queue_v2(
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
-    fields: Optional[List[str]] = None,
+    fields: Optional[
+        Sequence[str]] = managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
     statuses: Optional[List[str]] = None,
@@ -189,7 +191,11 @@ def queue_v2(
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
-        fields: Fields to get for the managed jobs.
+        fields: Fields to get for the managed jobs. Defaults to a lightweight
+            set of fields (see
+            ``sky.jobs.constants.DEFAULT_MANAGED_JOB_FIELDS``) that excludes
+            heavy fields such as the task YAML. Pass ``fields=None`` to fetch
+            every field (larger payload).
         sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
         sort_order: Sort direction ('asc' or 'desc').
         statuses: Only return jobs whose status is in this list.
@@ -261,7 +267,7 @@ def queue_v2(
         all_users=all_users,
         job_ids=job_ids,
         limit=limit,
-        fields=fields,
+        fields=list(fields) if fields is not None else None,
         sort_by=sort_by,
         sort_order=sort_order,
         statuses=statuses,

@@ -1,6 +1,7 @@
 """Unit tests for sky.jobs.utils functions."""
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -1151,7 +1152,7 @@ class TestFormatJobDetails:
             cloud='Kubernetes',
             recovery_reason='Evicted: Pod ephemeral local storage usage '
             'exceeds the total limit of containers 2Gi.')
-        assert 'resources.ephemeral_storage' in result
+        assert 'resources.disk_size' in result
 
     def test_recovery_reason_no_hint_on_non_kubernetes(self):
         # A non-k8s reason containing a matched word ('Insufficient') must not
@@ -1355,3 +1356,204 @@ class TestIsRelayedStatusPayloadLine:
     def test_plain_log_line_not_detected(self):
         assert jobs_utils._is_relayed_status_payload_line(
             'Preparing SkyPilot runtime (1/3)\n') is False
+
+
+class TestStreamLogsByIdExternalStoreFallback:
+    """stream_logs_by_id falls back to the external log reader for terminal jobs.
+
+    The read source is decided per task by the presence of a local log file
+    (local_log_file), not by the current logging-agent config: a task with no
+    local copy had its logs forwarded to an external store, so we stream them
+    back via the registered log reader. A registered reader is the only read-
+    side gate -- read-back keeps working even after the logging agent is
+    disconnected.
+    """
+
+    def _patch_terminal_job(self, monkeypatch, task_info):
+        """Stub managed_job_state so stream_logs_by_id hits the terminal branch.
+
+        task_info: list of (task_id, task_name, task_status, log_file,
+            logs_cleaned_at) tuples.
+        """
+        status = managed_job_state.ManagedJobStatus.SUCCEEDED
+        mock_state = MagicMock(wraps=managed_job_state)
+        mock_state.ManagedJobStatus = managed_job_state.ManagedJobStatus
+        mock_state.get_num_tasks.return_value = len(task_info)
+        mock_state.get_status.return_value = status
+        mock_state.get_all_task_ids_names_statuses_logs.return_value = task_info
+        mock_state.get_pool_from_job_id.return_value = None
+        monkeypatch.setattr(jobs_utils, 'managed_job_state', mock_state)
+        return mock_state
+
+    def _patch_logs(self, monkeypatch, reader):
+        mock_logs = MagicMock()
+        mock_logs.get_log_reader.return_value = reader
+        monkeypatch.setattr(jobs_utils, 'logs', mock_logs)
+        return mock_logs
+
+    def test_reads_from_external_store_when_local_file_absent(
+            self, monkeypatch):
+        # local_log_file is None -> logs went to the external store.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = 0
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_called_once_with(
+            'sky-managed-5-mytask', None, follow=False, tail=0)
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_local_file_takes_precedence_over_reader(self, monkeypatch,
+                                                     tmp_path):
+        # A local log file exists -> read it, never consult the reader (even
+        # when one is registered).
+        log_file = tmp_path / 'run.log'
+        log_file.write_text('hello\n', encoding='utf-8')
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      str(log_file), None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        self._patch_logs(monkeypatch, fake_reader)
+
+        _, code = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_not_called()
+        assert code == exceptions.JobExitCode.from_managed_job_status(
+            managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+    def test_no_reader_falls_to_terminal_message(self, monkeypatch):
+        # No external logging integration (no reader registered) and no local
+        # file -> the original terminal-state message, reader never consulted.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+        self._patch_logs(monkeypatch, None)
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        assert 'already in terminal state' in msg
+
+    def test_falls_through_when_reader_returns_none(self, monkeypatch):
+        # Reader registered but returns None (logs not in the store, e.g. aged
+        # out) -> the external-store fall-through message.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.return_value = None
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        fake_reader.read_cluster_job_logs.assert_called_once()
+        assert 'external log store' in msg
+
+    def test_reader_exception_is_logged_and_falls_through(self, monkeypatch):
+        # A reader error must not crash sky jobs logs; it falls through to the
+        # external-store message.
+        task_info = [(0, 'mytask', managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        fake_reader.read_cluster_job_logs.side_effect = RuntimeError('boom')
+        self._patch_logs(monkeypatch, fake_reader)
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            lambda name, jid: f'sky-managed-{jid}-{name}')
+
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+
+        assert 'external log store' in msg
+
+    def test_none_task_name_does_not_crash(self, monkeypatch):
+        # Guard removed: a null task name that breaks cluster-name derivation is
+        # caught and logged, not raised.
+        task_info = [(0, None, managed_job_state.ManagedJobStatus.SUCCEEDED,
+                      None, None)]
+        self._patch_terminal_job(monkeypatch, task_info)
+
+        fake_reader = MagicMock()
+        self._patch_logs(monkeypatch, fake_reader)
+
+        def _raise_on_none(name, jid):
+            if not name:
+                raise TypeError('task name is None')
+            return f'sky-managed-{jid}-{name}'
+
+        monkeypatch.setattr(jobs_utils, 'generate_managed_job_cluster_name',
+                            _raise_on_none)
+
+        # Should not raise.
+        msg, _ = jobs_utils.stream_logs_by_id(5, follow=False, tail=None)
+        assert 'external log store' in msg
+
+
+class TestTryToGetJobEndTime:
+    """Tests for try_to_get_job_end_time's best-effort fallback."""
+
+    def _disable_runtime(self, monkeypatch):
+        # Skip the managed-job runtime fast path so the test exercises the
+        # get_job_timestamp probe.
+        monkeypatch.setattr(jobs_utils.managed_job_runtime, 'is_registered',
+                            lambda: False)
+
+    def test_returns_timestamp_on_success(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp',
+                            lambda *args, **kwargs: 12345.0)
+        assert jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster',
+                                                  1) == 12345.0
+
+    def test_ssh_connection_failure_falls_back(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise exceptions.CommandError(returncode=255,
+                                          command='cmd',
+                                          error_msg='ssh failed',
+                                          detailed_reason='connection refused')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        result = jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+        assert isinstance(result, float)
+        assert result == pytest.approx(time.time(), abs=5)
+
+    def test_deleted_kubernetes_pod_falls_back(self, monkeypatch):
+        # On Kubernetes the pod can be deleted between the job-status check and
+        # the end-time fetch, which fails with returncode 1 rather than 255.
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise exceptions.CommandError(
+                returncode=1,
+                command='cmd',
+                error_msg='exec failed',
+                detailed_reason='Error from server (NotFound): pods '
+                '"my-pod" not found')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        result = jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
+        assert isinstance(result, float)
+        assert result == pytest.approx(time.time(), abs=5)
+
+    def test_non_command_error_reraises(self, monkeypatch):
+        self._disable_runtime(monkeypatch)
+
+        def _raise(*args, **kwargs):
+            raise ValueError('unexpected')
+
+        monkeypatch.setattr(jobs_utils, 'get_job_timestamp', _raise)
+        with pytest.raises(ValueError):
+            jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)

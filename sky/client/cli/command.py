@@ -69,6 +69,7 @@ from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -134,12 +135,8 @@ _DEFAULT_REQUEST_FIELDS_TO_SHOW = [
 _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
     'cluster_name'
 ]
-_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
-    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
-    'pool', 'is_primary_in_job_group', 'batch_total_batches',
-    'batch_completed_batches'
-]
+_DEFAULT_MANAGED_JOB_FIELDS_TO_GET = list(
+    managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS)
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
     'cloud', 'region', 'zone', 'cluster_resources', 'schedule_state', 'details',
@@ -349,10 +346,6 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
                 f'{ux_utils.BOLD}sky api logs {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
-                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
-                'visit: '
-                f'{server_common.get_server_url()}/api/stream?'
-                f'request_id={short_request_id}'
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
                 'the request, run: '
                 f'{ux_utils.BOLD}sky api cancel {short_request_id}'
@@ -366,10 +359,7 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
             f'{ux_utils.BOLD}sky api logs {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n'
-            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
-            f'{server_common.get_server_url()}/api/stream?'
-            f'request_id={short_request_id}'
-            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
+            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
             'the request, run: '
             f'{ux_utils.BOLD}sky api cancel {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n')
@@ -1303,6 +1293,15 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option(
+    '--resize',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Resize an existing cluster to --num-nodes. Supports both '
+          'scale-up (adding workers) and scale-down (removing workers). '
+          'Scale-down requires no running jobs. '
+          'Requires -c to specify an existing cluster.'))
 @click.option('--git-url', type=str, help='Git repository URL.')
 @click.option('--git-ref',
               type=str,
@@ -1353,6 +1352,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
     fast: bool,
+    resize: bool,
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1365,8 +1365,24 @@ def launch(
 
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
+
+    With ``--resize``, scale an existing cluster up or down to ``--num-nodes``.
+    Scale-up adds new workers while preserving existing nodes. Scale-down
+    requires no running jobs and re-provisions workers to the new count.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Resize an existing cluster to 4 nodes.
+      sky launch -c my-cluster --resize --num-nodes 4
+      \b
+      # Resize using a YAML that specifies num_nodes.
+      sky launch -c my-cluster --resize cluster.yaml
+
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
     # submitted, while the synchronous way of `sky launch` does. We should
@@ -1379,6 +1395,9 @@ def launch(
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     _warn_if_name_looks_like_file_path(
         cluster, yes, 'Cluster name', f'sky launch -c <cluster-name> {cluster}')
+    if resize and cluster is None:
+        raise click.UsageError(
+            '--resize requires -c/--cluster to specify an existing cluster.')
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1457,6 +1476,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         fast=fast,
+        resize=resize,
         _need_confirmation=not yes,
         # Ask the server to bundle SSH credentials with the launch
         # response so we can write the SSH config without a separate
@@ -6125,7 +6145,9 @@ def jobs_queue(verbose: bool,
 
     - ``RUNNING``: Job is running.
 
-    - ``RECOVERING``: The cluster of the job is recovering from a preemption.
+    - ``RECOVERING``: The job is recovering — from a cluster preemption or
+      failure, or from a controller-side issue (the controller restarted or
+      hit an unexpected internal error and is restarting job management).
 
     - ``SUCCEEDED``: Job succeeded.
 
@@ -7802,14 +7824,23 @@ def local():
     help='Starting port range for the local kind cluster. Needs to be a '
     'multiple of 100. If not given, a random range will be used. '
     'Used without ip list.')
+@click.option(
+    '--num-nodes',
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    required=False,
+    help='Number of nodes in the local kind cluster. A value greater than 1 '
+    'adds worker nodes, useful for testing multi-node scheduling locally. '
+    'Used without ip list.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
-             async_call: bool):
+             num_nodes: int, async_call: bool):
     """Creates a local cluster."""
-    request_id = sdk.local_up(gpus, name, port_start)
+    request_id = sdk.local_up(gpus, name, port_start, num_nodes)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -7842,14 +7873,16 @@ def api():
               help=('Deploy the SkyPilot API server. When set to True, '
                     'SkyPilot API server will use all resources on the host '
                     'machine assuming the machine is dedicated to SkyPilot API '
-                    'server; host will also be set to 0.0.0.0 to allow remote '
-                    'access.'))
+                    'server; host will also be set to a wildcard address '
+                    '(0.0.0.0, or :: when an IPv6 --host is given) '
+                    'to allow remote access.'))
 @click.option('--host',
               default='127.0.0.1',
               type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
               required=False,
-              help=('The host to deploy the SkyPilot API server. To allow '
-                    'remote access, set this to 0.0.0.0'))
+              help=('The host to bind the SkyPilot API server to. To allow '
+                    'remote access, set this to 0.0.0.0; use :: for IPv6 '
+                    'dual-stack.'))
 @click.option('--foreground',
               is_flag=True,
               default=False,
@@ -7873,7 +7906,10 @@ def api_start(deploy: bool, host: str, foreground: bool,
                   foreground=foreground,
                   enable_basic_auth=enable_basic_auth)
     api_server_url = server_common.get_server_url(host)
-    api_server_info = server_common.get_api_server_status(api_server_url)
+    # Dial via a reachable loopback URL: wildcard bind hosts (0.0.0.0 / ::) are
+    # not valid connect targets on all platforms.
+    api_server_info = server_common.get_api_server_status(
+        server_common.get_local_server_dial_url(host))
     server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 

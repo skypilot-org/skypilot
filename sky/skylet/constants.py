@@ -105,6 +105,17 @@ SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# Default user-facing Python environment, baked into the container image (see
+# Dockerfile_k8s{,_gpu}). It replaces the role conda's base env used to play:
+# user setup/run commands activate it so `pip`/`uv` install into a writable
+# location instead of a non-writable system site-packages. Kept separate from
+# the SkyPilot runtime env above. Only activated when conda is not active (an
+# opt-in conda base takes precedence). Keep the path in sync with the venv
+# created in the Dockerfiles.
+SKY_USER_ENV_PATH = '~/sky-user-env'
+ACTIVATE_SKY_USER_ENV = ('if [ -z "${CONDA_PREFIX:-}" ] && '
+                         f'[ -f {SKY_USER_ENV_PATH}/bin/activate ]; then '
+                         f'source {SKY_USER_ENV_PATH}/bin/activate; fi')
 # Place the conda root in the runtime directory, as installing to $HOME
 # on an NFS takes too long (1-2m slower).
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
@@ -158,7 +169,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '38'  # managed job table supports submitted_at time-range.
+SKYLET_VERSION = '39'  # add external-link log-scan skylet event.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -243,19 +254,23 @@ SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
                            f'mkdir -p ~/.sky/sky_app && '
                            f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
 
-# Install conda on the remote cluster if it is not already installed.
-# We use conda with python 3.10 to be consistent across multiple clouds with
-# best effort.
+# Install conda on the remote cluster if it is not already installed. This is
+# only used when the user opts in with `provision.install_conda: true` (conda is
+# not installed by default). We use Miniforge (conda-forge as the default and
+# only channel) rather than Miniconda: it avoids the Anaconda `defaults` channel
+# Terms-of-Service gate that makes non-interactive `conda create`/`install`
+# fail on recent conda.
+# The base python version (Miniforge ships a recent 3.x) does not matter here:
+# the SkyPilot runtime lives in a separate uv venv, and conda is user-facing.
 # https://github.com/ray-project/ray/issues/31606
-# We use python 3.10 to be consistent with the python version of the
-# AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ '
     # Use uname -m to get the architecture of the machine and download the
-    # corresponding Miniconda3-Linux.sh script.
-    # Download to /tmp to ensure write access for non-root users.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
+    # corresponding Miniforge installer. `-L` is required to follow the GitHub
+    # release redirect. Download to /tmp to ensure write access for non-root
+    # users.
+    'curl -L https://github.com/conda-forge/miniforge/releases/download/26.3.2-3/Miniforge3-26.3.2-3-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
@@ -576,6 +591,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('workspaces',),
     ('db',),
     ('daemons',),
+    ('metrics',),
     # TODO(kevin,tian): Override the whole controller config once our test
     # infrastructure supports setting dynamic server side configs.
     # Tests that are affected:

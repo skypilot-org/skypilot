@@ -86,7 +86,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_delete'
             assert call_args[1]['func'] == server.core.volume_delete
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
             assert isinstance(call_args[1]['request_body'],
                               payloads.VolumeDeleteBody)
 
@@ -142,7 +142,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
             assert isinstance(call_args[1]['request_body'],
                               payloads.VolumeApplyBody)
 
@@ -196,7 +196,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
 
     def test_volume_apply_success_pvc_none_config(self, monkeypatch):
         """Test volume_apply endpoint with PVC volume and None config."""
@@ -461,7 +461,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_delete'
             assert call_args[1]['func'] == server.core.volume_delete
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
 
     def test_volume_validate_success(self, monkeypatch):
         """Test volume_validate endpoint with successful validation."""
@@ -595,7 +595,7 @@ class TestVolumeServer:
             assert call_args[1]['request_name'] == 'volume_apply'
             assert call_args[1]['func'] == server.core.volume_apply
             assert call_args[1][
-                'schedule_type'] == requests_lib.ScheduleType.LONG
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
             assert isinstance(call_args[1]['request_body'],
                               payloads.VolumeApplyBody)
 

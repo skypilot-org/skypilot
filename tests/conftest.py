@@ -321,6 +321,14 @@ def pytest_configure(config):
         'markers', 'exclusive: mark test that mutates shared server state and '
         'must run serially; selected only by the pipeline generator\'s '
         '--exclusive flag and excluded from normal parallel runs')
+    config.addinivalue_line(
+        'markers',
+        'concurrency_group(name): serialize this test globally across all '
+        'Buildkite builds and pipelines by emitting a shared concurrency_group '
+        'with concurrency 1. Use for a test that mutates a shared external '
+        'resource so only one instance runs at a time org-wide, while every '
+        'other test still runs in parallel. The name must be a plain slug '
+        '(no commas or quotes)')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -516,7 +524,20 @@ def pytest_collection_modifyitems(config, items):
     if config.option.collectonly:
         for item in items:
             full_name = item.nodeid
-            marks = [mark.name for mark in item.iter_markers()]
+            marks = []
+            for mark in item.iter_markers():
+                # Surface the argument of a concurrency_group(name) marker so
+                # the pipeline generator can read the group name (all other
+                # markers are matched by name only, so keep them name-only).
+                # Accept both positional (concurrency_group('x')) and keyword
+                # (concurrency_group(name='x')) forms.
+                if mark.name == 'concurrency_group':
+                    group_name = (mark.args[0]
+                                  if mark.args else mark.kwargs.get('name'))
+                    marks.append(f'{mark.name}({group_name})'
+                                 if group_name else mark.name)
+                else:
+                    marks.append(mark.name)
             print(f"Collected {full_name} with marks: {marks}")
 
 

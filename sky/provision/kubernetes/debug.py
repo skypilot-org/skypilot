@@ -221,6 +221,51 @@ def dump_context_resources(context: Optional[str],
     return errors
 
 
+def context_reachable(context: Optional[str]) -> bool:
+    """Return whether a kube context's API server answers a bounded probe.
+
+    One no-retry, ``API_TIMEOUT``-bounded ``list_namespaced_pod`` against the
+    ``default`` namespace (``limit=1`` -- we only care whether the API server
+    answers, not what it returns). This is the same fast-fail signal the
+    per-cluster/per-context resource collection computes internally (see
+    ``_dump_pods`` / ``_dump_gpu_metrics_pods``), exposed standalone so other
+    debug-dump collectors can gate themselves on context reachability without
+    racking up their own timeouts.
+
+    Why this matters for the skylet log: ``_resolve_remote_skylet_log_path``
+    runs a remote command via a ``KubernetesCommandRunner``, whose
+    ``connect_timeout`` maps to ``kubectl --pod-running-timeout`` -- which only
+    bounds waiting for the pod to reach Running, a phase *after* kubectl reaches
+    the API server. Against a defunct API server kubectl never gets that far and
+    falls back to client-go defaults (~2min before giving up). A reachability
+    probe via the Python client (which honours ``_request_timeout`` + the
+    ``_fail_fast`` no-retry pool) lets the caller skip skylet collection on a
+    dead context in ~``API_TIMEOUT`` seconds instead.
+
+    Best-effort and fail-safe: returns ``False`` only on a connection/timeout
+    error (``MaxRetryError``), which is the unreachable signal we act on. Any
+    other error (e.g. RBAC 403, or unexpected client internals) returns ``True``
+    -- the context is reachable, just restricted -- so we never wrongly skip
+    collection for a live cluster on a transient hiccup.
+    """
+    try:
+        core = _fail_fast(kubernetes.core_api(context))
+        core.list_namespaced_pod('default',
+                                 limit=1,
+                                 _request_timeout=kubernetes.API_TIMEOUT)
+        return True
+    except kubernetes.max_retry_error():
+        logger.debug(f'Kubernetes context {context!r} is unreachable; '
+                     f'callers gating on reachability will skip it.')
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        # Reachable but the probe failed for another reason (RBAC, etc.). Treat
+        # as reachable so we don't wrongly skip a live cluster.
+        logger.debug(f'Reachability probe for context {context!r} failed with '
+                     f'a non-connection error; treating as reachable: {e}')
+        return True
+
+
 def _record_error(errors: List[Dict[str, str]], resource: str,
                   e: Exception) -> None:
     logger.debug(f'Failed to collect {resource}: {e}')

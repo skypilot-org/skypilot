@@ -474,6 +474,21 @@ available_node_types:
                         values:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
+            {% if k8s_efa_same_az %}
+            # Multi-node EFA co-location: an AWS EFA placement group is
+            # single-AZ, so every replica of this job must schedule into one
+            # zone or the fabric cannot form. Attract each pod to the zone of
+            # the other pods of the same SkyPilot cluster -- the first pod fixes
+            # the AZ (Karpenter provisions an EFA node wherever it has
+            # capacity) and the rest follow; the user names no zone. required
+            # (not preferred): cross-AZ EFA is broken, so pend loudly rather
+            # than silently fall back to TCP.
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    skypilot-cluster-name: {{cluster_name_on_cloud}}
+                topologyKey: topology.kubernetes.io/zone
+            {% endif %}
           {% endif %}
           {% endif %}
           {% if k8s_host_network %}
@@ -1144,7 +1159,7 @@ available_node_types:
               (
                 (
                 set -e
-                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # Create $SKY_RUNTIME_DIR/.sky early — uv_installation_commands
                 # writes python_path there before ray_installation_commands (which
                 # contains SETUP_SKY_DIRS_COMMANDS) creates it.
                 mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
@@ -1167,7 +1182,7 @@ available_node_types:
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # python_path is seeded by conda_installation_commands
+                # python_path is seeded by uv_installation_commands
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
                   {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }

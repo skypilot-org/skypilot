@@ -43,6 +43,9 @@ EVENTS = [
     events.ServiceUpdateEvent(pool=True),
     # Report usage heartbeat every 10 minutes.
     events.UsageHeartbeatReportEvent(),
+    # Harvest external-link URLs from running jobs' logs into job metadata so
+    # the controller / API server can surface them without log streaming.
+    events.JobLogLinkScanEvent(),
 ]
 
 

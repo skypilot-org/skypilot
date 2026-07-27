@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 55  # WAITING request status
+API_VERSION = 56  # resize field on LaunchBody
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -157,6 +157,10 @@ REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 # then truncated. One backup is kept per daemon.
 # Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
 DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
+
+# Default retention for per-operation artifacts under ~/sky_logs on the API
+# server. Configurable via api_server.logs_retention_hours; negative disables.
+DEFAULT_LOGS_RETENTION_HOURS = 720  # 30 days
 
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
