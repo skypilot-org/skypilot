@@ -534,7 +534,7 @@ export function InfrastructureSection({
                             </span>
                           </NonCapitalizedTooltip>
                         </td>
-                        <td className="p-3 text-gray-600 tabular-nums whitespace-nowrap">
+                        <td className="p-3 text-gray-500 tabular-nums whitespace-nowrap">
                           <span
                             className={`font-semibold ${
                               typeEntry.gpu_free > 0
