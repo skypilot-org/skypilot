@@ -2141,3 +2141,37 @@ async def test_interrupt_request_for_retry_records_terminal_error(
     error = interrupted.get_error()
     assert error is not None
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_request_without_retry_records_plain_cancellation(
+        isolated_database):
+    """should_retry=False marks the interrupt as a plain terminal
+    cancellation: no re-submit signal on /api/stream (Control.RETRY), just
+    the stored error. Used for requests whose client-side retry unit can
+    only re-attach the same dead request id (e.g. sky.launch at the
+    shutdown drain timeout)."""
+    from sky import exceptions
+    from sky.server import uvicorn as sky_uvicorn
+
+    request = requests.Request(request_id='interrupt-no-retry',
+                               name='sky.launch',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    assert await requests.create_if_not_exists_async(request)
+
+    sky_uvicorn.Server.interrupt_request_for_retry(mock.MagicMock(),
+                                                   'interrupt-no-retry',
+                                                   should_retry=False)
+
+    interrupted = requests.get_request('interrupt-no-retry')
+    assert interrupted is not None
+    assert interrupted.status == RequestStatus.CANCELLED
+    assert interrupted.should_retry is False
+    assert interrupted.finished_at is not None
+    error = interrupted.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)

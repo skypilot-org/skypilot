@@ -915,13 +915,20 @@ def test_api_get_interrupted_request_returns_terminal_error(monkeypatch):
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
 
 
-def test_api_get_interrupted_request_without_error_returns_503(monkeypatch):
-    """Interrupted rows without a stored error keep the retryable 503.
+def test_api_get_interrupted_request_without_error_synthesizes_error(
+        monkeypatch):
+    """Interrupted rows without a stored error get a synthesized one.
 
-    Requests interrupted by legacy server versions carry no error object;
-    /api/get preserves the previous behavior for them.
+    Rows written by servers that predate the stored-error behavior —
+    including the draining side of the rolling update that ships it — carry
+    bare should_retry. /api/get synthesizes the same terminal error at read
+    time so those rows stop 503ing immediately on deploy.
     """
     from fastapi.testclient import TestClient
+
+    from sky import exceptions
+    from sky.server.requests import payloads
+    from sky.server.requests import requests as requests_lib
 
     request = _make_interrupted_request(with_error=False)
     _mount_api_get_request(monkeypatch, request)
@@ -929,8 +936,12 @@ def test_api_get_interrupted_request_without_error_returns_503(monkeypatch):
     client = TestClient(server.app)
     response = client.get('/api/get', params={'request_id': 'interrupted-req'})
 
-    assert response.status_code == 503
-    assert 'should be retried' in response.json()['detail']
+    assert response.status_code == 500
+    payload = payloads.RequestPayload(**response.json()['detail'])
+    decoded = requests_lib.Request.decode(payload)
+    error = decoded.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
 
 
 def test_dashboard_config_endpoint_serializes_external_links(monkeypatch):

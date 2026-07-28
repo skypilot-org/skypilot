@@ -2405,10 +2405,18 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         raise fastapi.HTTPException(status_code=500,
                                     detail=request_task.encode().model_dump())
     if request_task.should_retry:
-        # Requests interrupted by legacy server versions carry no error
-        # object; keep the retryable 503 for them.
-        raise fastapi.HTTPException(
-            status_code=503, detail=f'Request {request_id!r} should be retried')
+        # Interrupted by a server version that recorded no error object —
+        # including the very rolling update that ships this code, whose
+        # draining (old) servers still write bare should_retry rows.
+        # Synthesize the same terminal error at read time so those rows,
+        # and any already stuck in the database, stop 503ing on deploy.
+        request_task.set_error(
+            exceptions.RequestInterruptedError(
+                f'Request {request_id!r} was interrupted by an API server '
+                'restart and will not be resumed. Please re-submit the '
+                'original request.'))
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=request_task.encode().model_dump())
     return request_task.encode()
 
 
