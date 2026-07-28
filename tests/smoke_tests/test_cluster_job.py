@@ -1847,7 +1847,19 @@ def test_gcp_start_stop():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            # Ensure the raylet's soft nofile limit is clamped to
+            # min(1048576, its own hard limit); fail loudly otherwise.
+            f'sky exec {name} "PID=\$(pgrep -f '
+            '\'raylet/raylet --raylet_socket_name\'); '
+            'SOFT=\$(prlimit --nofile --pid=\$PID --noheadings '
+            '--output=SOFT); '
+            'HARD=\$(prlimit --nofile --pid=\$PID --noheadings '
+            '--output=HARD); EXPECTED=1048576; '
+            'if [ \\"\$HARD\\" != unlimited ] '
+            '&& [ \\"\$HARD\\" -lt 1048576 ]; then EXPECTED=\$HARD; fi; '
+            '[ \\"\$SOFT\\" = \\"\$EXPECTED\\" ] || '
+            '( echo \\"raylet nofile soft=\$SOFT '
+            'expected=\$EXPECTED (hard=\$HARD)\\" >&2; exit 1 )"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -1879,7 +1891,19 @@ def test_azure_start_stop():
             f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/azure_start_stop.yaml',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            # Ensure the raylet's soft nofile limit is clamped to
+            # min(1048576, its own hard limit); fail loudly otherwise.
+            f'sky exec {name} "PID=\$(pgrep -f '
+            '\'raylet/raylet --raylet_socket_name\'); '
+            'SOFT=\$(prlimit --nofile --pid=\$PID --noheadings '
+            '--output=SOFT); '
+            'HARD=\$(prlimit --nofile --pid=\$PID --noheadings '
+            '--output=HARD); EXPECTED=1048576; '
+            'if [ \\"\$HARD\\" != unlimited ] '
+            '&& [ \\"\$HARD\\" -lt 1048576 ]; then EXPECTED=\$HARD; fi; '
+            '[ \\"\$SOFT\\" = \\"\$EXPECTED\\" ] || '
+            '( echo \\"raylet nofile soft=\$SOFT '
+            'expected=\$EXPECTED (hard=\$HARD)\\" >&2; exit 1 )"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky start -y {name} -i 1',

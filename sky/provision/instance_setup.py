@@ -39,16 +39,32 @@ _MAX_RETRY = 6
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
 # all the sessions to be reloaded. This is a workaround.
-# Raising the *hard* limit needs CAP_SYS_RESOURCE, which containers often
-# lack, so requesting 1048576 can fail with EPERM. In that case fall back to
-# raising the limit only up to the existing hard limit (ulimit -Hn), which
-# needs no extra capability, and warn if even that fails instead of silently
-# swallowing the error.
+#
+# prlimit acts on a *different* process (the raylet), so the calling shell's
+# own `ulimit -Hn` is irrelevant here: a process's soft limit can only be
+# raised up to *its own* hard limit, and raising a hard limit needs
+# CAP_SYS_RESOURCE (which containers usually lack). So:
+#   1. Try to set both soft+hard to 1048576. This works only when the runtime
+#      already grants a high (or unlimited) hard limit.
+#   2. Otherwise read the raylet's *own* hard limit from /proc/<pid>/limits
+#      (field 5 of the "Max open files" line) and raise only its soft limit
+#      up to that hard limit (the trailing-colon `--nofile=<hard>:` form),
+#      which needs no capability and never lowers the existing hard limit.
+# The fallback attempt keeps its stderr (no 2>/dev/null) so a genuine failure
+# (EPERM vs ESRCH vs missing sudo) is visible; the first attempt is expected
+# to fail on locked-down runtimes and is silenced. When the resulting clamp
+# is below 1048576 we emit an actionable NOTE pointing at the container
+# runtime's nofile default.
 _RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); do '
+    'hard=$(awk \'/Max open files/ {print $5}\' /proc/$id/limits '
+    '2>/dev/null); '
     'sudo prlimit --nofile=1048576:1048576 --pid=$id 2>/dev/null || '
-    'sudo prlimit --nofile="$(ulimit -Hn)":"$(ulimit -Hn)" --pid=$id '
-    '2>/dev/null || '
+    '{ [ -n "$hard" ] && sudo prlimit --nofile="$hard": --pid=$id && '
+    '{ [ "$hard" -lt 1048576 ] && echo "NOTE: raylet pid $id nofile '
+    'clamped to $hard (< 1048576); raise the container runtime nofile '
+    'default (e.g. containerd LimitNOFILE / --default-ulimit nofile)" >&2; '
+    'true; }; } || '
     'echo "WARNING: unable to raise nofile limit for raylet pid $id" >&2; '
     'done;')
 

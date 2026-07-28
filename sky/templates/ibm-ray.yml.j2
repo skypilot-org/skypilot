@@ -122,13 +122,13 @@ head_start_ray_commands:
   # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
   # all the sessions to be reloaded. This is a workaround.
   - {{ sky_activate_python_env }}; {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do hard=$(awk '/Max open files/ {print $5}' /proc/$id/limits 2>/dev/null); sudo prlimit --nofile=1048576:1048576 --pid=$id 2>/dev/null || { [ -n "$hard" ] && hs="$hard:" && sudo prlimit --nofile=$hs --pid=$id && { [ "$hard" -lt 1048576 ] && echo "NOTE raylet pid $id nofile clamped to $hard (below 1048576); raise the container runtime nofile default (e.g. containerd LimitNOFILE / --default-ulimit nofile)" >&2; true; }; } || echo "WARNING unable to raise nofile limit for raylet pid $id" >&2; done;
     {{dump_port_command}} {{ray_head_wait_initialized_command}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
   - {{ sky_activate_python_env }}; {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do hard=$(awk '/Max open files/ {print $5}' /proc/$id/limits 2>/dev/null); sudo prlimit --nofile=1048576:1048576 --pid=$id 2>/dev/null || { [ -n "$hard" ] && hs="$hard:" && sudo prlimit --nofile=$hs --pid=$id && { [ "$hard" -lt 1048576 ] && echo "NOTE raylet pid $id nofile clamped to $hard (below 1048576); raise the container runtime nofile default (e.g. containerd LimitNOFILE / --default-ulimit nofile)" >&2; true; }; } || echo "WARNING unable to raise nofile limit for raylet pid $id" >&2; done;
 {%- else %}
 worker_start_ray_commands: []
 {%- endif %}

@@ -822,10 +822,15 @@ available_node_types:
               # high limit and does not exhaust file descriptors at startup.
               # Raising the soft limit up to the hard limit needs no special
               # capability, but raising the hard limit needs CAP_SYS_RESOURCE,
-              # which containers commonly lack. So request the large value and,
-              # if that is above the container's hard limit, fall back to the
-              # existing hard limit (ulimit -Hn) instead of failing.
-              ulimit -n 1048576 2>/dev/null || ulimit -n "$(ulimit -Hn)" || true
+              # which containers commonly lack. Use `ulimit -Sn` (soft only):
+              # plain `ulimit -n` sets both soft AND hard, which would silently
+              # LOWER an `unlimited` hard limit to 1048576. Request the large
+              # value and, if it exceeds the hard limit, fall back to the hard
+              # limit ($(ulimit -Hn), correct here since this same shell forks
+              # the raylet). Because a later STEP restarts sshd as a descendant
+              # of this entrypoint shell, the raised soft limit propagates to
+              # all user tasks in the pod (not only the raylet) - intended.
+              ulimit -Sn 1048576 2>/dev/null || ulimit -Sn "$(ulimit -Hn)" || true
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
@@ -1763,7 +1768,7 @@ setup_commands:
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
-    ulimit -n 1048576 2>/dev/null || ulimit -n "$(ulimit -Hn)" || true;
+    ulimit -Sn 1048576 2>/dev/null || ulimit -Sn "$(ulimit -Hn)" || true;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);
