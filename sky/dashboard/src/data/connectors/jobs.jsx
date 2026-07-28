@@ -16,33 +16,17 @@ import { apiClient } from './client';
 import { trackJobAction } from '@/lib/analytics';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
-// Static descriptions for terminal failure states, shown on the status
-// badge hover so users can tell user-program failures from SkyPilot or
-// infra failures without opening the job. The job's dynamic details
-// (which include the exit code) are appended when available.
-const FAILURE_STATUS_DESCRIPTIONS = {
-  FAILED: 'The job program failed (user program failure)',
-  FAILED_SETUP: 'The job setup command failed (user setup failure)',
-  FAILED_PRECHECKS: 'Job prechecks failed (e.g. invalid job configuration)',
-  FAILED_NO_RESOURCE: 'Failed to provision resources for the job',
-  FAILED_CONTROLLER: 'The SkyPilot jobs controller hit an unexpected error',
-};
-
 /**
- * Tooltip for a job's status badge: pending reason for PENDING jobs,
- * failure attribution (static description plus dynamic details, which
- * carry the exit code for user-program failures) for FAILED* jobs.
+ * Tooltip for a job's status badge: pending reason for PENDING jobs, and
+ * the failure details (which carry the failure attribution and exit code,
+ * e.g. "Job exited with exit code 7 (user program failure). ...") for
+ * FAILED* jobs. Same text as the details column, surfaced on hover.
  */
 function getStatusTooltip(job) {
-  if (job.status === 'PENDING') {
-    return job.details || null;
+  if (job.status === 'PENDING' || job.status?.startsWith('FAILED')) {
+    return job.details || job.failure_reason || null;
   }
-  const failureDescription = FAILURE_STATUS_DESCRIPTIONS[job.status];
-  if (!failureDescription) {
-    return null;
-  }
-  const details = job.details || job.failure_reason;
-  return details ? `${failureDescription}\n${details}` : failureDescription;
+  return null;
 }
 
 // ============ Pagination Plugin Integration ============
