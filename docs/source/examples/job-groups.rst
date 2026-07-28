@@ -113,9 +113,8 @@ The header document supports the following fields:
        ``true``: place all tasks on a single Kubernetes cluster and set
        up hostname connectivity between them; hard-fail if either is not
        possible. ``false``: deliberately skip all networking setup; tasks
-       still prefer co-location but may land on separate clusters (via
-       per-task infra pins, or when no single cluster has the required
-       resource types). Unset: behaves like ``true`` where supported,
+       still prefer co-location but may land on separate clusters.
+       Unset: behaves like ``true`` where supported,
        like ``false`` (with a warning) where not.
        See :ref:`job-groups-inter-connection`.
 
@@ -216,14 +215,9 @@ With ``inter_connection: false``:
 
 .. note::
 
-   Hostname-based service discovery across clusters is not supported:
-   tasks placed on different clusters cannot reach each other via in-group
-   hostnames. In-group networking therefore requires placing the whole
-   group on a single Kubernetes cluster — a job group with networking
-   enabled that cannot be co-located fails at submission with
-   instructions, and pinning non-Kubernetes or conflicting infras
-   together with an explicit ``inter_connection: true`` is rejected when
-   the YAML is loaded.
+   Hostname-based service discovery across clusters is not yet
+   supported: tasks placed on different clusters cannot reach each other
+   via in-group hostnames.
 
 
 Viewing logs
