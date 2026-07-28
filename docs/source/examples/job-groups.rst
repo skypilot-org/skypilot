@@ -108,17 +108,15 @@ The header document supports the following fields:
        string (e.g., ``"30s"``, ``"5m"``) or a dict with per-task delays
        (e.g., ``{"default": "30s", "replay-buffer": "1m"}``).
    * - ``inter_connection``
-     - enabled
-     - Whether tasks need to reach each other by hostname (in-group
-       networking). When enabled, all tasks are placed together on one
-       Kubernetes cluster and the job fails if networking cannot be set
-       up. Unset (the default) enables networking wherever it is
-       supported; explicitly setting ``true`` is stricter — placements
-       that cannot support in-group networking (non-Kubernetes or
-       conflicting infra pins) become errors instead of warnings. Set to
-       ``false`` for tasks that coordinate externally: no in-group
-       networking is set up, tasks start without waiting for peers, and
-       tasks may be placed across different clusters.
+     - ``None``
+     - Whether tasks need to reach each other by hostname.
+       ``true``: place all tasks on a single Kubernetes cluster and set
+       up hostname connectivity between them; hard-fail if either is not
+       possible. ``false``: deliberately skip all networking setup; tasks
+       still prefer co-location but may land on separate clusters (via
+       per-task infra pins, or when no single cluster has the required
+       resource types). Unset: behaves like ``true`` where supported,
+       like ``false`` (with a warning) where not.
        See :ref:`job-groups-inter-connection`.
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
