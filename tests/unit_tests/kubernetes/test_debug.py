@@ -356,7 +356,7 @@ def test_context_prometheus_log_failure_is_recorded(tmp_path, k8s_apis):
     errors = _run_context(tmp_path)
 
     resources = {e['resource'] for e in errors}
-    assert ('gpu_metrics/skypilot-prometheus-server-abc123.log' in resources)
+    assert 'gpu_metrics/skypilot-prometheus-server-abc123.log' in resources
 
 
 def test_context_prometheus_logs_dedupes_identical_previous(tmp_path, k8s_apis):
@@ -721,3 +721,33 @@ def test_defunct_context_fast_fails_per_cluster(tmp_path, k8s_apis):
     k8s_apis.custom.list_namespaced_custom_object.assert_not_called()
     assert not (tmp_path / 'services.yaml').exists()
     assert not (tmp_path / 'kueue').exists()
+
+
+# ---------------------------------------------------------------------------
+# Tests for context_reachable (standalone bounded, no-retry probe)
+# ---------------------------------------------------------------------------
+def test_context_reachable_true_on_success(k8s_apis):
+    """A context whose API server answers the probe is reachable."""
+    k8s_apis.core.list_namespaced_pod.return_value = _pods()
+
+    assert debug.context_reachable('ctx') is True
+    # Bounded, namespace-scoped probe (default ns, limit=1).
+    _, kwargs = k8s_apis.core.list_namespaced_pod.call_args
+    assert kwargs['limit'] == 1
+    assert '_request_timeout' in kwargs
+
+
+def test_context_reachable_false_on_connection_error(k8s_apis):
+    """A connection/timeout failure means the context is defunct."""
+    k8s_apis.core.list_namespaced_pod.side_effect = _FakeMaxRetryError(
+        'connection timed out')
+
+    assert debug.context_reachable('ctx') is False
+
+
+def test_context_reachable_true_on_non_connection_error(k8s_apis):
+    """A non-connection error (e.g. RBAC 403) is reachable-but-restricted, so
+    we must NOT wrongly skip collection for it."""
+    k8s_apis.core.list_namespaced_pod.side_effect = _FakeApiException(403)
+
+    assert debug.context_reachable('ctx') is True

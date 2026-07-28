@@ -4,15 +4,15 @@ SkyPilot: Manage all your AI compute
 =========================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg
-  :width: 50%
+  :width: 38%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link, only-dark
+  :class: no-scaled-link, only-dark, hero-logo
 .. image:: /_static/SkyPilot_wide_light.svg
-  :width: 50%
+  :width: 38%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link, only-light
+  :class: no-scaled-link, only-light, hero-logo
 
 .. raw:: html
 
@@ -35,21 +35,11 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
-    :class: only-light
+    :class: only-light, hero-diagram
 .. image:: ../images/skypilot-abstractions-long-2-dark.png
     :width: 90%
     :align: center
-    :class: only-dark
-
-.. grid:: 1 1 1 1
-    :gutter: 3
-
-    .. grid-item-card::
-        :link: https://demo.skypilot.co/dashboard/
-        :text-align: center
-
-        🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
-
+    :class: only-dark, hero-diagram
 
 Why SkyPilot
 ----------------------
@@ -245,7 +235,7 @@ It turbocharges your existing Kubernetes clusters by **accelerating AI/ML veloci
 - Multi-cluster support: Bring all your clusters under one control plane
 - Multi-cloud support: One consistent interface to manage many providers
 
-See :ref:`SkyPilot vs Vanilla Kubernetes <sky-compare>` and this `blog post <https://blog.skypilot.co/ai-on-kubernetes/>`_ for more details.
+See :ref:`SkyPilot vs Vanilla Kubernetes <sky-compare>` and this `blog post <https://skypilot.ai/blog/ai-on-kubernetes>`_ for more details.
 
 Contact the SkyPilot team
 ---------------------------------
@@ -255,11 +245,9 @@ You can chat with the SkyPilot team and community on the `SkyPilot Slack <http:/
 Learn more
 --------------------------
 
-To learn more, see :ref:`SkyPilot Overview <overview>` and `SkyPilot blog <https://blog.skypilot.co/>`_.
+To learn more, see :ref:`SkyPilot Overview <overview>` and `SkyPilot blog <https://skypilot.ai/blog>`_.
 
-SkyPilot adopters: `Testimonials and Case Studies <https://blog.skypilot.co/case-studies/>`_
-
-Partners and integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
+SkyPilot adopters: `Testimonials and Case Studies <https://skypilot.ai/case-studies>`_
 
 Follow updates:
 
@@ -267,7 +255,7 @@ Follow updates:
 * `X <https://twitter.com/skypilot_org>`_
 * `LinkedIn <https://www.linkedin.com/company/skypilot-oss/>`_
 * `YouTube <https://www.youtube.com/@skypilot-org>`_
-* `SkyPilot Blog <https://blog.skypilot.co/>`_
+* `SkyPilot Blog <https://skypilot.ai/blog>`_
 
 .. toctree::
    :hidden:
@@ -280,7 +268,7 @@ Follow updates:
    Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
-   For Frontier AI <../frontier-ai>
+   SkyPilot Platform <../skypilot-platform>
 
 .. toctree::
    :hidden:
@@ -311,7 +299,7 @@ Follow updates:
    :maxdepth: 1
    :caption: Model Serving
 
-   SkyPilot Endpoints <https://blog.skypilot.co/skypilot-endpoints/>
+   SkyPilot Endpoints <https://skypilot.ai/blog/skypilot-endpoints>
    SkyServe <../serving/sky-serve>
 
 .. toctree::

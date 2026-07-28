@@ -9,14 +9,19 @@ Also tests the cancelled job log download feature in ControllerManager
 and file mount cleanup in task_cleanup().
 """
 import asyncio
+import runpy
+import sys
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
+import warnings
 
 import pytest
 
+from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
 from sky.skylet import job_lib
@@ -1082,6 +1087,60 @@ class TestDownloadLogsForCancelledJob:
                 1, mock_handle_1, None)
 
 
+class TestDownloadLogAndStreamLoggingAgentGate:
+    """download_log_and_stream skips the local copy only when logs are both
+    forwarded externally AND readable back.
+
+    The controller skips downloading a local copy only when a logging agent
+    forwards the logs AND a log reader is registered to stream them back. If the
+    store has no read-back path (no reader), it must keep the local copy so
+    sky jobs logs can still serve a finished job.
+    """
+
+    def _make_controller(self):
+        controller = MagicMock(spec=JobController)
+        controller._job_id = 1
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = (
+            JobController.download_log_and_stream.__get__(
+                controller, JobController))
+        return controller
+
+    def _run(self, agent_configured, reader):
+        controller = self._make_controller()
+        handle = MagicMock()
+        with patch('sky.jobs.controller.logs.is_logging_agent_configured',
+                   return_value=agent_configured), \
+             patch('sky.jobs.controller.logs.get_log_reader',
+                   return_value=reader), \
+             patch('sky.jobs.controller.managed_job_state') as mock_state, \
+             patch('sky.jobs.controller.managed_job_runtime') as mock_runtime, \
+             patch('sky.jobs.controller.controller_utils') as mock_cutils:
+            mock_runtime.is_registered.return_value = False
+            mock_cutils.download_and_stream_job_log.return_value = (
+                '/tmp/run.log')
+            controller.download_log_and_stream(0, handle, None)
+            return mock_state, mock_runtime, mock_cutils
+
+    def test_skips_download_when_agent_and_reader_configured(self):
+        # Logs are forwarded and readable back -> skip the local copy.
+        mock_state, mock_runtime, mock_cutils = self._run(agent_configured=True,
+                                                          reader=MagicMock())
+        mock_state.set_local_log_file.assert_not_called()
+        mock_runtime.download_logs.assert_not_called()
+        mock_cutils.download_and_stream_job_log.assert_not_called()
+
+    def test_downloads_when_agent_but_no_reader(self):
+        # Forwarded to a write-only store (no reader) -> keep the local copy so
+        # sky jobs logs still works for a finished job.
+        _, _, mock_cutils = self._run(agent_configured=True, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+    def test_downloads_when_no_logging_agent(self):
+        _, _, mock_cutils = self._run(agent_configured=False, reader=None)
+        mock_cutils.download_and_stream_job_log.assert_called_once()
+
+
 class TestJobGroupResumeDoesNotReissueStarting:
     """Regression: a resumed JobGroup task must not be re-issued STARTING.
 
@@ -1241,3 +1300,204 @@ class TestUserJobStatusClassification:
 
         failure_type = mock_set_failed.call_args.kwargs['failure_type']
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
+
+
+class TestDunderMainDispatchesToImportedModule:
+    """Regression: running this file as `__main__` must dispatch into the
+    IMPORTED `sky.jobs.controller` module, not into a second copy of it.
+
+    The controller process is launched as
+    `python -u -m sky.jobs.controller <uuid>`. Under `python -m pkg.mod`,
+    Python's `runpy` executes the module's source a SECOND time into a
+    fresh `__main__` namespace, in addition to the normal import of
+    `sky.jobs.controller`. That leaves the process with two distinct copies
+    of every class and module-level function defined in this file -- the
+    imported `sky.jobs.controller.JobController` and a separate
+    `__main__.JobController` -- and whichever `main()` actually runs
+    determines which copy every subsequently constructed object belongs to.
+    If the `__main__` guard called the LOCAL `main` (the `__main__` copy),
+    `mock.patch('sky.jobs.controller.JobController...')`, `isinstance`
+    checks, and `pickle` would all silently operate on the wrong class.
+
+    This test exercises the real `__main__` guard via `runpy` (it does not
+    reimplement the dispatch logic) and asserts that the imported module's
+    `main` -- addressed as `sky.jobs.controller.main` -- is the one that
+    gets called.
+    """
+
+    def test_run_as_main_calls_imported_module_main(self):
+        started = []
+
+        def _close_without_running(coro, *args, **kwargs):
+            # The `__main__` guard builds a coroutine and hands it to
+            # `asyncio.run`. Close it rather than run it: a coroutine does
+            # not execute any of its body until it is awaited, so this keeps
+            # a REGRESSION cheap and loud. Without this, a regression makes
+            # the `__main__` copy's own (unmocked) `main` coroutine run the
+            # real controller loop forever, and the test would hang CI
+            # instead of failing it. `asyncio.run` is resolved on the shared
+            # `asyncio` module at call time, so patching it here reaches the
+            # `__main__` copy too.
+            coro.close()
+            started.append(coro)
+
+        with warnings.catch_warnings():
+            # runpy warns that 'sky.jobs.controller' is already present in
+            # sys.modules (it was imported normally when this test module
+            # was collected). That is expected and is exactly the scenario
+            # under test, so it is suppressed rather than worked around.
+            warnings.filterwarnings('ignore',
+                                    message=r'.*found in sys\.modules.*',
+                                    category=RuntimeWarning)
+            with patch.object(controller_module, 'main',
+                              new_callable=AsyncMock) as mock_main, \
+                 patch.object(asyncio, 'run',
+                              side_effect=_close_without_running), \
+                 patch.object(sys, 'argv',
+                              ['sky.jobs.controller', 'test-uuid']):
+                runpy.run_module('sky.jobs.controller', run_name='__main__')
+
+        assert started, 'the __main__ guard never called asyncio.run'
+        # The imported module's `main` -- not the `__main__` copy's -- must be
+        # the one that was called.
+        mock_main.assert_called_once_with('test-uuid')
+
+
+class TestTransientJobStatusRecoveryWindow:
+    """Tests for the transient job-status-check retry window across recovery.
+
+    When the controller cannot fetch a task's job status but the cluster is
+    healthy, it retries for up to JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS before
+    recovering, to avoid a false alarm from a transient control-plane error.
+    That window (`transient_job_check_error_start_time`) must be reset after a
+    recovery; otherwise the first status-fetch failure after a recovery is
+    measured from before the recovery, exceeds the timeout immediately, and
+    triggers another recovery with no retries -- turning one transient error
+    into an unbounded recovery loop.
+    """
+
+    class _StopLoop(Exception):
+        """Sentinel to break the otherwise-infinite monitoring loop."""
+
+    @pytest.mark.asyncio
+    async def test_window_reset_after_recovery(self, monkeypatch):
+        """A transient failure after a recovery starts a fresh retry window.
+
+        Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
+        transient failure past the timeout (recover) -> transient failure
+        again. With the window reset, the third failure retries instead of
+        recovering, so ``recover`` is called exactly once. Without the reset it
+        would recover a second time immediately.
+
+        Calls the ``_impl`` body rather than ``_monitor_one_task``: the retry
+        window lives entirely in the body, and the wrapper only owns the status
+        logger's lifecycle (covered by
+        ``test_status_logger_flushed_when_body_raises``).
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+
+        # A logical clock advanced at the top of each loop iteration (inside
+        # the get_job_status stub) so `elapsed` is fully deterministic:
+        #   iter 1: +0   -> elapsed 0   < 60 -> retry
+        #   iter 2: +100 -> elapsed 100 >= 60 -> recover (#1); window reset
+        #   iter 3: +50  -> fresh window, elapsed 0 < 60 -> retry
+        #   iter 4: stub raises _StopLoop to end the loop
+        clock = {'t': 1000.0}
+        deltas = iter([0.0, 100.0, 50.0])
+        recover_calls = 0
+
+        async def fake_get_job_status(*args, **kwargs):
+            try:
+                clock['t'] += next(deltas)
+            except StopIteration:
+                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            return None, 'Job status check timed out after 30s.'
+
+        async def fake_recover(*args, **kwargs):
+            nonlocal recover_calls
+            recover_calls += 1
+            return clock['t']
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        def fake_refresh(*args, **kwargs):
+            return status_lib.ClusterStatus.UP, handle
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(side_effect=fake_recover)
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          side_effect=fake_refresh), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+                await controller_module.JobController._monitor_one_task_impl(
+                    mock_self,
+                    task_id=0,
+                    task=MagicMock(name='task'),
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=False)
+
+        assert recover_calls == 1, (
+            'expected exactly one recovery; a second recovery means the '
+            'transient retry window was not reset after the first recovery')
+
+    @pytest.mark.asyncio
+    async def test_status_logger_flushed_when_body_raises(self, monkeypatch):
+        """The status logger is flushed even when the loop exits by raising.
+
+        ``_monitor_one_task`` owns the logger outside the loop precisely so the
+        last status the controller observed reaches the log when the loop exits
+        by raising (job cancelled, controller torn down) rather than by
+        observing a terminal status. Without the ``finally``, a collapsed run's
+        closing logline -- the only record of when that status was last seen --
+        would be dropped on exactly the paths where it is most useful.
+        """
+        status_logger = MagicMock()
+        monkeypatch.setattr(managed_job_utils, 'JobStatusLogger',
+                            lambda: status_logger)
+
+        async def raise_stop_loop(*args, **kwargs):
+            raise TestTransientJobStatusRecoveryWindow._StopLoop()
+
+        mock_self = MagicMock()
+        mock_self._monitor_one_task_impl = raise_stop_loop
+
+        with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+            await controller_module.JobController._monitor_one_task(
+                mock_self,
+                task_id=0,
+                task=MagicMock(name='task'),
+                cluster_name='cluster',
+                executor=MagicMock())
+
+        status_logger.flush.assert_called_once()

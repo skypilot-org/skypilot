@@ -32,6 +32,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import logs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -48,6 +49,7 @@ from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
@@ -363,6 +365,12 @@ def cleanup_expired_api_access_tokens() -> int:
 def ha_recovery_for_consolidation_mode() -> None:
     """Recovery logic for consolidation mode.
 
+    Naming quirk: this path is historically called "HA recovery" because it
+    originally only applied to controllers deployed in HA mode (a k8s
+    deployment that auto-restarts). It now runs on any controller process
+    restart (e.g. a normal API-server upgrade/rollout); the recovery source
+    recorded for recoveries it forces is RecoverySource.RESTART.
+
     This should only be called from the managed-job-status-refresh-daemon, due
     so that we have correct ordering recovery -> controller start -> job status
     updates. This also should ensure correct operation during a rolling update.
@@ -432,14 +440,99 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
+class JobStatusLogger:
+    """Logs job-status poll results, collapsing consecutive identical ones.
+
+    The controller polls the status of its job every
+    JOB_STATUS_CHECK_GAP_SECONDS and logs the result, which for a long-running
+    job is the same on almost every poll. Logging every one of them dominates
+    the controller log and pushes the loglines that are actually useful for
+    debugging the job (recovery reasons, transient cloud API errors,
+    cluster-fetch failures, user-job exit codes) far out of the visible window
+    of the log viewer. So for each run of identical results we keep:
+
+    - the first occurrence, logged as-is;
+    - the last occurrence, logged when the run ends, carrying how long the
+      status was unchanged and over how many checks, so that the time the
+      status was last observed stays recoverable from the log. A run ends when
+      the status changes, when the caller is about to log something interesting
+      (``reset``), or when the polling loop exits (``flush``);
+    - nothing in between. A periodic reminder that the status is still the
+      same would add lines without adding information; the two kept lines
+      already bound the run at both ends.
+
+    One instance tracks one polling loop; it is not thread-safe.
+    """
+
+    def __init__(self) -> None:
+        # Message of the current run of identical results, None if no run is
+        # in progress.
+        self._message: Optional[str] = None
+        self._first_seen = 0.
+        self._last_seen = 0.
+        self._count = 0
+        # Whether the tail of the current run has already been logged, so that
+        # flushing twice (e.g. reset() and then the polling loop exiting) does
+        # not repeat it.
+        self._tail_logged = False
+
+    def log(self, message: str) -> None:
+        """Logs a poll result, collapsing it if it repeats the previous one."""
+        now = time.time()
+        if message != self._message:
+            self.flush()
+            self._message = message
+            self._first_seen = now
+            self._last_seen = now
+            self._count = 1
+            self._tail_logged = False
+            logger.info(message)
+            return
+        self._count += 1
+        self._last_seen = now
+        self._tail_logged = False
+
+    def flush(self) -> None:
+        """Logs the last observation of the current run, if not logged yet."""
+        if self._message is None or self._tail_logged:
+            return
+        if self._count == 1:
+            # The run's only observation was already logged in full.
+            return
+        duration = log_utils.readable_time_duration(self._first_seen,
+                                                    self._last_seen,
+                                                    absolute=True)
+        logger.info(f'{self._message} (unchanged for {duration}, '
+                    f'{self._count} checks)')
+        self._tail_logged = True
+
+    def reset(self) -> None:
+        """Flushes and forgets the current run.
+
+        The next poll result is then logged in full even if it is identical to
+        the last one. Callers use this after something noteworthy happened
+        (e.g. a recovery), so that the status observed afterwards is visible in
+        the log instead of being collapsed into the previous run.
+        """
+        self.flush()
+        self._message = None
+
+
 async def get_job_status(
-    backend: 'backends.CloudVmRayBackend', cluster_name: str,
-    job_id: Optional[int]
+    backend: 'backends.CloudVmRayBackend',
+    cluster_name: str,
+    job_id: Optional[int],
+    status_logger: Optional[JobStatusLogger] = None,
 ) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
+
+    Args:
+        status_logger: If provided, the result is logged through it, so that
+            consecutive identical results are collapsed into one logline. If
+            None, every result is logged.
 
     Returns:
         job_status: The status of the job.
@@ -452,14 +545,14 @@ async def get_job_status(
     handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
 
-    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
-        if status is None:
-            logger.info('No job found.')
+    def _log(message: str) -> None:
+        if status_logger is not None:
+            status_logger.log(message)
         else:
-            logger.info(f'Job status: {status}')
-        logger.info('=' * 34)
+            logger.info(message)
 
-    logger.info('=== Checking the job status... ===')
+    def _log_job_status(status: Optional['job_lib.JobStatus']) -> None:
+        _log('No job found.' if status is None else f'Job status: {status}')
 
     if managed_job_runtime.is_registered():
         result = await asyncio.to_thread(managed_job_runtime.get_job_status,
@@ -472,7 +565,7 @@ async def get_job_status(
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
-        logger.info(f'Cluster {cluster_name} not found.')
+        _log(f'Cluster {cluster_name} not found.')
         return None, None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
@@ -847,13 +940,24 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
                                  cluster_name,
                                  job_id=job_id,
                                  get_end_time=True)
-    except (exceptions.CommandError, grpc.RpcError,
-            grpc.FutureTimeoutError) as e:
-        if isinstance(e, exceptions.CommandError) and e.returncode == 255 or \
-                (isinstance(e, grpc.RpcError) and e.code() in [
-                    grpc.StatusCode.UNAVAILABLE,
-                    grpc.StatusCode.DEADLINE_EXCEEDED,
-                ]) or isinstance(e, grpc.FutureTimeoutError):
+    except exceptions.CommandError as e:
+        # Any failure of the end-time probe means the instance is unreachable
+        # or gone. An SSH connection failure surfaces as returncode 255, but
+        # the instance can also disappear between the job-status check and this
+        # fetch - e.g. on Kubernetes the pod may be deleted on preemption or
+        # teardown, which fails with returncode 1 and a "pods ... not found"
+        # error. This read is best-effort, so fall back to the current time
+        # instead of crashing the controller.
+        logger.warning(
+            f'Failed to get the end time from instance {cluster_name} '
+            f'(returncode={e.returncode}); assuming the instance was '
+            f'preempted or torn down. stderr: {e.detailed_reason}')
+        return time.time()
+    except (grpc.RpcError, grpc.FutureTimeoutError) as e:
+        if (isinstance(e, grpc.RpcError) and e.code() in [
+                grpc.StatusCode.UNAVAILABLE,
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+        ]) or isinstance(e, grpc.FutureTimeoutError):
             # Failed to connect - probably the instance was preempted since the
             # job completed. We shouldn't crash here, so just log and use the
             # current time.
@@ -1018,8 +1122,8 @@ def _collect_job_debug_manifest(
     # shared controller_system/*.log set to only the controllers that
     # actually ran this job.
     with _catch_to_errors(errors, 'managed_jobs', f'{job_id}/controller_log'):
-        controller_logs_dir = pathlib.Path(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        controller_logs_dir = runtime_utils.expanduser_path(
+            pathlib.Path(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR))
         log_file = controller_logs_dir / f'{job_id}.log'
         if log_file.is_file():
             file_paths.append({
@@ -1164,8 +1268,8 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
     if not relevant_uuids:
         return
     with _catch_to_errors(errors, 'managed_jobs', 'controller_system/logs'):
-        controller_logs_dir = pathlib.Path(
-            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        controller_logs_dir = runtime_utils.expanduser_path(
+            pathlib.Path(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR))
         if not controller_logs_dir.exists():
             return
         for uuid_str in relevant_uuids:
@@ -1471,7 +1575,8 @@ def cancel_managed_jobs(
 
 def controller_log_file_for_job(job_id: int,
                                 create_if_not_exists: bool = False) -> str:
-    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    log_dir = runtime_utils.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
         os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f'{job_id}.log')
@@ -1769,6 +1874,16 @@ def stream_logs_by_id(
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file_ever_existed = False
+            # Whether a task's logs went to an external store is a per-task,
+            # write-time fact: the controller only skips persisting a local
+            # copy (leaving local_log_file NULL) when a logging agent forwarded
+            # the logs elsewhere (see download_log_and_stream). So we decide the
+            # read source per task by the presence of a local file, NOT by the
+            # current global logging-agent config -- this keeps read-back
+            # working after the agent is disconnected or when serving from a
+            # replica whose config view differs. When there is no local copy we
+            # stream from the registered log reader, mirroring core.tail_logs.
+            log_reader = logs.get_log_reader()
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             total_tasks = len(task_info)
@@ -1845,6 +1960,52 @@ def stream_logs_by_id(
                                 f'{task_str} finished '
                                 f'(status: {task_status.value}).'),
                                   flush=True)
+                elif log_reader is not None:
+                    # No local copy was persisted for this task, so its logs
+                    # were forwarded to an external store. Stream them back for
+                    # this task's ephemeral cluster; the cluster ran exactly one
+                    # job, so read the latest indexed one (job_id=None).
+                    returncode = None
+                    try:
+                        pool = managed_job_state.get_pool_from_job_id(job_id)
+                        if pool is not None:
+                            cluster_name, _ = (
+                                managed_job_state.get_pool_submit_info(job_id))
+                        else:
+                            cluster_name = generate_managed_job_cluster_name(
+                                task_name, job_id)
+                        if cluster_name is None:
+                            # A pool job that was never assigned a cluster has
+                            # no logs to read back; fall through to the message.
+                            continue
+                        task_str = (f'Task {task_name}({task_id})'
+                                    if task_name else f'Task {task_id}')
+                        if num_tasks > 1 or task is not None:
+                            print(f'=== {task_str} ===')
+                        returncode = log_reader.read_cluster_job_logs(
+                            cluster_name,
+                            None,
+                            follow=False,
+                            tail=tail if tail is not None else 0)
+                    except Exception as e:  # pylint: disable=broad-except
+                        # Surface the failure (streamed to the user via the
+                        # request's stdout redirection) and fall through to the
+                        # terminal-state message instead of crashing.
+                        logger.warning(
+                            'Failed to read logs for job %s task %s from the '
+                            'external log store: %s', job_id, task_id, e)
+                        continue
+                    if returncode is None:
+                        # No logs in the external store for this task; fall
+                        # through to the terminal-state message below.
+                        continue
+                    log_file_ever_existed = True
+                    if num_tasks > 1 or task is not None:
+                        if task_status.is_terminal():
+                            print(ux_utils.finishing_message(
+                                f'{task_str} finished '
+                                f'(status: {task_status.value}).'),
+                                  flush=True)
             if log_file_ever_existed:
                 # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
@@ -1853,6 +2014,23 @@ def stream_logs_by_id(
                           flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
+            if log_reader is not None:
+                # An external log reader is registered but returned nothing for
+                # this job: its logs were not persisted locally and are not (or
+                # no longer) in the external store -- e.g. outside the store's
+                # retention window, or never captured. When a logging agent is
+                # in use, task-log retention is governed by the external store,
+                # not by jobs.controller.task_logs_gc_retention_hours.
+                return (
+                    f'{colorama.Fore.YELLOW}'
+                    f'No logs found for job {job_id} in the external log '
+                    f'store. The logs may be outside the store\'s retention '
+                    f'window or were never captured. For controller logs, '
+                    f'run: sky jobs logs --controller {job_id}'
+                    f'{colorama.Style.RESET_ALL}'
+                    f'{job_msg}',
+                    exceptions.JobExitCode.from_managed_job_status(
+                        managed_job_status))
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '

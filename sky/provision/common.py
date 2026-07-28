@@ -192,6 +192,14 @@ class ClusterInfo:
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
+    # Actual per-node CPU/memory requests observed on the provisioned
+    # instances (e.g., Kubernetes pod resources.requests). These can diverge
+    # from the launched resources spec when the final node config is mutated
+    # out-of-band, e.g., by an admin policy writing kubernetes.pod_config
+    # directly. Only populated by the Kubernetes provisioner; access with
+    # getattr for handles pickled before these fields existed.
+    actual_cpus: Optional[float] = None
+    actual_memory_gb: Optional[float] = None
 
     @property
     def num_instances(self) -> int:

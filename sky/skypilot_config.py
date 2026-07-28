@@ -81,6 +81,8 @@ from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
     import yaml
+
+    from sky import models
 else:
     yaml = adaptors_common.LazyImport('yaml')
 
@@ -581,8 +583,34 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
 
 def to_dict() -> config_utils.Config:
-    """Returns a deep-copied version of the current config."""
+    """Returns a deep-copied version of the current config.
+
+    `active_workspace` here is only what the config itself sets; use
+    `resolved_config()` for the workspace the request actually runs in.
+    """
     return copy.deepcopy(_get_loaded_config())
+
+
+def resolved_config() -> config_utils.Config:
+    """Returns the config with the effective `active_workspace` filled in.
+
+    The active workspace can be resolved into a thread-local context instead
+    of the config (the server-side resolver in
+    `executor.override_request_env_and_config` sets it there), so
+    `active_workspace` is taken from `get_active_workspace()`. Callers that
+    need the workspace a request actually runs in — e.g. admin policies —
+    should use this rather than `to_dict()`.
+
+    Keep this separate from `to_dict()`, which also feeds the client's
+    `override_skypilot_config` on the wire
+    (`payloads.get_override_skypilot_config_from_client`): stamping
+    `active_workspace` there would make `is_active_workspace_set()` always
+    return True and disable the per-user workspace resolver
+    (`_should_apply_workspace_resolver`).
+    """
+    config = to_dict()
+    config['active_workspace'] = get_active_workspace()
+    return config
 
 
 def _get_config_file_path(envvar: str) -> Optional[str]:
@@ -604,9 +632,27 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
     _validate_dashboard_external_links(config, config_source)
 
 
+# Variables that may appear as ${var} inside a dashboard.external_links url
+# template. Substitution happens client-side in the dashboard; keep in sync
+# with TEMPLATE_LINK_VARIABLES in
+# sky/dashboard/src/utils/externalLinks.js.
+DASHBOARD_LINK_TEMPLATE_VARIABLES = frozenset({
+    'cluster_name',
+    'job_id',
+    'job_name',
+    'user',
+    'workspace',
+})
+_TEMPLATE_VARIABLE_PATTERN = re.compile(r'\$\{([^}]*)\}')
+
+
 def _validate_dashboard_external_links(config: Dict[str, Any],
                                        config_source: str) -> None:
-    """Ensures every dashboard.external_links regex is compilable."""
+    """Ensures every dashboard.external_links entry is well-formed.
+
+    `regex` entries must compile; `url` entries may only reference known
+    template variables.
+    """
     dashboard = config.get('dashboard') if isinstance(config, dict) else None
     if not isinstance(dashboard, dict):
         return
@@ -617,15 +663,26 @@ def _validate_dashboard_external_links(config: Dict[str, Any],
         if not isinstance(entry, dict):
             continue
         regex = entry.get('regex')
-        if not isinstance(regex, str):
-            continue
-        try:
-            re.compile(regex)
-        except re.error as e:
-            raise ValueError(
-                f'Invalid config YAML from ({config_source}). '
-                f'dashboard.external_links[{idx}].regex is not a valid regex: '
-                f'{regex!r} ({e}).') from e
+        if isinstance(regex, str):
+            try:
+                re.compile(regex)
+            except re.error as e:
+                raise ValueError(
+                    f'Invalid config YAML from ({config_source}). '
+                    f'dashboard.external_links[{idx}].regex is not a valid '
+                    f'regex: {regex!r} ({e}).') from e
+        url = entry.get('url')
+        if isinstance(url, str):
+            for match in _TEMPLATE_VARIABLE_PATTERN.finditer(url):
+                variable = match.group(1)
+                if variable not in DASHBOARD_LINK_TEMPLATE_VARIABLES:
+                    allowed = ', '.join(
+                        sorted(DASHBOARD_LINK_TEMPLATE_VARIABLES))
+                    raise ValueError(
+                        f'Invalid config YAML from ({config_source}). '
+                        f'dashboard.external_links[{idx}].url references an '
+                        f'unknown template variable '
+                        f'${{{variable}}}. Allowed variables: {allowed}.')
 
 
 def overlay_skypilot_config(
@@ -958,27 +1015,33 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
     original_config_path = loaded_config_path_serialized()
     original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if new_configs != original_config:
-        # Modify the global config of current process or context
-        _set_loaded_config(new_configs)
-        with tempfile.NamedTemporaryFile(delete=False,
-                                         mode='w',
-                                         prefix='mutated-skypilot-config-',
-                                         suffix='.yaml') as temp_file:
-            yaml_utils.dump_yaml(temp_file.name, dict(**new_configs))
-        # Modify the env var of current process or context so that the
-        # new config will be used by spawned sub-processes.
-        # Note that this code modifies os.environ directly because it
-        # will be hijacked to be context-aware if a context is active.
-        os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
-        _set_loaded_config_path(temp_file.name)
-        yield
-        # Restore the original config and env var.
-        _set_loaded_config(original_config)
-        _set_loaded_config_path_serialized(original_config_path)
-        if original_env_var:
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
-        else:
-            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
+        try:
+            # Modify the global config of current process or context
+            _set_loaded_config(new_configs)
+            with tempfile.NamedTemporaryFile(delete=False,
+                                             mode='w',
+                                             prefix='mutated-skypilot-config-',
+                                             suffix='.yaml') as temp_file:
+                yaml_utils.dump_yaml(temp_file.name, dict(**new_configs))
+            # Modify the env var of current process or context so that the
+            # new config will be used by spawned sub-processes.
+            # Note that this code modifies os.environ directly because it
+            # will be hijacked to be context-aware if a context is active.
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+            _set_loaded_config_path(temp_file.name)
+            yield
+        finally:
+            # Restore the original config and env var. This must happen even
+            # if the body raises: while ENV_VAR_SKYPILOT_CONFIG is set,
+            # `reload_config()` reads the temporary file instead of the real
+            # config, so leaving it in place makes every later config reload
+            # in this process or context see the replacement config.
+            _set_loaded_config(original_config)
+            _set_loaded_config_path_serialized(original_config_path)
+            if original_env_var:
+                os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
+            else:
+                os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
     else:
         yield
 
@@ -1011,6 +1074,58 @@ def register_config_update_hook(fn: Callable[[], None]) -> None:
     """
     if fn not in _CONFIG_UPDATE_HOOKS:
         _CONFIG_UPDATE_HOOKS.append(fn)
+
+
+# Validators invoked at the start of `update_api_server_config_no_lock`,
+# before the new config is persisted. Each validator receives the currently
+# persisted config and the incoming config, and may reject the save by
+# raising. Server-side integrations use this to enforce invariants and block
+# invalid or conflicting config changes before they take effect. Registered at
+# server startup during single-threaded plugin loading, so no lock is needed.
+_CONFIG_SAVE_VALIDATORS: List[Callable[
+    [config_utils.Config, config_utils.Config], None]] = []
+
+
+def register_config_save_validator(
+        fn: Callable[[config_utils.Config, config_utils.Config], None]) -> None:
+    """Register a validator invoked before the API server config is saved.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. Each validator is called as ``fn(current, incoming)``
+    before the incoming config is persisted, where ``current`` is the
+    currently persisted config and ``incoming`` is the config about to be
+    saved. A validator vetoes the save by raising; unlike
+    `register_config_update_hook`, exceptions are NOT caught -- they propagate
+    to the caller so the save is aborted. Validators must not mutate the
+    config.
+    """
+    if fn not in _CONFIG_SAVE_VALIDATORS:
+        _CONFIG_SAVE_VALIDATORS.append(fn)
+
+
+# Post-save hooks invoked at the end of `update_api_server_config_no_lock`,
+# after the new config has been persisted and reloaded in-process. Unlike
+# `register_config_update_hook`, each hook receives the previously persisted
+# config, the newly persisted config, and the user who made the change.
+ConfigPostSaveHook = Callable[
+    [config_utils.Config, config_utils.Config, Optional['models.User']], None]
+_CONFIG_POST_SAVE_HOOKS: List[ConfigPostSaveHook] = []
+
+
+def register_config_post_save_hook(fn: ConfigPostSaveHook) -> None:
+    """Register a hook invoked after the API server config is saved.
+
+    Called at server startup during plugin loading (single-threaded), so no
+    lock is needed. Each hook is called as ``fn(old, new, user)`` after the
+    new config has been persisted and reloaded, where ``old`` is the
+    previously persisted config, ``new`` is the config that was just saved,
+    and ``user`` is the user who made the change. Hooks receive copies, so
+    mutating them has no effect. Like `register_config_update_hook`,
+    exceptions are caught and logged so a misbehaving hook cannot fail the
+    config update.
+    """
+    if fn not in _CONFIG_POST_SAVE_HOOKS:
+        _CONFIG_POST_SAVE_HOOKS.append(fn)
 
 
 def _get_effective_k8s_config_value(
@@ -1222,6 +1337,22 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
             constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
         raise ValueError('This function can only be called by the API Server.')
 
+    # Capture the currently persisted config before it is overwritten, for
+    # save validators and post-save hooks (to_dict() returns a fresh copy).
+    old_config: Optional[config_utils.Config] = None
+    if _CONFIG_SAVE_VALIDATORS or _CONFIG_POST_SAVE_HOOKS:
+        old_config = to_dict()
+
+    # Run registered validators before persisting the config, so a validator
+    # can veto the save by raising; exceptions propagate to abort the update.
+    # Validators must not mutate the config, so hand them a deep copy of the
+    # incoming config.
+    if _CONFIG_SAVE_VALIDATORS:
+        assert old_config is not None
+        incoming = copy.deepcopy(config)
+        for validator in list(_CONFIG_SAVE_VALIDATORS):
+            validator(old_config, incoming)
+
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
         # Fallback to ~/.sky/config.yaml, and make sure it exists.
@@ -1279,3 +1410,17 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Config-update hook {hook!r} raised: {e}',
                            exc_info=True)
+    if _CONFIG_POST_SAVE_HOOKS:
+        assert old_config is not None
+        user = common_utils.get_current_user()
+        # At this point `config` reflects what was persisted (e.g. with the
+        # ('db',) key stripped); hand each hook its own copies so mutations
+        # by one hook cannot leak into another.
+        for post_save_hook in list(_CONFIG_POST_SAVE_HOOKS):
+            try:
+                post_save_hook(copy.deepcopy(old_config), copy.deepcopy(config),
+                               user)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Config post-save hook {post_save_hook!r} raised: {e}',
+                    exc_info=True)

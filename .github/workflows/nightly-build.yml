@@ -303,6 +303,38 @@ jobs:
       package_name: skypilot-nightly
     secrets: inherit
 
+  # Tag the published commit so a nightly version maps back to its exact
+  # commit, mirroring the stable release flow (release-publish.yml
+  # `create-release`): an annotated `v<version>` tag pushed with the release
+  # PAT. Gated on a successful publish so only actually-released commits get
+  # tagged.
+  tag-nightly-release:
+    needs: [check-date, nightly-build-pypi, publish-and-validate-both]
+    if: ${{ always() && needs.publish-and-validate-both.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ secrets.GH_PAT_FOR_RELEASE }}
+      - name: Create and push nightly tag
+        run: |
+          VERSION="${{ needs.nightly-build-pypi.outputs.version }}"
+          TAG="v${VERSION}"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          # Nightly versions are date-based (1.0.0.devYYYYMMDD), so a same-day
+          # re-dispatch reuses the version. Keep the first tag of the day: if it
+          # already exists on origin, log and exit without failing the build.
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin; leaving it untouched."
+            exit 0
+          fi
+          git tag -a "${TAG}" -m "Nightly release ${TAG}"
+          git push origin "${TAG}"
+          echo "Created and pushed ${TAG} -> ${{ github.sha }}"
+
   # After a nightly is published, dispatch the downstream repo's workflow so it
   # can react without polling PyPI. Fail-loud: a missing secret, bad App creds,
   # or a non-204 turns the run red rather than silently skipping.
@@ -431,7 +463,7 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-kubernetes-jobs-consolidation, smoke-tests-shared-gke-api-server, smoke-tests-slurm-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release, tag-nightly-release]
     # Only run this job if any of the previous jobs failed
     if: failure()
     steps:

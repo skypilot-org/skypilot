@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PaginationControls } from '@/components/elements/PaginationControls';
+import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -2033,7 +2034,7 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex items-center justify-between text-sm mb-1">
+        <div className="flex items-center justify-between text-sm mb-4">
           <div className="flex flex-wrap items-center min-w-0">
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
@@ -2188,39 +2189,19 @@ export function ManagedJobsTable({
                     setCurrentPage(1);
                   });
                 };
-                const isActive = activeTab === 'active' && showAllMode;
-                const isAll = activeTab === 'all' && showAllMode;
+                // Neither segment is highlighted while a status chip
+                // narrows the view (showAllMode=false).
+                const activityValue = showAllMode ? activeTab : null;
                 return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by activity"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => selectTab('active')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isActive
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      Active
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isAll}
-                      onClick={() => selectTab('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isAll
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All
-                    </button>
-                  </div>
+                  <SegmentedToggle
+                    ariaLabel="Filter jobs by activity"
+                    options={[
+                      { value: 'active', label: 'Active' },
+                      { value: 'all', label: 'All' },
+                    ]}
+                    value={activityValue}
+                    onChange={selectTab}
+                  />
                 );
               })()}
               {(() => {
@@ -2234,36 +2215,15 @@ export function ManagedJobsTable({
                   : userScope === 'mine';
                 const isEveryone = !explicitUserFilter && userScope === 'all';
                 return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by owner"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isMine}
-                      onClick={() => selectScope('mine')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isMine
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      My Jobs
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isEveryone}
-                      onClick={() => selectScope('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isEveryone
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All Jobs
-                    </button>
-                  </div>
+                  <SegmentedToggle
+                    ariaLabel="Filter jobs by owner"
+                    options={[
+                      { value: 'mine', label: 'My Jobs' },
+                      { value: 'all', label: 'All Jobs' },
+                    ]}
+                    value={isMine ? 'mine' : isEveryone ? 'all' : null}
+                    onChange={selectScope}
+                  />
                 );
               })()}
               {/* Scope hint: when filtered to the current user's jobs,

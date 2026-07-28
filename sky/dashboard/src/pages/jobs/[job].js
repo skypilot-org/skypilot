@@ -62,7 +62,13 @@ import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents } from '@/plugins/PluginProvider';
 import { checkGrafanaAvailability } from '@/utils/grafana';
-import { normalizeUrl, useLogLinkExtractor } from '@/utils/externalLinks';
+import {
+  LINK_SCOPE_JOBS,
+  normalizeUrl,
+  useLogLinkExtractor,
+  useScopedLinks,
+  useTemplateLinks,
+} from '@/utils/externalLinks';
 import { TelemetrySection } from '@/components/TelemetrySection';
 import { hasAccelerator } from '@/utils/gpuUtils';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
@@ -476,7 +482,10 @@ function JobDetails() {
                                 </Link>
                               </TableCell>
                               <TableCell>
-                                <StatusBadge status={task.status} />
+                                <StatusBadge
+                                  status={task.status}
+                                  statusTooltip={task.statusTooltip}
+                                />
                               </TableCell>
                               <TableCell>
                                 {formatDuration(task.job_duration)}
@@ -1166,7 +1175,7 @@ function JobDetailsContent({
   // it is handed to a plugin that owns the logs slot — the OSS streamer
   // does not run in that case, so the plugin forwards its own lines.
   const { extractedLinks: logExtractedLinks, scanLines } =
-    useLogLinkExtractor();
+    useLogLinkExtractor(LINK_SCOPE_JOBS);
 
   useEffect(() => {
     scanLines(logs);
@@ -1179,11 +1188,34 @@ function JobDetailsContent({
     }
   }, [logExtractedLinks, onLinksExtracted]);
 
-  // Combine database links with log-extracted links
+  // Admin-configured url templates (dashboard.external_links entries with a
+  // `url` field) resolved against this managed job's metadata. The backing
+  // cluster name is the job's current cluster (present while running or
+  // after the last recovery).
+  const templateLinkContext = useMemo(
+    () => ({
+      cluster_name: jobData?.current_cluster_name,
+      job_id: jobData?.id,
+      job_name: jobData?.name,
+      user: jobData?.user,
+      workspace: jobData?.workspace,
+    }),
+    [
+      jobData?.current_cluster_name,
+      jobData?.id,
+      jobData?.name,
+      jobData?.user,
+      jobData?.workspace,
+    ]
+  );
+  const templateLinks = useTemplateLinks(templateLinkContext, LINK_SCOPE_JOBS);
+
+  // Combine template links, database links, and log-extracted links.
   // Use logExtractedLinksFromParent if provided (for info tab), otherwise use local extraction
-  const combinedLinks = useMemo(() => {
-    // Start with database links (they take priority if there's a conflict)
-    const combined = { ...(links || {}) };
+  const mergedLinks = useMemo(() => {
+    // Template links are the base; database links take priority if there's
+    // a conflict.
+    const combined = { ...templateLinks, ...(links || {}) };
     // Use parent-provided links (for info tab) or locally extracted links (for logs tab)
     const extractedToUse = logExtractedLinksFromParent || logExtractedLinks;
     // Add log-extracted links (only if not already present)
@@ -1193,7 +1225,10 @@ function JobDetailsContent({
       }
     }
     return combined;
-  }, [links, logExtractedLinks, logExtractedLinksFromParent]);
+  }, [templateLinks, links, logExtractedLinks, logExtractedLinksFromParent]);
+  // Scope-filter the merged map so server-computed (DB) links honor entry
+  // scopes too.
+  const combinedLinks = useScopedLinks(mergedLinks, LINK_SCOPE_JOBS);
 
   // Auto-scroll to bottom when logs change or tab changes
   useEffect(() => {
@@ -1360,7 +1395,16 @@ function JobDetailsContent({
               <PluginSlot
                 name="jobs.detail.status.badge"
                 context={jobData}
-                fallback={<StatusBadge status={computedStatus} />}
+                fallback={
+                  <StatusBadge
+                    status={computedStatus}
+                    statusTooltip={
+                      computedStatus === 'PENDING'
+                        ? jobData.statusTooltip
+                        : null
+                    }
+                  />
+                }
               />
             );
           })()}

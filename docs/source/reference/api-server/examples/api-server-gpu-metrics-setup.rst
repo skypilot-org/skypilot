@@ -146,7 +146,7 @@ Prometheus setup
 
 In the cluster where you deploy the API server, Prometheus is installed automatically as part of :ref:`api-server-setup-dcgm-metrics-scraping`.
 
-For other Kubernetes clusters (external clusters), deploy Prometheus manually. SkyPilot requires a Service named ``skypilot-prometheus-server`` in the ``skypilot`` namespace to scrape metrics from external clusters.
+For other Kubernetes clusters (external clusters), deploy Prometheus manually. By default, SkyPilot scrapes metrics from external clusters through a Service named ``skypilot-prometheus-server`` in the ``skypilot`` namespace. If your Prometheus is deployed under a different namespace, service name, or port, set the :ref:`metrics.prometheus <config-yaml-metrics-prometheus>` fields in the SkyPilot config accordingly.
 
 First, create a ``prometheus-values.yaml`` file with the following configuration:
 

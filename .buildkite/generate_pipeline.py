@@ -245,7 +245,7 @@ def _extract_marked_tests(
     extra_args: List[str],
     exclusive_run: bool = False
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[List[str]],
-                     List[bool]]]:
+                     List[bool], List[Optional[str]]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -330,6 +330,18 @@ def _extract_marked_tests(
         benchmark_test = 'benchmark' in marks
         no_auto_retry = 'no_auto_retry' in marks
 
+        # A concurrency_group(name) marker serializes this test globally across
+        # all builds and pipelines: the step gets that concurrency_group with a
+        # limit of 1, so only one instance runs at a time org-wide while every
+        # other step is unaffected. conftest.py renders the marker as
+        # 'concurrency_group(<name>)' in the collect-only output.
+        test_concurrency_group = None
+        for mark in marks:
+            group_match = re.match(r'concurrency_group\((.+)\)$', mark)
+            if group_match:
+                test_concurrency_group = group_match.group(1).strip()
+                break
+
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
                 # This mark does not specify a cloud, so we skip it.
@@ -372,7 +384,9 @@ def _extract_marked_tests(
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
-        ], [no_auto_retry for _ in range(len(final_clouds_to_include))])
+        ], [no_auto_retry for _ in range(len(final_clouds_to_include))], [
+            test_concurrency_group for _ in range(len(final_clouds_to_include))
+        ])
 
     return function_cloud_map
 
@@ -415,8 +429,8 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
         build_id = os.environ.get('BUILDKITE_BUILD_ID', 'local')
         concurrency_group = f'env-file-smoke-test-{build_id}'
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param, extra_args, no_auto_retry in zip(
-                *clouds_queues_param):
+        for (cloud, queue, param, extra_args, no_auto_retry,
+             test_concurrency_group) in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
@@ -440,7 +454,14 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                     'queue': queue
                 }
             }
-            if concurrency_limit is not None:
+            if test_concurrency_group is not None:
+                # Per-test global serialization takes precedence over any
+                # run-wide group: a Buildkite step has a single concurrency
+                # group, and this one is a fixed name shared across all builds
+                # and pipelines, so instances of this test serialize org-wide.
+                step['concurrency'] = 1
+                step['concurrency_group'] = test_concurrency_group
+            elif concurrency_limit is not None:
                 step['concurrency'] = concurrency_limit
                 step['concurrency_group'] = concurrency_group
             if no_auto_retry:

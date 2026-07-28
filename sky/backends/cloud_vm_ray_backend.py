@@ -263,6 +263,14 @@ def _format_provision_failure_blocks(
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
 
+# When a provision request cannot get the cluster lock within
+# _CLUSTER_LOCK_TIMEOUT and runs on an API server executor, it is parked as
+# WAITING (releasing the executor worker) until the lock is observed to be
+# acquirable, instead of holding the worker blocked on the lock for the whole
+# duration of the conflicting operation. This gap is the fallback reschedule
+# backoff when waiting on the lock condition fails (e.g. a database glitch).
+_CLUSTER_LOCK_RETRY_GAP_SECONDS = 30
+
 
 def _is_message_too_long(returncode: int,
                          output: Optional[str] = None,
@@ -1233,6 +1241,12 @@ class RetryingVmProvisioner(object):
                 usage_lib.messages.usage.update_final_cluster_status(
                     status_lib.ClusterStatus.INIT)
 
+                # Capture the task YAML.
+                user_specified_task_config = None
+                if task is not None:
+                    user_specified_task_config = task.to_yaml_config(
+                        use_user_specified_yaml=True)
+
                 # This sets the status to INIT (even for a normal, UP cluster).
                 global_user_state.add_or_update_cluster(
                     cluster_name,
@@ -1241,6 +1255,7 @@ class RetryingVmProvisioner(object):
                     ready=False,
                     is_managed=self._is_managed,
                     provision_log_path=log_abs_path,
+                    task_config=user_specified_task_config,
                 )
 
                 # Add cluster event for actual provisioning start.
@@ -3297,6 +3312,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
+            exceptions.ExecutionPausedError: when running on an API server
+                executor worker and the cluster lock is held by another
+                operation: the request is parked as WAITING (releasing the
+                worker) and re-enqueued once the lock is observed to be
+                acquirable, instead of blocking on the lock.
             RuntimeError: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
@@ -3319,7 +3339,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               retry_until_up,
                                               skip_unnecessary_provisioning,
                                               resize)
-            except locks.LockTimeout:
+            except locks.LockTimeout as e:
+                # When running a server request that the scheduler can park and
+                # resume, release the worker instead of holding it blocked on
+                # the cluster lock: raising ExecutionPausedError marks the
+                # request WAITING and re-enqueues it once the attached
+                # condition observes the lock to be acquirable. Launches issued
+                # by the jobs controller in-process do not go through the
+                # request scheduler, so they keep the blocking behavior.
+                if (common_utils.is_in_request_context() and
+                        not self._is_launched_by_jobs_controller):
+                    raise exceptions.ExecutionPausedError(
+                        f'Cluster {cluster_name!r} is locked by another '
+                        'operation (e.g. launch, start, stop, autostop or '
+                        'teardown).',
+                        hint=('Waiting for the other operation to finish; '
+                              'will resume once the cluster lock is '
+                              'released. Check concurrent requests: '
+                              f'sky api status -v | grep {cluster_name}'),
+                        retry_wait_seconds=_CLUSTER_LOCK_RETRY_GAP_SECONDS,
+                        continue_condition=locks.LockAcquirableCondition(
+                            lock_id)) from e
                 if not communicated_with_user:
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching - blocked by ' +
@@ -4658,6 +4698,75 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
+
+    def get_job_metadata(
+        self,
+        handle: CloudVmRayResourceHandle,
+        job_ids: Optional[List[int]] = None,
+    ) -> Dict[int, dict]:
+        """Best-effort fetch of per-job ``metadata`` from the cluster's skylet.
+
+        Reuses the existing job-queue read, whose payload already carries each
+        job's metadata JSON, over gRPC when available and SSH otherwise, so it
+        also works on non-gRPC clusters. Returns ``{}`` on any failure:
+        metadata-derived links are best-effort and the controller's
+        terminal-state log scan is the guarantee. Older clusters do not populate
+        the harvested-URL metadata, so they simply yield nothing here.
+        """
+        # (job_id, metadata) pairs; metadata is a JSON string (gRPC) or an
+        # already-decoded dict (SSH payload via load_job_queue).
+        raw_metadata: List[Any] = []
+        used_grpc = False
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = jobsv1_pb2.GetJobQueueRequest(all_jobs=True)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).get_job_queue(request))
+                raw_metadata = [
+                    (job.job_id, job.metadata) for job in response.jobs
+                ]
+                used_grpc = True
+            except Exception as e:  # pylint: disable=broad-except
+                # Best-effort: any gRPC/channel failure (including a tunnel
+                # RuntimeError raised by get_grpc_channel) should fall back to
+                # the SSH path below rather than propagate.
+                logger.debug('gRPC job metadata fetch failed, falling back to '
+                             f'SSH: {e}')
+        if not used_grpc:
+            code = job_lib.JobLibCodeGen.get_job_queue(None, True)
+            try:
+                returncode, stdout, stderr = self.run_on_head(
+                    handle,
+                    code,
+                    require_outputs=True,
+                    separate_stderr=True,
+                    stream_logs=False)
+                if returncode != 0 or not stdout:
+                    logger.debug('SSH job metadata fetch failed '
+                                 f'(returncode={returncode}): {stderr}')
+                    return {}
+                raw_metadata = [(record['job_id'], record.get('metadata'))
+                                for record in job_lib.load_job_queue(stdout)]
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'SSH job metadata fetch failed: {e}')
+                return {}
+        # Empty set means "all jobs"; a non-empty set filters to those ids.
+        wanted = set(job_ids or [])
+        result: Dict[int, dict] = {}
+        for job_id, metadata in raw_metadata:
+            if wanted and job_id not in wanted:
+                continue
+            if isinstance(metadata, str):
+                if not metadata:
+                    continue
+                try:
+                    metadata = json.loads(metadata)
+                except (ValueError, TypeError):
+                    continue
+            if isinstance(metadata, dict) and metadata:
+                result[job_id] = metadata
+        return result
 
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,

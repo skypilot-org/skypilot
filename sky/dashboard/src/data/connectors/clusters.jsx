@@ -30,6 +30,35 @@ function getPaginationFetch() {
   return typeof window !== 'undefined' ? window.__skyPaginationFetch : null;
 }
 
+/**
+ * Count clusters owned by users other than `currentUser`.
+ *
+ * Used to gate the "View all clusters" empty-state CTA when the
+ * current-user scope has no rows. When the pagination extension is
+ * available, ask it for the all-users total with a single-row page
+ * instead of fetching every row just to count them (mirrors the jobs
+ * page's empty-state probe). That total includes the caller's own
+ * clusters, but callers only use this when the current user's view is
+ * empty, so the difference is nil.
+ */
+export async function getOtherUsersClustersCount(currentUser) {
+  if (isPaginationPluginAvailable()) {
+    const pluginFetch = getPaginationFetch();
+    const result = await dashboardCache.get(pluginFetch, [
+      { page: 1, limit: 1, allUsers: true },
+    ]);
+    return result?.total || 0;
+  }
+  const all = (await dashboardCache.get(getClusters)) || [];
+  if (!currentUser) {
+    return all.length;
+  }
+  return all.filter(
+    (item) =>
+      item.user_hash !== currentUser.id && item.user !== currentUser.name
+  ).length;
+}
+
 const DEFAULT_TAIL_LINES = 5000;
 
 /**
@@ -72,11 +101,14 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
-export async function getClusters({ clusterNames = null } = {}) {
+export async function getClusters({
+  clusterNames = null,
+  allUsers = true,
+} = {}) {
   try {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
-      all_users: true,
+      all_users: allUsers,
       include_credentials: false,
       include_handle: false,
       summary_response: clusterNames == null,
@@ -416,6 +448,8 @@ export async function getClusterJobs({ clusterName, workspace }) {
         logs: '',
         workspace: workspace || 'default',
         git_commit: job.metadata?.git_commit || '-',
+        // External links extracted server-side from the job's logs.
+        links: job.links || {},
       };
     });
     return jobData;
@@ -549,6 +583,13 @@ export function useClusterDetails({ cluster, job = null }) {
  * @param {boolean} options.showHistory - Whether to include historical clusters
  * @param {number} options.historyDays - Number of days of history to fetch
  * @param {number} options.refreshInterval - Auto-refresh interval in ms
+ * @param {Object} options.sortConfig - {key, direction} sort configuration
+ * @param {Array} options.filters - Active filter definitions
+ * @param {boolean} options.allUsers - When false, ask the server to return
+ *   only the current user's clusters (scopes the fetch instead of filtering
+ *   client-side).
+ * @param {Object} options.currentUser - Logged-in user {id, name}, used to
+ *   scope the historical (cost_report) rows that the server doesn't filter.
  * @returns {Object} Cluster data with pagination state and actions
  */
 export function useClusterData(options = {}) {
@@ -558,6 +599,8 @@ export function useClusterData(options = {}) {
     refreshInterval = null,
     sortConfig = { key: null, direction: 'ascending' },
     filters = [],
+    allUsers = true,
+    currentUser = null,
   } = options;
 
   // Convert sortConfig to API format
@@ -586,16 +629,20 @@ export function useClusterData(options = {}) {
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
   const isInitialMount = useRef(true);
+  // Monotonic id used to drop stale responses: if the fetch options change
+  // (e.g. the ownership scope flips from all-users to current-user) while a
+  // request is in flight, the older response must not overwrite the newer one.
+  const fetchIdRef = useRef(0);
 
-  // Reset to page 1 when filters change, but skip on initial mount
-  // so the page number read from the URL isn't overwritten.
+  // Reset to page 1 when filters or ownership scope change, but skip on
+  // initial mount so the page number read from the URL isn't overwritten.
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
     setPage(1);
-  }, [filtersKey]);
+  }, [filtersKey, allUsers]);
 
   /**
    * Fetch clusters using server-side pagination (plugin path)
@@ -613,6 +660,7 @@ export function useClusterData(options = {}) {
         sortBy,
         sortOrder,
         filters,
+        allUsers,
       },
     ]);
 
@@ -621,14 +669,6 @@ export function useClusterData(options = {}) {
     const resultHasNext = result.hasNext || result.has_next || false;
     const resultHasPrev = result.hasPrev || result.has_prev || false;
     const resultData = result.items || result.data || [];
-
-    setData(resultData);
-    setFullData(resultData);
-    setTotal(resultTotal);
-    setTotalPages(resultTotalPages);
-    setHasNext(resultHasNext);
-    setHasPrev(resultHasPrev);
-    setIsServerPagination(true);
 
     // Prefetch next page in background if there is one
     if (resultHasNext) {
@@ -640,13 +680,33 @@ export function useClusterData(options = {}) {
         sortBy,
         sortOrder,
         filters,
+        allUsers,
       };
       dashboardCache
         .get(pluginFetch, [nextPageOptions], { ttl: 30000 })
         .then(() => console.log('[useClusterData] Prefetched page', page + 1))
         .catch((err) => console.warn('[useClusterData] Prefetch failed:', err));
     }
-  }, [page, limit, showHistory, historyDays, sortBy, sortOrder, filters]);
+
+    return {
+      data: resultData,
+      fullData: resultData,
+      total: resultTotal,
+      totalPages: resultTotalPages,
+      hasNext: resultHasNext,
+      hasPrev: resultHasPrev,
+      isServerPagination: true,
+    };
+  }, [
+    page,
+    limit,
+    showHistory,
+    historyDays,
+    sortBy,
+    sortOrder,
+    filters,
+    allUsers,
+  ]);
 
   /**
    * Fetch clusters using client-side pagination (default path)
@@ -654,8 +714,20 @@ export function useClusterData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useClusterData] Using client-side pagination');
 
+    const fetchActiveClusters = () =>
+      allUsers
+        ? dashboardCache.get(getClusters)
+        : dashboardCache.get(getClusters, [{ allUsers: false }]);
+
+    const belongsToCurrentUser = (c) =>
+      allUsers ||
+      !currentUser ||
+      c.user_hash === currentUser.id ||
+      c.user === currentUser.name;
+
     let allClusters;
     if (showHistory) {
+      const activeClusters = await fetchActiveClusters();
       let historyClusters = [];
       try {
         historyClusters = await dashboardCache.get(getClusterHistory, [
@@ -666,14 +738,23 @@ export function useClusterData(options = {}) {
         console.error('Error fetching cluster history:', historyError);
       }
 
-      // "Show history" surfaces only truly terminated clusters within the
-      // selected time window. cost_report also returns active clusters, so
-      // drop anything still present in cluster_table (status !== TERMINATED).
-      allClusters = historyClusters
-        .filter((c) => c.status === 'TERMINATED')
-        .map((c) => ({ ...c, isHistorical: true }));
+      const activeHashes = new Set(
+        activeClusters.map((c) => c.cluster_hash).filter(Boolean)
+      );
+      allClusters = [
+        ...activeClusters.map((c) => ({ ...c, isHistorical: false })),
+        // cost_report returns every user's rows, so scope history client-side.
+        ...historyClusters
+          .filter(
+            (c) =>
+              c.status === 'TERMINATED' &&
+              !activeHashes.has(c.cluster_hash) &&
+              belongsToCurrentUser(c)
+          )
+          .map((c) => ({ ...c, isHistorical: true })),
+      ];
     } else {
-      const activeClusters = await dashboardCache.get(getClusters);
+      const activeClusters = await fetchActiveClusters();
       allClusters = activeClusters.map((c) => ({
         ...c,
         isHistorical: false,
@@ -685,29 +766,44 @@ export function useClusterData(options = {}) {
     const startIndex = (page - 1) * limit;
     const paginatedData = allClusters.slice(startIndex, startIndex + limit);
 
-    setData(paginatedData);
-    setFullData(allClusters);
-    setTotal(clientTotal);
-    setTotalPages(clientTotalPages);
-    setHasNext(page < clientTotalPages);
-    setHasPrev(page > 1);
-    setIsServerPagination(false);
-  }, [showHistory, historyDays, page, limit]);
+    return {
+      data: paginatedData,
+      fullData: allClusters,
+      total: clientTotal,
+      totalPages: clientTotalPages,
+      hasNext: page < clientTotalPages,
+      hasPrev: page > 1,
+      isServerPagination: false,
+    };
+  }, [showHistory, historyDays, page, limit, allUsers, currentUser]);
 
   /**
    * Main fetch function - chooses server or client path
    */
   const fetchData = useCallback(async () => {
+    const fetchId = ++fetchIdRef.current;
     setLoading(true);
     setError(null);
 
     try {
-      if (isPaginationPluginAvailable()) {
-        await fetchServerSide();
-      } else {
-        await fetchClientSide();
+      const result = isPaginationPluginAvailable()
+        ? await fetchServerSide()
+        : await fetchClientSide();
+      // A newer fetch started while this one was in flight; drop the result.
+      if (fetchId !== fetchIdRef.current) {
+        return;
       }
+      setData(result.data);
+      setFullData(result.fullData);
+      setTotal(result.total);
+      setTotalPages(result.totalPages);
+      setHasNext(result.hasNext);
+      setHasPrev(result.hasPrev);
+      setIsServerPagination(result.isServerPagination);
     } catch (fetchError) {
+      if (fetchId !== fetchIdRef.current) {
+        return;
+      }
       console.error('[useClusterData] Error fetching clusters:', fetchError);
       setError(fetchError);
       setData([]);

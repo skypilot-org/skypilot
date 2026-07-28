@@ -81,7 +81,9 @@ export async function getEnabledCloudsList() {
 
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
-  const { getManagedJobs } = await import('@/data/connectors/jobs');
+  const { getManagedJobs, MANAGED_JOBS_SUMMARY_ARGS } = await import(
+    '@/data/connectors/jobs'
+  );
   const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );
@@ -89,9 +91,9 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   try {
     // Fetch jobs, clusters, and workspaces in parallel for better performance
     const [jobsResult, clustersResult, workspacesData] = await Promise.all([
-      // Use shared cache key (no field filtering) - preloader uses same args
+      // Shared cache key — must match the preloader's args exactly
       dashboardCache
-        .get(getManagedJobs, [{ allUsers: true, skipFinished: true }])
+        .get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS])
         .catch((error) => {
           console.error('Error fetching managed jobs:', error);
           return { jobs: [] };
@@ -205,6 +207,25 @@ export async function getCloudInfrastructure(forceRefresh = false) {
 export async function getGPUs() {
   // Legacy function - now redirects to workspace-aware infrastructure
   return await getWorkspaceInfrastructure();
+}
+
+/**
+ * Whether a Kubernetes context's node list is filtered by an `allowed_nodes`
+ * config. Drives the infra-page hint/badge that warn not all nodes in the
+ * context are shown, so a missing node isn't mistaken for a bug. Falls back to
+ * `{ configured: false }` on any error so the hint fails closed (no banner)
+ * rather than showing a misleading one.
+ */
+export async function getAllowedNodesConfig(context) {
+  try {
+    const response = await apiClient.get(
+      `/kubernetes/allowed_nodes?k8s_context=${encodeURIComponent(context)}`
+    );
+    if (!response.ok) return { configured: false };
+    return await response.json();
+  } catch {
+    return { configured: false };
+  }
 }
 
 // New workspace-aware infrastructure fetching function

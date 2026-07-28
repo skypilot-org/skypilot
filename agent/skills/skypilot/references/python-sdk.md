@@ -976,7 +976,7 @@ Deletes a storage.
 ### `sky.api_start`
 
 ```python
-sky.api_start(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False) -> None
+sky.api_start(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False, port: Optional[int] = None) -> None
 ```
 
 Starts the API server.
@@ -987,14 +987,20 @@ exist.
 **Args:**
     deploy: Whether to deploy the API server, i.e. fully utilize the
         resources of the machine.
-    host: The host to deploy the API server. It will be set to 0.0.0.0
-        if deploy is True, to allow remote access.
+    host: The host to bind the API server to. Under deploy, the server
+        always binds a wildcard address for remote access: ``::`` when an
+        IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+        is used as-is.
     foreground: Whether to run the API server in the foreground (run in
         the current process).
     metrics: Whether to export metrics of the API server.
     metrics_port: The port to export metrics of the API server.
     enable_basic_auth: Whether to enable basic authentication
         in the API server.
+    port: The port to bind the API server to. Defaults to the
+        SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580.
+        Other client commands only find a server on a non-default port
+        if the same environment variable is exported.
 **Returns:**
     None
 
@@ -1373,7 +1379,7 @@ Tears down the Kubernetes cluster started by local_up.
 ### `sky.local_up`
 
 ```python
-sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None) -> server_common.RequestId[None]
+sky.local_up(gpus: bool, name: Optional[str] = None, port_start: Optional[int] = None, num_nodes: int = 1) -> server_common.RequestId[None]
 ```
 
 Launches a Kubernetes cluster on local machines.

@@ -247,6 +247,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'GET'
     },
     {
+        'path': '/kubernetes/allowed_nodes',
+        'method': 'GET'
+    },
+    {
         'path': '/list_accelerators',
         'method': 'POST'
     },
@@ -393,13 +397,13 @@ def restrict_config_to_admins() -> bool:
     """Whether GET /workspaces/config is restricted to admins.
 
     The config payload includes admin-only secrets (e.g. cloud provider
-    tokens), so admins can opt into blocking non-admin reads by setting
-    ``rbac.restrict_config_to_admins: true``. Defaults to False to preserve
-    backward-compatible behavior (POST is always admin-only regardless).
+    tokens), so non-admin reads are blocked by default. Admins can opt out by
+    setting ``rbac.restrict_config_to_admins: false`` (POST is always
+    admin-only regardless).
     """
     return bool(
         skypilot_config.get_nested(('rbac', 'restrict_config_to_admins'),
-                                   default_value=False))
+                                   default_value=True))
 
 
 def get_role_permissions(

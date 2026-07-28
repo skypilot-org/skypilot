@@ -436,32 +436,10 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% set _affinity_node = (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
-        {% if _affinity_node or k8s_host_network %}
+        {% if k8s_node_affinity or k8s_host_network %}
         affinity:
-          {% if _affinity_node %}
-          nodeAffinity:
-            {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: {{k8s_acc_label_key}}
-                  operator: In
-                  values:
-                  {% for label_value in k8s_acc_label_values %}
-                  - {{label_value}}
-                  {% endfor %}
-            {% endif %}
-            {% if avoid_label_keys is not none %}
-            preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 1
-              preference:
-                matchExpressions:
-                {% for avoid_label_key in avoid_label_keys %}
-                - key: {{avoid_label_key}}
-                  operator: DoesNotExist
-                {% endfor %}
-            {% endif %}
+          {% if k8s_node_affinity %}
+          nodeAffinity: {{k8s_node_affinity | tojson}}
           {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
           podAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
@@ -474,6 +452,21 @@ available_node_types:
                         values:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
+            {% if k8s_efa_same_az %}
+            # Multi-node EFA co-location: an AWS EFA placement group is
+            # single-AZ, so every replica of this job must schedule into one
+            # zone or the fabric cannot form. Attract each pod to the zone of
+            # the other pods of the same SkyPilot cluster -- the first pod fixes
+            # the AZ (Karpenter provisions an EFA node wherever it has
+            # capacity) and the rest follow; the user names no zone. required
+            # (not preferred): cross-AZ EFA is broken, so pend loudly rather
+            # than silently fall back to TCP.
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    skypilot-cluster-name: {{cluster_name_on_cloud}}
+                topologyKey: topology.kubernetes.io/zone
+            {% endif %}
           {% endif %}
           {% endif %}
           {% if k8s_host_network %}
@@ -626,6 +619,13 @@ available_node_types:
                   fi
           {% endif %}
           env:
+            # Pin Ray's node IP to the address SkyPilot records as internal_ip
+            # (status.podIP). On multi-NIC / hostNetwork nodes Ray may otherwise
+            # auto-detect a different NIC and break multi-node rank ordering.
+            - name: SKYPILOT_RAY_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: SKYPILOT_POD_NODE_TYPE
               valueFrom:
                 fieldRef:
@@ -1287,7 +1287,7 @@ available_node_types:
               (
                 (
                 set -e
-                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # Create $SKY_RUNTIME_DIR/.sky early — uv_installation_commands
                 # writes python_path there before ray_installation_commands (which
                 # contains SETUP_SKY_DIRS_COMMANDS) creates it.
                 mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
@@ -1328,7 +1328,7 @@ available_node_types:
                 # absent, but on a fully offline/minimal image that too can be
                 # unavailable. Warn and continue rather than abort the launch --
                 # the cluster comes up and runs without these patches.
-                # python_path is seeded by conda_installation_commands
+                # python_path is seeded by uv_installation_commands
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
                   # Fall back to `command -v python3` (POSIX builtin, no external
                   # `which` dependency) if python_path is missing OR empty
