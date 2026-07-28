@@ -817,6 +817,16 @@ available_node_types:
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
+              # Marker STEP 1 publishes once the CORE prereqs (curl/rsync/wget)
+              # are installed AND CONFIGURED -- i.e. the package manager has
+              # returned, not merely unpacked a binary. STEP 2 gates its HTTPS
+              # conda download on this; see the wait there for why binary
+              # presence alone is not enough. Declared out here so both step
+              # subshells see it. Published BEFORE the best-effort
+              # MISSING_PACKAGES install, so STEP 2 still overlaps with that and
+              # the INSTALL_FIRST/MISSING split keeps its purpose.
+              CORE_PKGS_READY=/tmp/sky_core_pkgs_ready
+
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
                 (
@@ -1147,6 +1157,9 @@ available_node_types:
                   fi
 
                   # INSTALL_FIRST succeeded (or was empty) with this source.
+                  # Core prereqs are configured -- unblock STEP 2 now, before the
+                  # best-effort packages below.
+                  touch "$CORE_PKGS_READY"
                   # Install MISSING_PACKAGES individually (optional, some may not exist on certain distros).
                   set +e
                   if [ ! -z "$MISSING_PACKAGES" ]; then
@@ -1173,6 +1186,9 @@ available_node_types:
                       return
                     }
                   fi
+                  # Core prereqs are configured -- unblock STEP 2 before the
+                  # best-effort packages below.
+                  touch "$CORE_PKGS_READY"
                   if [ ! -z "$MISSING_PACKAGES" ]; then
                     echo "Installing missing packages individually via $PKG_MGR: $MISSING_PACKAGES" >> /tmp/apt-update.log
                     for pkg in $MISSING_PACKAGES; do
@@ -1185,6 +1201,9 @@ available_node_types:
                 INSTALL_SUCCESS=false
                 if [ -z "$INSTALL_FIRST" ] && [ -z "$MISSING_PACKAGES" ]; then
                   echo "All required packages already installed; skipping package install." >> /tmp/apt-update.log
+                  # Nothing to install: whatever curl the image ships (and
+                  # whatever trust store it uses) is already in place.
+                  touch "$CORE_PKGS_READY"
                   INSTALL_SUCCESS=true
                 elif [ "$PKG_MGR" = "apt" ]; then
                   run_apt_install_with_fallback
@@ -1287,56 +1306,37 @@ available_node_types:
                 # writes python_path there before ray_installation_commands (which
                 # contains SETUP_SKY_DIRS_COMMANDS) creates it.
                 mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
-                # Wait for `curl` to be able to do HTTPS before installing conda
-                # and ray. This is TWO conditions, not one:
+                # Wait for STEP 1 to have INSTALLED AND CONFIGURED the core
+                # prereqs before the HTTPS conda download below.
                 #
-                #   1. the curl BINARY exists. Gating on `dpkg -l "^ii  curl "`
-                #      here (as this did pre-patch) is not portable -- RHEL/UBI/
-                #      Alpine/SUSE have no dpkg -- and would also deadlock,
-                #      because the install decision above uses `pkg_present`
-                #      (binary presence): an image shipping curl outside dpkg
-                #      would never be queued for install, so a dpkg-state wait
-                #      would spin forever.
+                # This gate used to be `dpkg -l | grep "^ii  curl "`, which
+                # protected the download somewhat by accident: waiting for curl
+                # to be *configured* implied ca-certificates (pulled in the same
+                # apt transaction) had already run update-ca-certificates, so
+                # /etc/ssl/certs/ca-certificates.crt existed. A portable
+                # `command -v curl` loses exactly that -- the binary is unpacked
+                # BEFORE the configure phase -- so the download could fire with
+                # no trust store and die with
+                #   curl: (77) error setting certificate verify locations
+                # which short-circuits conda installation and leaves the
+                # unconditional `conda deactivate` in
+                # CONDA_INSTALLATION_COMMANDS as a command-not-found. Repro'd on
+                # a bare apt image (--image-id docker:ubuntu:18.04).
                 #
-                #   2. a CA trust store exists. This is the part a bare
-                #      `command -v curl` misses, and what the old dpkg gate gave
-                #      us for free: on apt images curl and ca-certificates land
-                #      in the SAME transaction, and the binary is unpacked
-                #      BEFORE ca-certificates' postinst runs
-                #      update-ca-certificates. Gating only on the binary lets
-                #      the Miniconda HTTPS download below fire while
-                #      /etc/ssl/certs/ca-certificates.crt does not yet exist:
-                #        curl: (77) error setting certificate verify locations
-                #      which then short-circuits conda installation and leaves
-                #      the unconditional `conda deactivate` in
-                #      CONDA_INSTALLATION_COMMANDS as a `command not found`,
-                #      exiting 127 and failing the pod. Reproducible on a bare
-                #      apt image (e.g. --image-id docker:ubuntu:18.04).
+                # Reintroducing the dpkg check is not an option: it is apt-only
+                # (the point of this patch is RHEL/UBI/Alpine/SUSE), and it would
+                # now DEADLOCK -- the install decision in STEP 1 uses binary
+                # presence, so an image shipping curl outside dpkg is never
+                # queued for install and a dpkg-state wait would spin forever.
                 #
-                # The CA wait is BOUNDED: an image may ship a curl linked
-                # against its own/alternate trust store, so a file that never
-                # appears must not hang the launch.
-                until command -v curl >/dev/null 2>&1; do
+                # So gate on STEP 1's own marker instead. That is the package
+                # manager reporting it returned, which is the "fully configured"
+                # guarantee itself rather than a proxy for it -- portable across
+                # apt/dnf/microdnf/yum/apk/zypper, and it needs no timeout or
+                # per-distro CA paths. Also break out if STEP 1 failed, so this
+                # can never outlive the step it waits on.
+                until [ -f "$CORE_PKGS_READY" ] || [ -f "/tmp/${STEPS[0]}.failed" ]; do
                   sleep 0.1
-                  echo "Waiting for curl package to be installed..."
-                done
-                _ca_wait=0
-                until [ -s /etc/ssl/certs/ca-certificates.crt ] \
-                   || [ -s /etc/pki/tls/certs/ca-bundle.crt ] \
-                   || [ -s /etc/ssl/cert.pem ] \
-                   || [ -n "${CURL_CA_BUNDLE:-}" ] \
-                   || [ -n "${SSL_CERT_FILE:-}" ]; do
-                  sleep 0.1
-                  _ca_wait=$((_ca_wait + 1))
-                  if [ "$_ca_wait" -ge 600 ]; then
-                    echo "WARNING: no CA trust store after 60s; proceeding (curl may use a builtin store)."
-                    break
-                  fi
-                  # Throttle to ~once every 5s (loop runs at 10Hz) so a slow
-                  # ca-certificates configure doesn't flood the pod log.
-                  if [ $((_ca_wait % 50)) -eq 1 ]; then
-                    echo "Waiting for ca-certificates to be configured..."
-                  fi
                 done
                 {{ conda_installation_commands }}
                 {{ uv_installation_commands }}
