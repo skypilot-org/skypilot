@@ -712,6 +712,56 @@ class TestInterConnectionPlacement:
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
             mock_same_infra.assert_called_once()
 
+    def test_disjoint_any_of_pin_sets_conflict(self, mock_k8s_cloud):
+        """any_of {A,B} vs any_of {C,D}: no common option -> conflict."""
+        task1 = self._make_task('task-1', [
+            self._make_resources(mock_k8s_cloud, 'ctx-a'),
+            self._make_resources(mock_k8s_cloud, 'ctx-b'),
+        ])
+        task2 = self._make_task('task-2', [
+            self._make_resources(mock_k8s_cloud, 'ctx-c'),
+            self._make_resources(mock_k8s_cloud, 'ctx-d'),
+        ])
+        dag = self._make_dag([task1, task2], inter_connection=True)
+
+        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+        assert 'no common option' in str(exc_info.value)
+
+    def test_cross_cloud_any_of_with_common_option_not_a_conflict(
+            self, mock_k8s_cloud, mock_aws_cloud):
+        """{k8s/ctxA, aws/use1} vs {aws/use1}: common option -> no conflict."""
+        task1 = self._make_task('task-1', [
+            self._make_resources(mock_k8s_cloud, 'ctx-a'),
+            self._make_resources(mock_aws_cloud, 'us-east-1'),
+        ])
+        task2 = self._make_task(
+            'task-2', [self._make_resources(mock_aws_cloud, 'us-east-1')])
+        dag = self._make_dag([task1, task2], inter_connection=False)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_same_infra.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_same_infra.assert_called_once()
+
+    def test_unpinned_option_defuses_conflict(self, mock_k8s_cloud,
+                                              mock_aws_cloud):
+        """[k8s/ctxA, <unpinned>] vs aws pin: task1 is fully flexible."""
+        task1 = self._make_task('task-1', [
+            self._make_resources(mock_k8s_cloud, 'ctx-a'),
+            self._make_resources(None, None),
+        ])
+        task2 = self._make_task('task-2',
+                                [self._make_resources(mock_aws_cloud, None)])
+        dag = self._make_dag([task1, task2], inter_connection=False)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_same_infra.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_same_infra.assert_called_once()
+
     def test_mixed_pin_narrows_group_to_pinned_context(self, mock_k8s_cloud):
         """k8s/blah + k8s + k8s: everyone lands on blah, hard-pinned."""
         res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
@@ -767,6 +817,70 @@ class TestInterConnectionPlacement:
                     blocked_resources=None,
                     quiet=True)
         assert 'No single infrastructure' in str(exc_info.value)
+
+
+class TestGetTaskPinSets:
+    """Direct tests for per-task pin-set extraction (OR semantics).
+
+    A task only has an exactly-enumerable constraint set at a granularity
+    when EVERY resource option is pinned at that granularity.
+    """
+
+    def _task(self, options):
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 't'
+        task.resources = options
+        return task
+
+    def _res(self, cloud_str, region):
+        res = MagicMock(spec=resources_lib.Resources)
+        if cloud_str is None:
+            res.cloud = None
+        else:
+            cloud = MagicMock()
+            cloud.__str__ = MagicMock(return_value=cloud_str)
+            res.cloud = cloud
+        res.region = region
+        return res
+
+    def test_fully_pinned_single_option(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([self._res('Kubernetes', 'ctx-a')]))
+        assert cloud_pins == {'Kubernetes'}
+        assert infra_pins == {'Kubernetes/ctx-a'}
+
+    def test_any_of_fully_pinned_across_clouds(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([
+                self._res('Kubernetes', 'ctx-a'),
+                self._res('AWS', 'us-east-1'),
+            ]))
+        assert cloud_pins == {'Kubernetes', 'AWS'}
+        assert infra_pins == {'Kubernetes/ctx-a', 'AWS/us-east-1'}
+
+    def test_mixed_region_and_cloud_only_options(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([
+                self._res('Kubernetes', 'ctx-a'),
+                self._res('Kubernetes', None),
+            ]))
+        # Exactly enumerable at cloud granularity, flexible within it.
+        assert cloud_pins == {'Kubernetes'}
+        assert infra_pins is None
+
+    def test_option_without_cloud_makes_task_fully_flexible(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(
+            self._task([
+                self._res('Kubernetes', 'ctx-a'),
+                self._res(None, None),
+            ]))
+        assert cloud_pins is None
+        assert infra_pins is None
+
+    def test_no_resource_options(self):
+        cloud_pins, infra_pins = optimizer._get_task_pin_sets(self._task([]))
+        assert cloud_pins is None
+        assert infra_pins is None
 
 
 class TestModuleLevelOptimizeJobGroup:
