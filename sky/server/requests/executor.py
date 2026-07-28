@@ -109,7 +109,10 @@ def _get_executor_mp_context() -> multiprocessing.context.BaseContext:
     Honors EXECUTOR_START_METHOD_ENV; falls back to the process-wide default
     ('spawn') so the behavior is unchanged unless explicitly opted in.
     """
-    method = os.environ.get(EXECUTOR_START_METHOD_ENV, 'spawn').strip().lower()
+    # TEMP(aylei): default to 'forkserver' to exercise the forkserver path in
+    # CI smoke tests; revert to 'spawn' before merging.
+    method = os.environ.get(EXECUTOR_START_METHOD_ENV,
+                            'forkserver').strip().lower()
     supported = multiprocessing.get_all_start_methods()
     if method not in supported:
         logger.warning(
