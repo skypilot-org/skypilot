@@ -1,0 +1,22 @@
+$ sky gpus list --infra kubernetes
+(CUSTOM_GPU_RESOURCE_KEY unset)
+
+Kubernetes GPUs
+Context: kubernetes-admin-cluster.local@cluster.local
+GPU        REQUESTABLE_QTY_PER_NODE  UTILIZATION
+GB10       1                         1 of 1 free
+STRIXHALO  1                         0 of 2 free
+Kubernetes per-node GPU availability
+CONTEXT                                       NODE          vCPU           Memory (GB)      GPU        GPU UTILIZATION  NODE STATUS
+kubernetes-admin-cluster.local@cluster.local  evo-x2-green  20 of 32 free  22 of 62 free    STRIXHALO  0 of 1 free      Healthy
+kubernetes-admin-cluster.local@cluster.local  evo-x2-red    24 of 32 free  30 of 62 free    STRIXHALO  0 of 1 free      Healthy
+kubernetes-admin-cluster.local@cluster.local  spark-1ba1    19 of 20 free  121 of 122 free  GB10       1 of 1 free      Healthy
+
+(no "Note: Some Kubernetes nodes have GPU labels but report 0 GPU resources" warning)
+
+S1: PASS -- GB10 1 of 1 and STRIXHALO (2 total) shown simultaneously, no CUSTOM_GPU_RESOURCE_KEY.
+S2: PASS -- per-node table lists all three nodes (spark-1ba1, evo-x2-green, evo-x2-red) with
+    correct non-zero REQUESTABLE_QTY_PER_NODE / total capacity.
+    STRIXHALO shows 0 of 2 free because both units are legitimately held by the pre-existing
+    'amdsvc' sky serve service (2/2 replicas) -- this is real utilization, not a bug (see
+    before-fix-gpus-list.txt ground truth notes).

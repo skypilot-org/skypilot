@@ -798,8 +798,8 @@ class Kubernetes(clouds.Cloud):
                 # the pod requests aws.amazon.com/neuron instead of a GPU key.
                 k8s_resource_key = kubernetes_utils.NEURON_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
-                    context)
+                k8s_resource_key = kubernetes_utils.get_accelerator_resource_key(
+                    context, acc_type)
         else:
             # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
             # maintain GPU isolation. This is to override the default behavior

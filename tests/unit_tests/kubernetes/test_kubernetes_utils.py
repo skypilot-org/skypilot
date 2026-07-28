@@ -746,6 +746,99 @@ def test_heterogenous_gpu_detection():
         assert available == {'H100': 1}
 
 
+def test_get_node_accelerator_resource_key_mixed_vendor():
+    """Tests that per-node accelerator resource key resolution correctly
+    identifies each node's own vendor key on a cluster where nodes come
+    from different accelerator vendors (e.g. some nodes advertise
+    amd.com/gpu, others nvidia.com/gpu).
+
+    This fails on unpatched code because get_gpu_resource_key() resolves a
+    single key for the whole context (whichever vendor's key it finds
+    first while scanning all nodes), so a node whose capacity dict lacks
+    that exact key is incorrectly reported as having zero accelerators.
+    """
+    mock_nvidia_node = mock.MagicMock()
+    mock_nvidia_node.metadata.name = 'nvidia-node'
+    mock_nvidia_node.status.capacity = {'nvidia.com/gpu': '1', 'cpu': '20'}
+    mock_nvidia_node.status.allocatable = {'nvidia.com/gpu': '1', 'cpu': '19'}
+
+    mock_amd_node = mock.MagicMock()
+    mock_amd_node.metadata.name = 'amd-node'
+    mock_amd_node.status.capacity = {'amd.com/gpu': '1', 'cpu': '32'}
+    mock_amd_node.status.allocatable = {'amd.com/gpu': '1', 'cpu': '20'}
+
+    # Each node resolves to its OWN resource key, not a single shared one.
+    assert utils.get_node_accelerator_resource_key(
+        mock_nvidia_node) == 'nvidia.com/gpu'
+    assert utils.get_node_accelerator_resource_key(
+        mock_amd_node) == 'amd.com/gpu'
+
+    # get_node_accelerator_count must not report 0 for the "other" vendor.
+    assert utils.get_node_accelerator_count(
+        'test-context', mock_nvidia_node.status.allocatable) == 1
+    assert utils.get_node_accelerator_count(
+        'test-context', mock_amd_node.status.allocatable) == 1
+
+    # detect_accelerator_resource must recognize a cluster with only one of
+    # the two vendors' keys present just as readily as one with both.
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                    return_value=[mock_nvidia_node, mock_amd_node]):
+        has_accelerator, cluster_resources = utils.detect_accelerator_resource(
+            'test-context')
+        assert has_accelerator
+        assert 'nvidia.com/gpu' in cluster_resources
+        assert 'amd.com/gpu' in cluster_resources
+
+
+def test_mixed_vendor_gpu_realtime_availability():
+    """Tests that sky gpus list correctly reports availability for BOTH
+    vendors simultaneously on a cluster with one NVIDIA node and one AMD
+    node, without relying on get_gpu_resource_key() at all.
+
+    Regression test for the bug where a mixed-vendor cluster's realtime GPU
+    listing showed the "losing" vendor (the one not returned by
+    get_gpu_resource_key()) as 0 of 0 available, even though it had a free,
+    correctly-labeled accelerator. This test fails on unpatched code (the
+    "losing" vendor shows up with 0 capacity) and passes after the fix.
+    """
+    mock_nvidia_node = mock.MagicMock()
+    mock_nvidia_node.metadata.name = 'nvidia-node'
+    mock_nvidia_node.metadata.labels = {'skypilot.co/accelerator': 'gb10'}
+    mock_nvidia_node.status.allocatable = {'nvidia.com/gpu': '1'}
+    mock_nvidia_node.status.addresses = []
+    mock_nvidia_node.is_ready.return_value = True
+    mock_nvidia_node.is_cordoned.return_value = False
+    mock_nvidia_node.get_taints.return_value = []
+
+    mock_amd_node = mock.MagicMock()
+    mock_amd_node.metadata.name = 'amd-node'
+    mock_amd_node.metadata.labels = {'skypilot.co/accelerator': 'strixhalo'}
+    mock_amd_node.status.allocatable = {'amd.com/gpu': '2'}
+    mock_amd_node.status.addresses = []
+    mock_amd_node.is_ready.return_value = True
+    mock_amd_node.is_cordoned.return_value = False
+    mock_amd_node.get_taints.return_value = []
+
+    with mock.patch('sky.clouds.cloud_in_iterable', return_value=True), \
+         mock.patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name', return_value='mixed-vendor-context'), \
+         mock.patch('sky.provision.kubernetes.utils.check_credentials', return_value=[True]), \
+         mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes', return_value=[mock_nvidia_node, mock_amd_node]), \
+         mock.patch('sky.provision.kubernetes.utils.get_allocated_resources_by_node', return_value=({mock_nvidia_node.metadata.name: 0, mock_amd_node.metadata.name: 0}, {})):
+        # Deliberately NOT mocking get_gpu_resource_key: the fix must not
+        # depend on it (or its single-vendor answer) at all for this path.
+        counts, capacity, available = kubernetes_catalog.list_accelerators_realtime(
+            True, None, None, None)
+
+        assert capacity.get('GB10') == 1, (
+            f'Expected NVIDIA GB10 capacity of 1, got {capacity}')
+        assert available.get('GB10') == 1, (
+            f'Expected NVIDIA GB10 to be free, got {available}')
+        assert capacity.get('STRIXHALO') == 2, (
+            f'Expected AMD STRIXHALO capacity of 2, got {capacity}')
+        assert available.get('STRIXHALO') == 2, (
+            f'Expected AMD STRIXHALO to be free, got {available}')
+
+
 def test_low_priority_pod_filtering():
     """Tests that low priority pods (e.g., CoreWeave HPC verification) are excluded from GPU allocation calculations."""
     # Mock node with 8 GPUs

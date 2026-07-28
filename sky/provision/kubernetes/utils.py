@@ -283,6 +283,51 @@ NO_ACCELERATOR_HELP_MESSAGE = (
     'on the nodes and the node labels for identifying GPUs/TPUs '
     '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
+
+def _candidate_accelerator_resource_keys() -> List[str]:
+    """Ordered list of resource keys to look for in a node/pod resource dict.
+
+    A CUSTOM_GPU_RESOURCE_KEY override (if set) takes precedence; otherwise
+    each vendor-specific GPU key is checked before TPU/Neuron, which use
+    their own device plugins and are never ambiguous across vendors.
+    """
+    custom_key = os.getenv('CUSTOM_GPU_RESOURCE_KEY')
+    keys = [custom_key] if custom_key else []
+    keys.extend(SUPPORTED_GPU_RESOURCE_KEYS.values())
+    keys.extend([TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY])
+    return keys
+
+
+def resolve_accelerator_resource_key(
+        attribute_dict: Optional[dict]) -> Optional[str]:
+    """Returns the accelerator resource key present in `attribute_dict`.
+
+    Unlike get_gpu_resource_key(), which resolves a single GPU vendor key for
+    an entire context by scanning every node and picking the first vendor it
+    sees, this only looks at one node's (or one pod's) own resource dict
+    (e.g. status.capacity, status.allocatable, or a container's
+    resources.requests). This is required for clusters whose nodes come from
+    different accelerator vendors -- e.g. some nodes advertise amd.com/gpu
+    and others advertise nvidia.com/gpu -- where a single cluster-wide key
+    cannot represent both, and resolving one globally causes every node
+    without that exact key to be reported as having zero accelerators.
+    """
+    if not attribute_dict:
+        return None
+    for key in _candidate_accelerator_resource_keys():
+        if key in attribute_dict:
+            return key
+    return None
+
+
+def get_node_accelerator_resource_key(node: Any) -> Optional[str]:
+    """Returns the accelerator resource key advertised by this node.
+
+    See resolve_accelerator_resource_key() for why this must be resolved
+    per-node rather than once per context.
+    """
+    return resolve_accelerator_resource_key(node.status.capacity)
+
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
     'All GPUs that can be provisioned may not be listed '
@@ -1506,9 +1551,12 @@ def detect_accelerator_resource(
     nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_accelerator = (get_gpu_resource_key(context) in cluster_resources or
-                       TPU_RESOURCE_KEY in cluster_resources or
-                       NEURON_RESOURCE_KEY in cluster_resources)
+    # Check against every known vendor/accelerator key (not just the single
+    # key get_gpu_resource_key() would resolve) so a cluster with e.g. only
+    # amd.com/gpu nodes, only nvidia.com/gpu nodes, or a mix of both is
+    # correctly detected as having accelerators.
+    has_accelerator = any(
+        key in cluster_resources for key in _candidate_accelerator_resource_keys())
 
     return has_accelerator, cluster_resources
 
@@ -2828,6 +2876,43 @@ def get_accelerator_label_key_values(
                     f'{suffix}')
             raise exceptions.ResourcesUnavailableError(msg)
     assert False, 'This should not be reached'
+
+
+def get_accelerator_resource_key(context: Optional[str],
+                                 acc_type: Optional[str]) -> str:
+    """Returns the pod resource key to request for a specific accelerator.
+
+    Unlike get_gpu_resource_key(), which resolves a single vendor key for the
+    whole context by scanning every node and returning the first vendor it
+    sees, this looks at which node(s) actually advertise `acc_type` (via node
+    labels) and returns that node's own resource key. This matters on a
+    mixed-vendor cluster: requesting e.g. an NVIDIA GPU must produce a pod
+    that requests nvidia.com/gpu even if some other node in the same cluster
+    advertises amd.com/gpu (which get_gpu_resource_key() might otherwise
+    resolve to, making the pod unschedulable despite correctly targeting the
+    right node via nodeSelector/affinity).
+
+    Falls back to get_gpu_resource_key(context) if no node's label matches
+    acc_type (e.g. an autoscale-from-zero cluster with no nodes yet).
+    """
+    if acc_type is not None:
+        label_formatter, _ = detect_gpu_label_formatter(context)
+        if label_formatter is not None:
+            for node in get_kubernetes_nodes(context=context):
+                labels = node.metadata.labels or {}
+                if is_multi_host_tpu(labels):
+                    continue
+                for label, value in labels.items():
+                    if not label_formatter.match_label_key(label):
+                        continue
+                    accelerator = (
+                        label_formatter.get_accelerator_from_label_value(value))
+                    viable = [value.lower(), accelerator.lower()]
+                    if _accelerator_name_matches(acc_type, viable):
+                        resource_key = get_node_accelerator_resource_key(node)
+                        if resource_key is not None:
+                            return resource_key
+    return get_gpu_resource_key(context)
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
@@ -4340,7 +4425,7 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     nodes = get_kubernetes_nodes(context=context)
     nodes_with_accelerator = []
     for node in nodes:
-        if get_gpu_resource_key(context) in node.status.capacity:
+        if get_node_accelerator_resource_key(node) is not None:
             nodes_with_accelerator.append(node)
 
     label_formatter, _ = detect_gpu_label_formatter(context)
@@ -4879,26 +4964,26 @@ def get_node_accelerator_count(context: Optional[str],
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    gpu_resource_name = get_gpu_resource_key(context)
+    del context  # Resolution is per attribute_dict now; see below.
+    # Resolve the key from this node's/pod's own resource dict rather than
+    # from get_gpu_resource_key(context), which would pick a single vendor
+    # for the entire cluster and report 0 for every other node whose
+    # capacity dict lacks that exact key (breaking mixed-vendor clusters).
+    #
     # A node is expected to advertise at most one accelerator family (GPU, TPU,
     # or Neuron). Rather than assert on external cluster state (which would crash
     # `sky status`/`show-gpus` if a node is misconfigured or in a transitional
     # hybrid state), warn and fall through to the first family found below.
     present_keys = [
-        k for k in (gpu_resource_name, TPU_RESOURCE_KEY, NEURON_RESOURCE_KEY)
-        if k in attribute_dict
+        k for k in _candidate_accelerator_resource_keys() if k in attribute_dict
     ]
     if len(present_keys) > 1:
         logger.warning(
             f'Node advertises multiple accelerator families {present_keys}; '
             f'using {present_keys[0]}.')
-    if gpu_resource_name in attribute_dict:
-        return int(attribute_dict[gpu_resource_name])
-    elif TPU_RESOURCE_KEY in attribute_dict:
-        return int(attribute_dict[TPU_RESOURCE_KEY])
-    elif NEURON_RESOURCE_KEY in attribute_dict:
-        return int(attribute_dict[NEURON_RESOURCE_KEY])
-    return 0
+    if not present_keys:
+        return 0
+    return int(attribute_dict[present_keys[0]])
 
 
 def reduce_tpu_topology(topology: str) -> int:
@@ -5042,9 +5127,15 @@ def process_skypilot_pods(
             memory_request = parse_memory_resource(
                 (requests.get('memory', '0') if requests is not None else '0'),
                 unit='G')
+            # Resolve the key from this pod's own requests dict (a pod can
+            # only request one vendor's GPU key) rather than a single
+            # cluster-wide key, so this correctly reports GPU count for
+            # pods requesting either vendor on a mixed-vendor cluster.
+            pod_gpu_resource_key = (resolve_accelerator_resource_key(requests)
+                                    if requests is not None else None)
             gpu_count = parse_cpu_or_gpu_resource(
-                (requests.get(get_gpu_resource_key(context), '0')
-                 if requests is not None else '0'))
+                (requests.get(pod_gpu_resource_key, '0')
+                 if pod_gpu_resource_key is not None else '0'))
             gpu_name = None
             if gpu_count > 0:
                 label_formatter, _ = (detect_gpu_label_formatter(context))

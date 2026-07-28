@@ -1,0 +1,32 @@
+$ sky gpus list --infra kubernetes
+(CUSTOM_GPU_RESOURCE_KEY unset)
+
+Kubernetes GPUs
+Context: kubernetes-admin-cluster.local@cluster.local
+GPU        REQUESTABLE_QTY_PER_NODE  UTILIZATION
+GB10                                 0 of 0 free
+STRIXHALO  1                         0 of 2 free
+Kubernetes per-node GPU availability
+CONTEXT                                       NODE          vCPU           Memory (GB)      GPU        GPU UTILIZATION  NODE STATUS
+kubernetes-admin-cluster.local@cluster.local  evo-x2-green  20 of 32 free  22 of 62 free    STRIXHALO  0 of 1 free      Healthy
+kubernetes-admin-cluster.local@cluster.local  evo-x2-red    24 of 32 free  30 of 62 free    STRIXHALO  0 of 1 free      Healthy
+kubernetes-admin-cluster.local@cluster.local  spark-1ba1    19 of 20 free  121 of 122 free  GB10       0 of 0 free      Healthy
+
+Note: Some Kubernetes nodes have GPU labels but report 0 GPU resources. Please
+check the node labels and configuration. Affected 1 node(s):
+kubernetes-admin-cluster.local@cluster.local/spark-1ba1
+
+--- Ground truth (kubectl) ---
+spark-1ba1 capacity: nvidia.com/gpu=1, allocatable: nvidia.com/gpu=1 (0 GPU-requesting
+pods scheduled there -- the 'bench' pod present on that node requests no resources,
+so this is a real, currently-unallocated GB10 that SkyPilot cannot see at all)
+evo-x2-green / evo-x2-red: amd.com/gpu=1 each, both held by the running 'amdsvc'
+sky serve service (2/2 replicas, 1x STRIXHALO each) -- so '0 of 2 free' for STRIXHALO
+is correct, real utilization, not a bug.
+
+Root cause: SUPPORTED_GPU_RESOURCE_KEYS = {'amd': 'amd.com/gpu', 'nvidia': 'nvidia.com/gpu'}
+_gpu_resource_key_helper() resolves ONE resource key for the whole context by scanning
+capacity keys across all nodes and returning the first match in dict order. Since the
+cluster has both amd.com/gpu (evo nodes) and nvidia.com/gpu (spark) present, and 'amd'
+is iterated first, get_gpu_resource_key() returns 'amd.com/gpu' cluster-wide. Every node
+whose capacity dict lacks that exact key (spark-1ba1) is reported as having 0 GPUs.

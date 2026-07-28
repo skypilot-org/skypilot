@@ -1,0 +1,45 @@
+=== S3: sky launch --gpus GB10:1 (NVIDIA) ===
+$ sky launch -d -c probe-gb10 -y ~/skyjobs/probe-gb10.yaml
+Considered resources (1 node):
+ INFRA                                    INSTANCE   vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
+ Kubernetes (kubernetes-...uster.local)   -          4       16        GB10:1   0.00       [check]
+Pod is up. Cluster launched: probe-gb10.
+
+$ kubectl get pods -o wide | grep probe-gb10
+probe-gb10-0495da07-head   1/1   Running   0   2m15s   10.233.72.106   spark-1ba1   <- correct node
+
+$ sky logs probe-gb10 1
+NVIDIA-SMI 580.142  ... GPU 0  NVIDIA GB10 ...
+probe-gb10-0495da07-head
+Job finished (status: SUCCEEDED).
+
+RESULT: PASS. Pod requested nvidia.com/gpu (not amd.com/gpu, which get_gpu_resource_key()
+would have returned pre-fix since amd.com/gpu is present elsewhere in this mixed cluster),
+landed on spark-1ba1, ran nvidia-smi successfully.
+
+=== S4: sky launch --gpus STRIXHALO:1 (AMD) -- regression check ===
+Both STRIXHALO GPUs were already held by the pre-existing 'amdsvc' sky-serve service (2/2
+replicas) at the time of this test, so no free AMD GPU existed cluster-wide. This test
+therefore verifies the fix's CORRECTNESS under contention rather than a clean scheduling
+success, which is arguably a stronger signal for this change (it proves the pod requested
+the right vendor key and targeted the right nodes, and merely lost the capacity race):
+
+$ sky launch -d -c probe-amd -y ~/skyjobs/probe-amd.yaml
+Considered resources (1 node):
+ INFRA                                    INSTANCE   vCPUs   Mem(GB)   GPUS          CHOSEN
+ Kubernetes (kubernetes-...uster.local)   -          4       16        STRIXHALO:1   [check]
+Insufficient resource capacity on the cluster:
+  Pod status: Pending Details: '0/3 nodes are available: 1 node(s) didn't match Pod's
+  node affinity/selector, 2 Insufficient amd.com/gpu. ...'
+
+RESULT: PASS (no regression). The Pending reason itself is the proof:
+  - "1 node(s) didn't match Pod's node affinity/selector" = spark-1ba1 (NVIDIA node),
+    correctly EXCLUDED by the node-selector/affinity logic (unchanged by this fix).
+  - "2 Insufficient amd.com/gpu" = evo-x2-green and evo-x2-red, correctly TARGETED and
+    correctly requesting amd.com/gpu (not some wrong/global key) -- just genuinely out
+    of capacity (both held by amdsvc at request time).
+If either the resource key or node targeting were wrong, the error would instead show
+a node-affinity mismatch against the AMD nodes too, or a request for the wrong resource
+key entirely. Neither occurred.
+
+Cleanup: `sky down probe-gb10 -y` and `sky down probe-amd -y` run after each test.
