@@ -645,7 +645,9 @@ def _load_job_group(
                     f'termination_delay must be a string, int, or dict, '
                     f'got {type(termination_delay).__name__}')
 
-    # Parse and validate inter_connection
+    # Parse and validate inter_connection. Semantic validation (e.g.
+    # non-Kubernetes pins contradicting `inter_connection: true`) lives in
+    # the optimizer, the choke point every launch passes through.
     inter_connection = header.get('inter_connection')
     if inter_connection is not None:
         if not isinstance(inter_connection, bool):
@@ -654,28 +656,6 @@ def _load_job_group(
                                  f'got {type(inter_connection).__name__}: '
                                  f'{inter_connection!r}')
         dag.inter_connection = inter_connection
-
-    if dag.inter_connection is True:
-        # In-group networking is only supported on Kubernetes. Explicitly
-        # requiring it while pinning a job to a non-Kubernetes cloud is a
-        # contradiction; fail at load time rather than at placement.
-        conflicting_jobs = []
-        for task in dag.tasks:
-            clouds = [res.cloud for res in task.resources]
-            if clouds and all(
-                    cloud is not None and str(cloud).lower() != 'kubernetes'
-                    for cloud in clouds):
-                conflicting_jobs.append(task.name)
-        if conflicting_jobs:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'This job group sets `inter_connection: true`, but '
-                    'in-group networking (hostname-based service '
-                    'discovery) is only supported on Kubernetes, and the '
-                    f'following jobs pin non-Kubernetes infra: '
-                    f'{conflicting_jobs}. Remove the non-Kubernetes infra '
-                    'pins, or set `inter_connection: false` if the jobs do '
-                    'not need to reach each other by hostname.')
 
     logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
                 f'{[t.name for t in dag.tasks]}')

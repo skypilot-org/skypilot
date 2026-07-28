@@ -1202,13 +1202,26 @@ class Optimizer:
                         if str(cloud).lower() == 'kubernetes'
                     })
                 if not any(cloud_launchables.values()):
+                    # Distinguish a user contradiction (the job pins only
+                    # non-Kubernetes infra) from a feasibility problem.
+                    cloud_pins, _ = _get_task_pin_sets(task)
+                    if cloud_pins and not any(cloud.lower() == 'kubernetes'
+                                              for cloud in cloud_pins):
+                        reason = (f'job "{task.name}" pins non-Kubernetes '
+                                  f'infra ({sorted(cloud_pins)}). Remove '
+                                  'the non-Kubernetes infra pins, or set '
+                                  '`inter_connection: false` if the jobs '
+                                  'do not need to reach each other by '
+                                  'hostname.')
+                    else:
+                        reason = (f'job "{task.name}" has no feasible '
+                                  'Kubernetes placement.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            f'Job "{task.name}" in JobGroup "{dag.name}" '
-                            'has no feasible Kubernetes placement, but '
-                            '`inter_connection: true` requires in-group '
-                            'networking, which is only supported on '
-                            'Kubernetes.')
+                            f'JobGroup "{dag.name}" sets '
+                            '`inter_connection: true`, which requires '
+                            'in-group networking, only supported on '
+                            f'Kubernetes, but {reason}')
 
             task_launchables[task] = cloud_launchables
 

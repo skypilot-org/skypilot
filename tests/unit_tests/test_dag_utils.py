@@ -185,17 +185,19 @@ def test_job_group_inter_connection_invalid_type():
         _load_job_group(header_extra='inter_connection: "yes"\n')
 
 
-def test_job_group_inter_connection_non_k8s_pin_is_a_contradiction():
-    """Explicit true + a job pinned to a non-k8s cloud fails at load time."""
-    with pytest.raises(ValueError, match='non-Kubernetes'):
-        _load_job_group(header_extra='inter_connection: true\n',
-                        job1_extra='resources:\n  infra: aws\n')
+def test_job_group_inter_connection_pins_load_without_validation():
+    """Infra pins load fine regardless of inter_connection.
 
-    # Unset degrades with a warning instead of failing.
+    Semantic validation (e.g. non-Kubernetes pins contradicting
+    `inter_connection: true`) lives in the optimizer, not the loader.
+    """
+    dag = _load_job_group(header_extra='inter_connection: true\n',
+                          job1_extra='resources:\n  infra: aws\n')
+    assert dag.inter_connection is True
+
     dag = _load_job_group(job1_extra='resources:\n  infra: aws\n')
     assert dag.inter_connection is None
 
-    # Kubernetes pins (with or without a context) are fine.
     dag = _load_job_group(header_extra='inter_connection: true\n',
                           job1_extra='resources:\n  infra: k8s/my-ctx\n')
     assert dag.inter_connection is True
