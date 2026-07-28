@@ -1383,11 +1383,16 @@ class TestTransientJobStatusRecoveryWindow:
     async def test_window_reset_after_recovery(self, monkeypatch):
         """A transient failure after a recovery starts a fresh retry window.
 
-        Drives ``_monitor_one_task`` through: transient failure (retry) ->
+        Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
         transient failure past the timeout (recover) -> transient failure
         again. With the window reset, the third failure retries instead of
         recovering, so ``recover`` is called exactly once. Without the reset it
         would recover a second time immediately.
+
+        Calls the ``_impl`` body rather than ``_monitor_one_task``: the retry
+        window lives entirely in the body, and the wrapper only owns the status
+        logger's lifecycle (covered by
+        ``test_status_logger_flushed_when_body_raises``).
         """
         monkeypatch.setattr(managed_job_utils,
                             'JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60)
@@ -1452,15 +1457,47 @@ class TestTransientJobStatusRecoveryWindow:
              patch.object(controller_module.asyncio, 'sleep',
                           new=AsyncMock(return_value=None)):
             with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
-                await controller_module.JobController._monitor_one_task(
+                await controller_module.JobController._monitor_one_task_impl(
                     mock_self,
                     task_id=0,
                     task=MagicMock(name='task'),
                     cluster_name='cluster',
                     executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
                     callback_func=MagicMock(),
                     force_transit_to_recovering=False)
 
         assert recover_calls == 1, (
             'expected exactly one recovery; a second recovery means the '
             'transient retry window was not reset after the first recovery')
+
+    @pytest.mark.asyncio
+    async def test_status_logger_flushed_when_body_raises(self, monkeypatch):
+        """The status logger is flushed even when the loop exits by raising.
+
+        ``_monitor_one_task`` owns the logger outside the loop precisely so the
+        last status the controller observed reaches the log when the loop exits
+        by raising (job cancelled, controller torn down) rather than by
+        observing a terminal status. Without the ``finally``, a collapsed run's
+        closing logline -- the only record of when that status was last seen --
+        would be dropped on exactly the paths where it is most useful.
+        """
+        status_logger = MagicMock()
+        monkeypatch.setattr(managed_job_utils, 'JobStatusLogger',
+                            lambda: status_logger)
+
+        async def raise_stop_loop(*args, **kwargs):
+            raise TestTransientJobStatusRecoveryWindow._StopLoop()
+
+        mock_self = MagicMock()
+        mock_self._monitor_one_task_impl = raise_stop_loop
+
+        with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+            await controller_module.JobController._monitor_one_task(
+                mock_self,
+                task_id=0,
+                task=MagicMock(name='task'),
+                cluster_name='cluster',
+                executor=MagicMock())
+
+        status_logger.flush.assert_called_once()

@@ -922,6 +922,48 @@ class JobController:
         Returns:
             True if the task succeeded, False otherwise.
         """
+        # Collapses the periodic job-status poll results in the controller log,
+        # so that they do not bury the loglines that are useful for debugging
+        # this task. Owned here, outside the loop, so that the last status the
+        # controller observed is logged even when the loop exits by raising
+        # (e.g. the job is cancelled, or the controller is torn down) rather
+        # than by observing a terminal status.
+        status_logger = managed_job_utils.JobStatusLogger()
+        try:
+            return await self._monitor_one_task_impl(
+                task_id=task_id,
+                task=task,
+                cluster_name=cluster_name,
+                executor=executor,
+                job_id_on_pool_cluster=job_id_on_pool_cluster,
+                callback_func=callback_func,
+                cleanup_cluster_on_success=cleanup_cluster_on_success,
+                force_transit_to_recovering=force_transit_to_recovering,
+                on_recovery=on_recovery,
+                status_logger=status_logger,
+            )
+        finally:
+            status_logger.flush()
+
+    async def _monitor_one_task_impl(
+        self,
+        task_id: int,
+        task: 'sky.Task',
+        cluster_name: str,
+        executor: 'recovery_strategy.StrategyExecutor',
+        status_logger: managed_job_utils.JobStatusLogger,
+        job_id_on_pool_cluster: Optional[int] = None,
+        callback_func: Optional[typing.Callable] = None,
+        cleanup_cluster_on_success: bool = True,
+        force_transit_to_recovering: bool = False,
+        on_recovery: Optional[typing.Callable[[], typing.Coroutine]] = None,
+    ) -> bool:
+        """Body of the monitoring loop; see _monitor_one_task for the contract.
+
+        Args:
+            status_logger: Collapses the periodic job-status poll results.
+                Flushed by _monitor_one_task once the loop exits.
+        """
         if callback_func is None:
             callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id, task_id=task_id, task=task)
@@ -972,8 +1014,10 @@ class JobController:
                             self._backend,
                             cluster_name,
                             job_id=job_id_on_pool_cluster,
+                            status_logger=status_logger,
                         ))
                 except exceptions.FetchClusterInfoError as fetch_e:
+                    status_logger.reset()
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
@@ -999,6 +1043,10 @@ class JobController:
             # for job failure, as it could be a transient error for
             # communication issue.
             if transient_job_check_error_reason is not None:
+                # Pin the last status the controller did observe before the
+                # errors start, and log the status in full once the fetches
+                # recover, instead of collapsing it into the pre-error run.
+                status_logger.reset()
                 logger.info(
                     'Potential transient error when fetching the job '
                     f'status. Reason: {transient_job_check_error_reason}.\n'
@@ -1109,6 +1157,7 @@ class JobController:
                 # unreachable. Only when both get_job_status and this refresh
                 # keep failing for JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS is
                 # the error re-raised, escalating to emergency recovery.
+                status_logger.reset()
                 if transient_job_check_error_start_time is None:
                     transient_job_check_error_start_time = time.time()
                     job_check_backoff = common_utils.Backoff(
@@ -1143,6 +1192,9 @@ class JobController:
                 # code).
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
+                # Pin the last job status observed before the preemption, and
+                # log the post-recovery status in full even if it matches.
+                status_logger.reset()
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
