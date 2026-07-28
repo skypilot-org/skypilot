@@ -39,9 +39,18 @@ _MAX_RETRY = 6
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
 # all the sessions to be reloaded. This is a workaround.
+# Raising the *hard* limit needs CAP_SYS_RESOURCE, which containers often
+# lack, so requesting 1048576 can fail with EPERM. In that case fall back to
+# raising the limit only up to the existing hard limit (ulimit -Hn), which
+# needs no extra capability, and warn if even that fails instead of silently
+# swallowing the error.
 _RAY_PRLIMIT = (
-    'which prlimit && for id in $(pgrep -f raylet/raylet); '
-    'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
+    'which prlimit && for id in $(pgrep -f raylet/raylet); do '
+    'sudo prlimit --nofile=1048576:1048576 --pid=$id 2>/dev/null || '
+    'sudo prlimit --nofile="$(ulimit -Hn)":"$(ulimit -Hn)" --pid=$id '
+    '2>/dev/null || '
+    'echo "WARNING: unable to raise nofile limit for raylet pid $id" >&2; '
+    'done;')
 
 DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'runtime_dir = os.path.expanduser(os.environ.get('
