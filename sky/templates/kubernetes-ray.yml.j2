@@ -933,11 +933,7 @@ available_node_types:
                 # for hf-mount, rclone, blobfuse2, etc.). On Ubuntu 22.04+
                 # `fuse3 Breaks: fuse` (both ship /usr/bin/fusermount), so the
                 # two packages cannot coexist. FUSE is handled out-of-band below.
-                # `which` is included because SkyPilot's own runtime setup calls
-                # `uv run which ray`; Debian ships it (debianutils) but minimal
-                # RHEL/UBI base images do not, so without it a non-Debian launch
-                # dies at "Failed to spawn: which". Same package name everywhere.
-                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server which";
+                PACKAGES="rsync curl wget netcat gcc patch pciutils openssh-server";
 
                 # --- Portable package-manager support (CC-328 / TICKET-039) ---
                 # This bootstrap historically assumed apt/dpkg (Debian/Ubuntu).
@@ -1291,11 +1287,56 @@ available_node_types:
                 # writes python_path there before ray_installation_commands (which
                 # contains SETUP_SKY_DIRS_COMMANDS) creates it.
                 mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
-                # Wait for `curl` package to be installed before installing conda
-                # and ray.
+                # Wait for `curl` to be able to do HTTPS before installing conda
+                # and ray. This is TWO conditions, not one:
+                #
+                #   1. the curl BINARY exists. Gating on `dpkg -l "^ii  curl "`
+                #      here (as this did pre-patch) is not portable -- RHEL/UBI/
+                #      Alpine/SUSE have no dpkg -- and would also deadlock,
+                #      because the install decision above uses `pkg_present`
+                #      (binary presence): an image shipping curl outside dpkg
+                #      would never be queued for install, so a dpkg-state wait
+                #      would spin forever.
+                #
+                #   2. a CA trust store exists. This is the part a bare
+                #      `command -v curl` misses, and what the old dpkg gate gave
+                #      us for free: on apt images curl and ca-certificates land
+                #      in the SAME transaction, and the binary is unpacked
+                #      BEFORE ca-certificates' postinst runs
+                #      update-ca-certificates. Gating only on the binary lets
+                #      the Miniconda HTTPS download below fire while
+                #      /etc/ssl/certs/ca-certificates.crt does not yet exist:
+                #        curl: (77) error setting certificate verify locations
+                #      which then short-circuits conda installation and leaves
+                #      the unconditional `conda deactivate` in
+                #      CONDA_INSTALLATION_COMMANDS as a `command not found`,
+                #      exiting 127 and failing the pod. Reproducible on a bare
+                #      apt image (e.g. --image-id docker:ubuntu:18.04).
+                #
+                # The CA wait is BOUNDED: an image may ship a curl linked
+                # against its own/alternate trust store, so a file that never
+                # appears must not hang the launch.
                 until command -v curl >/dev/null 2>&1; do
                   sleep 0.1
                   echo "Waiting for curl package to be installed..."
+                done
+                _ca_wait=0
+                until [ -s /etc/ssl/certs/ca-certificates.crt ] \
+                   || [ -s /etc/pki/tls/certs/ca-bundle.crt ] \
+                   || [ -s /etc/ssl/cert.pem ] \
+                   || [ -n "${CURL_CA_BUNDLE:-}" ] \
+                   || [ -n "${SSL_CERT_FILE:-}" ]; do
+                  sleep 0.1
+                  _ca_wait=$((_ca_wait + 1))
+                  if [ "$_ca_wait" -ge 600 ]; then
+                    echo "WARNING: no CA trust store after 60s; proceeding (curl may use a builtin store)."
+                    break
+                  fi
+                  # Throttle to ~once every 5s (loop runs at 10Hz) so a slow
+                  # ca-certificates configure doesn't flood the pod log.
+                  if [ $((_ca_wait % 50)) -eq 1 ]; then
+                    echo "Waiting for ca-certificates to be configured..."
+                  fi
                 done
                 {{ conda_installation_commands }}
                 {{ uv_installation_commands }}

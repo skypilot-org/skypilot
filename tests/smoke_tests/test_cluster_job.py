@@ -551,6 +551,23 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
             f'sky exec {name} '
             f'\'command -v {pkg_mgr} && ! command -v apt-get\'',
             f'sky logs {name} 1 --status',
+            # The sshd MaxSessions/MaxStartups tuning must survive on an image
+            # where the reload has no systemd AND no `service` command, which is
+            # why this PR made that reload best-effort with a SIGHUP fallback.
+            # Two assertions, because the file containing the directive does NOT
+            # prove sshd honors it:
+            #   1. the directives are appended to sshd_config, and
+            #   2. `sshd -T` -- the EFFECTIVE config -- reports them. This is
+            #      the load-bearing check: sshd_config is first-wins and
+            #      RHEL-family images `Include /etc/ssh/sshd_config.d/*.conf`
+            #      from line ~15, so an appended value can be silently shadowed
+            #      by a drop-in. `sshd -T` resolves includes and precedence.
+            f'sky exec {name} \''
+            f'grep -q "^MaxSessions 200" /etc/ssh/sshd_config && '
+            f'grep -q "^MaxStartups 150:30:200" /etc/ssh/sshd_config && '
+            f'{{ sshd -T || /usr/sbin/sshd -T || /sbin/sshd -T; }} 2>/dev/null | '
+            f'grep -qx "maxsessions 200"\'',
+            f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
         # A from-scratch runtime bootstrap on a non-Debian base + image pull is
