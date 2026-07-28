@@ -1,7 +1,11 @@
 """Tests for docker container initialization on a remote node."""
+from concurrent import futures
+import pathlib
 from unittest import mock
 
 from sky.provision import docker_utils
+from sky.provision import instance_setup
+from sky.provision import logging as provision_logging
 
 
 def _make_initializer(docker_config, runs, stream_pull_logs=True):
@@ -115,12 +119,6 @@ def test_initialize_docker_streams_head_only(monkeypatch):
     provisioning thread; resolving it inside the pool-dispatched closure
     would see the /dev/null default and never stream.
     """
-    from concurrent import futures
-    import pathlib
-
-    from sky.provision import instance_setup
-    from sky.provision import logging as provision_logging
-
     head_log_path = '/logs/provision.log'
     worker_log_path = '/logs/instance/worker.log'
     monkeypatch.setattr(provision_logging.config,
