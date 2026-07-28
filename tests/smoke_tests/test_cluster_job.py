@@ -535,7 +535,7 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
     """
     # get_cluster_name() keys off the (shared) test function name, so the
     # parametrized cases would otherwise collide on one cluster name -- append a
-    # per-image suffix (e.g. rockyl / ubi9 / leap) to keep each unique.
+    # per-image suffix (e.g. rockyl / ubi9) to keep each unique.
     name = (smoke_tests_utils.get_cluster_name() + '-' +
             image.split(':')[0].split('/')[-1][:6])
     test = smoke_tests_utils.Test(
@@ -554,14 +554,19 @@ def test_kubernetes_non_debian_image(image, pkg_mgr, num_nodes):
             # The sshd MaxSessions/MaxStartups tuning must survive on an image
             # where the reload has no systemd AND no `service` command, which is
             # why this PR made that reload best-effort with a SIGHUP fallback.
-            # Two assertions, because the file containing the directive does NOT
-            # prove sshd honors it:
+            # Two assertions:
             #   1. the directives are appended to sshd_config, and
-            #   2. `sshd -T` -- the EFFECTIVE config -- reports them. This is
-            #      the load-bearing check: sshd_config is first-wins and
-            #      RHEL-family images `Include /etc/ssh/sshd_config.d/*.conf`
-            #      from line ~15, so an appended value can be silently shadowed
-            #      by a drop-in. `sshd -T` resolves includes and precedence.
+            #   2. `sshd -T` reports them. This is the load-bearing check:
+            #      sshd_config is first-wins and RHEL-family images
+            #      `Include /etc/ssh/sshd_config.d/*.conf` from line ~15, so an
+            #      appended value can be silently shadowed by a drop-in, which
+            #      grepping the file alone would not catch. `sshd -T` resolves
+            #      includes and precedence.
+            # Scope, deliberately: `sshd -T` RE-PARSES the config in a fresh
+            # process, so this proves the config a starting/re-execing sshd will
+            # use -- not that the already-running daemon reloaded. Asserting the
+            # latter needs the live listener's own state, which has no portable
+            # probe. `sshd -T` also needs root, which both images here are.
             f'sky exec {name} \''
             f'grep -q "^MaxSessions 200" /etc/ssh/sshd_config && '
             f'grep -q "^MaxStartups 150:30:200" /etc/ssh/sshd_config && '

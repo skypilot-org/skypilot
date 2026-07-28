@@ -1393,7 +1393,11 @@ available_node_types:
                   # `which` dependency) if python_path is missing OR empty
                   # ([ -s ]: a bare $(cat) of an empty file would render `... -c`
                   # with no interpreter and abort under set -e).
-                  _py_bin=$([ -s ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path ] && cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path 2>/dev/null || command -v python3);
+                  # Trailing `|| true`: without it `set -e` aborts on the
+                  # ASSIGNMENT when neither python_path nor python3 resolves,
+                  # so the non-empty guard below never runs and the "skip the
+                  # patches, don't abort" intent is dead code.
+                  _py_bin=$([ -s "${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path" ] && cat "${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path" 2>/dev/null || command -v python3 || true);
                   # Guard on a non-empty interpreter (else `env ... -c ...` would
                   # eat `-c` as its own flag) and quote it (paths may contain
                   # spaces). Missing interpreter -> skip the patches, don't abort.
@@ -1422,15 +1426,25 @@ available_node_types:
                   # by the worker probe inside ray_worker_start_command.
 {% else %}
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
-                  # Wait until the ray head's port is reachable. Use bash's
-                  # /dev/tcp (the pod entrypoint is /bin/bash) rather than `nc -z`:
-                  # RHEL/UBI ship nmap-ncat, whose `nc` has no `-z` flag, so the old
-                  # probe spun forever there with no diagnostic. /dev/tcp is
-                  # nc-dialect-independent and needs no netcat at all. Fall back to
-                  # `nc -w 1` (portable, no `-z`) for the rare bash compiled with
-                  # --disable-net-redirections, where /dev/tcp is unavailable.
+                  # Wait until the ray head's port is reachable using bash's
+                  # /dev/tcp (the pod entrypoint is /bin/bash), which needs no
+                  # netcat at all.
+                  #
+                  # What actually broke on non-Debian images was not the `nc`
+                  # dialect -- Ncat does support `-z` (verified: nmap-ncat 7.92
+                  # on Rocky 9 lists "-z  Zero-I/O mode"). It was that this wait
+                  # was preceded by `until dpkg -l | grep -q "^ii \(netcat\|
+                  # netcat-openbsd\|netcat-traditional\) "`, which can never
+                  # match on an image with no dpkg, so the launch hung there
+                  # with no diagnostic.
+                  #
+                  # `nc -z -w 1` remains as a fallback for the rare bash built
+                  # with --disable-net-redirections, where /dev/tcp is
+                  # unavailable. `-z` is accepted by both openbsd-netcat and
+                  # Ncat, and keeps the probe to a connect test rather than
+                  # opening a data channel to a port that never closes.
                   until timeout 1 bash -c ": < /dev/tcp/${SKYPILOT_RAY_HEAD_IP}/${SKYPILOT_RAY_PORT}" 2>/dev/null \
-                        || nc -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT} < /dev/null 2>/dev/null; do
+                        || nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT} < /dev/null 2>/dev/null; do
                     sleep 0.1
                   done
 {% endif %}

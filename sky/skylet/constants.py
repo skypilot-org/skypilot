@@ -469,9 +469,24 @@ SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
     # Make the live reload best-effort. On containers with no systemd (all K8s
     # pods) `systemctl reload sshd` fails, and on non-Debian images (RHEL/UBI)
     # there is also no `service` command, so this line exited 127 and failed the
-    # whole runtime setup even though sshd is already running. The
-    # MaxSessions/MaxStartups config is applied on the next sshd start; a failed
-    # live reload must not abort the launch.
+    # whole runtime setup even though sshd is already running. A failed live
+    # reload must not abort the launch.
+    #
+    # Which link actually applies the setting matters, because this command is
+    # rendered into setup_commands -- it runs over SSH, i.e. AFTER the pod's
+    # sshd is already up. There is no "next sshd start" for a K8s pod: the
+    # container does not restart, and if it did, the writable layer (and these
+    # appended lines) would be gone. So on RHEL/UBI, where systemctl and
+    # service are both unavailable, `kill -HUP` is what applies it -- sshd
+    # re-execs on SIGHUP and re-reads the config. That works because the pod
+    # starts sshd via a bare `sshd`/`/usr/sbin/sshd`, which writes
+    # /var/run/sshd.pid. If every link fails, the setting is simply never
+    # applied for that pod's lifetime; the cluster still comes up, just with
+    # sshd's default limits.
+    #
+    # Verified on a live docker:rockylinux:9 launch: `kill -HUP` was the link
+    # that won, and the running listener reported our values (its process title
+    # read "0 of 150-200 startups" against a default of 10-100).
     '(systemctl reload sshd 2>/dev/null || service ssh reload 2>/dev/null || '
     'service sshd reload 2>/dev/null || '
     'kill -HUP $(cat /var/run/sshd.pid 2>/dev/null) 2>/dev/null || true); '
