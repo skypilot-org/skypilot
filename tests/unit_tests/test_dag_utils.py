@@ -167,6 +167,12 @@ def test_job_group_inter_connection_round_trip():
     redag = dag_utils.load_job_group_from_yaml_str(dumped)
     assert redag.inter_connection is False
 
+    # The user-specified-yaml dump variant shares the header build and
+    # must also carry the field (the controller-bound serialization).
+    dumped_user = dag_utils.dump_job_group_to_yaml_str(
+        dag, use_user_specified_yaml=True)
+    assert 'inter_connection: false' in dumped_user
+
     dag = _load_job_group(header_extra='inter_connection: true\n')
     assert dag.inter_connection is True
     assert dag.inter_connection_enabled()
