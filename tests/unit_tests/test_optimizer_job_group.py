@@ -762,6 +762,32 @@ class TestInterConnectionPlacement:
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
             mock_same_infra.assert_called_once()
 
+    def test_unset_placed_off_kubernetes_degrades(self, mock_aws_cloud):
+        """Unset group whose best common infra is non-k8s: warn + degrade.
+
+        The degradation is persisted on the dag so the controller (which
+        reads the serialized dag) skips all networking machinery.
+        """
+        res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=None)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        assert dag.inter_connection is False
+        assert task1.best_resources == res
+        assert task2.best_resources == res
+
     def test_mixed_pin_narrows_group_to_pinned_context(self, mock_k8s_cloud):
         """k8s/blah + k8s + k8s: everyone lands on blah, hard-pinned."""
         res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
