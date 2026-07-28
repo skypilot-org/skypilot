@@ -1193,15 +1193,17 @@ class Optimizer:
 
             if dag.inter_connection is True:
                 # In-group networking is only supported on Kubernetes, so
-                # explicitly requiring it constrains placement to
-                # Kubernetes candidates.
-                cloud_launchables = collections.defaultdict(
-                    list, {
-                        cloud: res_list
-                        for cloud, res_list in cloud_launchables.items()
-                        if str(cloud).lower() == 'kubernetes'
-                    })
-                if not any(cloud_launchables.values()):
+                # explicitly requiring it constrains this task's
+                # candidates to Kubernetes before the common-infra
+                # intersection below ever sees other clouds.
+                kubernetes_launchables: _PerCloudCandidates = (
+                    collections.defaultdict(
+                        list, {
+                            cloud: res_list
+                            for cloud, res_list in cloud_launchables.items()
+                            if str(cloud).lower() == 'kubernetes'
+                        }))
+                if not any(kubernetes_launchables.values()):
                     # Distinguish a user contradiction (the job pins only
                     # non-Kubernetes infra) from a feasibility problem.
                     cloud_pins, _ = _get_task_pin_sets(task)
@@ -1222,6 +1224,7 @@ class Optimizer:
                             '`inter_connection: true`, which requires '
                             'in-group networking, only supported on '
                             f'Kubernetes, but {reason}')
+                cloud_launchables = kubernetes_launchables
 
             task_launchables[task] = cloud_launchables
 
