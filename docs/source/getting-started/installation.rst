@@ -855,7 +855,7 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
 Together AI
 ~~~~~~~~~~~
 
-`Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
+`Together AI <https://together.ai/>`_ offers Together *GPU clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
 
 1. Install the necessary dependencies for Kubernetes.
 
@@ -895,7 +895,7 @@ Together AI
       # From source
       pip install -e ".[kubernetes]"
 
-2. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
+2. Launch a Together `GPU Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
 3. Get the Kubernetes config for the cluster
 4. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
 5. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
