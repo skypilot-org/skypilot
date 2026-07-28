@@ -1741,9 +1741,25 @@ Custom labels and annotations to apply to all Kubernetes resources.
 
 Timeout for resource provisioning (optional).
 
-Timeout in seconds for resource provisioning.
+Timeout in seconds to wait for pods to be scheduled (bound to a node) before
+giving up and failing over. Set to ``-1`` to wait indefinitely.
 
-Default: ``10``.
+Time spent waiting for queue admission does not count against this timeout:
+while pods are held by a scheduling gate (e.g. Kueue admission when
+:ref:`kubernetes.kueue.local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`
+is set), the timeout clock only starts once the pods are admitted. The
+admission wait itself is bounded by
+:ref:`kubernetes.kueue.admission_timeout <config-yaml-kubernetes-kueue-admission-timeout>`
+(default 24 hours).
+
+If unset, the default is chosen based on the launch: ``10`` seconds for a
+single node, scaled up by ``0.2`` seconds per additional node (capped at
+``60`` seconds); ``1200`` seconds (capped at ``2400``) when GCP DWS flex
+start is used; ``180`` seconds (capped at ``240``) when a ``ReadWriteMany``
+PVC must be provisioned; and 24 hours when a Kueue local queue is
+configured.
+
+Default: ``10``–``60`` seconds (see above).
 
 .. _config-yaml-kubernetes-autoscaler:
 
@@ -1887,6 +1903,22 @@ Kueue configuration (optional).
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Name of the `local queue <https://kueue.sigs.k8s.io/docs/concepts/local_queue/>`_ to use for SkyPilot jobs.
+
+.. _config-yaml-kubernetes-kueue-admission-timeout:
+
+``kubernetes.kueue.admission_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout in seconds for queue admission (optional).
+
+How long a launch may wait for pods held by a scheduling gate (e.g. Kueue
+admission) to be admitted before failing. Time spent waiting for admission
+does not count against
+:ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`,
+which starts once the pods are admitted. Set to ``-1`` to wait
+indefinitely.
+
+Default: ``86400`` (24 hours).
 
 .. _config-yaml-kubernetes-dws:
 

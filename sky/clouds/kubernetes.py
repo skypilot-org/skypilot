@@ -677,8 +677,12 @@ class Kubernetes(clouds.Cloud):
             Timeout in seconds
         """
         if is_using_queueing:
-            # Return a large timeout to let the
-            # queue system handle the provisioning
+            # Queued (e.g. Kueue) workloads wait for quota admission before
+            # they can schedule. The scheduling wait loop separately pauses
+            # the provisioning clock while pods are held by scheduling gates
+            # (see provision/kubernetes/instance.py), so this large default
+            # keeps the post-admission scheduling wait generous for
+            # deployments that have not set provision_timeout explicitly.
             return 24 * 60 * 60  # 24 hours
 
         base_timeout = 10  # Base timeout for single node

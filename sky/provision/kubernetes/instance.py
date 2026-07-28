@@ -61,6 +61,17 @@ _AUTOSCALE_DETECTED_TIMEOUT_SECONDS = 900  # 15 minutes
 # short user-configured provision_timeout (e.g. the default 10s) would exit
 # the wait loop before any event is emitted, defeating the detection logic.
 _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS = 60
+# A pod held by a scheduling gate (e.g. Kueue's kueue.x-k8s.io/admission) is
+# waiting for an external admission controller to admit it — a quota wait,
+# not a provisioning delay. provision_timeout is tuned for scheduling
+# latency and must not count this phase: an explicitly configured
+# provision_timeout would otherwise silently cap queue waits (e.g. a 30s
+# value kills every queue wait), defeating the point of queueing. While any
+# expected pod is gated, the provisioning clock is paused and the gated wait
+# is bounded separately, by kubernetes.kueue.admission_timeout. This is that
+# knob's default (matching the default provision_timeout applied when a
+# Kueue local queue is configured); -1 waits indefinitely.
+_QUEUE_ADMISSION_TIMEOUT_SECONDS = 24 * 60 * 60  # 24 hours
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 # Normal-type pod events that represent slow, legitimately-in-flight steps
@@ -622,12 +633,35 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             f'{_AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS}s.')
         timeout = _AUTOSCALE_INITIAL_MIN_TIMEOUT_SECONDS
 
-    original_deadline = start_time + timeout
+    # Queue-admission gating (e.g. Kueue): a pod held by a scheduling gate is
+    # waiting for an external admission controller to admit it (a quota
+    # wait), not failing to provision. While any expected pod is gated, the
+    # provisioning clock is paused: provision_timeout starts counting from
+    # the moment all expected pods are ungated (admitted). The gated wait
+    # itself is bounded by kubernetes.kueue.admission_timeout (default
+    # _QUEUE_ADMISSION_TIMEOUT_SECONDS; -1 waits indefinitely).
+    admission_timeout = skypilot_config.get_effective_region_config(
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
+        region=context,
+        keys=('kueue', 'admission_timeout'),
+        default_value=_QUEUE_ADMISSION_TIMEOUT_SECONDS)
+    pods_are_gated = False
+    last_gated_pod_names: List[str] = []
+    # Start of the provisioning clock; slides to the admission moment when
+    # pods leave the gated state.
+    provision_clock_start = start_time
 
     def _evaluate_timeout() -> bool:
         # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
+        # While pods are held by scheduling gates, provision_timeout does
+        # not apply; the admission wait is bounded separately.
+        if pods_are_gated:
+            if admission_timeout < 0:
+                return True
+            return time.time() < start_time + admission_timeout
+        original_deadline = provision_clock_start + timeout
         # If autoscaling has been detected, extend the deadline from the
         # detection moment. Use max(...) so an explicitly long user timeout
         # is never shortened by this extension.
@@ -659,6 +693,48 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                         f'Missing pods: {missing_pods}')
             time.sleep(0.5)
             continue
+
+        # A pod with scheduling gates is invisible to the kube-scheduler
+        # until an external controller (e.g. Kueue on admission) removes the
+        # gates. Pause the provisioning clock while any expected pod is
+        # gated — this is a quota/queue wait, not a scheduling delay — and
+        # skip scheduling checks and autoscaler detection, which are
+        # meaningless for gated pods.
+        gated_pod_names = [
+            pod.metadata.name
+            for pod in pods
+            if pod.metadata.name in expected_pod_names and
+            pod.spec.scheduling_gates
+        ]
+        if gated_pod_names:
+            if not pods_are_gated:
+                pods_are_gated = True
+                logger.info(f'Pod(s) {sorted(gated_pod_names)} are held by '
+                            'scheduling gates, waiting for queue admission; '
+                            'provision_timeout will apply after admission.')
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(
+                        'Launching (waiting for queue admission)',
+                        cluster_name=cluster_name))
+                global_user_state.add_cluster_event(
+                    cluster_name,
+                    new_status=None,
+                    reason='Launching (waiting for queue admission)',
+                    event_type=global_user_state.ClusterEventType.
+                    LAUNCH_PROGRESS,
+                    nop_if_duplicate=True,
+                )
+            last_gated_pod_names = gated_pod_names
+            iteration += 1
+            time.sleep(1)
+            continue
+        if pods_are_gated:
+            # All expected pods were just admitted (gates removed) — start
+            # the provisioning clock now.
+            pods_are_gated = False
+            provision_clock_start = time.time()
+            logger.info('All pods admitted (scheduling gates removed); '
+                        f'waiting up to {timeout}s for scheduling.')
 
         # A pod is considered scheduled once the kube-scheduler has bound it
         # to a node (capacity found). We deliberately do not wait for the
@@ -717,6 +793,17 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
 
         iteration += 1
         time.sleep(1)
+
+    # Pods still gated at the admission deadline: the queue never admitted
+    # them. _raise_pod_scheduling_errors inspects scheduler events, which
+    # gated pods do not have — raise a queue-specific error instead.
+    if pods_are_gated:
+        raise config_lib.KubernetesError(
+            f'Pod(s) {sorted(last_gated_pod_names)} were still held by '
+            f'scheduling gates after waiting {admission_timeout} seconds '
+            'for queue admission. Check the queue status and quotas (e.g. '
+            '`kubectl describe workload` for Kueue), adjust the requested '
+            'resources, or raise kubernetes.kueue.admission_timeout.')
 
     # Handle pod scheduling errors
     try:

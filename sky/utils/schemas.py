@@ -1619,6 +1619,11 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'local_queue_name': {
                 'type': 'string',
             },
+            # Seconds a launch may wait for queue admission (pods held by
+            # a scheduling gate) before failing; -1 waits indefinitely.
+            'admission_timeout': {
+                'type': 'integer',
+            },
         },
     },
     # Alias of `kueue.local_queue_name`; `quota.queue` takes precedence
@@ -2497,6 +2502,9 @@ def get_config_schema():
                             'properties': {
                                 'local_queue_name': {
                                     'type': 'string',
+                                },
+                                'admission_timeout': {
+                                    'type': 'integer',
                                 },
                             },
                         },
