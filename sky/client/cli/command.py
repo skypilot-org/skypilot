@@ -8332,11 +8332,14 @@ def workspace_info(output_format: str):
     source_str = info.get('source') or '-'
     preferred = info.get('preferred')
     preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
-    accessible = info.get('accessible') or []
-    read_only = set(info.get('read_only') or [])
-    accessible_str = (', '.join(
-        f'{w!r} (read-only)' if w in read_only else repr(w) for w in accessible)
-                      if accessible else '(none)')
+    # `accessible` is the writable set (where a launch can land); `read_only`
+    # is listed separately so no line reads as "you can use these" for a
+    # workspace the user can only look at.
+    writable = info.get('accessible') or []
+    read_only = info.get('read_only') or []
+    writable_str = ', '.join(
+        repr(w) for w in writable) if writable else '(none)'
+    read_only_str = ', '.join(repr(w) for w in read_only)
     note = info.get('note')
     lines = [
         f'Workspace: {workspace_str}',
@@ -8344,10 +8347,14 @@ def workspace_info(output_format: str):
     ]
     if note:
         lines.append(f'{ux_utils.INDENT_SYMBOL}Note: {note}')
-    lines.extend([
-        f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}',
-        f'{ux_utils.INDENT_LAST_SYMBOL}Accessible: {accessible_str}',
-    ])
+    lines.append(f'{ux_utils.INDENT_SYMBOL}Preferred: {preferred_str}')
+    if read_only:
+        lines.extend([
+            f'{ux_utils.INDENT_SYMBOL}Writable: {writable_str}',
+            f'{ux_utils.INDENT_LAST_SYMBOL}Read-only: {read_only_str}',
+        ])
+    else:
+        lines.append(f'{ux_utils.INDENT_LAST_SYMBOL}Writable: {writable_str}')
     click.echo('\n'.join(lines))
 
     # AMBIGUOUS is the only state whose recovery message is multi-line

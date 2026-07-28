@@ -22,6 +22,7 @@ from sky.utils import common_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
 from sky.utils.db import kv_cache
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import utils as workspaces_utils
 
 logging.getLogger('casbin.policy').setLevel(sky_logging.ERROR)
@@ -56,6 +57,10 @@ class PermissionService:
         self._lock = threading.Lock()
         # Viewer role's endpoint allowlist, materialised at boot.
         self._viewer_allowlist: List[tuple] = []
+        # Endpoints that only read, for workspace-access purposes: the viewer
+        # allowlist plus the entries the viewer role cannot express. Also
+        # materialised at boot. See `rbac.get_read_only_endpoints`.
+        self._read_only_endpoints: List[tuple] = []
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -169,7 +174,11 @@ class PermissionService:
             return []
 
     def _build_viewer_allowlist_no_lock(self) -> None:
-        """Build `self._viewer_allowlist` from defaults + plugin entries.
+        """Build the endpoint allowlists from defaults + plugin entries.
+
+        Populates both `self._viewer_allowlist` (viewer role) and
+        `self._read_only_endpoints` (workspace-access classification), which
+        share the same plugin lookup.
 
         Read-only with respect to casbin/DB state — no policy lock
         required. Safe to call from any process (main server or uvicorn
@@ -179,8 +188,12 @@ class PermissionService:
         self._viewer_allowlist = [(rule['path'], rule['method'])
                                   for rule in rbac.get_viewer_allowlist(
                                       plugin_allowlist=plugin_viewer_allow)]
+        self._read_only_endpoints = [(rule['path'], rule['method'])
+                                     for rule in rbac.get_read_only_endpoints(
+                                         plugin_allowlist=plugin_viewer_allow)]
         logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
-                     'entries')
+                     f'entries, read-only endpoints '
+                     f'{len(self._read_only_endpoints)}')
 
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
@@ -393,22 +406,26 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         return enforcer.get_users_for_role(role)
 
-    def get_accessible_workspace_names(self,
-                                       user_id: str,
-                                       workspace_names: Set[str],
-                                       action: str = 'read') -> Set[str]:
+    def get_accessible_workspace_names(
+            self,
+            user_id: str,
+            workspace_names: Set[str],
+            action: str = workspace_constants.WORKSPACE_ACTION_WRITE
+    ) -> Set[str]:
         """Return workspace names the user can access (batch, O(1) enforcer).
 
         Use instead of check_workspace_permission in a loop when filtering
         many workspaces, to avoid N enforcer calls.
 
         Args:
-            action: 'read' (default) returns workspaces the user can see: the
-                member '*' grants plus workspaces that are read-only-visible to
-                non-members (evaluated live from config, not a materialized
-                grant). 'write' returns only workspaces the user can mutate (the
-                member '*' grants) -- used e.g. for the dashboard's
-                per-workspace ``writable`` signal.
+            action: 'write' (default) returns only workspaces the user can
+                mutate (the member '*' grants) -- the historical meaning of
+                "accessible", and the right answer for any caller that offers
+                the list as a place to act. 'read' additionally includes
+                workspaces that are read-only-visible to non-members (evaluated
+                live from config, not a materialized grant); pass it explicitly
+                for visibility-only uses such as resource listings and
+                ``GET /workspaces``.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
             return workspace_names
@@ -474,7 +491,29 @@ class PermissionService:
 
     def _is_viewer_allowed(self, path: str, method: str) -> bool:
         """Test (path, method) against the viewer allowlist."""
-        for allow_path, allow_method in self._viewer_allowlist:
+        return self._matches_endpoint(self._viewer_allowlist, path, method)
+
+    def is_read_only_endpoint(self, path: str, method: str) -> bool:
+        """Whether this endpoint only reads, for workspace-access purposes.
+
+        Consumed by `sky.server.requests.workspace_access` to decide whether a
+        request needs read or write access to the caller's active workspace.
+        Derived from `rbac.get_read_only_endpoints`, so plugin endpoints are
+        classified by the declaration plugins already maintain for the viewer
+        role.
+
+        Returns False for anything not declared read-only — the caller treats
+        that as "needs write", which is the fail-safe direction.
+        """
+        # Ensures the allowlists are materialised in this process; a no-op
+        # after the first call.
+        self._lazy_initialize()
+        return self._matches_endpoint(self._read_only_endpoints, path, method)
+
+    @staticmethod
+    def _matches_endpoint(entries: List[tuple], path: str, method: str) -> bool:
+        """Test (path, method) against a list of (path pattern, method)."""
+        for allow_path, allow_method in entries:
             if allow_method != method:
                 continue
             # casbin_util.key_match2: arg1 is the request key, arg2 is

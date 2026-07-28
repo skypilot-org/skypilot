@@ -88,26 +88,40 @@ def _load_workspaces() -> Dict[str, Any]:
 
 def _accessible_workspace_names_for_user(user_id: str,
                                          workspace_names: Set[str],
-                                         action: str = 'read') -> Set[str]:
+                                         action: str) -> Set[str]:
     """Return the subset of workspace_names the user can access.
 
-    ``action='read'`` (default) includes read-only workspaces (for listing /
+    ``action='read'`` includes read-only workspaces (for listing /
     visibility); ``action='write'`` returns only workspaces the user can
     mutate (used to pick the active workspace to operate in).
+
+    Deliberately has no default: read and write differ by exactly the
+    read-only-visible workspaces, and a caller that silently inherits the wrong
+    one either hides resources (write where read was meant) or offers a
+    workspace the user cannot act in (read where write was meant). Every call
+    site states which it means.
     """
     return permission.permission_service.get_accessible_workspace_names(
         user_id, workspace_names, action=action)
 
 
-def get_accessible_workspace_names(action: str = 'read') -> Set[str]:
+def get_accessible_workspace_names(
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> Set[str]:
     """Returns workspace names the current user can access (no config dict).
 
     Use this when only workspace names are needed (e.g. filtering clusters/jobs)
     to avoid building the full workspace config dict.
 
-    ``action='read'`` (default) includes read-only workspaces; ``action=
-    'write'`` returns only workspaces the user can mutate (member/open),
-    e.g. to distinguish read-only visibility from writable access.
+    ``action='write'`` (default) returns the workspaces the user can act in —
+    the historical meaning of "accessible", i.e. the answer to "where can I
+    launch". ``action='read'`` additionally includes workspaces that are merely
+    read-only-visible to a non-member; pass it explicitly at the call sites that
+    want visibility rather than usability (resource listings, `/workspaces`).
+
+    The default is deliberately the narrower set: a caller that offers this list
+    as a choice (a "create here" dropdown, a target for a mutation) must not be
+    handed a workspace the user cannot write, and the failure would otherwise
+    only surface later, at the create.
     """
     workspaces = _load_workspaces()
     return _accessible_workspace_names_for_user(
@@ -1144,15 +1158,22 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
         A map from workspace name to workspace configuration.
     """
     workspaces = _load_workspaces()
+    # Visibility, not usability: this endpoint must also return the workspaces
+    # that are only read-only-visible to a non-member, so the dashboard can
+    # render them with the read-only badge. Consumers that need "where can I
+    # create" must filter on the `writable` flag set below.
     accessible_names = _accessible_workspace_names_for_user(
-        user_id, set(workspaces.keys()))
+        user_id,
+        set(workspaces.keys()),
+        action=workspace_constants.WORKSPACE_ACTION_READ)
     # A workspace is 'writable' if the user can mutate it (a member, or the
     # workspace is open); read-only workspaces surfaced to non-members are not.
     # Exposed so the dashboard can enable/disable per-workspace action controls
     # without recomputing membership client-side.
-    writable_names = _accessible_workspace_names_for_user(user_id,
-                                                          accessible_names,
-                                                          action='write')
+    writable_names = _accessible_workspace_names_for_user(
+        user_id,
+        accessible_names,
+        action=workspace_constants.WORKSPACE_ACTION_WRITE)
     result: Dict[str, Any] = {}
     for name in accessible_names:
         # Copy so the request-cached config isn't mutated with computed state.
@@ -1296,7 +1317,8 @@ def resolve_workspace_for_user(user: models.User,
     # read request we fall back to the read-accessible set only when the user
     # has no writable workspace at all, so a read-only-only user can still
     # resolve an active workspace (read-relaxation) instead of being denied.
-    def _active_candidates() -> List[str]:
+    def _active_candidates() -> Tuple[List[str], bool]:
+        """(candidates, whether they came from the read-only fallback)."""
         all_ws = set(_load_workspaces().keys())
         writable = _accessible_workspace_names_for_user(user.id,
                                                         all_ws,
@@ -1305,10 +1327,10 @@ def resolve_workspace_for_user(user: models.User,
             return sorted(
                 _accessible_workspace_names_for_user(user.id,
                                                      all_ws,
-                                                     action='read'))
-        return sorted(writable)
+                                                     action='read')), True
+        return sorted(writable), False
 
-    accessible = _active_candidates()
+    accessible, read_only_only = _active_candidates()
     if not accessible:
         # Zero accessible workspaces can mean the user's private-workspace
         # grant was never materialized: the new-user policy re-sync at first
@@ -1319,7 +1341,7 @@ def resolve_workspace_for_user(user: models.User,
         # idempotent and race-safe, so the retry also heals users whose
         # records predate the re-sync.
         _try_resync_new_user_grants(user)
-        accessible = _active_candidates()
+        accessible, read_only_only = _active_candidates()
         if accessible:
             logger.info(f'Workspace access for user {user.name} ({user.id}) '
                         f'restored by policy re-sync: {accessible}')
@@ -1358,5 +1380,21 @@ def resolve_workspace_for_user(user: models.User,
     if not accessible:
         raise exceptions.NoWorkspaceAccessError(
             f'User {user.name} ({user.id}) has no accessible workspaces.')
+
+    if read_only_only:
+        # Several read-only-visible workspaces and no writable one. Ambiguity
+        # is a *write* problem — a new resource lands in exactly one workspace
+        # and only the user can say which. A read just needs a config context,
+        # and listings filter by every accessible workspace regardless of the
+        # pick, so any candidate serves. Raising here would leave such a user
+        # unable to read ANYTHING (every request resolves the active workspace
+        # first), and `WorkspaceAmbiguousError`'s recovery hint would be a dead
+        # end for them: it says to set a preferred workspace, but
+        # `set_user_preferred_workspace` requires write access. Pick
+        # deterministically instead.
+        return WorkspaceResolution(
+            workspace=accessible[0],
+            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY,
+            note=drift_note)
 
     raise exceptions.WorkspaceAmbiguousError(accessible, note=drift_note)

@@ -1,9 +1,14 @@
 """Unit tests for workspace permissions."""
 
+import inspect
+import pathlib
 import unittest
 from unittest import mock
 
+import sky
 from sky import models
+from sky.workspaces import constants as workspace_constants
+from sky.workspaces import core as workspaces_core
 from sky.workspaces import utils as workspaces_utils
 
 
@@ -320,6 +325,74 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
                          {'w-priv'})
         self.assertTrue(workspaces_utils.is_read_only_workspace('w-priv'))
         self.assertFalse(workspaces_utils.is_read_only_workspace('w-none'))
+
+
+class TestAccessibleDefaultsToWritable(unittest.TestCase):
+    """"Accessible" must keep meaning "where can I act".
+
+    Before read-only visibility existed, `get_accessible_workspace_names()`
+    returned the member/open set, and every consumer treats its result as a set
+    of usable choices (create-here dropdowns, mutation targets). Defaulting it
+    to the read set silently folded read-only-visible workspaces into all of
+    them, so a dropdown would offer a workspace whose create then fails. The
+    read set is opt-in per call site.
+    """
+
+    def test_public_helper_defaults_to_write(self):
+        with mock.patch.object(workspaces_core, '_load_workspaces',
+                               return_value={'w': {}}), \
+             mock.patch.object(workspaces_core,
+                               '_accessible_workspace_names_for_user') as m, \
+             mock.patch.object(workspaces_core.common_utils,
+                               'get_current_user',
+                               return_value=models.User(id='u', name='u')):
+            workspaces_core.get_accessible_workspace_names()
+        self.assertEqual(m.call_args.kwargs['action'],
+                         workspace_constants.WORKSPACE_ACTION_WRITE)
+
+    def test_read_is_opt_in(self):
+        with mock.patch.object(workspaces_core, '_load_workspaces',
+                               return_value={'w': {}}), \
+             mock.patch.object(workspaces_core,
+                               '_accessible_workspace_names_for_user') as m, \
+             mock.patch.object(workspaces_core.common_utils,
+                               'get_current_user',
+                               return_value=models.User(id='u', name='u')):
+            workspaces_core.get_accessible_workspace_names(
+                action=workspace_constants.WORKSPACE_ACTION_READ)
+        self.assertEqual(m.call_args.kwargs['action'],
+                         workspace_constants.WORKSPACE_ACTION_READ)
+
+    def test_private_helper_requires_an_explicit_action(self):
+        """No default at all one level down, so nothing can inherit the wrong
+        set by omission."""
+        sig = inspect.signature(
+            workspaces_core._accessible_workspace_names_for_user)  # pylint: disable=protected-access
+        self.assertIs(sig.parameters['action'].default, inspect.Parameter.empty)
+
+    def test_visibility_call_sites_ask_for_read(self):
+        """The resource listings must keep asking for the READ set.
+
+        These are the call sites the feature exists for: a non-member of a
+        read-only workspace has to SEE its clusters/jobs and the workspace
+        itself. They are the only places that deliberately depart from the
+        writable default, so a well-meaning "simplify to the default" would
+        silently hide those resources again. Everywhere else may rely on the
+        default, which fails in the safe direction.
+        """
+        root = pathlib.Path(sky.__file__).parent
+        missing = []
+        for relative in [
+                'backends/backend_utils.py',  # cluster listing filter
+                'jobs/server/core.py',  # managed-job listing filter
+                'server/server.py',  # enabled_clouds_batch API filter
+        ]:
+            if 'WORKSPACE_ACTION_READ' not in (root / relative).read_text():
+                missing.append(relative)
+        self.assertEqual(
+            missing, [], f'{missing} no longer request the read set from '
+            'get_accessible_workspace_names(). Listings must stay READ so '
+            'read-only-visible workspaces keep showing their resources.')
 
 
 if __name__ == '__main__':

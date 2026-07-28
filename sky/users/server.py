@@ -247,11 +247,34 @@ def get_user_workspace(
                             if e.note else 'multiple workspaces accessible; '
                             'no preferred or active workspace set')
     except exceptions.NoWorkspaceAccessError as e:
-        # One-line message from the raise site ("User <name> (<id>) has
-        # no accessible workspaces.") — short enough to fit in the tree
-        # row and more informative than a generic stand-in.
-        response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
-        response['note'] = str(e)
+        # The resolver answers "where would a *write* land", so it reports no
+        # access for a user whose every accessible workspace is read-only.
+        # Reporting `no-access` here would contradict the `accessible` /
+        # `read_only` lists filled in below (the payload would claim "no
+        # accessible workspaces" next to a list of them). Re-resolve at read
+        # level to report where that user's reads land, under a distinct state
+        # so the CLI / dashboard can say "read-only".
+        response['source'] = workspace_constants.WORKSPACE_SOURCE_READ_ONLY
+        response['note'] = ('read-only access only: launching requires '
+                            'membership of a writable workspace')
+        try:
+            resolution = workspaces_core.resolve_workspace_for_user(
+                user_for_resolve,
+                requested=requested,
+                action=workspace_constants.WORKSPACE_ACTION_READ)
+        except (exceptions.NoWorkspaceAccessError,
+                exceptions.PermissionDeniedError):
+            # No read access either, so the original message is the truth.
+            # One-line message from the raise site ("User <name> (<id>) has
+            # no accessible workspaces.") — short enough to fit in the tree
+            # row and more informative than a generic stand-in.
+            response['source'] = workspace_constants.WORKSPACE_SOURCE_NO_ACCESS
+            response['note'] = str(e)
+        else:
+            response['workspace'] = resolution.workspace
+            response['note'] = ('read-only access only: reads land here, but '
+                                'launching requires membership of a writable '
+                                'workspace')
     except exceptions.PermissionDeniedError as e:
         # Per-workspace deny — raised when an explicit `requested`
         # workspace exists but the user can't access it. We keep the
@@ -265,12 +288,18 @@ def get_user_workspace(
         response['workspace'] = resolution.workspace
         response['source'] = resolution.source
         response['note'] = resolution.note
-    accessible = workspaces_core.get_accessible_workspace_names()
-    writable = workspaces_core.get_accessible_workspace_names(action='write')
-    response['accessible'] = sorted(accessible)
+    # `accessible` keeps its historical meaning: the workspaces the user can
+    # launch into. Everything downstream treats it as a set of usable choices
+    # (dropdowns, "where do I create this"), so read-only-visible workspaces
+    # must NOT be folded in — they go in `read_only`, additively.
+    writable = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_WRITE)
+    readable = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
+    response['accessible'] = sorted(writable)
     # Workspaces the user can only view (read-only visibility for non-members):
-    # accessible for read but not writable. Lets the CLI/dashboard flag them.
-    response['read_only'] = sorted(accessible - writable)
+    # visible but not writable. Lets the CLI/dashboard list them separately.
+    response['read_only'] = sorted(readable - writable)
     return response
 
 

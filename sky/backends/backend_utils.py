@@ -72,6 +72,7 @@ from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.utils.plugin_extensions import ExternalFailureSource
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -3912,7 +3913,11 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    accessible_workspaces = workspaces_core.get_accessible_workspace_names()
+    # Visibility, not usability: a non-member of a read-only workspace must see
+    # its clusters (that is the point of read-only visibility). Whether they may
+    # act on one is decided per-resource, on the cluster's own workspace.
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names(
+        action=workspace_constants.WORKSPACE_ACTION_READ)
 
     # Defense-in-depth: even if some caller bypasses the HTTP layer's
     # role_filter shim and reaches here with include_credentials=True

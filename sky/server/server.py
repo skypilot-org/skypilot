@@ -86,6 +86,7 @@ from sky.server.requests import preconditions
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
+from sky.server.requests import workspace_access
 from sky.skylet import constants
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
@@ -111,6 +112,7 @@ from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 from sky.workspaces import server as workspaces_rest
 
@@ -217,6 +219,27 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             return fastapi.responses.JSONResponse(
                 status_code=403, content={'detail': 'Forbidden'})
 
+        return await call_next(request)
+
+
+class RequestEndpointMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to record the dispatched endpoint context-locally.
+
+    The access level a request needs on the caller's active workspace is
+    derived from the endpoint rather than from the request name, so that
+    plugin endpoints are covered by the same declaration as OSS ones (see
+    `sky.server.requests.workspace_access`). The endpoint is only known here,
+    in the dispatch context; the classification happens further down the same
+    call chain in `executor.prepare_request_async`.
+
+    Registered as the innermost middleware so the recorded path is the one the
+    router matched — i.e. after the rewrites done by `PathCleanMiddleware` and
+    `InternalDashboardPrefixMiddleware`, which is also the path
+    `RBACMiddleware` evaluates.
+    """
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        workspace_access.set_request_endpoint(request.url.path, request.method)
         return await call_next(request)
 
 
@@ -1043,6 +1066,10 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
+# Added first => innermost (wrapped by all the others), so the endpoint it
+# records is the router-matched path, after the rewrites done by
+# PathCleanMiddleware / InternalDashboardPrefixMiddleware.
+app.add_middleware(RequestEndpointMiddleware)
 app.add_middleware(APIVersionMiddleware)
 # The order of all the authentication-related middleware is important.
 # RBACMiddleware must precede all the auth middleware, so it can access
@@ -1304,9 +1331,15 @@ async def enabled_clouds_batch(request: fastapi.Request,
     # before the request reaches the core function (defense-in-depth).
     auth_user = request.state.auth_user
     if auth_user is not None and workspace_list:
+        # Visibility, not usability: reporting a workspace's enabled clouds is a
+        # read, so a read-only-visible workspace must survive this filter (the
+        # dashboard asks for every workspace it can see at once, and dropping
+        # one would fail the whole batch).
         workspace_list = list(
             permission.permission_service.get_accessible_workspace_names(
-                auth_user.id, set(workspace_list)))
+                auth_user.id,
+                set(workspace_list),
+                action=workspace_constants.WORKSPACE_ACTION_READ))
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,

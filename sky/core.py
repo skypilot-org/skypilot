@@ -46,6 +46,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.workspaces import constants as workspace_constants
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -1669,8 +1670,16 @@ def enabled_clouds(workspace: Optional[str] = None,
     if workspace is None:
         workspace = skypilot_config.get_active_workspace()
     else:
+        # A read: this only reports which clouds/contexts the workspace has
+        # enabled, so read access is the right level. Requiring write would
+        # deny a workspace the caller can legitimately see (read-only
+        # visibility for non-members), which in turn fails the whole
+        # `enabled_clouds_batch` fan-out below and empties the dashboard's
+        # "Enabled infra" column and Infra page.
         workspaces_core.check_workspace_permission(
-            common_utils.get_current_user(), workspace)
+            common_utils.get_current_user(),
+            workspace,
+            action=workspace_constants.WORKSPACE_ACTION_READ)
     cached_clouds = global_user_state.get_cached_enabled_clouds(
         sky_cloud.CloudCapability.COMPUTE, workspace=workspace)
     with skypilot_config.local_active_workspace_ctx(workspace):

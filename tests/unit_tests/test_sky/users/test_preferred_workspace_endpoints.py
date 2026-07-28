@@ -425,6 +425,99 @@ class TestGetUsersMeWorkspace(unittest.TestCase):
         self.assertEqual(resp['note'], raise_msg)
         self.assertEqual(resp['accessible'], [])
 
+    def test_read_only_only_user_gets_read_only_source(self):
+        """Every accessible workspace is read-only -> not `no-access`.
+
+        The resolver answers "where does a *write* land", so it raises
+        NoWorkspaceAccessError for this user. Reporting `no-access` would
+        contradict the `accessible` / `read_only` lists in the same payload
+        (the bug: "has no accessible workspaces" printed above four of them).
+        The handler re-resolves at read level instead.
+        """
+        fresh = models.User(id='alice', name='alice')
+        read_pick = workspaces_core.WorkspaceResolution(
+            workspace='default',
+            source=workspace_constants.WORKSPACE_SOURCE_DEFAULT_FALLBACK)
+
+        def _resolve(_user, requested=None, action=None):
+            del _user, requested
+            if action == workspace_constants.WORKSPACE_ACTION_READ:
+                return read_pick
+            raise exceptions.NoWorkspaceAccessError(
+                'User alice (alice) has no accessible workspaces.')
+
+        def _accessible(action=None):
+            # Nothing writable; everything readable.
+            return set() if action == 'write' else {'default', 'pub'}
+
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               side_effect=_resolve), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               side_effect=_accessible), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+        # Where this user's reads actually land.
+        self.assertEqual(resp['workspace'], 'default')
+        self.assertIn('read-only access only', resp['note'])
+        self.assertNotIn('no accessible workspaces', resp['note'])
+        # `accessible` means "where can I launch" — empty for this user. The
+        # read-only-visible ones are reported separately, so no consumer can
+        # mistake them for usable choices.
+        self.assertEqual(resp['accessible'], [])
+        self.assertEqual(resp['read_only'], ['default', 'pub'])
+
+    def test_read_only_only_user_with_several_readable_workspaces(self):
+        """Several readable workspaces: the resolver picks, so we report it.
+
+        `resolve_workspace_for_user(action='read')` no longer raises
+        AMBIGUOUS for a read-only-only user (see
+        `TestReadOnlyOnlyUser::test_several_read_only_workspaces_pick_
+        deterministically`), so this handler always gets a workspace back.
+        """
+        fresh = models.User(id='alice', name='alice')
+        read_pick = workspaces_core.WorkspaceResolution(
+            workspace='pub',
+            source=workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+
+        def _resolve(_user, requested=None, action=None):
+            del _user, requested
+            if action == workspace_constants.WORKSPACE_ACTION_READ:
+                return read_pick
+            raise exceptions.NoWorkspaceAccessError(
+                'User alice (alice) has no accessible workspaces.')
+
+        def _accessible(action=None):
+            return set() if action == 'write' else {'pub', 'team'}
+
+        with mock.patch.object(users_server.global_user_state,
+                               'get_user',
+                               return_value=fresh), \
+             mock.patch.object(users_server.workspaces_core,
+                               'resolve_workspace_for_user',
+                               side_effect=_resolve), \
+             mock.patch.object(users_server.workspaces_core,
+                               'get_accessible_workspace_names',
+                               side_effect=_accessible), \
+             mock.patch.object(users_server.skypilot_config,
+                               'is_active_workspace_set',
+                               return_value=False):
+            resp = users_server.get_user_workspace(_fake_request(
+                self.auth_user))
+        self.assertEqual(resp['source'],
+                         workspace_constants.WORKSPACE_SOURCE_READ_ONLY)
+        self.assertEqual(resp['workspace'], 'pub')
+        self.assertEqual(resp['read_only'], ['pub', 'team'])
+
     def test_permission_denied_surfaces_permission_denied_source(self):
         """Explicit `requested` workspace the user can't access. The
         handler keeps `str(e)` here (unlike the ambiguous path) because

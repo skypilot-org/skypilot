@@ -320,6 +320,22 @@ _DEFAULT_VIEWER_ALLOWLIST = [
     },
 ]
 
+# Endpoints that need no *write* access to the caller's active workspace but
+# that the viewer allowlist cannot express, because `RBACMiddleware`
+# short-circuits the `/api/` and `/dashboard/` prefixes before any allowlist
+# is consulted — so an entry here would be dead weight for the viewer role.
+# Consumed only by the workspace-access classification (see
+# `sky/server/requests/workspace_access.py`), never by the viewer role.
+_WORKSPACE_READ_EXTRA_ENDPOINTS = [
+    # Cancelling a request touches the request queue, not any workspace.
+    # Requiring write on the active workspace would deny it to a user whose
+    # only accessible workspace is read-only.
+    {
+        'path': '/api/cancel',
+        'method': 'POST'
+    },
+]
+
 
 # Define roles
 class RoleName(str, enum.Enum):
@@ -390,6 +406,39 @@ def get_viewer_allowlist(
             if entry not in combined:
                 combined.append(entry)
 
+    return combined
+
+
+def get_read_only_endpoints(
+    plugin_allowlist: Optional[List[Dict[str, str]]] = None
+) -> List[Dict[str, str]]:
+    """Get the endpoints that only read, for workspace-access purposes.
+
+    This is the viewer role's allowlist (OSS defaults + operator config +
+    plugin ``BasePlugin.viewer_allowlist``) plus
+    `_WORKSPACE_READ_EXTRA_ENDPOINTS`. The viewer allowlist is exactly "the
+    endpoints a strictly-read-only role may call", so reusing it avoids
+    maintaining a second read/write classification of the same endpoints —
+    and it is the only declaration that plugins already populate for their
+    own endpoints.
+
+    An endpoint deliberately kept *off* the viewer allowlist because it
+    exposes secrets (e.g. ``GET /workspaces/config``, key paths) is therefore
+    treated as a write here. That errs on the strict side, which is the safe
+    direction for a workspace the caller can only read.
+
+    Args:
+        plugin_allowlist: Optional list of `{path, method}` records
+            collected from loaded plugins.
+
+    Returns:
+        Combined list of `{path, method}` records, Casbin `keyMatch2` syntax.
+    """
+    combined = get_viewer_allowlist(plugin_allowlist=plugin_allowlist)
+    for rule in _WORKSPACE_READ_EXTRA_ENDPOINTS:
+        entry = {'path': rule['path'], 'method': rule['method']}
+        if entry not in combined:
+            combined.append(entry)
     return combined
 
 
