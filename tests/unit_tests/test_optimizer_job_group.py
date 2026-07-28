@@ -562,6 +562,28 @@ class TestInterConnectionPlacement:
                     quiet=True)
         assert 'no feasible Kubernetes placement' in str(exc_info.value)
 
+    def test_required_non_k8s_pin_error_names_pins(self, mock_aws_cloud):
+        """Explicit true + a job pinning only non-k8s infra: the error
+        names the contradicting pins instead of a generic feasibility
+        message."""
+        aws_res = self._make_resources(mock_aws_cloud, 'us-east-1')
+        task = self._make_task('task-1', [aws_res])
+        dag = self._make_dag([task], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [aws_res]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with pytest.raises(
+                    exceptions.ResourcesUnavailableError) as exc_info:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+        assert 'pins non-Kubernetes infra' in str(exc_info.value)
+
     def test_enabled_no_common_infra_raises(self, mock_k8s_cloud):
         """Default (unset) + empty intersection fails fast, never spreads."""
         res_a = self._make_resources(mock_k8s_cloud, 'ctx-a')
