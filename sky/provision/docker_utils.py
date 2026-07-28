@@ -51,7 +51,7 @@ INSTALL_AWS_CLI_CMD = (
 
 # The Azure CLI is only needed when pulling a private ACR image with the
 # VM's managed identity, so keep the install lazy.
-INSTALL_AZURE_CLI_CMD = ('which az || '
+INSTALL_AZURE_CLI_CMD = ('command -v az || '
                          '(curl -fsSL https://aka.ms/InstallAzureCLIDeb | '
                          'sudo bash)')
 
