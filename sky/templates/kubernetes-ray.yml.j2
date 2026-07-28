@@ -1200,10 +1200,33 @@ available_node_types:
                   INSTALL_SUCCESS=false
                   if [ ! -z "$INSTALL_FIRST" ]; then
                     echo "Installing core packages via $PKG_MGR: $INSTALL_FIRST" >> /tmp/apt-update.log
-                    pkg_install $INSTALL_FIRST >> /tmp/apt-update.log 2>&1 || {
-                      echo "Core install failed via $PKG_MGR: $INSTALL_FIRST" >> /tmp/apt-update.log
-                      return
-                    }
+                    # Retry, to match the apt path (which retries across mirror
+                    # candidates). A single transient repo/CDN/proxy failure
+                    # should not kill the launch.
+                    _core_try=0
+                    while :; do
+                      pkg_install $INSTALL_FIRST >> /tmp/apt-update.log 2>&1
+                      # Do NOT trust the exit status alone: zypper returns >=100
+                      # for informational success (e.g. 106 = a repo had to be
+                      # skipped, but the requested packages installed fine), and
+                      # a partially unreachable repo set is normal behind an
+                      # egress proxy. Ask the same portable question the install
+                      # decision asked -- is the package actually there now?
+                      _core_missing=""
+                      for _g in $INSTALL_FIRST; do
+                        pkg_present "$_g" || _core_missing="$_core_missing $_g"
+                      done
+                      if [ -z "$_core_missing" ]; then
+                        break
+                      fi
+                      _core_try=$((_core_try + 1))
+                      if [ "$_core_try" -ge 3 ]; then
+                        echo "Core install failed via $PKG_MGR after $_core_try attempts; still missing:$_core_missing" >> /tmp/apt-update.log
+                        return
+                      fi
+                      echo "Core packages still missing:$_core_missing -- retry $_core_try/3 via $PKG_MGR" >> /tmp/apt-update.log
+                      sleep 5
+                    done
                   fi
                   # Core prereqs are configured -- unblock STEP 2 before the
                   # best-effort packages below.
@@ -1230,13 +1253,17 @@ available_node_types:
                 else
                   echo "Error: no supported package manager (apt/dnf/microdnf/yum/apk/zypper) found and prereqs are missing: $INSTALL_FIRST $MISSING_PACKAGES" >> /tmp/apt-update.log
                 fi
-                # Drop to set +e for the subsequent "ok to fail" steps (SSH setup
-                # etc.). The apt path already does this inside its fallback helper;
-                # the non-apt and already-installed paths must match, or a later
-                # tolerated Debian-ism (e.g. `service ssh restart`) would abort the
-                # step under set -e on a non-Debian image. The core-install guard
-                # below is an explicit test, unaffected by set +e.
-                set +e
+                # Re-arm set -e for the SSH setup below. The apt fallback helper
+                # leaves set +e behind, and the non-apt / already-installed paths
+                # must not differ from each other -- but the state they converge
+                # on has to be set -e, because upstream ran this block under
+                # set -e and the commands in it are load-bearing: if the
+                # sshd_config edit, ssh-keygen or authorized_keys write fails,
+                # SkyPilot cannot reach the pod at all. Swallowing those turns a
+                # clear "apt-ssh-setup failed" into an opaque SSH timeout much
+                # later. The genuinely optional Debian-isms are tolerated
+                # individually with `|| true` at their own call sites instead.
+                set -e
 
                 if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
@@ -1248,6 +1275,18 @@ available_node_types:
                 # Install Docker CLI and buildx plugin from Docker's official
                 # apt repo (same approach as paperspace provisioner).
                 # Use .asc (armored) key format to avoid requiring gpg binary.
+                #
+                # This block is apt-only: it writes /etc/apt/keyrings and
+                # sources.list.d, calls dpkg, and installs via apt. Rather than
+                # letting a non-Debian image fail obscurely partway through
+                # (`dpkg: command not found`, or a 404 on a Docker repo that has
+                # no build for this $ID), say so plainly. Making it portable is
+                # out of scope for this change.
+                if [ "$PKG_MGR" != "apt" ]; then
+                  echo "Error: kubernetes.enable_docker requires a Debian-family image (apt); detected PKG_MGR='${PKG_MGR:-none}'." >> /tmp/apt-update.log
+                  dump_apt_log
+                  exit 1
+                fi
                 set -e
                 $(prefix_cmd) install -m 0755 -d /etc/apt/keyrings
                 curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg" \
@@ -1271,7 +1310,11 @@ available_node_types:
 
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
-                $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;
+                # Cosmetic (silences a pam_loginuid warning in containers); not
+                # required for SSH to work, and /etc/pam.d/sshd need not exist on
+                # a minimal non-Debian image -- so tolerate it rather than
+                # dropping set -e for the load-bearing commands below.
+                $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd || true;
                 cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
                 $(prefix_cmd) mkdir -p ~/.ssh;
                 $(prefix_cmd) chown -R $(whoami) ~/.ssh;
@@ -1293,7 +1336,9 @@ available_node_types:
                   || $(prefix_cmd) /usr/sbin/sshd 2>/dev/null \
                   || $(prefix_cmd) /sbin/sshd 2>/dev/null \
                   || true;
-                $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+                # Also cosmetic, and ~/.profile is a Debian convention (RHEL ships
+                # ~/.bash_profile) -- tolerate a missing file.
+                $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile || true;
 
                 {% if k8s_enable_docker_build %}
                 # Register BuildKit sidecar as a remote buildx builder so
