@@ -1053,6 +1053,25 @@ available_node_types:
                   esac
                 done;
 
+                # No core package missing => the image already ships curl (and
+                # whatever trust store its curl uses), so STEP 2 has nothing to
+                # wait for. Publish the marker HERE, not only on the install
+                # paths, because several of those can bail out without being
+                # fatal and would otherwise leave STEP 2 waiting forever:
+                #   - apt with INSTALL_FIRST empty but MISSING_PACKAGES set: the
+                #     index refresh can fail on every mirror and `continue` out
+                #     of the loop, yet the core-install guard below only exits
+                #     when INSTALL_FIRST is non-empty, so STEP 1 still ends 0.
+                #   - no supported package manager at all: same shape.
+                # Both cases are ones the old `command -v curl` gate passed
+                # immediately, so not publishing here would be a regression.
+                # Deliberately before the FUSE block below: `fuse` can be
+                # appended to INSTALL_FIRST, but it has nothing to do with the
+                # HTTPS conda download STEP 2 is gating on.
+                if [ -z "$INSTALL_FIRST" ]; then
+                  touch "$CORE_PKGS_READY"
+                fi
+
                 # FUSE handling — four cases for (fuse_installed, fuse3_installed):
                 #   (0, 0): install fuse first then fuse3. apt's Breaks
                 #           resolution removes the `fuse` package while leaving
@@ -1201,9 +1220,8 @@ available_node_types:
                 INSTALL_SUCCESS=false
                 if [ -z "$INSTALL_FIRST" ] && [ -z "$MISSING_PACKAGES" ]; then
                   echo "All required packages already installed; skipping package install." >> /tmp/apt-update.log
-                  # Nothing to install: whatever curl the image ships (and
-                  # whatever trust store it uses) is already in place.
-                  touch "$CORE_PKGS_READY"
+                  # ($CORE_PKGS_READY was already published above, since
+                  # INSTALL_FIRST is empty on this path.)
                   INSTALL_SUCCESS=true
                 elif [ "$PKG_MGR" = "apt" ]; then
                   run_apt_install_with_fallback
