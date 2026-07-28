@@ -108,13 +108,17 @@ The header document supports the following fields:
        string (e.g., ``"30s"``, ``"5m"``) or a dict with per-task delays
        (e.g., ``{"default": "30s", "replay-buffer": "1m"}``).
    * - ``inter_connection``
-     - ``true``
+     - enabled
      - Whether tasks need to reach each other by hostname (in-group
-       networking). When ``true`` (the default), all tasks are placed
-       together on one Kubernetes cluster and the job fails if networking
-       cannot be set up. Set to ``false`` for tasks that coordinate
-       externally: no in-group networking is set up, tasks start without
-       waiting for peers, and tasks may be placed across different clusters.
+       networking). When enabled, all tasks are placed together on one
+       Kubernetes cluster and the job fails if networking cannot be set
+       up. Unset (the default) enables networking wherever it is
+       supported; explicitly setting ``true`` is stricter — placements
+       that cannot support in-group networking (non-Kubernetes or
+       conflicting infra pins) become errors instead of warnings. Set to
+       ``false`` for tasks that coordinate externally: no in-group
+       networking is set up, tasks start without waiting for peers, and
+       tasks may be placed across different clusters.
        See :ref:`job-groups-inter-connection`.
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
@@ -177,11 +181,18 @@ Example usage in a task:
 Requiring or skipping in-group networking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In-group service discovery is supported on Kubernetes. By default
-(``inter_connection: true``), SkyPilot places all tasks in a job group on a
-single Kubernetes cluster, and tasks wait for peer hostnames to become
-resolvable before running. If networking cannot be initialized, the job
-fails with a clear error rather than running without connectivity.
+In-group service discovery is supported on Kubernetes. By default,
+in-group networking is enabled: SkyPilot places all tasks in a job group
+on a single Kubernetes cluster, and tasks wait for peer hostnames to
+become resolvable before running. If networking cannot be initialized,
+the job fails with a clear error rather than running without
+connectivity.
+
+Explicitly setting ``inter_connection: true`` is stricter than leaving it
+unset: placements where in-group networking cannot exist (non-Kubernetes
+infra, or infra pins with no common option) are rejected with an error,
+whereas with the field unset such placements proceed without networking
+and emit a warning.
 
 Set ``inter_connection: false`` in the header for tasks that do not need to
 reach each other by hostname (e.g., components that coordinate through an
@@ -209,11 +220,12 @@ With ``inter_connection: false``:
 
    Hostname-based service discovery across clusters is not supported:
    tasks placed on different clusters cannot reach each other via in-group
-   hostnames. ``inter_connection: true`` (the default) therefore requires
-   placing the whole group on a single Kubernetes cluster — a job group
-   that cannot be co-located fails at submission with instructions, and
-   pinning non-Kubernetes or conflicting infras together with
-   ``inter_connection: true`` is rejected when the YAML is loaded.
+   hostnames. In-group networking therefore requires placing the whole
+   group on a single Kubernetes cluster — a job group with networking
+   enabled that cannot be co-located fails at submission with
+   instructions, and pinning non-Kubernetes or conflicting infras
+   together with an explicit ``inter_connection: true`` is rejected when
+   the YAML is loaded.
 
 
 Viewing logs
