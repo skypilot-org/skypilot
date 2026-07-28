@@ -563,26 +563,19 @@ class TestInterConnectionPlacement:
         assert 'no feasible Kubernetes placement' in str(exc_info.value)
 
     def test_required_non_k8s_pin_error_names_pins(self, mock_aws_cloud):
-        """Explicit true + a job pinning only non-k8s infra: the error
-        names the contradicting pins instead of a generic feasibility
-        message."""
+        """Explicit true + a job pinning only non-k8s infra: rejected by
+        the spec-level pin validation, before any catalog work, with an
+        error naming the contradicting pins."""
         aws_res = self._make_resources(mock_aws_cloud, 'us-east-1')
         task = self._make_task('task-1', [aws_res])
         dag = self._make_dag([task], inter_connection=True)
 
-        def mock_fill(task, blocked_resources, quiet):
-            return ({'any': [aws_res]}, None, None, None)
-
-        with patch('sky.optimizer._fill_in_launchable_resources',
-                   side_effect=mock_fill):
-            with pytest.raises(
-                    exceptions.ResourcesUnavailableError) as exc_info:
-                optimizer.Optimizer._optimize_same_infra(
-                    dag,
-                    minimize=common.OptimizeTarget.COST,
-                    blocked_resources=None,
-                    quiet=True)
+        # No catalog mocking: the contradiction is knowable from the
+        # spec alone and must be rejected before placement runs.
+        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
         assert 'pins non-Kubernetes infra' in str(exc_info.value)
+        assert 'task-1' in str(exc_info.value)
 
     def test_enabled_no_common_infra_raises(self, mock_k8s_cloud):
         """Default (unset) + empty intersection fails fast, never spreads."""
@@ -676,7 +669,8 @@ class TestInterConnectionPlacement:
 
     def test_cloud_level_pins_conflict_required_raises(self, mock_k8s_cloud,
                                                        mock_aws_cloud):
-        """Cloud-only pins to different clouds conflict (k8s vs aws)."""
+        """Cloud-only pins with explicit true: the non-k8s pin is the
+        contradiction (checked before the cross-job conflict)."""
         task1 = self._make_task('task-1',
                                 [self._make_resources(mock_k8s_cloud, None)])
         task2 = self._make_task('task-2',
@@ -685,7 +679,8 @@ class TestInterConnectionPlacement:
 
         with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-        assert 'no common option' in str(exc_info.value)
+        assert 'pins non-Kubernetes infra' in str(exc_info.value)
+        assert 'task-2' in str(exc_info.value)
 
     def test_cloud_level_pins_conflict_unset_degrades(self, mock_k8s_cloud,
                                                       mock_aws_cloud):

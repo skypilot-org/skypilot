@@ -1068,68 +1068,10 @@ class Optimizer:
             logger.info(
                 f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
 
-        # Detect deliberately cross-infra pins from the user's spec alone,
-        # at two levels of granularity:
-        # - cloud-pinned: every resource option of a job pins a cloud
-        #   (region optional, e.g. `infra: k8s`). Jobs whose cloud pin
-        #   sets share no cloud can never be co-located.
-        # - fully-pinned: every option pins cloud+region (e.g.
-        #   `infra: k8s/ctx`). Jobs whose pin sets share no infra can
-        #   never be co-located, even within one cloud.
-        # Either way the common-infra search below can never succeed.
-        # Whether that is allowed depends on inter_connection (in-group
-        # networking does not work across infras today):
-        # - explicitly required (true): error;
-        # - unset (default): allowed, networking degrades to off with a
-        #   warning;
-        # - false: allowed silently.
-        pinned_task_clouds: Dict[str, Set[str]] = {}
-        pinned_task_infras: Dict[str, Set[str]] = {}
-        for task in tasks:
-            cloud_pins, infra_pins = _get_task_pin_sets(task)
-            if cloud_pins is not None:
-                pinned_task_clouds[str(task.name)] = cloud_pins
-            if infra_pins is not None:
-                pinned_task_infras[str(task.name)] = infra_pins
-        clouds_conflict = (len(pinned_task_clouds) > 1 and
-                           not set.intersection(*pinned_task_clouds.values()))
-        infras_conflict = (len(pinned_task_infras) > 1 and
-                           not set.intersection(*pinned_task_infras.values()))
-        pins_conflict = clouds_conflict or infras_conflict
-        if pins_conflict:
-            # Show each job's own pins so the user can see exactly which
-            # jobs disagree, at the granularity that conflicted.
-            conflicting_pins = (pinned_task_infras
-                                if infras_conflict else pinned_task_clouds)
-            pins_desc = '; '.join(f'{name}: {sorted(pins)}'
-                                  for name, pins in conflicting_pins.items())
-            if dag.inter_connection is True:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(
-                        f'Jobs in JobGroup "{dag.name}" pin infrastructures '
-                        f'with no common option ({pins_desc}), but '
-                        '`inter_connection: true` requires in-group '
-                        'networking, which does not work across '
-                        'infrastructures. Unify the infra pins, or set '
-                        '`inter_connection: false` if the jobs do not need '
-                        'to reach each other by hostname.')
-            if dag.inter_connection is None:
-                logger.warning(
-                    f'Jobs in JobGroup "{dag.name}" pin infrastructures '
-                    f'with no common option ({pins_desc}); in-group '
-                    'networking will not be set up and jobs cannot reach '
-                    'each other by hostname. Set `inter_connection: false` '
-                    'to silence this warning.')
-                # Persist the degradation so downstream consumers (the
-                # jobs controller) skip all networking machinery: without
-                # this, the controller would inject the (fatal)
-                # networking wait for a placement where hostnames can
-                # never resolve.
-                dag.inter_connection = False
-            elif not quiet:
-                logger.info(f'Jobs in JobGroup "{dag.name}" pin different '
-                            'infrastructures; optimizing each job '
-                            'independently.')
+        # Spec-level validation of the user's infra pins against
+        # inter_connection (no catalog lookups). May persist an
+        # unset -> off networking degradation on the dag.
+        if _validate_inter_connection_pins(dag, quiet):
             return Optimizer._optimize_independent(dag, minimize,
                                                    blocked_resources, quiet)
 
@@ -1204,26 +1146,16 @@ class Optimizer:
                             if str(cloud).lower() == 'kubernetes'
                         }))
                 if not any(kubernetes_launchables.values()):
-                    # Distinguish a user contradiction (the job pins only
-                    # non-Kubernetes infra) from a feasibility problem.
-                    cloud_pins, _ = _get_task_pin_sets(task)
-                    if cloud_pins and not any(cloud.lower() == 'kubernetes'
-                                              for cloud in cloud_pins):
-                        reason = (f'job "{task.name}" pins non-Kubernetes '
-                                  f'infra ({sorted(cloud_pins)}). Remove '
-                                  'the non-Kubernetes infra pins, or set '
-                                  '`inter_connection: false` if the jobs '
-                                  'do not need to reach each other by '
-                                  'hostname.')
-                    else:
-                        reason = (f'job "{task.name}" has no feasible '
-                                  'Kubernetes placement.')
+                    # Pure feasibility: user-ask contradictions (pins
+                    # excluding Kubernetes) were already rejected by
+                    # _validate_inter_connection_pins before placement.
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             f'JobGroup "{dag.name}" sets '
                             '`inter_connection: true`, which requires '
                             'in-group networking, only supported on '
-                            f'Kubernetes, but {reason}')
+                            f'Kubernetes, but job "{task.name}" has no '
+                            'feasible Kubernetes placement.')
                 cloud_launchables = kubernetes_launchables
 
             task_launchables[task] = cloud_launchables
@@ -1848,6 +1780,91 @@ def _get_task_pin_sets(
         # No resource options at all: no constraints expressed.
         return None, None
     return cloud_pins, infra_pins
+
+
+def _validate_inter_connection_pins(dag: 'dag_lib.Dag', quiet: bool) -> bool:
+    """Validate a JobGroup's infra pins against its inter_connection.
+
+    Spec-level validation only: reads the pins the user wrote and the
+    inter_connection setting, no catalog lookups. Feasibility (whether a
+    pinned infra actually exists and fits each job) is checked later by
+    the common-infra search.
+
+    Checks, in order:
+    - `inter_connection: true` + a job whose options pin only
+      non-Kubernetes clouds: contradiction (in-group networking is only
+      supported on Kubernetes) -> error.
+    - Pinned jobs share no common infra option, at cloud or cloud/region
+      granularity: the placement is deliberately cross-infra, so the
+      common-infra search can never succeed. Error when networking is
+      explicitly required; degrade networking to off (persisted on the
+      dag) with a warning when unset; allowed silently when false.
+
+    Returns:
+        True when the group's pins are deliberately cross-infra and each
+        job must be placed independently; False when the common-infra
+        search should run.
+    """
+    pinned_task_clouds: Dict[str, Set[str]] = {}
+    pinned_task_infras: Dict[str, Set[str]] = {}
+    for task in dag.tasks:
+        cloud_pins, infra_pins = _get_task_pin_sets(task)
+        if cloud_pins is not None:
+            pinned_task_clouds[str(task.name)] = cloud_pins
+        if infra_pins is not None:
+            pinned_task_infras[str(task.name)] = infra_pins
+
+    if dag.inter_connection is True:
+        for task_name, cloud_pins in pinned_task_clouds.items():
+            if not any(cloud.lower() == 'kubernetes' for cloud in cloud_pins):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'JobGroup "{dag.name}" sets '
+                        '`inter_connection: true`, which requires '
+                        'in-group networking, only supported on '
+                        f'Kubernetes, but job "{task_name}" pins '
+                        f'non-Kubernetes infra ({sorted(cloud_pins)}). '
+                        'Remove the non-Kubernetes infra pins, or set '
+                        '`inter_connection: false` if the jobs do not '
+                        'need to reach each other by hostname.')
+
+    clouds_conflict = (len(pinned_task_clouds) > 1 and
+                       not set.intersection(*pinned_task_clouds.values()))
+    infras_conflict = (len(pinned_task_infras) > 1 and
+                       not set.intersection(*pinned_task_infras.values()))
+    if not (clouds_conflict or infras_conflict):
+        return False
+
+    # Show each job's own pins so the user can see exactly which jobs
+    # disagree, at the granularity that conflicted.
+    conflicting_pins = (pinned_task_infras
+                        if infras_conflict else pinned_task_clouds)
+    pins_desc = '; '.join(
+        f'{name}: {sorted(pins)}' for name, pins in conflicting_pins.items())
+    if dag.inter_connection is True:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesUnavailableError(
+                f'Jobs in JobGroup "{dag.name}" pin infrastructures with '
+                f'no common option ({pins_desc}), but '
+                '`inter_connection: true` requires in-group networking, '
+                'which does not work across infrastructures. Unify the '
+                'infra pins, or set `inter_connection: false` if the jobs '
+                'do not need to reach each other by hostname.')
+    if dag.inter_connection is None:
+        logger.warning(
+            f'Jobs in JobGroup "{dag.name}" pin infrastructures with no '
+            f'common option ({pins_desc}); in-group networking will not '
+            'be set up and jobs cannot reach each other by hostname. Set '
+            '`inter_connection: false` to silence this warning.')
+        # Persist the degradation so downstream consumers (the jobs
+        # controller) skip all networking machinery: without this, the
+        # controller would inject the (fatal) networking wait for a
+        # placement where hostnames can never resolve.
+        dag.inter_connection = False
+    elif not quiet:
+        logger.info(f'Jobs in JobGroup "{dag.name}" pin different '
+                    'infrastructures; optimizing each job independently.')
+    return True
 
 
 def _fill_in_launchable_resources(
