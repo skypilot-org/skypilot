@@ -1086,30 +1086,11 @@ class Optimizer:
         pinned_task_clouds: Dict[str, Set[str]] = {}
         pinned_task_infras: Dict[str, Set[str]] = {}
         for task in tasks:
-            cloud_pins: Set[str] = set()
-            infra_pins: Set[str] = set()
-            fully_pinned = True
-            for resource in task.resources:
-                if resource.cloud is None:
-                    # An option with no cloud can land anywhere: the job
-                    # is flexible and cannot cause a provable conflict.
-                    break
-                cloud_pins.add(str(resource.cloud))
-                if resource.region is None:
-                    fully_pinned = False
-                else:
-                    infra_pins.add(f'{resource.cloud}/{resource.region}')
-            else:
-                task_name = str(task.name)
-                if cloud_pins:
-                    pinned_task_clouds[task_name] = cloud_pins
-                # A job only participates in infra-level conflict checks
-                # when EVERY option pins a region: a job with a mix of
-                # region-pinned and cloud-only options (e.g.
-                # any_of: [k8s/ctxA, k8s]) is still flexible within the
-                # cloud and cannot cause a provable infra conflict.
-                if fully_pinned and infra_pins:
-                    pinned_task_infras[task_name] = infra_pins
+            cloud_pins, infra_pins = _get_task_pin_sets(task)
+            if cloud_pins is not None:
+                pinned_task_clouds[str(task.name)] = cloud_pins
+            if infra_pins is not None:
+                pinned_task_infras[str(task.name)] = infra_pins
         clouds_conflict = (len(pinned_task_clouds) > 1 and
                            not set.intersection(*pinned_task_clouds.values()))
         infras_conflict = (len(pinned_task_infras) > 1 and
@@ -1787,6 +1768,43 @@ def _check_specified_regions(task: task_lib.Task) -> None:
                 f'to ensure the infra is enabled.')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(msg)
+
+
+def _get_task_pin_sets(
+        task: task_lib.Task) -> Tuple[Optional[Set[str]], Optional[Set[str]]]:
+    """Return the exact placement constraint sets a task's pins express.
+
+    A task's resource options are alternatives (OR semantics): the task
+    can run anywhere any option allows. A task therefore only has an
+    exactly-enumerable constraint set at a given granularity when EVERY
+    option is pinned at that granularity; one flexible option means the
+    task can escape any conflict at that granularity.
+
+    Returns:
+        (cloud_pins, infra_pins):
+        cloud_pins: the exact set of cloud names the task can run on, or
+            None if any option leaves the cloud unspecified (or the task
+            has no resource options) - the task is flexible across
+            clouds.
+        infra_pins: the exact set of 'cloud/region' infras the task can
+            run on, or None if any option leaves cloud or region
+            unspecified - the task is flexible at least within a cloud
+            (e.g. any_of: [k8s/ctxA, k8s]).
+    """
+    cloud_pins: Set[str] = set()
+    infra_pins: Optional[Set[str]] = set()
+    for resource in task.resources:
+        if resource.cloud is None:
+            return None, None
+        cloud_pins.add(str(resource.cloud))
+        if resource.region is None:
+            infra_pins = None
+        elif infra_pins is not None:
+            infra_pins.add(f'{resource.cloud}/{resource.region}')
+    if not cloud_pins:
+        # No resource options at all: no constraints expressed.
+        return None, None
+    return cloud_pins, infra_pins
 
 
 def _fill_in_launchable_resources(
