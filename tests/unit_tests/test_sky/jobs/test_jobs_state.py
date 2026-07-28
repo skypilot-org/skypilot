@@ -924,6 +924,41 @@ class TestSetRecoveringEventReason:
         assert code is None
 
 
+class TestSetFailedEventCode:
+    """set_failed_async stamps USER_JOB_FAILURE only for user-error types.
+
+    FAILED and FAILED_SETUP mean the user's own program or setup command
+    failed; controller/infra/resource failure types must not carry the code.
+    """
+
+    async def _run(self, failure_type):
+        with mock.patch.object(state, 'add_job_event_async',
+                               new=mock.AsyncMock()) as mock_add_event, \
+             mock.patch.object(state, '_retry_session',
+                               new=mock.AsyncMock(return_value=True)):
+            await state.set_failed_async(job_id=1,
+                                         task_id=0,
+                                         failure_type=failure_type,
+                                         failure_reason='boom')
+        # add_job_event_async(job_id, task_id, status, reason, code)
+        return mock_add_event.await_args.args
+
+    @pytest.mark.asyncio
+    async def test_failed_stamps_user_job_failure(self):
+        args = await self._run(state.ManagedJobStatus.FAILED)
+        assert args[4] == state.USER_JOB_FAILURE_EVENT_CODE
+
+    @pytest.mark.asyncio
+    async def test_failed_setup_stamps_user_job_failure(self):
+        args = await self._run(state.ManagedJobStatus.FAILED_SETUP)
+        assert args[4] == state.USER_JOB_FAILURE_EVENT_CODE
+
+    @pytest.mark.asyncio
+    async def test_failed_controller_has_no_code(self):
+        args = await self._run(state.ManagedJobStatus.FAILED_CONTROLLER)
+        assert args[4] is None
+
+
 # Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
 # stored as epoch seconds (a sqlalchemy.Float column), matching time.time().
 _T100 = 100.0

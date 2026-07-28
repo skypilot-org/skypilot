@@ -3465,8 +3465,15 @@ async def set_failed_async(
     override_terminal: bool = False,
 ):
     """Set an entire job or task to failed."""
+    # FAILED / FAILED_SETUP mean the user's own program (or setup command)
+    # failed, as opposed to controller / infra / resource failures. Stamp the
+    # machine-readable code so consumers (e.g. dashboard event styling) can
+    # attribute the failure without parsing the reason text.
+    code = (USER_JOB_FAILURE_EVENT_CODE
+            if failure_type in (ManagedJobStatus.FAILED,
+                                ManagedJobStatus.FAILED_SETUP) else None)
     await add_job_event_async(job_id, task_id, failure_type,
-                              f'Job failed: {failure_reason}')
+                              f'Job failed: {failure_reason}', code)
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 

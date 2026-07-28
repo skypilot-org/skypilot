@@ -1301,6 +1301,23 @@ class TestUserJobStatusClassification:
         failure_type = mock_set_failed.call_args.kwargs['failure_type']
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
 
+    @pytest.mark.asyncio
+    async def test_terminal_failure_reason_includes_exit_code(self):
+        """A non-retried user failure surfaces the exit code and user-error
+        attribution in failure_reason, which feeds the dashboard details
+        and the FAILED job event (SKY-6411)."""
+
+        controller = self._make_controller()
+        controller._get_cluster_job_exit_codes = AsyncMock(return_value=[7])
+        mock_set_failed = await self._run_until_terminal(
+            controller, job_lib.JobStatus.FAILED)
+
+        failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
+        assert ('Job exited with exit code 7 (user program failure)'
+                in failure_reason)
+        # The log pointer is appended, not replaced.
+        assert 'sky jobs logs --controller' in failure_reason
+
 
 class TestUserJobFailureRecoveryEventReason:
     """The RECOVERING job event must state the real trigger (SKY-6411).

@@ -1254,6 +1254,18 @@ class JobController:
                     exit_codes = await self._get_cluster_job_exit_codes(
                         job_id_on_pool_cluster, handle)
 
+                    # Human-readable description of the non-zero exit, used
+                    # in the RECOVERING event when the job is restarted and
+                    # in failure_reason when it is not.
+                    exit_code_desc: Optional[str] = None
+                    if exit_codes:
+                        if len(exit_codes) == 1:
+                            exit_code_desc = ('Job exited with exit code '
+                                              f'{exit_codes[0]}')
+                        else:
+                            exit_code_desc = ('Job exited with exit codes '
+                                              f'{exit_codes}')
+
                     should_restart_on_failure = (
                         executor.should_restart_on_failure(
                             exit_codes=exit_codes))
@@ -1288,13 +1300,8 @@ class JobController:
                         # RECOVERING event (with the exit code and a log
                         # pointer) instead of the generic "Cluster preempted
                         # or failed" copy, which would be misleading here.
-                        if exit_codes:
-                            if len(exit_codes) == 1:
-                                failure_desc = ('Job exited with exit code '
-                                                f'{exit_codes[0]}')
-                            else:
-                                failure_desc = ('Job exited with exit codes '
-                                                f'{exit_codes}')
+                        if exit_code_desc is not None:
+                            failure_desc = exit_code_desc
                         else:
                             # job_status is non-None here: this branch is
                             # only entered for user-code-failure statuses.
@@ -1307,6 +1314,15 @@ class JobController:
                             f'--controller {self._job_id}')
                         # Fall through to recovery
                     else:
+                        if exit_code_desc is not None:
+                            # failure_reason feeds the dashboard details
+                            # column, the CLI queue, and the FAILED job
+                            # event; state that the user program failed and
+                            # with what exit code, not just where the logs
+                            # are.
+                            failure_reason = (
+                                f'{exit_code_desc} (user program failure). '
+                                f'{failure_reason}')
                         logger.info(
                             f'Task {task_id} failed and will not be retried')
                         await managed_job_state.set_failed_async(
