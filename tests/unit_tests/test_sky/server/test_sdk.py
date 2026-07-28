@@ -131,6 +131,44 @@ def test_api_info_with_cookie_file(set_api_cookie_jar):
             assert mock_make_request.call_args[0] == ('GET', '/api/health')
 
 
+@pytest.mark.parametrize(
+    'deploy,host,expected_host',
+    [
+        # Deploy always binds a wildcard for remote access.
+        (True, '127.0.0.1', '0.0.0.0'),
+        (True, 'localhost', '0.0.0.0'),
+        (True, '0.0.0.0', '0.0.0.0'),
+        # Any IPv6 host under deploy binds the IPv6 wildcard.
+        (True, '::', '::'),
+        (True, '::1', '::'),
+        # A full-length IPv6 literal (no '::') is still detected; the deploy
+        # override runs before allowlist validation, so '::' passes.
+        (True, '2001:db8:0:0:0:0:0:1', '::'),
+        # Non-deploy leaves the host untouched.
+        (False, '127.0.0.1', '127.0.0.1'),
+        (False, '::1', '::1'),
+    ])
+def test_api_start_host_resolution(deploy, host, expected_host):
+    """api_start resolves/validates the bind host and forwards it to start."""
+    with mock.patch('sky.server.common.is_api_server_local',
+                    return_value=True), \
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn'
+                   ) as mock_start:
+        client_sdk.api_start(deploy=deploy, host=host)
+    assert mock_start.call_count == 1
+    # check_server_healthy_or_start_fn(deploy, host, foreground, ...)
+    assert mock_start.call_args[0][1] == expected_host
+
+
+def test_api_start_rejects_invalid_host():
+    """api_start rejects hosts outside the local allowlist."""
+    with mock.patch('sky.server.common.is_api_server_local',
+                    return_value=True), \
+         mock.patch('sky.server.common.check_server_healthy_or_start_fn'):
+        with pytest.raises(ValueError, match='Invalid host'):
+            client_sdk.api_start(deploy=False, host='192.168.1.5')
+
+
 def test_api_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # Create a temporary config file
     config_path = tmp_path / "config.yaml"
@@ -940,3 +978,40 @@ def test_get_request_id():
     mock_response.reason = 'OK'
     request_id = server_common.get_request_id(mock_response)
     assert request_id == 'test_request_id'
+
+
+def _interrupted_entrypoint():
+    """Module-level entrypoint so Request.encode() can pickle it."""
+
+
+def test_get_interrupted_request_raises_request_interrupted_error():
+    """sdk.get() rebuilds the server's 500 payload into
+    RequestInterruptedError — not a generic RuntimeError — so callers (and
+    the retry decorator) can react to the interruption specifically."""
+    from sky import exceptions
+    from sky.server.requests import payloads as requests_payloads
+    from sky.server.requests import requests as requests_lib
+
+    request = requests_lib.Request(request_id='interrupted-req',
+                                   name='sky.launch',
+                                   entrypoint=_interrupted_entrypoint,
+                                   request_body=requests_payloads.RequestBody(),
+                                   status=requests_lib.RequestStatus.CANCELLED,
+                                   created_at=0.0,
+                                   user_id='user-123',
+                                   should_retry=True)
+    request.set_error(
+        exceptions.RequestInterruptedError(
+            'Request was interrupted by an API server restart.'))
+
+    with mock.patch('sky.server.common.make_authenticated_request'
+                   ) as mock_make_request:
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {
+            'detail': request.encode().model_dump()
+        }
+        mock_make_request.return_value = mock_response
+
+        with pytest.raises(exceptions.RequestInterruptedError):
+            client_sdk.get('interrupted-req')

@@ -3,17 +3,22 @@ import asyncio
 import contextlib
 import functools
 import os
+import queue
+import random
 import re
 import select
 import subprocess
+import threading
 import time
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import httpx
 import prometheus_client as prom
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.skylet import constants
+from sky.utils import common_utils
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -41,6 +46,106 @@ logger = sky_logging.init_logger(__name__)
 # Whether the metrics are enabled, cannot be changed at runtime.
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
                                  'false').lower() == 'true'
+
+# Default Prometheus deployment that each context's metrics are federated
+# from. Overridable via the `metrics.prometheus` server config section.
+_DEFAULT_PROMETHEUS_NAMESPACE = 'skypilot'
+_DEFAULT_PROMETHEUS_SERVICE = 'skypilot-prometheus-server'
+_DEFAULT_PROMETHEUS_SERVICE_PORT = 80
+
+# Namespace whose UID is used as the cluster identity for local-context
+# detection. kube-system exists in every cluster, cannot be deleted, and
+# its UID is stable for the lifetime of the cluster, making it the
+# de-facto cluster identifier. Using a fixed, well-known name also lets
+# RBAC be pinned with `resourceNames: ["kube-system"]`.
+_CLUSTER_IDENTITY_NAMESPACE = 'kube-system'
+
+# Timeout for the namespace UID probes used by local-context detection.
+# Must fit within the per-context timeout budget in sky/server/metrics.py
+# (_PER_CONTEXT_TIMEOUT_SECONDS) together with the actual metrics request.
+_NAMESPACE_PROBE_TIMEOUT_SECONDS = 5
+
+# Interval between re-probes of a context whose detection concluded
+# (local or remote). A periodic refresh (instead of probing once) covers
+# the rare case where a kubeconfig context name is remapped to a
+# different cluster at runtime; a stale verdict self-heals within this
+# window. Detection results must NOT live in the request-level cache:
+# gpu_metrics() calls annotations.clear_request_level_cache() on every
+# scrape, which would turn the probe into per-scrape overhead.
+_LOCAL_CONTEXT_CACHE_TTL_SECONDS = 60 * 60
+
+# Backoff schedule for inconclusive detections (probe error, no
+# in-cluster identity): the first retry comes quickly, so a transient
+# failure (RBAC not yet applied, API server hiccup) cannot pin a wrong
+# verdict for a full refresh window, then doubles per consecutive
+# failure up to the max. Without the backoff cap, a permanently failing
+# context (dead cluster, missing RBAC) re-probes on every scrape cycle
+# forever, and the resulting thread/subprocess churn runs in the same
+# process that serves /metrics — enough sustained churn and the scrape
+# times out (up == 0) once per cycle.
+_LOCAL_CONTEXT_FAILURE_RETRY_SECONDS = 60
+_LOCAL_CONTEXT_FAILURE_RETRY_MAX_SECONDS = 15 * 60
+
+# Fraction of each re-probe interval randomized away so contexts first
+# probed together (process start, kubeconfig upload) do not re-probe in
+# one synchronized burst every cycle thereafter.
+_LOCAL_CONTEXT_REFRESH_JITTER_FRACTION = 0.1
+
+
+class _ContextDetection:
+    """Detection state for one kubeconfig context.
+
+    verdict is the last CONCLUSIVE answer (None until a probe first
+    concludes) and keeps being served until a newer conclusive probe
+    replaces it: an inconclusive refresh must not flip a known-local
+    context to remote (and start self-federation) or a known-remote one
+    to local (and silently drop its federation). next_probe_at gates
+    background re-probes — refresh cadence after success, backoff after
+    failure — and consecutive_failures drives the backoff.
+    """
+
+    __slots__ = ('verdict', 'next_probe_at', 'consecutive_failures')
+
+    def __init__(self) -> None:
+        self.verdict: Optional[bool] = None
+        self.next_probe_at: float = 0.0
+        self.consecutive_failures: int = 0
+
+
+# Process-level detection state: context name -> _ContextDetection,
+# guarded by _local_context_cache_lock.
+_local_context_cache: Dict[str, _ContextDetection] = {}
+_local_context_cache_lock = threading.Lock()
+
+# Contexts queued for (or undergoing) a probe, for dedup: scheduling an
+# already-pending context is a no-op, so a hung probe costs one queue
+# slot total rather than one per scrape cycle. Guarded by
+# _local_context_cache_lock.
+_probe_pending: Set[str] = set()
+_probe_queue: 'queue.Queue[str]' = queue.Queue()
+
+# Single daemon worker draining _probe_queue. One worker (instead of a
+# thread per context) serializes probe work: a probe makes blocking
+# Kubernetes reads and may fork a kubeconfig exec-credential plugin
+# subprocess, and running many of those at once contends (GIL, fork,
+# CPU) with the latency-sensitive metrics endpoints served from this
+# same process. Started lazily and re-started if found dead (e.g. in a
+# forked child); daemon because a probe can hang indefinitely and must
+# not block interpreter shutdown.
+_probe_worker: Optional[threading.Thread] = None
+
+# UID of the kube-system namespace as seen through the in-cluster
+# credentials, i.e. the identity of the cluster this API server runs in.
+# Only successful reads are cached; failures are retried on the next
+# detection attempt.
+_in_cluster_identity_uid: Optional[str] = None
+_in_cluster_identity_uid_lock = threading.Lock()
+
+# Whether the last in-cluster anchor read failed, so the failure is
+# logged at WARNING once per state change instead of once per probe: a
+# missing RBAC grant would otherwise emit the same multi-line warning on
+# every backoff cycle of every context.
+_anchor_read_failed = False
 
 # Latency buckets shared by histograms that observe seconds. Kept compact to
 # bound time-series cardinality (each labeled series multiplies by len(buckets))
@@ -251,6 +356,63 @@ SKY_APISERVER_FEDERATION_TOTAL = prom.Counter(
     ['context', 'route', 'outcome'],
 )
 
+# Outcome of each completed local-context detection probe, emitted by the
+# background probe worker: local | remote (conclusive) | inconclusive
+# (probe error / timeout / no identity anchor). A sustained inconclusive
+# rate for a context means its verdict never reaches the success refresh
+# interval and keeps re-probing on the failure backoff — the probe-churn
+# signature. Alert on
+# rate(sky_apiserver_local_context_detection_total{result="inconclusive"}[15m]).
+SKY_APISERVER_LOCAL_CONTEXT_DETECTION_TOTAL = prom.Counter(
+    'sky_apiserver_local_context_detection_total',
+    'Count of local-context detection probes per context and result',
+    ['context', 'result'],
+)
+
+# Wall-clock of one detection probe (kubeconfig client construction,
+# exec-credential subprocess if any, and the kube-system read), by
+# result. The p99 here is what each backoff/refresh cycle costs the
+# process; long tails explain metrics-endpoint pressure even when
+# probes eventually conclude.
+SKY_APISERVER_LOCAL_CONTEXT_DETECTION_DURATION_SECONDS = prom.Histogram(
+    'sky_apiserver_local_context_detection_duration_seconds',
+    'Duration of one local-context detection probe, by context and result',
+    ['context', 'result'],
+    buckets=_LATENCY_BUCKETS,
+)
+
+# In-cluster identity-anchor (kube-system) read outcome:
+# success | unauthorized | no_credentials | no_uid | error.
+# `unauthorized` means the API server's own service account lacks
+# `get` on the kube-system namespace, which disables detection for
+# every named context; alert on any nonzero rate of the
+# result="unauthorized" series over a 15m window.
+SKY_APISERVER_LOCAL_CONTEXT_ANCHOR_READ_TOTAL = prom.Counter(
+    'sky_apiserver_local_context_anchor_read_total',
+    'Count of in-cluster identity-anchor (kube-system) read outcomes',
+    ['result'],
+)
+
+# Contexts queued for (or undergoing) a detection probe. A value that
+# stays elevated means the single probe worker cannot keep up — most
+# likely one probe is hanging (exec-credential plugin, unreachable API
+# server) and the rest are waiting behind it.
+SKY_APISERVER_LOCAL_CONTEXT_PROBE_QUEUE_DEPTH = prom.Gauge(
+    'sky_apiserver_local_context_probe_queue_depth',
+    'Number of contexts queued for or undergoing a detection probe',
+    multiprocess_mode='livesum',
+)
+
+# What the request path served per context: local | remote (a conclusive
+# verdict existed) | unknown (no verdict yet; served as remote for the
+# request). A context stuck at result="unknown" is one whose probes
+# never conclude.
+SKY_APISERVER_LOCAL_CONTEXT_SERVED_TOTAL = prom.Counter(
+    'sky_apiserver_local_context_served_total',
+    'Verdicts served by the non-blocking request path, per context',
+    ['context', 'result'],
+)
+
 
 def record_federation_phase(context: str, route: str, phase: str,
                             seconds: float) -> None:
@@ -278,6 +440,29 @@ def record_federation_outcome(context: str, route: str, outcome: str) -> None:
         SKY_APISERVER_FEDERATION_TOTAL.labels(context=context,
                                               route=route,
                                               outcome=outcome).inc()
+
+
+def _record_detection_probe(context: str, result: str, seconds: float) -> None:
+    """Records one completed detection probe (non-blocking, best-effort)."""
+    if METRICS_ENABLED:
+        SKY_APISERVER_LOCAL_CONTEXT_DETECTION_TOTAL.labels(context=context,
+                                                           result=result).inc()
+        SKY_APISERVER_LOCAL_CONTEXT_DETECTION_DURATION_SECONDS.labels(
+            context=context, result=result).observe(seconds)
+
+
+def _record_anchor_read(result: str) -> None:
+    """Records one in-cluster identity-anchor read outcome (non-blocking)."""
+    if METRICS_ENABLED:
+        SKY_APISERVER_LOCAL_CONTEXT_ANCHOR_READ_TOTAL.labels(
+            result=result).inc()
+
+
+def _record_served_verdict(context: str, result: str) -> None:
+    """Records the verdict served by the request path (non-blocking)."""
+    if METRICS_ENABLED:
+        SKY_APISERVER_LOCAL_CONTEXT_SERVED_TOTAL.labels(context=context,
+                                                        result=result).inc()
 
 
 class FederationStats:
@@ -364,6 +549,326 @@ def time_me_async(func):
             return await func(*args, **kwargs)
 
     return async_wrapper
+
+
+def _get_prometheus_target() -> Tuple[str, str, int]:
+    """(namespace, service, port) of the Prometheus to federate from.
+
+    Reads the `metrics.prometheus` server config section, falling back to
+    the defaults that match the SkyPilot Helm chart. The metrics routes
+    reload the config on every scrape, so changes are picked up at runtime.
+    """
+    namespace = skypilot_config.get_nested(
+        ('metrics', 'prometheus', 'namespace'), _DEFAULT_PROMETHEUS_NAMESPACE)
+    service = skypilot_config.get_nested(('metrics', 'prometheus', 'service'),
+                                         _DEFAULT_PROMETHEUS_SERVICE)
+    port = skypilot_config.get_nested(('metrics', 'prometheus', 'port'),
+                                      _DEFAULT_PROMETHEUS_SERVICE_PORT)
+    return namespace, service, port
+
+
+def _read_cluster_identity_uid(core) -> Optional[str]:
+    """Reads the kube-system namespace UID through the given CoreV1Api."""
+    namespace = core.read_namespace(
+        _CLUSTER_IDENTITY_NAMESPACE,
+        _request_timeout=_NAMESPACE_PROBE_TIMEOUT_SECONDS)
+    if namespace is None or namespace.metadata is None:
+        return None
+    return namespace.metadata.uid
+
+
+def _get_in_cluster_identity_uid() -> Optional[str]:
+    """UID of kube-system in the cluster the API server runs in.
+
+    Read through the in-cluster credentials, it acts as the identity
+    anchor for local-context detection: a kubeconfig context that
+    resolves kube-system to the same UID points at the cluster this API
+    server runs in.
+
+    Returns None when not running in a pod or when kube-system cannot be
+    read (e.g. missing RBAC); in that case detection is disabled and
+    every named context is treated as remote.
+    """
+    global _in_cluster_identity_uid, _anchor_read_failed
+    with _in_cluster_identity_uid_lock:
+        if _in_cluster_identity_uid is not None:
+            return _in_cluster_identity_uid
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+
+    def _log_failure(message: str) -> None:
+        # WARNING once per state change, DEBUG on repeats: a persistent
+        # failure (e.g. missing RBAC) re-reads the anchor on every probe
+        # backoff cycle and would spam the same warning forever.
+        global _anchor_read_failed
+        with _in_cluster_identity_uid_lock:
+            first_failure = not _anchor_read_failed
+            _anchor_read_failed = True
+        if first_failure:
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    try:
+        core = kubernetes_adaptors.core_api(
+            kubernetes_adaptors.in_cluster_context_name())
+        uid = _read_cluster_identity_uid(core)
+        if not uid:
+            _record_anchor_read('no_uid')
+            logger.debug(
+                f'The {_CLUSTER_IDENTITY_NAMESPACE!r} namespace was read '
+                f'through in-cluster credentials but carries no UID; '
+                f'local-context detection is disabled until the next '
+                f'attempt.')
+            return None
+    except kubernetes_adaptors.config_exception():
+        # Not running inside a Kubernetes pod: there are no in-cluster
+        # credentials, hence no local cluster to detect.
+        _record_anchor_read('no_credentials')
+        logger.debug('No in-cluster credentials; local-context detection '
+                     'is disabled.')
+        return None
+    except kubernetes_adaptors.api_exception() as e:
+        status = getattr(e, 'status', None)
+        if status in (401, 403):
+            _record_anchor_read('unauthorized')
+            _log_failure(
+                f'The in-cluster service account is not allowed to read '
+                f'the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
+                f'(status={status}); local-context detection is disabled '
+                f'and only the in-cluster context will be treated as '
+                f'local. Grant `get` on the '
+                f'{_CLUSTER_IDENTITY_NAMESPACE!r} namespace to the API '
+                f'server service account (included in the Helm chart '
+                f'default rbac.clusterRules) to enable detection: '
+                f'{common_utils.format_exception(e)}')
+        else:
+            _record_anchor_read('error')
+            _log_failure(
+                f'Failed to read the {_CLUSTER_IDENTITY_NAMESPACE!r} '
+                f'namespace through in-cluster credentials '
+                f'(status={status}); local-context detection is disabled '
+                f'until the next attempt: '
+                f'{common_utils.format_exception(e)}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        _record_anchor_read('error')
+        _log_failure(
+            f'Failed to read the {_CLUSTER_IDENTITY_NAMESPACE!r} namespace '
+            f'through in-cluster credentials; local-context detection is '
+            f'disabled until the next attempt and only the in-cluster '
+            f'context will be treated as local: '
+            f'{common_utils.format_exception(e)}')
+        return None
+    _record_anchor_read('success')
+    with _in_cluster_identity_uid_lock:
+        if _anchor_read_failed:
+            _anchor_read_failed = False
+            logger.info('In-cluster identity anchor read recovered; '
+                        'local-context detection is enabled.')
+        _in_cluster_identity_uid = uid
+    return _in_cluster_identity_uid
+
+
+def _next_probe_delay(conclusive: bool, consecutive_failures: int) -> float:
+    """Seconds until a context's next probe, with jitter.
+
+    Conclusive verdicts refresh on the cache TTL; inconclusive ones
+    retry on an exponential backoff so a permanently failing context
+    settles at one probe per _LOCAL_CONTEXT_FAILURE_RETRY_MAX_SECONDS
+    instead of one per scrape cycle.
+    """
+    if conclusive:
+        interval: float = _LOCAL_CONTEXT_CACHE_TTL_SECONDS
+    else:
+        interval = min(
+            _LOCAL_CONTEXT_FAILURE_RETRY_SECONDS *
+            2**max(0, consecutive_failures - 1),
+            _LOCAL_CONTEXT_FAILURE_RETRY_MAX_SECONDS)
+    return interval * (1 -
+                       _LOCAL_CONTEXT_REFRESH_JITTER_FRACTION * random.random())
+
+
+def is_local_context(context: str) -> bool:
+    """Whether a kubeconfig context points at the API server's own cluster.
+
+    The in-cluster context is local by construction (its credentials are
+    the pod's own service account). Named contexts are probed: local iff
+    the kube-system UID read through the context's credentials matches
+    the API server's own cluster identity.
+
+    Blocking (this is the probing primitive, normally run by the
+    background probe worker — the request path reads verdicts through
+    split_local_remote_contexts() instead). A fresh verdict is answered
+    from the cache; otherwise the context is probed inline. Conclusive
+    verdicts are sticky: an inconclusive probe (no identity anchor, 403,
+    timeout) keeps the previous conclusive verdict and only shortens the
+    re-probe interval, and a context that never concluded is remote —
+    the safe answer, since the local cluster stays reachable via the
+    in-cluster context.
+    """
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    if context == kubernetes_adaptors.in_cluster_context_name():
+        return True
+    now = time.time()
+    with _local_context_cache_lock:
+        entry = _local_context_cache.get(context)
+        if entry is not None and now < entry.next_probe_at:
+            # Not due for a probe: serve the verdict (or the safe
+            # remote default while none has concluded yet).
+            return bool(entry.verdict)
+    start = time.monotonic()
+    is_local = False
+    conclusive = False
+    own_uid = _get_in_cluster_identity_uid()
+    if own_uid is not None:
+        try:
+            core = kubernetes_adaptors.core_api(context)
+            probed_uid = _read_cluster_identity_uid(core)
+            conclusive = bool(probed_uid)
+            is_local = conclusive and probed_uid == own_uid
+        except Exception as e:  # pylint: disable=broad-except
+            status = getattr(e, 'status', None)
+            status_str = f' (status={status})' if status is not None else ''
+            logger.warning(
+                f'Failed to probe the {_CLUSTER_IDENTITY_NAMESPACE!r} '
+                f'namespace through context {context!r}{status_str}: '
+                f'{common_utils.format_exception(e)}')
+    duration = time.monotonic() - start
+    with _local_context_cache_lock:
+        entry = _local_context_cache.setdefault(context, _ContextDetection())
+        if conclusive:
+            if entry.consecutive_failures > 0 or entry.verdict is None:
+                logger.info(
+                    f'Local-context detection for {context!r} concluded: '
+                    f'{"local" if is_local else "remote"}.')
+            entry.verdict = is_local
+            entry.consecutive_failures = 0
+        else:
+            entry.consecutive_failures += 1
+        entry.next_probe_at = now + _next_probe_delay(
+            conclusive, entry.consecutive_failures)
+        verdict = entry.verdict
+        failures = entry.consecutive_failures
+        retry_in = entry.next_probe_at - now
+    if conclusive:
+        result = 'local' if is_local else 'remote'
+    else:
+        result = 'inconclusive'
+        kept = ('keeping previous verdict '
+                f'{"local" if verdict else "remote"}'
+                if verdict is not None else 'treating it as remote')
+        logger.warning(
+            f'Local-context detection for {context!r} was inconclusive '
+            f'(failure #{failures}); {kept}, retrying in {retry_in:.0f}s.')
+    _record_detection_probe(context, result, duration)
+    return bool(verdict)
+
+
+def _cached_local_verdict(context: str) -> Optional[bool]:
+    """Last conclusive verdict for a context, or None if none yet.
+
+    Never probes, so it is safe to call from latency-sensitive paths.
+    """
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    if context == kubernetes_adaptors.in_cluster_context_name():
+        return True
+    with _local_context_cache_lock:
+        entry = _local_context_cache.get(context)
+        if entry is not None:
+            return entry.verdict
+    return None
+
+
+def _probe_worker_loop() -> None:
+    """Drains the probe queue, one detection probe at a time."""
+    while True:
+        context = _probe_queue.get()
+        try:
+            is_local_context(context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Local-context detection failed for {context!r}: '
+                           f'{common_utils.format_exception(e)}')
+        finally:
+            with _local_context_cache_lock:
+                _probe_pending.discard(context)
+            if METRICS_ENABLED:
+                SKY_APISERVER_LOCAL_CONTEXT_PROBE_QUEUE_DEPTH.dec()
+
+
+def _schedule_probe(context: str) -> None:
+    """Queues a background detection probe for context, deduplicated.
+
+    An already-queued (or in-flight) context is not queued again, so a
+    hung probe costs one queue slot total rather than one per scrape
+    cycle. Starts the worker on first use and restarts it if found dead
+    (threads do not survive fork).
+    """
+    global _probe_worker
+    with _local_context_cache_lock:
+        if context in _probe_pending:
+            return
+        _probe_pending.add(context)
+        if _probe_worker is None or not _probe_worker.is_alive():
+            _probe_worker = threading.Thread(target=_probe_worker_loop,
+                                             name='local-context-probe-worker',
+                                             daemon=True)
+            _probe_worker.start()
+    if METRICS_ENABLED:
+        SKY_APISERVER_LOCAL_CONTEXT_PROBE_QUEUE_DEPTH.inc()
+    _probe_queue.put(context)
+
+
+def split_local_remote_contexts(
+        contexts: List[str]) -> Tuple[List[str], List[str]]:
+    """Partitions contexts into (local, remote), without blocking.
+
+    Shared by the federation routes and /dashboard_config so both agree
+    on which contexts point at the API server's own cluster. Verdicts
+    are answered from the cache; contexts due for a probe (never probed,
+    refresh interval elapsed, or failure backoff expired) are handed to
+    the background probe worker and answered with the last conclusive
+    verdict in the meantime. A context with no conclusive verdict yet is
+    remote for this call — the safe answer; a later call picks up the
+    worker's verdict from the cache. Never probes, joins, or spawns a
+    thread per context, so it cannot stall the metrics event loop no
+    matter how slow or broken a context is.
+    """
+    # Import lazily to avoid circular import (metrics -> provision ->
+    # clouds -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    if not contexts:
+        return [], []
+    in_cluster = kubernetes_adaptors.in_cluster_context_name()
+    now = time.time()
+    local: List[str] = []
+    remote: List[str] = []
+    for context in contexts:
+        if context == in_cluster:
+            # Local by construction; never probed.
+            local.append(context)
+            continue
+        with _local_context_cache_lock:
+            entry = _local_context_cache.get(context)
+            verdict = entry.verdict if entry is not None else None
+            due = entry is None or now >= entry.next_probe_at
+        if due:
+            _schedule_probe(context)
+        if verdict is None:
+            _record_served_verdict(context, 'unknown')
+        else:
+            _record_served_verdict(context, 'local' if verdict else 'remote')
+        (local if verdict else remote).append(context)
+    return local, remote
 
 
 def start_svc_port_forward(context: str, namespace: str, service: str,
@@ -582,32 +1087,63 @@ async def send_metrics_request_with_port_forward(
             stop_svc_port_forward(port_forward_process)
 
 
-async def add_cluster_name_label(metrics_text: str, context: str) -> str:
-    """Adds a cluster_name label to each metric line.
-    Args:
-        metrics_text: The text containing the metrics
-        context: The cluster name
+# Matches an existing `cluster="..."` label token in a metric line's label
+# section. Valid exposition escapes quotes inside label values, so the raw
+# substring `cluster="` can only start an actual label; the lookbehind keeps
+# names like `k8s_cluster` from matching.
+_CLUSTER_LABEL_RE = re.compile(r'(?<![A-Za-z0-9_])cluster="')
+# Cheap necessary condition for _CLUSTER_LABEL_RE to match. The regex only
+# differs from this literal by rejecting a preceding word character, so a
+# line without the literal can never match — the substring test is a
+# false-negative-free pre-filter. It matters because the regex runs once
+# per federated series: at multi-hundred-MiB payloads the regex dominates
+# this loop, while the (almost always false) substring test is a C-level
+# scan an order of magnitude cheaper.
+_CLUSTER_LABEL_LITERAL = 'cluster="'
+
+
+def _stamp_cluster_label(metrics_text: str, context: str) -> str:
+    """Body of add_cluster_name_label(); see it for semantics.
+
+    Split out as a plain sync function so it can be handed to a worker
+    thread: it is CPU-bound with no await points, and a federated payload
+    can be hundreds of MiB, so running it on the event loop would stall
+    every other endpoint served by the metrics server (notably /metrics)
+    for as long as the stamping takes.
     """
     lines = metrics_text.strip().split('\n')
     modified_lines = []
+    already_labeled = 0
+    prefix = f'cluster="{context}",'
+    only_label = f'cluster="{context}"'
 
     for line in lines:
         # keep comment lines and empty lines as-is
         if line.startswith('#') or not line.strip():
             modified_lines.append(line)
             continue
-        # if line is a metric line with labels, add cluster label
+        # if line is a metric line with labels, add cluster label. rfind
+        # for the closing brace: label values may legitimately contain '}'
+        # (the sample value/timestamp after the label section cannot).
         brace_start = line.find('{')
-        brace_end = line.find('}')
-        if brace_start != -1 and brace_end != -1:
+        brace_end = line.rfind('}')
+        if brace_start != -1 and brace_end > brace_start:
             metric_name = line[:brace_start]
             existing_labels = line[brace_start + 1:brace_end]
             rest_of_line = line[brace_end + 1:]
 
+            if (_CLUSTER_LABEL_LITERAL in existing_labels and
+                    _CLUSTER_LABEL_RE.search(existing_labels)):
+                # Already attributed; re-stamping would duplicate the
+                # cluster label and invalidate the whole scrape body.
+                already_labeled += 1
+                modified_lines.append(line)
+                continue
+
             if existing_labels:
-                new_labels = f'cluster="{context}",{existing_labels}'
+                new_labels = f'{prefix}{existing_labels}'
             else:
-                new_labels = f'cluster="{context}"'
+                new_labels = only_label
 
             modified_line = f'{metric_name}{{{new_labels}}}{rest_of_line}'
             modified_lines.append(modified_line)
@@ -615,7 +1151,46 @@ async def add_cluster_name_label(metrics_text: str, context: str) -> str:
             # keep other lines as-is
             modified_lines.append(line)
 
+    if already_labeled:
+        # Aggregated (never per line): during real self-federation nearly
+        # every line matches. A large fraction usually means this context
+        # resolves to the central Prometheus itself, i.e. a local context
+        # is being federated as remote (e.g. detection lacks RBAC).
+        logger.debug(
+            f'{already_labeled}/{len(lines)} series federated from context '
+            f'{context!r} already carried a cluster label and were left '
+            f'unstamped.')
+
     return '\n'.join(modified_lines)
+
+
+async def add_cluster_name_label(metrics_text: str, context: str) -> str:
+    """Adds a cluster label to each metric line.
+
+    Skips lines that already carry a `cluster` label (stamped by a
+    previous federation pass, or labeled at the source): re-stamping
+    would produce two `cluster` labels on one line, which is a hard
+    duplicate-label error that makes Prometheus roll back the entire
+    /gpu-metrics scrape body. This is the safety net for the fail-safe
+    path in split_local_remote_contexts(): if a local context is ever
+    misdetected as remote (missing RBAC, cold start, transient probe
+    error), its already-stamped series are federated back here, and
+    skipping keeps them byte-identical to the stored series so ingestion
+    collapses them to a no-op instead of poisoning the scrape.
+
+    Runs in a worker thread: the metrics server serves /metrics,
+    /gpu-metrics and /endpoints-metrics from a single event loop, and a
+    large fleet's federated payload takes tens of seconds of pure CPU to
+    rewrite. Done inline that stalls the loop outright and the
+    concurrent /metrics scrape times out (up == 0) once per federation
+    cycle; in a thread the loop keeps accepting and answering requests
+    while the rewrite proceeds.
+
+    Args:
+        metrics_text: The text containing the metrics
+        context: The cluster name
+    """
+    return await asyncio.to_thread(_stamp_cluster_label, metrics_text, context)
 
 
 # Series federated from each context's Prometheus by /gpu-metrics: DCGM, host
@@ -655,13 +1230,14 @@ async def get_metrics_for_context(context: str,
         Exception: If metrics collection fails for any reason
     """
     match_patterns = GPU_METRICS_MATCH_PATTERNS
+    prometheus_namespace, prometheus_service, prometheus_port = (
+        _get_prometheus_target())
 
-    # TODO(rohan): don't hardcode the namespace and service name
     metrics_text = await send_metrics_request_with_port_forward(
         context=context,
-        namespace='skypilot',
-        service='skypilot-prometheus-server',
-        service_port=80,
+        namespace=prometheus_namespace,
+        service=prometheus_service,
+        service_port=prometheus_port,
         endpoint_path='/federate',
         match_patterns=match_patterns,
         route='gpu-metrics',
@@ -704,12 +1280,14 @@ async def get_endpoint_metrics_for_context(
         Exception: If metrics collection fails for any reason
     """
     match_patterns = ENDPOINT_METRICS_MATCH_PATTERNS
+    prometheus_namespace, prometheus_service, prometheus_port = (
+        _get_prometheus_target())
 
     metrics_text = await send_metrics_request_with_port_forward(
         context=context,
-        namespace='skypilot',
-        service='skypilot-prometheus-server',
-        service_port=80,
+        namespace=prometheus_namespace,
+        service=prometheus_service,
+        service_port=prometheus_port,
         endpoint_path='/federate',
         match_patterns=match_patterns,
         route='endpoints-metrics',

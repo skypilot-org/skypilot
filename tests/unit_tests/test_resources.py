@@ -39,6 +39,53 @@ def test_get_reservations_available_resources():
         "instance_type", "region", "zone", set())
 
 
+def test_get_cost_without_region_uses_joint_regional_price():
+    """get_cost() with no region must not mix per-component minimums.
+
+    The cheapest instance price and the cheapest accelerator price can live in
+    different regions; the cost estimate must be the cheapest joint price a
+    single region offers, not the (unachievable) sum of the two minimums.
+    """
+    instance_prices = {'cheap-instance-region': 8.0, 'cheap-accel-region': 9.0}
+    accel_prices = {'cheap-instance-region': 47.0, 'cheap-accel-region': 26.0}
+
+    mock_cloud = mock.Mock()
+    mock_cloud.instance_type_to_hourly_cost.side_effect = (
+        lambda instance_type, use_spot, region, zone: instance_prices[region])
+    mock_cloud.accelerators_to_hourly_cost.side_effect = (
+        lambda accelerators, use_spot, region, zone: accel_prices[region])
+
+    r = Resources(cloud=mock_cloud,
+                  instance_type='instance_type',
+                  accelerators={'A100': 16})
+    regions = [
+        clouds.Region(name=region_name) for region_name in instance_prices
+    ]
+    with mock.patch.object(Resources,
+                           'get_valid_regions_for_launchable',
+                           return_value=regions):
+        # Cheapest joint price is cheap-accel-region: 9 + 26 = 35, cheaper
+        # than cheap-instance-region (8 + 47 = 55) and than the region-mixed
+        # sum of minimums (8 + 26 = 34), which no region offers.
+        assert r.get_cost(3600) == 35.0
+
+
+def test_get_cost_with_region_prices_that_region():
+    mock_cloud = mock.Mock()
+    mock_cloud.instance_type_to_hourly_cost.return_value = 8.0
+    mock_cloud.accelerators_to_hourly_cost.return_value = 26.0
+    mock_cloud.validate_region_zone.return_value = ('some-region', None)
+    r = Resources(cloud=mock_cloud,
+                  instance_type='instance_type',
+                  accelerators={'A100': 16},
+                  region='some-region')
+    assert r.get_cost(3600) == 34.0
+    mock_cloud.instance_type_to_hourly_cost.assert_called_once_with(
+        'instance_type', False, 'some-region', None)
+    mock_cloud.accelerators_to_hourly_cost.assert_called_once_with(
+        {'A100': 16}, False, 'some-region', None)
+
+
 def _run_label_test(allowed_labels: Dict[str, str],
                     invalid_labels: Dict[str, str],
                     cloud: clouds.Cloud = None):
@@ -295,7 +342,6 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'accelerators': {
             'A10': 1
         },
-        'disk_size': 256,
     }),
     ({
         'infra': 'gcp/*/us-east1-b',
@@ -311,7 +357,6 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
         'labels': {
             'key': 'value'
         },
-        'disk_size': 256,
     }),
 ])
 def test_to_yaml_and_load(resources_kwargs, expected_yaml_config):
@@ -473,16 +518,13 @@ def test_resources_any_of_dump_in_serve_version_bump():
             'accelerators': {
                 'H200': 1
             },
-            'disk_size': 256,
         },
         {
-            'disk_size': 256,
             'accelerators': {
                 'H100': 1
             },
         },
         {
-            'disk_size': 256,
             'accelerators': {
                 'L4': 4
             },
@@ -493,16 +535,13 @@ def test_resources_any_of_dump_in_serve_version_bump():
             'accelerators': {
                 'H100': 1
             },
-            'disk_size': 256,
         },
         {
             'accelerators': {
                 'L4': 4
             },
-            'disk_size': 256,
         },
         {
-            'disk_size': 256,
             'accelerators': {
                 'H200': 1
             },
@@ -1330,7 +1369,6 @@ def test_priority_with_ordered():
             'A10': 1
         },
         'priority': 400,
-        'disk_size': 256,
     }),
     ({
         'cpus': 4,
@@ -1340,7 +1378,6 @@ def test_priority_with_ordered():
         'cpus': '4',
         'memory': '8+',
         'priority': 0,
-        'disk_size': 256,
     }),
     ({
         'cpus': 2,
@@ -1348,7 +1385,6 @@ def test_priority_with_ordered():
     }, {
         'cpus': '2',
         'priority': 1000,
-        'disk_size': 256,
     }),
 ])
 def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):

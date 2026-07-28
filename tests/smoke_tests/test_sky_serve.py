@@ -1190,7 +1190,11 @@ def test_user_dependencies(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'user-dependencies',
         [
-            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "pip install ray>2.11; ray start --head"',
+            # conda is not installed by default; opt in via a temporary config
+            # (it is not a task-YAML-overridable key) so the later
+            # different_default_conda_env.yaml step can `conda create`. Set at
+            # first launch so conda is present cluster-wide.
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --config provision.install_conda=true "pip install ray>2.11; ray start --head"',
             f'sky logs {name} 1 --status',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 2 --status',

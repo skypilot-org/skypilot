@@ -59,7 +59,7 @@ def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 
-    endpoint = server_common.DEFAULT_SERVER_URL
+    endpoint = server_common.get_default_server_url()
 
     config = textwrap.dedent(f"""
     api_server:
@@ -100,7 +100,8 @@ def test_endpoint_output_env(generic_cloud: str):
                                   teardown=f'sky down -y {name}',
                                   env={
                                       constants.SKY_API_SERVER_URL_ENV_VAR:
-                                          server_common.DEFAULT_SERVER_URL
+                                          server_common.get_default_server_url(
+                                          )
                                   })
     smoke_tests_utils.run_one_test(test)
 
@@ -170,8 +171,14 @@ def test_cli_auto_retry(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'cli_auto_retry',
         [
-            # Chaos proxy will kill TCP connections every 30 seconds.
-            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Chaos proxy kills TCP connections roughly every 30 seconds.
+            # The +/-10s jitter keeps the kill schedule from phase-locking
+            # to the client's reconnect cadence: without it, a kill landing
+            # in the small window between the job finishing and the log
+            # stream closing repeats on every attempt (the job runtime and
+            # reconnect timing are ~deterministic), turning a rare race into
+            # a deterministic failure. See #9246.
+            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 --jitter 10 & echo $! > /tmp/{name}-chaos.pid',
             # Wait until the proxy is actually listening on the port. The
             # background `&` returns control immediately and on slower CI
             # workers the first sky-launch would otherwise race the proxy

@@ -336,15 +336,24 @@ def wait_for_message_in_pool_logs(pool_name: str,
         'exit 1')
 
 
-def check_worker_id_exists(pool_name: str,
-                           worker_id: int,
-                           timeout: int = 30,
-                           time_between_checks: int = 5):
-    """Check that a specific worker ID exists in the pool status.
+def check_remaining_worker_is_busy(pool_name: str,
+                                   timeout: int = 30,
+                                   time_between_checks: int = 5):
+    """Check that exactly one worker remains and it is the busy one.
+
+    Used after scaling a pool down to a single worker to verify that the idle
+    worker was removed and the worker still running a job was kept.
+
+    We intentionally do NOT assert a specific worker ID here. Scaling a pool
+    bumps its version and performs a rolling update; depending on timing this
+    can either keep the busy worker in place or migrate its job onto a
+    freshly-provisioned replica with a new ID. Asserting a hard-coded ID is
+    therefore flaky. The stable invariant is that the single remaining worker
+    is the busy one, i.e. its USED_BY column (the last column of each
+    "Pool Workers" row) references a job rather than showing "-".
 
     Args:
         pool_name: The name of the pool.
-        worker_id: The worker ID (replica_id) to check for.
         timeout: Maximum time to wait in seconds.
         time_between_checks: Time to wait between checks in seconds.
     """
@@ -352,28 +361,23 @@ def check_worker_id_exists(pool_name: str,
         'start_time=$SECONDS; '
         'while true; do '
         f'if (( $SECONDS - $start_time > {timeout} )); then '
-        f'  echo "Timeout after {timeout} seconds waiting for worker {worker_id} to exist"; exit 1; '
+        f'  echo "Timeout after {timeout} seconds waiting for the remaining '
+        f'worker to be busy"; exit 1; '
         'fi; '
         f's=$(sky jobs pool status {pool_name} -v 2>&1); '
         'echo "$s"; '
-        # Extract worker IDs using awk: look for "Pool Workers" section,
-        # then extract numeric IDs from subsequent lines
-        'worker_ids=($(echo "$s" | awk \'/Pool Workers/{{flag=1; next}} flag && NF>0 {{print $2}}\' | grep -E \'^[0-9]+$\')); '
-        'found=0; '
-        'for id in "${worker_ids[@]}"; do '
-        f'  if [[ "$id" == "{worker_id}" ]]; then '
-        f'    echo "Worker {worker_id} found in pool status"; '
-        '    found=1; '
-        '    break; '
-        '  fi; '
-        'done; '
-        'if [[ $found -eq 1 ]]; then '
+        # USED_BY is the last column of each "Pool Workers" row; a busy worker
+        # shows a numeric job id while an idle worker shows "-".
+        'used_by=($(echo "$s" | awk \'/Pool Workers/{flag=1; next} '
+        f'flag && $1=="{pool_name}" {{print $NF}}\')); '
+        'if [[ ${#used_by[@]} -eq 1 && "${used_by[0]}" =~ ^[0-9]+$ ]]; then '
+        '  echo "Remaining worker is busy (USED_BY=${used_by[0]})"; '
         '  break; '
         'fi; '
         'if echo "$s" | grep "FAILED"; then '
         '  exit 1; '
         'fi; '
-        f'echo "Waiting for worker {worker_id} to appear in pool status..."; '
+        'echo "Waiting for the single remaining worker to be busy..."; '
         f'sleep {time_between_checks}; '
         'done')
 
@@ -1259,6 +1263,26 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+def _parse_job_ids_snippet(source_var: str, ids_file: str) -> str:
+    """Shell snippet: extract launched job IDs into a comma list at ids_file.
+
+    ``sky jobs launch --num-jobs`` collapses contiguous IDs into ranges in its
+    "Jobs submitted with IDs:" line (e.g. ``2-11``), so widen the capture to
+    include ``-`` and expand any ``N-M`` range back into individual
+    comma-separated IDs (plain comma lists pass through unchanged). Downstream
+    ``awk -F,`` field access then works regardless of format. ``source_var`` is
+    the shell var holding the launch output (e.g. ``s`` for ``$s``).
+    """
+    # awk expands each field: an 'N-M' range becomes N,N+1,...,M; a bare id is
+    # kept as-is. Braces/`$i` are literal awk, not str formatting.
+    expand = (
+        r"""awk -F, '{o=""; for (i=1; i<=NF; i++) {n=split($i, a, "-"); """
+        r"""if (n==2) {for (j=a[1]; j<=a[2]; j++) o=o (o == "" ? "" : ",") j} """
+        r"""else o=o (o == "" ? "" : ",") $i} print o}'""")
+    return (f'echo "${source_var}" | grep "Jobs submitted with IDs:" | '
+            f'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | {expand} > {ids_file}')
+
+
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1281,8 +1305,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
             launch_cmd = (
                 f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
                 f'--num-jobs {num_jobs} -d -y); echo "$s"; '
-                f'echo "$s" | grep "Jobs submitted with IDs:" | '
-                f'sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                f'{_parse_job_ids_snippet("s", ids_file)}; '
                 f'cat {ids_file}')
             id_expr = (lambda i: f"$(awk -F, '{{print ${i + 1}}}' {ids_file})")
             test = smoke_tests_utils.Test(
@@ -1364,12 +1387,20 @@ def test_pools_num_jobs_option(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    # Test parallel job launching with --num-jobs 3
-                    ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
-                     'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Jobs submitted with IDs: 2,3,4,5,6,7,8,9,10,11"; '
-                     'sleep 5').format(pool_name=pool_name,
-                                       job_yaml=job_yaml.name)
+                    # Test parallel job launching with --num-jobs 10. The IDs
+                    # are collapsed into a single N-M range (see
+                    # _parse_job_ids_snippet); assert the range spans exactly 10
+                    # jobs rather than hard-coding the start ID, which is not 2
+                    # on a shared/long-lived server DB.
+                    (
+                        's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
+                        'echo "$s"; '
+                        'echo; echo; echo "$s" | grep "Jobs submitted with IDs:" | '
+                        'sed "s/.*IDs: \\([0-9,-]*\\).*/\\1/" | '
+                        # Braces doubled: this string goes through str.format().
+                        'awk -F- \'{{c = $2 - $1 + 1}} END {{exit !(c == 10)}}\'; '
+                        'sleep 5').format(pool_name=pool_name,
+                                          job_yaml=job_yaml.name)
                 ],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
@@ -2434,10 +2465,12 @@ def test_pools_num_jobs_rank(generic_cloud: str):
             launch_cmd = (
                 's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
                 'echo "$s"; '
-                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > {ids_file}; '
+                '{parse}; '
                 'cat {ids_file}').format(pool_name=pool_name,
                                          job_yaml=job_yaml.name,
                                          NUM_JOBS=NUM_JOBS,
+                                         parse=_parse_job_ids_snippet(
+                                             's', ids_file),
                                          ids_file=ids_file)
             test_commands.append(launch_cmd)
 
@@ -2847,7 +2880,10 @@ def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
     7. Cancels the first job
     8. Scales the pool down to 1 worker
     9. Waits for there to be 1 worker
-    10. Confirms that the worker that remains has id 2 (the one with the job)
+    10. Confirms that the worker that remains is the busy one (the one still
+        running the second job), i.e. the idle worker was scaled down. The
+        remaining worker's ID is not asserted because scaling performs a
+        rolling version update that may reassign worker IDs.
     """
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
@@ -2901,8 +2937,14 @@ def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
                     _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, num_workers=1),
                     wait_until_num_workers(pool_name, 1, timeout=timeout),
-                    # Verify that worker 2 remains (the one with the job)
-                    check_worker_id_exists(pool_name, 2, timeout=timeout),
+                    # The second job must survive the scale-down: its worker is
+                    # the busy one and should be kept over the idle worker.
+                    wait_until_job_status(job_name_2, ['RUNNING'],
+                                          timeout=timeout),
+                    # Verify the remaining worker is the busy one (the one with
+                    # the job), rather than asserting a specific worker ID which
+                    # is not stable across the rolling scale-down update.
+                    check_remaining_worker_is_busy(pool_name, timeout=timeout),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),

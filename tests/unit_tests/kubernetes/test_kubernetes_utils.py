@@ -2259,7 +2259,8 @@ class TestCheckInstanceFits:
                           memory_capacity: str,
                           is_ready: bool = True,
                           labels: Optional[dict] = None,
-                          gpu_allocatable: Optional[str] = None):
+                          gpu_allocatable: Optional[str] = None,
+                          ephemeral_storage_capacity: Optional[str] = None):
         """Helper to create mock Kubernetes node."""
         mock_node = mock.MagicMock()
         mock_node.metadata.name = name
@@ -2272,6 +2273,9 @@ class TestCheckInstanceFits:
             'cpu': cpu_capacity,
             'memory': memory_capacity
         }
+        if ephemeral_storage_capacity is not None:
+            mock_node.status.capacity[
+                'ephemeral-storage'] = ephemeral_storage_capacity
         if gpu_allocatable is not None:
             mock_node.status.allocatable['nvidia.com/gpu'] = gpu_allocatable
         mock_node.is_ready.return_value = is_ready
@@ -2332,6 +2336,52 @@ class TestCheckInstanceFits:
             assert fits is False
             assert reason is not None
             assert 'No ready nodes' in reason
+
+    def test_cpu_instance_fits_with_ephemeral_storage(self):
+        """Test instance fits when ephemeral storage requirement is met."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi',
+                                           ephemeral_storage_capacity='200Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB',
+                                                     ephemeral_storage_gb=100)
+            assert fits is True
+            assert reason is None
+
+    def test_cpu_instance_does_not_fit_insufficient_ephemeral_storage(self):
+        """Test instance does not fit due to insufficient ephemeral storage."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi',
+                                           ephemeral_storage_capacity='50Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB',
+                                                     ephemeral_storage_gb=100)
+            assert fits is False
+            assert reason is not None
+            assert 'ephemeral storage' in reason.lower()
+
+    def test_cpu_instance_missing_ephemeral_storage_capacity(self):
+        """Test instance does not fit when node reports no ephemeral storage."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB',
+                                                     ephemeral_storage_gb=100)
+            assert fits is False
+            assert reason is not None
+            assert 'ephemeral storage' in reason.lower()
 
     def test_gpu_instance_fits_on_cluster(self):
         """Test GPU instance that fits on the cluster."""
@@ -5269,3 +5319,233 @@ def test_diagnose_terminated_pod_substitutes_dashboard_url_token(monkeypatch):
     assert msg is not None
     assert '{dashboard_url}' not in msg
     assert 'the SkyPilot dashboard infra page' in msg
+
+
+def test_get_spot_label_karpenter():
+    """use_spot on a Karpenter context maps to karpenter.sh/capacity-type."""
+    kat = utils.kubernetes_enums.KubernetesAutoscalerType
+    with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
+         mock.patch.object(utils, 'get_autoscaler_type',
+                           return_value=kat.KARPENTER):
+        assert utils.get_spot_label('ctx') == ('karpenter.sh/capacity-type',
+                                               'spot')
+
+
+def test_get_spot_label_gke_unchanged():
+    """GKE spot label is unchanged by the Karpenter addition."""
+    kat = utils.kubernetes_enums.KubernetesAutoscalerType
+    with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
+         mock.patch.object(utils, 'get_autoscaler_type',
+                           return_value=kat.GKE):
+        assert utils.get_spot_label('ctx') == ('cloud.google.com/gke-spot',
+                                               'true')
+
+
+def test_get_spot_label_none_without_known_autoscaler():
+    """No autoscaler (or one without a known spot label) -> no spot label."""
+    with mock.patch.object(utils, 'get_kubernetes_nodes', return_value=[]), \
+         mock.patch.object(utils, 'get_autoscaler_type', return_value=None):
+        assert utils.get_spot_label('ctx') == (None, None)
+
+
+def test_match_kubernetes_failure_hint_text_realistic_eviction_reason():
+    """The display helper maps a real kubelet eviction reason to the hint.
+
+    Uses the full reason string as it appears in the abnormal->INIT cluster
+    event (see backend_utils._update_cluster_status), exercising the display
+    (`_text`) variant end to end. The reason contains both 'ephemeral' and
+    'Evicted'; the 'ephemeral' entry must win, so the resolved hint points at
+    `resources.disk_size`.
+    """
+    reason = ('Evicted: The node was low on resource: ephemeral-storage. '
+              'Threshold quantity: 380764701840, available: 13249836Ki. '
+              'Container ray-node was using 4943246992Ki, request is 0, has '
+              'larger consumption of ephemeral-storage.')
+    hint = utils.match_kubernetes_failure_hint_text(reason)
+    assert hint is not None
+    assert 'resources.disk_size' in hint
+
+
+def test_get_node_accelerator_count_neuron():
+    """AWS Neuron count is read from the aws.amazon.com/neuron resource key."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # Neuron node: count from the Neuron resource key.
+        assert utils.get_node_accelerator_count(
+            None, {'aws.amazon.com/neuron': '16'}) == 16
+        # GPU / TPU paths unchanged.
+        assert utils.get_node_accelerator_count(None,
+                                                {'nvidia.com/gpu': '8'}) == 8
+        assert utils.get_node_accelerator_count(None,
+                                                {'google.com/tpu': '4'}) == 4
+        # No accelerator -> 0.
+        assert utils.get_node_accelerator_count(None, {'cpu': '4'}) == 0
+
+
+def test_get_node_accelerator_count_multiple_families_no_crash():
+    """A node advertising multiple accelerator families must not crash the
+    caller (e.g. sky status/show-gpus); it warns and returns the first family
+    found (GPU > TPU > Neuron)."""
+    with unittest.mock.patch(
+            'sky.provision.kubernetes.utils.get_gpu_resource_key',
+            return_value='nvidia.com/gpu'):
+        # GPU + Neuron on the same node -> GPU wins, no exception.
+        assert utils.get_node_accelerator_count(None, {
+            'nvidia.com/gpu': '8',
+            'aws.amazon.com/neuron': '16',
+        }) == 8
+
+
+def test_get_handled_taint_keys_includes_neuron():
+    assert utils.NEURON_RESOURCE_KEY in utils.get_handled_taint_keys()
+
+
+class TestOCINetworkEnvVars:
+    """OCI network_tier: best NCCL env-var injection per GPU shape."""
+
+    _NET = utils.KubernetesHighPerformanceNetworkType.OCI_ROCE
+
+    def test_gb200_profile(self):
+        """GB200 gets the MNNVL/NVLS InfiniBand profile, not RoCEv2."""
+        env = self._NET.get_network_env_vars('GB200')
+        # The rack-scale NVLink knobs that make GB200 distinct.
+        assert env['NCCL_MNNVL_ENABLE'] == '1'
+        assert env['NCCL_NVLS_ENABLE'] == '1'
+        assert env['NCCL_NET_PLUGIN'] == 'sys'
+        assert env['NCCL_CUMEM_ENABLE'] == '1'
+        assert env['NCCL_IB_HCA'] == 'mlx5_0,mlx5_1,mlx5_3,mlx5_4'
+        assert env['NCCL_SOCKET_IFNAME'] == 'eth0'
+
+    def test_gb200_is_replacement_not_union(self):
+        """GB200 must drop the RoCEv2-only knobs, not merge them in.
+
+        The official OCI GB200 configmap omits DSCP/GID/UCX; folding the
+        RoCE defaults in would inject values OCI does not ship for GB200.
+        """
+        env = self._NET.get_network_env_vars('GB200')
+        for absent in ('NCCL_IB_GID_INDEX', 'NCCL_IB_TC', 'UCX_TLS',
+                       'UCX_NET_DEVICES'):
+            assert absent not in env, absent
+
+    def test_gb200_case_insensitive(self):
+        env = self._NET.get_network_env_vars('gb200')
+        assert env['NCCL_MNNVL_ENABLE'] == '1'
+
+    def test_gb300_profile(self):
+        """GB300 is MNNVL/NVLS but keeps IB tuning and NET_PLUGIN=none."""
+        env = self._NET.get_network_env_vars('GB300')
+        assert env['NCCL_MNNVL_ENABLE'] == '1'
+        assert env['NCCL_NVLS_ENABLE'] == '1'
+        assert env['NCCL_NET_PLUGIN'] == 'none'
+        # Leading '=' is NCCL's exact-name-match prefix; must be preserved.
+        assert env['NCCL_IB_HCA'] == ('=mlx5_0,mlx5_1,mlx5_2,mlx5_3,'
+                                      'mlx5_5,mlx5_6,mlx5_7,mlx5_8')
+        # GB300-specific knobs absent from GB200.
+        assert env['NCCL_NET_GDR_C2C'] == '1'
+        assert env['NCCL_DMABUF_ENABLE'] == '1'
+        assert env['NCCL_IB_TIMEOUT'] == '22'
+
+    def test_gb200_and_gb300_are_distinct(self):
+        """The two GB profiles must not be identical (NET_PLUGIN differs)."""
+        gb200 = self._NET.get_network_env_vars('GB200')
+        gb300 = self._NET.get_network_env_vars('GB300')
+        assert gb200 != gb300
+        assert gb200['NCCL_NET_PLUGIN'] == 'sys'
+        assert gb300['NCCL_NET_PLUGIN'] == 'none'
+
+    def test_default_roce_profile_for_other_shapes(self):
+        """H100/None fall back to the existing RoCEv2 profile unchanged."""
+        expected = {
+            'NCCL_IB_HCA': 'mlx5',
+            'NCCL_IB_GID_INDEX': '3',
+            'NCCL_IB_TC': '41',
+            'NCCL_SOCKET_IFNAME': 'eth0',
+            'UCX_TLS': 'tcp',
+            'UCX_NET_DEVICES': 'eth0',
+        }
+        assert self._NET.get_network_env_vars('H100') == expected
+        assert self._NET.get_network_env_vars(None) == expected
+        # GB200/GB300 must NOT return the default RoCE profile.
+        assert self._NET.get_network_env_vars('GB200') != expected
+        assert self._NET.get_network_env_vars('GB300') != expected
+
+    def test_non_oci_types_ignore_acc_type(self):
+        """acc_type only affects OCI; other types return their fixed dict."""
+        coreweave = utils.KubernetesHighPerformanceNetworkType.COREWEAVE
+        assert (coreweave.get_network_env_vars('GB200') ==
+                coreweave.get_network_env_vars(None))
+
+
+class TestGetNodeAffinity:
+    """Tests for utils.get_node_affinity."""
+
+    def test_none_when_no_terms(self):
+        """No accelerator key and no avoid keys -> no affinity."""
+        assert utils.get_node_affinity(None, None, None) is None
+
+    def test_none_when_key_without_values(self):
+        """A key with None values does not produce a required term."""
+        assert utils.get_node_affinity('skypilot.co/accelerator', None,
+                                       None) is None
+
+    def test_required_term_single_value(self):
+        affinity = utils.get_node_affinity('skypilot.co/accelerator', ['H100'],
+                                           None)
+        assert affinity == {
+            'requiredDuringSchedulingIgnoredDuringExecution': {
+                'nodeSelectorTerms': [{
+                    'matchExpressions': [{
+                        'key': 'skypilot.co/accelerator',
+                        'operator': 'In',
+                        'values': ['H100'],
+                    }],
+                }],
+            },
+        }
+
+    def test_required_term_multiple_values(self):
+        affinity = utils.get_node_affinity('skypilot.co/accelerator',
+                                           ['A100', 'A100-80GB'], None)
+        assert affinity == {
+            'requiredDuringSchedulingIgnoredDuringExecution': {
+                'nodeSelectorTerms': [{
+                    'matchExpressions': [{
+                        'key': 'skypilot.co/accelerator',
+                        'operator': 'In',
+                        'values': ['A100', 'A100-80GB'],
+                    }],
+                }],
+            },
+        }
+
+    def test_preferred_term_only(self):
+        """CPU-only: avoid keys steer away from accelerator nodes."""
+        affinity = utils.get_node_affinity(
+            None, None, ['nvidia.com/gpu.present', 'gke-tpu-accelerator'])
+        assert affinity == {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1,
+                'preference': {
+                    'matchExpressions': [
+                        {
+                            'key': 'nvidia.com/gpu.present',
+                            'operator': 'DoesNotExist',
+                        },
+                        {
+                            'key': 'gke-tpu-accelerator',
+                            'operator': 'DoesNotExist',
+                        },
+                    ],
+                },
+            }],
+        }
+
+    def test_both_terms(self):
+        affinity = utils.get_node_affinity('skypilot.co/accelerator', ['H100'],
+                                           ['some-other-key'])
+        assert affinity is not None
+        assert set(affinity.keys()) == {
+            'requiredDuringSchedulingIgnoredDuringExecution',
+            'preferredDuringSchedulingIgnoredDuringExecution',
+        }

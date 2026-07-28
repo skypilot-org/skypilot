@@ -141,6 +141,7 @@ def test_batch_simple(generic_cloud: str):
 @pytest.mark.batch
 @pytest.mark.resource_heavy
 @pytest.mark.no_kubernetes  # pool.yaml hardcodes L4 GPU; K8s CI clusters may not have it
+@pytest.mark.no_azure  # pool.yaml hardcodes L4 GPU; Azure has no L4 instance
 @pytest.mark.no_remote_server  # see note 1 above
 def test_batch_diffusion(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()

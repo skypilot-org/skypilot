@@ -216,26 +216,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
 
 
 def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
-    if not job_ids:
-        return ''
-
-    if len(job_ids) == 1:
-        return str(job_ids[0])
-
-    job_ids = sorted(job_ids)
-    ranges = []
-    start = prev = job_ids[0]
-
-    for n in job_ids[1:]:
-        if n == prev + 1:
-            prev = n
-            continue
-        ranges.append(f'{start}-{prev}' if start != prev else str(start))
-        start = prev = n
-
-    # append last range
-    ranges.append(f'{start}-{prev}' if start != prev else str(start))
-    return ','.join(ranges)
+    return managed_job_utils.format_job_ids_as_ranges(job_ids)
 
 
 class _DefaultManagedJobRunner:
@@ -881,9 +862,6 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
-    if num_jobs and pool is None:
-        raise ValueError('Cannot specify num_jobs without pool.')
-
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
     # need to serialize the pool name in the dag. The dag object will be
@@ -1238,7 +1216,15 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
+    # The deprecated v1 queue body cannot request specific fields, so default
+    # to the lightweight field set to avoid returning heavy fields (e.g. the
+    # task YAML) for every job, which is expensive with many jobs.
+    jobs, _, _, _ = queue_v2(
+        refresh,
+        skip_finished,
+        all_users,
+        job_ids,
+        fields=list(managed_job_constants.DEFAULT_MANAGED_JOB_FIELDS))
 
     return jobs
 
@@ -1268,6 +1254,18 @@ def queue_v2_api(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
         name_match, pool_match, page, limit, statuses, fields, sort_by,
         sort_order, submitted_after, submitted_before)
+    if fields:
+        # The queue records carry every known column (None for the ones the
+        # query didn't select). Callers that pass ``fields`` have declared
+        # exactly what they read, so drop the other keys here; the response
+        # encoder's exclude_unset then leaves them out of the payload
+        # entirely. On wide job tables the key/None overhead otherwise
+        # dominates the response size (~1.4KB per job — tens of MB at tens
+        # of thousands of jobs). ``job_id``, ``task_id`` and ``status`` are
+        # always kept: the server force-selects them (see _update_fields)
+        # and clients key records on them.
+        keep = set(fields) | {'job_id', 'task_id', 'status'}
+        jobs = [{k: v for k, v in job.items() if k in keep} for job in jobs]
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 

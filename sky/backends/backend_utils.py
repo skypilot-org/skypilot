@@ -49,6 +49,7 @@ from sky.serve import serve_utils
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import auth_utils
 from sky.utils import cluster_utils
@@ -312,8 +313,8 @@ def is_ip(s: str) -> bool:
 def _get_yaml_path_from_cluster_name(cluster_name: str,
                                      prefix: str = constants.SKY_USER_FILE_PATH
                                     ) -> str:
-    output_path = pathlib.Path(
-        prefix).expanduser().resolve() / f'{cluster_name}.yml'
+    output_path = runtime_utils.expanduser_path(
+        pathlib.Path(prefix)).resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
 
@@ -981,7 +982,7 @@ def write_cluster_config(
         labels.update(to_provision.labels)
 
     install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
-                                               True)
+                                               False)
 
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
@@ -1418,6 +1419,23 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
     return datetime.strptime(
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
+
+
+def _summarize_probe_failure(e: exceptions.CommandError) -> str:
+    """Extract a concise, user-facing reason from a failed health probe.
+
+    str(e) embeds the entire remote ray-status command, which is too noisy
+    for the cluster event surfaced on the dashboard and CLI. The actionable
+    part is the last stderr line (e.g. 'ssh: connect to host 1.2.3.4 port
+    22: Operation timed out').
+    """
+    for source in (e.detailed_reason, e.error_msg):
+        if not source:
+            continue
+        lines = [line.strip() for line in source.splitlines() if line.strip()]
+        if lines:
+            return f'health probe failed: {lines[-1]}'
+    return f'health probe failed with return code {e.returncode}'
 
 
 def _count_healthy_nodes_from_ray(output: str,
@@ -2668,6 +2686,10 @@ def _update_cluster_status(
                                 f'If the cluster was restarted manually, try running: '
                                 f'{reset}{bright}sky start {cluster_name}{reset} '
                                 f'{yellow}to recover from INIT status.{reset}')
+                            # Record the probe failure so the cluster event
+                            # explains the INIT transition instead of showing
+                            # 'ray cluster is unhealthy (None)'.
+                            ray_status_details = _summarize_probe_failure(e)
                             return False
                         raise e
                     # We retry for kubernetes because coreweave can have a
@@ -2706,6 +2728,13 @@ def _update_cluster_status(
             if ray_status_details is None:
                 ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
+        except exceptions.CommandError as e:
+            # The health probe command itself failed (e.g. SSH to the head
+            # node is unreachable). Record the concise failure instead of
+            # str(e), which embeds the whole remote command.
+            ray_status_details = _summarize_probe_failure(e)
+            logger.debug(f'Refreshing status ({cluster_name!r}) probe failed: ',
+                         exc_info=e)
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
@@ -2952,6 +2981,36 @@ def _update_cluster_status(
         ]
         if some_nodes_terminated:
             init_reason = 'one or more nodes terminated'
+            # Say where the node went. The pods are gone, so their live status
+            # explains nothing, but the Kubernetes nodes they were placed on
+            # still do: a node that no longer exists, or that is NotReady or
+            # cordoned, points at a cluster/cloud-side failure rather than a
+            # user-initiated teardown. K8s-only; other clouds keep the generic
+            # reason. Best-effort -- fall back to the generic message when the
+            # nodes are unknown or all look fine.
+            #
+            # Skipped once the cluster is already INIT, mirroring the guard on
+            # the event write below: a cluster stays INIT with the pod missing
+            # until it is downed or relaunched, so without this we would poll
+            # the K8s API once per node every refresh to build a string that
+            # is then discarded.
+            if (status != status_lib.ClusterStatus.INIT and
+                    not status_reason and
+                    isinstance(launched_resources.cloud, clouds.Kubernetes)):
+                try:
+                    cluster_info = handle.cached_cluster_info
+                    node_names = (cluster_info.get_node_names()
+                                  if cluster_info is not None else None)
+                    if node_names:
+                        ray_config = global_user_state.get_cluster_yaml_dict(
+                            handle.cluster_yaml)
+                        if ray_config and 'provider' in ray_config:
+                            status_reason = (
+                                k8s_instance.get_missing_node_reason(
+                                    node_names, ray_config['provider']) or '')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to get node state for '
+                                 f'{cluster_name!r}: {e}')
         elif ray_cluster_unhealthy:
             if status_reason:
                 # K8s diagnostics explain the issue — lead with that
@@ -3073,12 +3132,24 @@ def _update_cluster_status(
             # Some status reason clears after a certain time (e.g. k8s events
             # are only stored for an hour by default), so it is possible that
             # the previous event has a status reason, but now it does not.
-            init_reason_regex = (f'^Cluster is abnormal because '
-                                 f'{re.escape(init_reason)}.*')
-        log_message = f'Cluster is abnormal because {init_reason}'
+            init_reason_regex = (
+                f'^{re.escape(global_user_state.ABNORMAL_STATUS_REASON_PREFIX)}'
+                f' {re.escape(init_reason)}.*')
+        log_message = (f'{global_user_state.ABNORMAL_STATUS_REASON_PREFIX} '
+                       f'{init_reason}')
         if status_reason:
             log_message += f' ({status_reason})'
-        log_message += '. Transitioned to INIT.'
+        log_message += '. Transitioned to INIT (details: cluster is unhealthy).'
+        # Surface a remediation hint when we recognize a Kubernetes failure
+        # (e.g. a pod evicted for exceeding ephemeral storage). Guarded on the
+        # cloud -- matching the provision-failure and managed-jobs hint call
+        # sites -- so a non-k8s reason that happens to contain a matched word
+        # (e.g. 'Insufficient') is not mis-hinted.
+        if isinstance(launched_resources.cloud, clouds.Kubernetes):
+            hint = kubernetes_utils.match_kubernetes_failure_hint_text(
+                log_message)
+            if hint:
+                log_message += f' {hint}'
         # Do not add event if the cluster is already in INIT status.
         if status != status_lib.ClusterStatus.INIT:
             global_user_state.add_cluster_event(

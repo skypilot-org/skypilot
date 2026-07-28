@@ -120,6 +120,206 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+# Defining workspaces requires loading a server config, which means restarting
+# the API server -- not possible against a remote server or in the dependency
+# test (see test_workspaces.py for the same constraints).
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_managed_jobs_queue_workspace_column(generic_cloud: str):
+    """Regression test for the `sky jobs queue` WORKSPACE column.
+
+    `sky jobs queue` renders a WORKSPACE column whenever the listed jobs span
+    more than one workspace (see `format_job_table` in sky/jobs/utils.py). That
+    extra column shifts the position of the NAME column, which used to break the
+    status-wait helper's awk parsing (it matched the name in a fixed column).
+
+    Launch two managed jobs in two different workspaces to force the WORKSPACE
+    column to appear, assert it is actually present, and confirm the helper can
+    still find each job's status despite the shifted NAME column.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    ws1 = f'{name}-wsa'
+    ws2 = f'{name}-wsb'
+    # Define the two workspaces (and the low controller resources) via
+    # config_dict. This matters: config_dict is *overlaid* onto the existing
+    # server config by override_sky_config (which writes the merged result to
+    # SKYPILOT_GLOBAL_CONFIG), whereas pointing SKYPILOT_GLOBAL_CONFIG at a
+    # hand-written workspaces-only file would *replace* the server config on
+    # restart and drop settings the test env relies on (e.g. jobs controller
+    # consolidation). The SKY_API_RESTART below then loads the merged config.
+    config_dict = {
+        **smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG,
+        'workspaces': {
+            ws1: {},
+            ws2: {},
+        },
+    }
+
+    # Broad status set: the job may already be RUNNING/SUCCEEDED by the time we
+    # poll. We only care that the helper *finds* the status, not which one.
+    job_statuses = [
+        sky.ManagedJobStatus.PENDING,
+        sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
+        sky.ManagedJobStatus.STARTING,
+        sky.ManagedJobStatus.RUNNING,
+        sky.ManagedJobStatus.SUCCEEDED,
+    ]
+    wait_timeout = 360 if generic_cloud in [
+        'azure', 'gcp', 'kubernetes', 'nebius'
+    ] else 120
+
+    def _launch(job_name: str, workspace: str) -> str:
+        return (f'sky jobs launch -n {job_name} --workspace {workspace} '
+                f'--infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'examples/managed_job.yaml -y -d')
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-queue-workspace-column',
+        [
+            # Restart so the server picks up the merged config (existing server
+            # config + the two workspaces + low controller resources) that
+            # override_sky_config wrote to SKYPILOT_GLOBAL_CONFIG.
+            smoke_tests_utils.SKY_API_RESTART,
+            _launch(f'{name}-1', ws1),
+            _launch(f'{name}-2', ws2),
+            # With jobs in two workspaces, `sky jobs queue` must render the
+            # WORKSPACE column -- otherwise this test would not exercise the
+            # column-shift scenario, so fail loudly if it is missing.
+            's=$(sky jobs queue); echo "$s"; echo "$s" | grep -q WORKSPACE',
+            # The actual regression guard: the helper must find each job's
+            # status even though the WORKSPACE column shifted the NAME column.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-1',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=job_statuses,
+                timeout=wait_timeout),
+        ],
+        # Cancel each job in its own workspace (cancel is workspace-scoped),
+        # then restart onto the original server config to drop our workspaces.
+        teardown=
+        (f'sky jobs cancel -y -n {name}-1 --config active_workspace={ws1} || true; '
+         f'sky jobs cancel -y -n {name}-2 --config active_workspace={ws2} || true; '
+         f'export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}= && '
+         f'{smoke_tests_utils.SKY_API_RESTART}'),
+        config_dict=config_dict,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
+    """`sky jobs launch --num-jobs N` works without a pool.
+
+    Regression test for the lifted pool-only restriction on --num-jobs: with no
+    --pool, N independent managed jobs must be submitted, each on its own
+    cluster, with SKYPILOT_NUM_JOBS=N and a distinct SKYPILOT_JOB_RANK in
+    [0, N). It also checks the CLI output uses the non-pool variants (no
+    `--pool None` / `value=None` hints).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    num_jobs = 2
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    # The API server DB is shared across tests, so we can't assume the job IDs
+    # are 1..num_jobs. All num_jobs jobs share the same name (a known
+    # limitation), so we resolve their IDs by name from `sky jobs queue`.
+    ids_file = f'/tmp/num_jobs_no_pool_ids_{name}.txt'
+    job_config = textwrap.dedent("""\
+        run: |
+          echo "SKYPILOT_NUM_JOBS_VALUE=${SKYPILOT_NUM_JOBS}"
+          echo "SKYPILOT_JOB_RANK_VALUE=${SKYPILOT_JOB_RANK}"
+        """)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as job_yaml:
+        job_yaml.write(job_config)
+        job_yaml.flush()
+        # Launch num_jobs jobs without a pool and assert the output is the
+        # non-pool variant: no pool-only hints, and the multi-job notice.
+        launch_cmd = (
+            f's=$(sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} {job_yaml.name} '
+            f'--num-jobs {num_jobs} -y -d); echo "$s"; '
+            # Non-pool multi-job notice is printed.
+            'echo "$s" | grep "Each job will be launched on its own cluster"; '
+            # No pool-specific hints leaked when there is no pool.
+            '! echo "$s" | grep -- "--pool None"; '
+            '! echo "$s" | grep "value=None"; '
+            '! echo "$s" | grep "in the pool"')
+        # Resolve the num_jobs job IDs by name. `sky jobs queue` renders a
+        # variable number of leading columns before NAME: the TASK column can be
+        # empty and a WORKSPACE column is added whenever the listed jobs span
+        # more than one workspace (always the case with --all), so NAME is not at
+        # a fixed column index. Match the name in any column and print the ID
+        # (always the first column).
+        # Use --all: on a shared server the default queue is truncated to the
+        # latest 50 jobs, so the just-launched jobs can fall outside the window
+        # and the name lookup finds 0.
+        capture_ids_cmd = (
+            's=$(sky jobs queue --all); echo "$s"; echo "$s" | '
+            'awk -v n=' + name +
+            ' \'{for (i=1; i<=NF; i++) if ($i==n) {print $1; break}}\' | '
+            f'sort -un > {ids_file}; cat {ids_file}; '
+            f'cnt=$(wc -l < {ids_file}); '
+            f'if [ "$cnt" -ne {num_jobs} ]; then '
+            f'  echo "Expected {num_jobs} jobs named {name}, found $cnt"; '
+            '  exit 1; fi')
+        # Wait for every job (by ID) to reach SUCCEEDED, failing fast on a bad
+        # status. Uses the controller log, like wait_until_job_status_by_id.
+        wait_all_cmd = (
+            f'start_time=$SECONDS; while read jid; do while true; do '
+            f'  if (( $SECONDS - $start_time > {timeout} )); then '
+            '    echo "Timeout waiting for job $jid"; sky jobs queue; exit 1; fi; '
+            '  s=$(sky jobs logs --controller "$jid" --no-follow 2>&1); '
+            '  echo "$s"; '
+            '  if echo "$s" | grep -q "Job status: JobStatus.SUCCEEDED"; then '
+            '    break; fi; '
+            '  if echo "$s" | grep -qE "Job status: JobStatus.(FAILED|CANCELLED'
+            '|FAILED_SETUP|FAILED_CONTROLLER)"; then '
+            '    echo "Job $jid hit a bad status"; sky jobs queue; exit 1; fi; '
+            '  sleep 10; '
+            f'done; done < {ids_file}')
+        # Check each job logged SKYPILOT_NUM_JOBS=num_jobs, and that the set of
+        # SKYPILOT_JOB_RANK values is exactly {0, ..., num_jobs-1} (distinct).
+        check_envs_cmd = (
+            'ranks=""; while read jid; do '
+            '  s=$(sky jobs logs "$jid" --no-follow 2>&1); echo "$s"; '
+            f'  echo "$s" | grep "SKYPILOT_NUM_JOBS_VALUE={num_jobs}"; '
+            '  r=$(echo "$s" | sed -n '
+            '"s/.*SKYPILOT_JOB_RANK_VALUE=\\([0-9]*\\).*/\\1/p" | head -n1); '
+            '  ranks="$ranks $r"; '
+            f'done < {ids_file}; '
+            'sorted=$(echo $ranks | tr " " "\\n" | sort -un | tr "\\n" " " | '
+            'sed "s/ *$//"); echo "ranks: [$sorted]"; '
+            f'expected=$(seq 0 {num_jobs - 1} | tr "\\n" " " | sed "s/ *$//"); '
+            'if [ "$sorted" != "$expected" ]; then '
+            '  echo "Expected distinct ranks [$expected], got [$sorted]"; '
+            '  exit 1; fi; echo "Ranks are distinct and correct."')
+        test = smoke_tests_utils.Test(
+            'managed-jobs-num-jobs-without-pool',
+            [
+                launch_cmd,
+                capture_ids_cmd,
+                wait_all_cmd,
+                # Give the job logs a moment to be fully flushed.
+                'sleep 20',
+                check_envs_cmd,
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
     """Test that logs are accessible after a managed job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
@@ -301,11 +501,11 @@ def test_managed_jobs_logs_tail(generic_cloud: str):
             f'JOB_ID=$({get_job_id_cmd}) && '
             f'(sky jobs logs -s --tail 5 $JOB_ID 2>&1 || true) | '
             f'grep "tail is not supported with --sync-down"',
-            # --tail with a non-numeric value is rejected by Click's
-            # built-in int parser. Negative ints (and 0) are valid
-            # synonyms for "all lines".
+            # --tail with a non-numeric value is rejected by the integer
+            # parser. Negative ints (and 0) are valid synonyms for "all
+            # lines".
             f'(sky jobs logs --tail xyz 1 2>&1 || true) | '
-            f'grep "is not a valid integer"',
+            f'grep -iE "invalid.*(int|num|tail)|not a valid"',
         ],
         f'sky jobs cancel -y -n tail-{name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -665,6 +865,90 @@ def test_managed_jobs_recovery_kubernetes_multinode():
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# The whole script is embedded as a *single-quoted* argument to `sky jobs
+# launch` (see below), so it must avoid single quotes (') entirely -- one
+# would prematurely close that quoting before the job is even submitted.
+# Every other character (including '$' and double quotes) is left alone so
+# it's evaluated inside the pod, where the script actually runs.
+_VERIFY_ACCELERATOR_NODE_CONSTRAINT_SH = """\
+set -e
+arch=$(uname -m)
+if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+  arch=arm64
+else
+  arch=amd64
+fi
+if ! command -v kubectl &>/dev/null; then
+  ver=$(curl -sL https://dl.k8s.io/release/stable.txt)
+  curl -sL -o /tmp/kubectl "https://dl.k8s.io/release/$ver/bin/linux/$arch/kubectl"
+  chmod +x /tmp/kubectl
+  kubectl=/tmp/kubectl
+else
+  kubectl=kubectl
+fi
+
+pod_name=$(hostname)
+namespace=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+# The accelerator label key differs per cluster flavor (the SkyPilot
+# labeler, GKE, CoreWeave, GPU Feature Discovery, Karpenter, Nebius, ...), so
+# pull the whole nodeSelector/nodeAffinity portion of the pod spec instead
+# of hardcoding one key, and grep it for the requested GPU name.
+node_selector=$($kubectl get pod "$pod_name" -n "$namespace" -o jsonpath="{.spec.nodeSelector}")
+node_affinity=$($kubectl get pod "$pod_name" -n "$namespace" -o jsonpath="{.spec.affinity.nodeAffinity}")
+constraint="$node_selector $node_affinity"
+echo "pod scheduling constraint: $constraint"
+
+if [ -z "$(echo "$constraint" | tr -d "[:space:]")" ]; then
+  echo "FAIL: pod spec has no nodeSelector/nodeAffinity at all"
+  exit 1
+fi
+if ! echo "$constraint" | grep -qiF -- "__WANT_ACCELERATOR__"; then
+  echo "FAIL: __WANT_ACCELERATOR__ not found in the pod nodeSelector/nodeAffinity"
+  exit 1
+fi
+echo ACCELERATOR_NODE_CONSTRAINT_OK
+"""
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+@pytest.mark.resource_heavy
+def test_managed_jobs_kubernetes_accelerator_node_constraint():
+    """A managed job's pod must self-verify its own accelerator scheduling
+    constraint.
+
+    SkyPilot pins a Kubernetes pod to nodes carrying the requested
+    accelerator type via a nodeSelector/nodeAffinity constraint on the
+    cluster's accelerator label (see the ``k8s_acc_label_key`` /
+    ``k8s_acc_label_values`` block in
+    ``sky/templates/kubernetes-ray.yml.j2``). This test asserts that
+    contract end-to-end: the job's own pod fetches its own manifest via
+    kubectl (using its bound ServiceAccount for in-cluster auth) and checks
+    that the requested GPU type is present in its own nodeSelector/
+    nodeAffinity values.
+    """
+    gpu_type = smoke_tests_utils.get_available_gpus(infra='kubernetes')
+    if not gpu_type:
+        pytest.fail('No GPUs available on the kubernetes infra.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    run_command = _VERIFY_ACCELERATOR_NODE_CONSTRAINT_SH.replace(
+        '__WANT_ACCELERATOR__', gpu_type)
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_kubernetes_accelerator_node_constraint',
+        [
+            f"s=$(sky jobs launch --infra kubernetes -n {name} "
+            f"--gpus {gpu_type}:1 -y '{run_command}' 2>&1); echo \"$s\"; "
+            'echo "$s" | grep -q ACCELERATOR_NODE_CONSTRAINT_OK',
+        ],
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -1545,7 +1829,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test-managed-jobs-inline-env',
         [
-            rf'sky jobs launch -n {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
+            rf'sky jobs launch -n {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]] && [[ ! -z \"\$SKYPILOT_CLUSTER_INFO\" ]] && [[ ! -z \"\${constants.USER_ENV_VAR}\" ]] && [[ ! -z \"\${constants.TASK_ID_ENV_VAR}\" ]]) || exit 1"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -1667,6 +1951,54 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                 }
             })
         smoke_tests_utils.run_one_test(test)
+
+
+# Only run this test on Kubernetes since this test relies on
+# kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
+    """pod_config targeting the main container by name must merge into it.
+
+    The main container in SkyPilot Kubernetes pods is named ``ray-node``, and
+    user pod_configs commonly target it by that name (e.g. to add
+    volumeMounts). Container entries are patch-merged by name, so a named
+    entry must merge into the existing ``ray-node`` container rather than
+    being treated as a new container. The pod_config lives in the task YAML's
+    ``config`` section (tests/test_yamls/test_k8s_pod_config_ray_node.yaml),
+    which adds an env var and an emptyDir volume mount to the ``ray-node``
+    container; the test asserts both are visible from inside the job.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_ray_node.yaml'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_pod_config_ray_node_container',
+        [
+            # The task sleeps 60 so the job is still RUNNING when we tail its
+            # logs by name (same workaround as
+            # test_managed_jobs_env_isolation).
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+            f's=$(sky jobs logs -n {name} --no-follow) && echo "$s" && '
+            f'echo "$s" | grep "pod_env_check: ray-node-pod-config-merged" && '
+            f'echo "$s" | grep "mount_check: ok"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_remote_server
@@ -2258,7 +2590,9 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
     def check_labels_in_queue():
         """Check that labels are present in the job queue."""
         # Get the job queue using SDK
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'labels'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         # Parse the queue response
@@ -2350,7 +2684,9 @@ def test_managed_job_git_commit_in_queue(generic_cloud: str):
 
     def check_git_commit_in_queue():
         """Check that git_commit is present in the job queue metadata."""
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=False,
+                                             all_users=True,
+                                             fields=['job_name', 'metadata'])
         queue_records = sdk.stream_and_get(queue_request_id)
 
         if isinstance(queue_records, tuple):
@@ -3310,6 +3646,233 @@ def test_managed_jobs_api_access(generic_cloud: str):
                 timeout=600),
         ],
         f'sky jobs cancel -y -n {name}; sky jobs cancel -y -n nested-job',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing emergency recovery from unexpected controller errors ----------
+@pytest.mark.managed_jobs
+# Mutates the managed-jobs DB directly on the API server host, so it cannot
+# run against a remote API server (skip at collection, not just runtime).
+@pytest.mark.no_remote_server
+def test_managed_jobs_emergency_recovery(generic_cloud: str):
+    """An externally mutated schedule state triggers emergency recovery.
+
+    Mutating job_info.schedule_state out from under the controller makes its
+    next schedule-state transition fail unexpectedly (the incident signature
+    this feature addresses). The job must emergency-recover — surfacing as a
+    RECOVERING job event tagged recovery_source=EMERGENCY, with exactly one
+    recovery attempt recorded — and still end SUCCEEDED with no duplicate
+    cluster. (Emergency recovery reuses the normal RECOVERING status; the
+    EMERGENCY source on the event is the distinguishing signal.)
+
+    The mutation needs direct access to the managed-jobs DB, so the test
+    only runs where that access exists: local API server (both
+    consolidation mode, via the local DB, and non-consolidation, via ssh to
+    the jobs controller). Remote-server configurations are skipped by the
+    no_remote_server marker (at collection time), so no runtime check here.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    consolidation = smoke_tests_utils.server_side_is_consolidation_mode()
+
+    # The conditional UPDATE consumes the LAUNCHING window atomically: it
+    # only applies while schedule_state is LAUNCHING, so retrying it every
+    # few seconds both waits for and triggers the failure with no race.
+    #
+    # There are two LAUNCHING windows. The claim-time one (set by the
+    # scheduler before the controller runs, while the task status is still
+    # PENDING) is self-healing: scheduler_set_launching_async unconditionally
+    # re-sets LAUNCHING when the controller actually launches, so mutating it
+    # there does nothing. The launch-time window (during the controller's
+    # launch(), after the task has moved to STARTING) is the one whose
+    # LAUNCHING->ALIVE transition 0-rows and raises the unexpected error we
+    # want. Gate on the task being STARTING so we only hit the second window.
+    mutation_sql = ("UPDATE job_info SET schedule_state='ALIVE' "
+                    f"WHERE name='{name}' AND schedule_state='LAUNCHING' "
+                    "AND spot_job_id IN (SELECT spot_job_id FROM spot "
+                    "WHERE status='STARTING')")
+    count_sql = ('SELECT emergency_recovery_count FROM job_info '
+                 f"WHERE name='{name}'")
+    # Count of RECOVERING events tagged EMERGENCY — the distinguishing
+    # signal that this was an emergency recovery (not a preemption).
+    emergency_event_sql = (
+        'SELECT COUNT(*) FROM job_events e JOIN job_info j '
+        'ON e.spot_job_id = j.spot_job_id '
+        f"WHERE j.name='{name}' AND e.new_status='RECOVERING' "
+        "AND e.recovery_source='EMERGENCY'")
+
+    def _run_sql_locally(sql: str) -> int:
+        """Run sql against the local server's managed-jobs DB.
+
+        Returns the affected row count for UPDATEs, or the first column of
+        the first row for SELECTs (-1 if no row).
+        """
+        import sqlalchemy  # pylint: disable=import-outside-toplevel
+
+        from sky.jobs import state as managed_job_state
+        engine = managed_job_state._db_manager.get_engine()  # pylint: disable=protected-access
+        with engine.connect() as conn:
+            result = conn.execute(sqlalchemy.text(sql))
+            conn.commit()
+            if sql.lstrip().upper().startswith('SELECT'):
+                row = result.fetchone()
+                if row is None or row[0] is None:
+                    return -1
+                return int(row[0])
+            return result.rowcount
+
+    def _run_sql_on_controller(sql: str) -> int:
+        """Run sql against ~/.sky/spot_jobs.db on the jobs controller."""
+        controller = None
+        status_out = subprocess.run(['sky', 'status'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60,
+                                    check=False).stdout
+        for line in status_out.splitlines():
+            if 'sky-jobs-controller-' in line:
+                controller = line.split()[0]
+                break
+        if controller is None:
+            raise RuntimeError('ENVIRONMENT FAILURE: no jobs controller '
+                               'found in sky status; recovery NOT exercised.')
+        # Pass the SQL as a repr'd literal, not embedded in a '''...'''
+        # block: a query ending in a quoted literal (e.g. ...='EMERGENCY')
+        # would otherwise close the triple-quoted string early and raise a
+        # SyntaxError in the remote python.
+        code = textwrap.dedent(f"""\
+            import os
+            import sqlite3
+            conn = sqlite3.connect(
+                os.path.expanduser('~/.sky/spot_jobs.db'))
+            cursor = conn.execute({sql!r})
+            conn.commit()
+            if {repr(sql.lstrip().upper().startswith('SELECT'))}:
+                row = cursor.fetchone()
+                print(-1 if row is None or row[0] is None else int(row[0]))
+            else:
+                print(cursor.rowcount)
+            """)
+        # Bare `python3` is not on the non-interactive ssh PATH on every
+        # controller: Kubernetes pods have no system python3, only the
+        # SkyPilot runtime env. Resolve the interpreter the way SkyPilot
+        # itself does (the path recorded in ~/.sky/python_path), falling back
+        # to python3 (present on VM controllers).
+        remote_python = ('$([ -s ~/.sky/python_path ] && '
+                         'cat ~/.sky/python_path 2>/dev/null || '
+                         'command -v python3)')
+        result = subprocess.run(['ssh', controller, f'exec {remote_python} -'],
+                                input=code,
+                                capture_output=True,
+                                text=True,
+                                timeout=60,
+                                check=False)
+        if result.returncode != 0:
+            # Surface the remote python's output so a failed controller read
+            # reports *why* it failed. A bare CalledProcessError hides the
+            # remote traceback (it lives in .stderr, which is otherwise
+            # discarded), which is exactly what we need to debug a
+            # non-consolidation smoke failure.
+            raise RuntimeError(
+                f'Remote sql on {controller} exited {result.returncode}. '
+                f'SQL: {sql!r}\n--- remote stdout ---\n{result.stdout}'
+                f'\n--- remote stderr ---\n{result.stderr}')
+        return int(result.stdout.strip().splitlines()[-1])
+
+    run_sql = _run_sql_locally if consolidation else _run_sql_on_controller
+
+    def _count_job_clusters() -> int:
+        status_out = subprocess.run(['sky', 'status', '-u'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60,
+                                    check=False).stdout
+        return sum(1 for line in status_out.splitlines()
+                   if line.startswith(f'{name}-'))
+
+    def check_emergency_recovery():
+        # Consume the LAUNCHING window. Environmental slowness only extends
+        # the loop; the deadline is generous on purpose.
+        deadline = time.time() + 600
+        mutated = 0
+        while time.time() < deadline:
+            try:
+                mutated = run_sql(mutation_sql)
+            except (subprocess.SubprocessError, RuntimeError) as e:
+                yield f'Transient error applying mutation, retrying: {e}'
+                mutated = 0
+            if mutated:
+                break
+            time.sleep(2)
+        if not mutated:
+            raise RuntimeError(
+                'ENVIRONMENT FAILURE: never observed the LAUNCHING window; '
+                'recovery NOT exercised.')
+        yield 'Mutated schedule_state during LAUNCHING.'
+
+        # Subject under test, strict from here on: an EMERGENCY-tagged
+        # RECOVERING event must appear (it is recorded when the emergency is
+        # detected, before the backoff, and persists in job_events, so the
+        # 5s poll over 300s cannot miss it), and the cluster must never be
+        # duplicated.
+        observed = False
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            if run_sql(emergency_event_sql) >= 1:
+                observed = True
+                break
+            jobs_list = sky.get(sky.jobs.queue(refresh=False))
+            job = [j for j in jobs_list if j['job_name'] == name]
+            status = job[0]['status'] if job else None
+            assert status not in (
+                sky.ManagedJobStatus.FAILED_CONTROLLER,
+                None), (f'Job failed instead of emergency-recovering: {status}')
+            assert _count_job_clusters() <= 1, 'Duplicate cluster detected.'
+            time.sleep(5)
+        assert observed, ('No EMERGENCY-tagged RECOVERING event after the '
+                          'schedule-state mutation.')
+        yield 'Observed an EMERGENCY recovery event.'
+        assert _count_job_clusters() <= 1, 'Duplicate cluster detected.'
+
+        # Exactly one recovery attempt for exactly one mutation.
+        attempts = run_sql(count_sql)
+        assert attempts == 1, (f'Expected exactly 1 emergency recovery '
+                               f'attempt, got {attempts}.')
+        yield 'Recovery attempt recorded; waiting for the job to succeed.'
+
+        smoke_tests_utils.wait_for_managed_job_status_sdk(
+            name, [sky.ManagedJobStatus.SUCCEEDED], timeout=900)
+        # A managed job is marked SUCCEEDED before its cluster is torn down:
+        # set_succeeded runs first for responsiveness, then the controller
+        # downloads logs and terminates the cluster, and only then does its
+        # schedule_state reach DONE (run_job_loop calls _cleanup before
+        # scheduler.job_done). So wait for DONE — the controller's own
+        # "fully cleaned up" signal — before checking for a leaked cluster,
+        # rather than racing the teardown right after SUCCEEDED.
+        done_sql = (f"SELECT COUNT(*) FROM job_info WHERE name='{name}' "
+                    "AND schedule_state='DONE'")
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            if run_sql(done_sql) >= 1:
+                break
+            time.sleep(5)
+        assert run_sql(done_sql) >= 1, (
+            'Controller never reached schedule_state DONE after SUCCEEDED.')
+        assert _count_job_clusters() == 0, (
+            'Job cluster still exists after the controller finished (DONE).')
+        yield 'Job recovered and succeeded with no leaked cluster.'
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-emergency-recovery',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d -- '
+            f'"echo job started; sleep 60"',
+            check_emergency_recovery,
+        ],
+        f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=30 * 60,
     )

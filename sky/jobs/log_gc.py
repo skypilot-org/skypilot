@@ -14,12 +14,13 @@ from sky import skypilot_config
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.skylet import runtime_utils
 from sky.utils import context
 
 logger = sky_logging.init_logger(__name__)
 
 # Filelock for garbage collector leader election.
-_JOB_CONTROLLER_GC_LOCK_PATH = os.path.expanduser(
+_JOB_CONTROLLER_GC_LOCK_PATH = runtime_utils.expanduser(
     '~/.sky/locks/job_controller_gc.lock')
 
 _DEFAULT_TASK_LOGS_GC_RETENTION_HOURS = 24 * 7
@@ -67,7 +68,14 @@ def gc_controller_logs_for_job():
 
 
 def gc_task_logs_for_job():
-    """Garbage collect task logs for job."""
+    """Garbage collect task logs for job.
+
+    Only local task logs are garbage collected here: the cleanup query
+    requires ``local_log_file IS NOT NULL``. When a logging agent forwards a
+    job's logs to an external store the controller does not persist a local
+    copy, so those logs are not subject to this retention -- their lifetime is
+    governed by the external store's own retention policy.
+    """
     while True:
         skypilot_config.reload_config()
         task_logs_retention = skypilot_config.get_nested(
@@ -163,7 +171,8 @@ def _clean_task_logs_with_retention(retention_seconds: int,
 @context.contextual
 def run_log_gc():
     """Run the log garbage collector."""
-    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    log_dir = runtime_utils.expanduser(
+        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'garbage_collector.log')
     # Remove previous log file

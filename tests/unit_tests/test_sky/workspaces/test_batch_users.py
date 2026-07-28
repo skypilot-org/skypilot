@@ -363,6 +363,57 @@ class TestBatchRemoveUsersFromWorkspaces:
         # Validation failed in the pre-pass, so the modifier never runs.
         mock_update_config.assert_not_called()
 
+    @mock.patch(
+        'sky.users.permission.permission_service.update_workspace_policy')
+    @mock.patch('sky.workspaces.utils.get_workspace_users', return_value=[])
+    @mock.patch('sky.workspaces.core._update_workspaces_config')
+    @mock.patch(
+        'sky.workspaces.core._validate_workspace_config_changes_with_lock')
+    @mock.patch('sky.workspaces.core._validate_workspace_config')
+    @mock.patch('sky.global_user_state.get_all_users',
+                return_value=[_mk_user('u1', 'alice')])
+    def test_concurrent_removal_does_not_clobber(self, mock_get_all_users,
+                                                 mock_validate_config,
+                                                 mock_validate_changes,
+                                                 mock_update_config,
+                                                 mock_get_ws_users,
+                                                 mock_update_policy):
+        # The validation pre-pass reads {alice, bob, carol} OUTSIDE the lock;
+        # by the time the lock is held (fake_update), a concurrent removal has
+        # already dropped 'bob'. Removing 'alice' must strip only alice from the
+        # FRESH in-lock config -> ['carol'], not resurrect 'bob' by writing back
+        # the pre-lock snapshot minus alice (['bob', 'carol']).
+        prelock = {
+            'p1': {
+                'private': True,
+                'allowed_users': ['alice', 'bob', 'carol']
+            }
+        }
+        captured = {}
+
+        def fake_update(modifier):
+            # Fresh state inside the lock: 'bob' was concurrently removed.
+            workspaces = {
+                'p1': {
+                    'private': True,
+                    'allowed_users': ['alice', 'carol']
+                }
+            }
+            modifier(workspaces)
+            captured['workspaces'] = workspaces
+
+        mock_update_config.side_effect = fake_update
+
+        with self._patch_initial_workspaces(prelock):
+            result = core.batch_remove_users_from_workspaces(['p1'], ['u1'])
+
+        assert result == {'succeeded': ['p1'], 'failed': []}
+        # Reverting the in-lock recompute yields ['bob', 'carol'] here.
+        assert captured['workspaces']['p1']['allowed_users'] == ['carol']
+        # Casbin is set from the fresh config, so it must not contain 'bob'.
+        _, policy_users = mock_update_policy.call_args[0]
+        assert 'bob' not in policy_users
+
     def test_empty_args_rejected(self):
         with pytest.raises(ValueError):
             core.batch_remove_users_from_workspaces([], ['u1'])
