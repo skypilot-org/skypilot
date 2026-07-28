@@ -601,184 +601,6 @@ class TestInterConnectionPlacement:
         assert 'No single infrastructure' in str(exc_info.value)
         assert 'inter_connection: false' in str(exc_info.value)
 
-    def test_pins_conflict_required_raises(self, mock_k8s_cloud):
-        """Explicit true + conflicting pins is a submission-time error."""
-        task1 = self._make_task('task-1',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-b')])
-        dag = self._make_dag([task1, task2], inter_connection=True)
-
-        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-        assert 'no common option' in str(exc_info.value)
-        # The error names each conflicting job with its own pins.
-        assert 'task-1' in str(exc_info.value)
-        assert 'ctx-b' in str(exc_info.value)
-
-    def test_pins_conflict_unset_places_independently(self, mock_k8s_cloud):
-        """Unset + conflicting pins warns, degrades, places independently."""
-        task1 = self._make_task('task-1',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-b')])
-        dag = self._make_dag([task1, task2], inter_connection=None)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_independent') as mock_independent:
-            mock_independent.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_independent.assert_called_once()
-        # The degradation is persisted so the controller (which reads the
-        # serialized dag) skips all networking machinery.
-        assert dag.inter_connection is False
-
-    def test_pins_conflict_partial_pinning(self, mock_k8s_cloud):
-        """Conflict detection works when only some tasks are pinned."""
-        task1 = self._make_task('task-1',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-b')])
-        unpinned = self._make_task('task-3',
-                                   [self._make_resources(mock_k8s_cloud, None)])
-        dag = self._make_dag([task1, task2, unpinned], inter_connection=False)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_independent') as mock_independent:
-            mock_independent.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_independent.assert_called_once()
-
-    def test_any_of_overlapping_pins_not_a_conflict(self, mock_k8s_cloud):
-        """Tasks whose pin sets overlap can still colocate: no conflict."""
-        task1 = self._make_task('task-1', [
-            self._make_resources(mock_k8s_cloud, 'ctx-a'),
-            self._make_resources(mock_k8s_cloud, 'ctx-b'),
-        ])
-        task2 = self._make_task('task-2', [
-            self._make_resources(mock_k8s_cloud, 'ctx-a'),
-            self._make_resources(mock_k8s_cloud, 'ctx-b'),
-        ])
-        dag = self._make_dag([task1, task2], inter_connection=True)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_same_infra') as mock_same_infra:
-            mock_same_infra.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_same_infra.assert_called_once()
-
-    def test_cloud_level_pins_conflict_required_raises(self, mock_k8s_cloud,
-                                                       mock_aws_cloud):
-        """Cloud-only pins with explicit true: the non-k8s pin is the
-        contradiction (checked before the cross-job conflict)."""
-        task1 = self._make_task('task-1',
-                                [self._make_resources(mock_k8s_cloud, None)])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_aws_cloud, None)])
-        dag = self._make_dag([task1, task2], inter_connection=True)
-
-        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-        assert 'pins non-Kubernetes infra' in str(exc_info.value)
-        assert 'task-2' in str(exc_info.value)
-
-    def test_cloud_level_pins_conflict_unset_degrades(self, mock_k8s_cloud,
-                                                      mock_aws_cloud):
-        """k8s/ctx pin vs aws pin with unset degrades instead of erroring."""
-        task1 = self._make_task('task-1',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_aws_cloud, None)])
-        dag = self._make_dag([task1, task2], inter_connection=None)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_independent') as mock_independent:
-            mock_independent.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_independent.assert_called_once()
-        assert dag.inter_connection is False
-
-    def test_cloud_pin_with_context_pin_same_cloud_no_conflict(
-            self, mock_k8s_cloud):
-        """`infra: k8s` + `infra: k8s/ctx` share a cloud: no conflict."""
-        task1 = self._make_task('task-1',
-                                [self._make_resources(mock_k8s_cloud, None)])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
-        dag = self._make_dag([task1, task2], inter_connection=True)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_same_infra') as mock_same_infra:
-            mock_same_infra.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_same_infra.assert_called_once()
-
-    def test_mixed_options_task_is_flexible(self, mock_k8s_cloud):
-        """any_of [k8s/ctxA, k8s] is flexible: no conflict with a ctxB pin."""
-        mixed = self._make_task('mixed', [
-            self._make_resources(mock_k8s_cloud, 'ctx-a'),
-            self._make_resources(mock_k8s_cloud, None),
-        ])
-        pinned_b = self._make_task(
-            'pinned-b', [self._make_resources(mock_k8s_cloud, 'ctx-b')])
-        dag = self._make_dag([mixed, pinned_b], inter_connection=True)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_same_infra') as mock_same_infra:
-            mock_same_infra.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_same_infra.assert_called_once()
-
-    def test_disjoint_any_of_pin_sets_conflict(self, mock_k8s_cloud):
-        """any_of {A,B} vs any_of {C,D}: no common option -> conflict."""
-        task1 = self._make_task('task-1', [
-            self._make_resources(mock_k8s_cloud, 'ctx-a'),
-            self._make_resources(mock_k8s_cloud, 'ctx-b'),
-        ])
-        task2 = self._make_task('task-2', [
-            self._make_resources(mock_k8s_cloud, 'ctx-c'),
-            self._make_resources(mock_k8s_cloud, 'ctx-d'),
-        ])
-        dag = self._make_dag([task1, task2], inter_connection=True)
-
-        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-        assert 'no common option' in str(exc_info.value)
-
-    def test_cross_cloud_any_of_with_common_option_not_a_conflict(
-            self, mock_k8s_cloud, mock_aws_cloud):
-        """{k8s/ctxA, aws/use1} vs {aws/use1}: common option -> no conflict."""
-        task1 = self._make_task('task-1', [
-            self._make_resources(mock_k8s_cloud, 'ctx-a'),
-            self._make_resources(mock_aws_cloud, 'us-east-1'),
-        ])
-        task2 = self._make_task(
-            'task-2', [self._make_resources(mock_aws_cloud, 'us-east-1')])
-        dag = self._make_dag([task1, task2], inter_connection=False)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_same_infra') as mock_same_infra:
-            mock_same_infra.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_same_infra.assert_called_once()
-
-    def test_unpinned_option_defuses_conflict(self, mock_k8s_cloud,
-                                              mock_aws_cloud):
-        """[k8s/ctxA, <unpinned>] vs aws pin: task1 is fully flexible."""
-        task1 = self._make_task('task-1', [
-            self._make_resources(mock_k8s_cloud, 'ctx-a'),
-            self._make_resources(None, None),
-        ])
-        task2 = self._make_task('task-2',
-                                [self._make_resources(mock_aws_cloud, None)])
-        dag = self._make_dag([task1, task2], inter_connection=False)
-
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_same_infra') as mock_same_infra:
-            mock_same_infra.return_value = dag
-            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-            mock_same_infra.assert_called_once()
-
     def test_unset_placed_off_kubernetes_degrades(self, mock_aws_cloud):
         """Unset group whose best common infra is non-k8s: warn + degrade.
 
@@ -860,6 +682,155 @@ class TestInterConnectionPlacement:
                     blocked_resources=None,
                     quiet=True)
         assert 'No single infrastructure' in str(exc_info.value)
+
+    def test_pins_conflict_routes_to_independent_placement(
+            self, mock_k8s_cloud):
+        """optimize_job_group consults the pin validation and routes a
+        cross-infra verdict to independent placement."""
+        task1 = self._make_task('task-1',
+                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
+        task2 = self._make_task('task-2',
+                                [self._make_resources(mock_k8s_cloud, 'ctx-b')])
+        dag = self._make_dag([task1, task2], inter_connection=False)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent, \
+             patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_independent.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_independent.assert_called_once()
+            mock_same_infra.assert_not_called()
+
+
+class TestValidateInterConnectionPins:
+    """Direct truth-table tests for _validate_inter_connection_pins.
+
+    Spec-level only: scenario (pins x inter_connection) -> verdict
+    (place independently?), error, or persisted degradation. No catalog
+    or placement machinery involved.
+    """
+
+    @pytest.fixture
+    def k8s(self):
+        cloud = MagicMock(spec=clouds.Kubernetes)
+        cloud.__str__ = MagicMock(return_value='Kubernetes')
+        return cloud
+
+    @pytest.fixture
+    def aws(self):
+        cloud = MagicMock(spec=clouds.AWS)
+        cloud.__str__ = MagicMock(return_value='AWS')
+        return cloud
+
+    def _res(self, cloud, region):
+        res = MagicMock(spec=resources_lib.Resources)
+        res.cloud = cloud
+        res.region = region
+        return res
+
+    def _dag(self, task_specs, inter_connection):
+        """task_specs: dict of task name -> list of (cloud, region)."""
+        dag = MagicMock(spec=dag_lib.Dag)
+        dag.name = 'g'
+        dag.inter_connection = inter_connection
+        tasks = []
+        for name, options in task_specs.items():
+            task = MagicMock(spec=task_lib.Task)
+            task.name = name
+            task.resources = [self._res(c, r) for c, r in options]
+            tasks.append(task)
+        dag.tasks = tasks
+        return dag
+
+    def _validate(self, dag):
+        return optimizer._validate_inter_connection_pins(dag, quiet=True)
+
+    def test_no_pins_no_verdict(self, k8s):
+        dag = self._dag({'a': [(None, None)], 'b': [(None, None)]}, None)
+        assert self._validate(dag) is False
+
+    def test_true_with_non_k8s_pin_raises(self, aws):
+        dag = self._dag({'a': [(aws, 'us-east-1')]}, True)
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='pins non-Kubernetes infra'):
+            self._validate(dag)
+
+    def test_unset_with_non_k8s_pin_alone_is_fine(self, aws):
+        """A lone non-k8s pin with unset is not a conflict; degradation
+        (if the group lands off k8s) happens later, at placement."""
+        dag = self._dag({'a': [(aws, 'us-east-1')], 'b': [(None, None)]}, None)
+        assert self._validate(dag) is False
+        assert dag.inter_connection is None
+
+    def test_region_conflict_true_raises(self, k8s):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(k8s, 'ctx-b')]}, True)
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='no common option'):
+            self._validate(dag)
+
+    def test_region_conflict_unset_degrades(self, k8s):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(k8s, 'ctx-b')]}, None)
+        assert self._validate(dag) is True
+        assert dag.inter_connection is False
+
+    def test_region_conflict_false_allowed(self, k8s):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(k8s, 'ctx-b')]}, False)
+        assert self._validate(dag) is True
+        assert dag.inter_connection is False
+
+    def test_cloud_conflict_unset_degrades(self, k8s, aws):
+        dag = self._dag({'a': [(k8s, 'ctx-a')], 'b': [(aws, None)]}, None)
+        assert self._validate(dag) is True
+        assert dag.inter_connection is False
+
+    def test_partial_pinning_conflict(self, k8s):
+        """Conflict detection works when only some tasks are pinned."""
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a')],
+                'b': [(k8s, 'ctx-b')],
+                'c': [(k8s, None)]
+            }, False)
+        assert self._validate(dag) is True
+
+    def test_overlapping_any_of_not_a_conflict(self, k8s):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (k8s, 'ctx-b')],
+                'b': [(k8s, 'ctx-a'), (k8s, 'ctx-b')]
+            }, True)
+        assert self._validate(dag) is False
+
+    def test_disjoint_any_of_is_a_conflict(self, k8s):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (k8s, 'ctx-b')],
+                'b': [(k8s, 'ctx-c'), (k8s, 'ctx-d')]
+            }, True)
+        with pytest.raises(exceptions.ResourcesUnavailableError,
+                           match='no common option'):
+            self._validate(dag)
+
+    def test_cross_cloud_any_of_with_common_option(self, k8s, aws):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (aws, 'us-east-1')],
+                'b': [(aws, 'us-east-1')]
+            }, False)
+        assert self._validate(dag) is False
+
+    def test_unpinned_option_defuses_conflict(self, k8s, aws):
+        dag = self._dag(
+            {
+                'a': [(k8s, 'ctx-a'), (None, None)],
+                'b': [(aws, None)]
+            }, False)
+        assert self._validate(dag) is False
+
+    def test_cloud_pin_and_context_pin_same_cloud(self, k8s):
+        dag = self._dag({'a': [(k8s, None)], 'b': [(k8s, 'ctx-a')]}, True)
+        assert self._validate(dag) is False
 
 
 class TestGetTaskPinSets:
