@@ -1639,16 +1639,18 @@ export function Status2Actions({
               </Tooltip>
             );
           }
+          // The read-only hint is a full sentence, so it must not be
+          // title-cased. `CustomTooltip` hardcodes `capitalize` on the span
+          // that renders the content, and a `className` passed here lands on
+          // the wrapper instead — it cannot override that. Use the
+          // non-capitalizing variant for the sentence and keep the plain
+          // tooltip for the short action labels.
+          const DisabledTooltip = !writable ? NonCapitalizedTooltip : Tooltip;
           return (
-            <Tooltip
+            <DisabledTooltip
               key={actionName}
               content={tooltipText}
-              // The read-only hint (shown when !writable) is a full sentence,
-              // so render it normal-case; the short action labels keep
-              // capitalize.
-              className={`${
-                !writable ? 'normal-case' : 'capitalize'
-              } text-sm text-muted-foreground`}
+              className="capitalize text-sm text-muted-foreground"
             >
               <span
                 className="opacity-30 flex items-center cursor-not-allowed text-sm"
@@ -1657,7 +1659,7 @@ export function Status2Actions({
                 {actionIcon}
                 {!isMobile && <span className="ml-1.5">{label}</span>}
               </span>
-            </Tooltip>
+            </DisabledTooltip>
           );
         })}
       </div>

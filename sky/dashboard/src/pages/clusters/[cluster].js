@@ -20,6 +20,7 @@ import {
   streamClusterJobLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
+import { getWorkspaces } from '@/data/connectors/workspaces';
 import {
   RotateCwIcon,
   ChevronDownIcon,
@@ -90,6 +91,26 @@ function ClusterDetails() {
     refreshData,
     refreshClusterJobsOnly,
   } = useClusterDetails({ cluster });
+
+  // Per-workspace writability, so Connect/VSCode are disabled here for a
+  // cluster in a workspace the user can only read — matching the clusters
+  // list, which gates the same actions per row. Missing entry -> treated as
+  // writable (open/default workspace).
+  const [workspacesConfig, setWorkspacesConfig] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    dashboardCache
+      .get(getWorkspaces)
+      .then((cfg) => {
+        if (!cancelled) setWorkspacesConfig(cfg || {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const isClusterWorkspaceWritable =
+    workspacesConfig[clusterData?.workspace || 'default']?.writable !== false;
 
   // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
@@ -228,6 +249,7 @@ function ClusterDetails() {
                     status={clusterData.status}
                     onOpenSSHModal={handleConnectClick}
                     onOpenVSCodeModal={handleVSCodeClick}
+                    writable={isClusterWorkspaceWritable}
                   />
                 </div>
               )}
