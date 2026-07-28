@@ -25,7 +25,9 @@ Example workflow:
   >> # Edit this file to include command_runner.py.patch.
 """
 import os
+import shlex
 import subprocess
+import sys
 
 from sky.skylet import constants
 
@@ -43,25 +45,36 @@ def _run_patch(target_file,
     # Get diff filename by replacing .patch with .diff
     diff_file = patch_file.replace('.patch', '.diff')
 
+    # Detect `patch` with `command -v` (a POSIX shell builtin) rather than
+    # `which` (a separate binary that minimal non-Debian images -- RHEL/UBI/
+    # Rocky -- do not ship). With `which`, `which patch` fails on those images
+    # even when `patch` IS installed, so we silently took the Python fallback
+    # below and lost the Ray patches.
+    #
+    # Invoke the fallback through sys.executable rather than a bare `python`:
+    # the environment that owns the `ray` being patched is a venv that may only
+    # expose `python3` (or expose neither on PATH), and sys.executable is by
+    # definition the interpreter whose site-packages we are patching.
+    py = shlex.quote(sys.executable)
     script = f"""\
-    which patch >/dev/null 2>&1 || sudo yum install -y patch || true
+    command -v patch >/dev/null 2>&1 || sudo yum install -y patch || true
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
         cp {target_file} {orig_file}
     fi
-    if which patch >/dev/null 2>&1; then
+    if command -v patch >/dev/null 2>&1; then
         # System patch command is available, use it
         # It is ok to patch again from the original file.
         patch {orig_file} -i {patch_file} -o {target_file}
     else
         # System patch command not available, use Python patch library
         echo "System patch command not available, using Python patch library..."
-        python -m pip install patch
+        {py} -m pip install patch
         # Get target directory
         target_dir="$(dirname {target_file})"
         # Execute python patch command
-        echo "Executing python -m patch -d $target_dir {diff_file}"
-        python -m patch -d "$target_dir" "{diff_file}"
+        echo "Executing {py} -m patch -d $target_dir {diff_file}"
+        {py} -m patch -d "$target_dir" "{diff_file}"
     fi
     """
     subprocess.run(script, shell=True, check=True)
