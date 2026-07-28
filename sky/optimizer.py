@@ -1245,6 +1245,22 @@ class Optimizer:
             common_infras, task_launchables, tasks,
             minimize == common.OptimizeTarget.COST)
 
+        if (dag.inter_connection is None and
+                str(best_infra[0]).lower() != 'kubernetes'):
+            # In-group networking is only supported on Kubernetes, and the
+            # group is placed elsewhere. Explicit `inter_connection: true`
+            # can never get here (its candidates are filtered to
+            # Kubernetes above); unset degrades to no networking, with a
+            # warning. Persist the degradation so downstream consumers
+            # (the jobs controller) skip all networking machinery.
+            logger.warning(
+                f'Job group "{dag.name}" is placed on {best_infra[0]}; '
+                'in-group service discovery (hostname-based networking) '
+                'is only supported on Kubernetes, so tasks cannot reach '
+                'each other by hostname. Set `inter_connection: false` '
+                'to silence this warning.')
+            dag.inter_connection = False
+
         if not quiet:
             cloud, region = best_infra
             # Format infra as lowercase cloud/region
@@ -1274,26 +1290,37 @@ class Optimizer:
                 if str(cand_cloud) == cloud_name:
                     matching_cloud = cand_cloud
                     break
-            if matching_cloud is None:
-                continue
+            # best_infra came from the intersection of every task's
+            # candidates, so every task must have a matching candidate. A
+            # silently unpinned task would be re-optimized independently
+            # on the controller and could land on a different infra.
+            assert matching_cloud is not None, (
+                f'Job {task.name!r} has no candidates in the selected '
+                f'cloud {cloud_name!r}')
 
             # Find resources in this cloud+region
+            matched_resources = None
             for resources in candidates[matching_cloud]:
                 if resources.region == region:
-                    # Set best_resources on the task
-                    task.best_resources = resources
-                    # Also set resources override to ensure the constraint
-                    # persists through YAML serialization to the controller.
-                    # Without this, the controller would re-optimize each
-                    # task independently, placing them on different infras.
-                    override_params: Dict[str, Any] = {}
-                    if resources.cloud is not None:
-                        override_params['cloud'] = resources.cloud
-                    if resources.region is not None:
-                        override_params['region'] = resources.region
-                    if override_params:
-                        task.set_resources_override(override_params)
+                    matched_resources = resources
                     break
+            assert matched_resources is not None, (
+                f'Job {task.name!r} has no candidates in the selected '
+                f'infra {cloud_name}/{region}')
+
+            # Set best_resources on the task
+            task.best_resources = matched_resources
+            # Also set resources override to ensure the constraint
+            # persists through YAML serialization to the controller.
+            # Without this, the controller would re-optimize each
+            # task independently, placing them on different infras.
+            override_params: Dict[str, Any] = {}
+            if matched_resources.cloud is not None:
+                override_params['cloud'] = matched_resources.cloud
+            if matched_resources.region is not None:
+                override_params['region'] = matched_resources.region
+            if override_params:
+                task.set_resources_override(override_params)
 
         # Step 5: Print optimizer table for job groups
         if not quiet and len(tasks) > 1:
