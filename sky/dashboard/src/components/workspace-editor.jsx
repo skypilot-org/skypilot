@@ -318,6 +318,10 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const router = useRouter();
   const [workspaceConfig, setWorkspaceConfig] = useState({});
   const [originalConfig, setOriginalConfig] = useState({});
+  // Server-computed read-only-visibility flag (accounts for the org-wide
+  // workspace_config.non_member_access fallback). Held separately from the
+  // editable config, which strips computed fields.
+  const [isReadOnlyVisible, setIsReadOnlyVisible] = useState(false);
   const [yamlValue, setYamlValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -355,13 +359,18 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
           getUsers(),
         ]);
 
-        // `writable` is a server-computed, per-user flag (not persisted
-        // config). Strip it so it doesn't render in the YAML, get flagged as
-        // an unknown infra key, or get written back on save.
-        const { writable: _writable, ...config } =
-          allWorkspaces[workspaceName] || {};
+        // `writable` and `read_only` are server-computed flags (not persisted
+        // config). Strip them so they don't render in the YAML, get flagged as
+        // unknown infra keys, or get written back on save. `read_only` is kept
+        // separately for the badge.
+        const {
+          writable: _writable,
+          read_only: readOnly,
+          ...config
+        } = allWorkspaces[workspaceName] || {};
         setWorkspaceConfig(config);
         setOriginalConfig(config);
+        setIsReadOnlyVisible(readOnly === true);
         setAllUsers(usersResponse || []);
 
         // Format as YAML with workspace name as top-level key
@@ -736,9 +745,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           </div>
                           <WorkspaceBadge
                             isPrivate={originalConfig.private === true}
-                            readOnly={
-                              originalConfig.non_member_access === 'read-only'
-                            }
+                            readOnly={isReadOnlyVisible}
                           />
                         </div>
                       </CardTitle>

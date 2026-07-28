@@ -1179,6 +1179,13 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
         # Copy so the request-cached config isn't mutated with computed state.
         ws_config = dict(workspaces[name])
         ws_config['writable'] = name in writable_names
+        # Whether non-members see this workspace read-only. Computed here (not
+        # derived client-side from the raw `non_member_access` field) so the
+        # org-wide ``workspace_config.non_member_access`` fallback is applied:
+        # a private workspace with no per-workspace override is still read-only
+        # when the global default is ``read-only``.
+        ws_config['read_only'] = workspaces_utils.is_read_only_for_non_members(
+            workspaces[name])
         result[name] = ws_config
     return result
 

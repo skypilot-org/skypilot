@@ -327,6 +327,93 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
         self.assertFalse(workspaces_utils.is_read_only_workspace('w-none'))
 
 
+class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
+    """workspaces_for_user annotates each workspace with a `read_only` flag.
+
+    The flag is server-computed via is_read_only_for_non_members, so it applies
+    the org-wide workspace_config.non_member_access fallback -- the dashboard
+    must not have to re-derive it from the raw per-workspace field (which was
+    the bug: a private workspace with no override but a global read-only default
+    showed no badge).
+    """
+
+    @staticmethod
+    def _config(workspaces, global_default):
+
+        def _get_nested(keys, default_value=None):
+            if keys == ('workspaces',):
+                return dict(workspaces)
+            if keys == ('workspace_config', 'non_member_access'):
+                return global_default
+            return default_value
+
+        return _get_nested
+
+    def _run(self, workspaces, global_default, accessible, writable):
+        """Invoke workspaces_for_user with permissions/config mocked."""
+
+        def _accessible(user_id, names, action):
+            return set(accessible) if action == 'read' else set(writable)
+
+        with mock.patch('sky.skypilot_config.get_nested',
+                        side_effect=self._config(workspaces, global_default)), \
+             mock.patch.object(workspaces_core.common_utils,
+                               'get_current_user',
+                               return_value=models.User(id='u', name='u')), \
+             mock.patch.object(
+                 workspaces_core.permission.permission_service,
+                 'get_accessible_workspace_names',
+                 side_effect=_accessible):
+            return workspaces_core.workspaces_for_user('u')
+
+    def test_global_default_read_only_sets_flag_without_override(self):
+        # 'w-priv' is private with no per-workspace override; the org-wide
+        # default read-only must make read_only True (the regression case).
+        result = self._run(
+            workspaces={
+                'w-priv': {
+                    'private': True
+                },
+                'w-none': {
+                    'private': True,
+                    'non_member_access': 'none'
+                },
+                'w-pub': {
+                    'private': False
+                },
+            },
+            global_default='read-only',
+            accessible={'w-priv', 'w-none', 'w-pub'},
+            writable={'w-pub'},
+        )
+        self.assertTrue(result['w-priv']['read_only'])
+        # Per-workspace 'none' opts back out even under a read-only default.
+        self.assertFalse(result['w-none']['read_only'])
+        # Public workspace: read-only is moot.
+        self.assertFalse(result['w-pub']['read_only'])
+        # The existing writable flag is unaffected.
+        self.assertFalse(result['w-priv']['writable'])
+        self.assertTrue(result['w-pub']['writable'])
+
+    def test_global_default_none_only_flags_overrides(self):
+        result = self._run(
+            workspaces={
+                'w-ro': {
+                    'private': True,
+                    'non_member_access': 'read-only'
+                },
+                'w-priv': {
+                    'private': True
+                },
+            },
+            global_default='none',
+            accessible={'w-ro', 'w-priv'},
+            writable=set(),
+        )
+        self.assertTrue(result['w-ro']['read_only'])
+        self.assertFalse(result['w-priv']['read_only'])
+
+
 class TestAccessibleDefaultsToWritable(unittest.TestCase):
     """"Accessible" must keep meaning "where can I act".
 

@@ -971,8 +971,11 @@ export function Workspaces() {
                     const workspaceConfig =
                       rawWorkspacesData?.[workspace.name] || {};
                     const isPrivate = workspaceConfig.private === true;
-                    const isReadOnly =
-                      workspaceConfig.non_member_access === 'read-only';
+                    // Server-computed flag: already accounts for the org-wide
+                    // workspace_config.non_member_access fallback, so a private
+                    // workspace with no per-workspace override is flagged
+                    // read-only when the global default is read-only.
+                    const isReadOnly = workspaceConfig.read_only === true;
 
                     return (
                       <TableRow
