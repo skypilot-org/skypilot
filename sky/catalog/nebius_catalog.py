@@ -78,8 +78,11 @@ def _get_df() -> Union[pd.DataFrame, common.LazyDataFrame]:
         from sky.adaptors import nebius
         tenant_id = nebius.get_tenant_id()
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning('Failed to get Nebius tenant ID. '
-                       f'{common_utils.format_exception(e)}')
+        # Log at debug level: personal pricing is best-effort and falls
+        # back to the static catalog, so a flaky external API must not
+        # pollute user-facing CLI output (e.g. mid `sky launch`).
+        logger.debug('Failed to get Nebius tenant ID. Falling back to the '
+                     f'static catalog. {common_utils.format_exception(e)}')
         return _static_df
 
     if tenant_id is None:
@@ -113,8 +116,13 @@ def _get_df() -> Union[pd.DataFrame, common.LazyDataFrame]:
                 df=personal_df, expires_at=expires_at)
             return personal_df
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning('Failed to fetch personal pricing. '
-                           f'{common_utils.format_exception(e)}')
+            # Log at debug level: personal pricing is best-effort and falls
+            # back to the static (or stale personal) catalog, so a flaky
+            # external API must not pollute user-facing CLI output (e.g.
+            # mid `sky launch`).
+            logger.debug('Failed to fetch personal pricing. Falling back to '
+                         'the static catalog. '
+                         f'{common_utils.format_exception(e)}')
             stale_df = entry.df if entry is not None else None
             _personal_catalogs[tenant_id] = _PersonalCatalogEntry(
                 df=stale_df,

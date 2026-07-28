@@ -2109,3 +2109,76 @@ class TestRemoveQueueNameFromConfig:
                 ]:
                     assert current.get_nested(
                         keys, 'NOT_SET') is None, (f'Expected None at {keys}')
+
+
+class _BodyError(Exception):
+    """Raised from inside a context manager body."""
+
+
+def test_replace_skypilot_config_restores_on_exception(monkeypatch, tmp_path):
+    """replace_skypilot_config undoes the replacement if the body raises."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(f'aws:\n  vpc_name: {VPC_NAME}\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'non_existent.yaml')
+    _reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+    original_config = skypilot_config._get_loaded_config()
+    original_config_path = skypilot_config.loaded_config_path_serialized()
+    new_configs = _make_config({'aws': {'vpc_name': 'replacement-vpc'}})
+
+    with pytest.raises(_BodyError):
+        with skypilot_config.replace_skypilot_config(new_configs):
+            assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                              None) == 'replacement-vpc'
+            assert os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG].endswith(
+                '.yaml')
+            raise _BodyError()
+
+    assert skypilot_config._get_loaded_config() == original_config
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+    assert (
+        skypilot_config.loaded_config_path_serialized() == original_config_path)
+    # The env var was unset before, so it must be unset again rather than set
+    # to an empty string, which reload_config() would read as a config path.
+    assert skypilot_config.ENV_VAR_SKYPILOT_CONFIG not in os.environ
+
+    # A later reload must see the original config, not the replacement.
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+
+def test_replace_skypilot_config_restores_env_var_on_exception(
+        monkeypatch, tmp_path):
+    """A pre-existing config env var is restored if the body raises."""
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(f'aws:\n  vpc_name: {VPC_NAME}\n')
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, '_PROJECT_CONFIG_PATH',
+                        tmp_path / 'non_existent.yaml')
+    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                       str(config_path))
+    _reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+
+    original_config = skypilot_config._get_loaded_config()
+    original_config_path = skypilot_config.loaded_config_path_serialized()
+    new_configs = _make_config({'aws': {'vpc_name': 'replacement-vpc'}})
+
+    with pytest.raises(_BodyError):
+        with skypilot_config.replace_skypilot_config(new_configs):
+            assert os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] != str(
+                config_path)
+            raise _BodyError()
+
+    assert skypilot_config._get_loaded_config() == original_config
+    assert (
+        skypilot_config.loaded_config_path_serialized() == original_config_path)
+    assert os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] == str(
+        config_path)
+
+    skypilot_config.reload_config()
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME

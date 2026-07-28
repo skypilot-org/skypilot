@@ -7897,14 +7897,24 @@ def api():
               default=False,
               required=False,
               help='Enable basic authentication in the SkyPilot API server.')
+@click.option('--port',
+              default=None,
+              type=int,
+              required=False,
+              help=('The port to bind the SkyPilot API server to. Defaults '
+                    'to the SKYPILOT_API_SERVER_LOCAL_PORT environment '
+                    'variable, or 46580. Other client commands only find a '
+                    'server on a non-default port if the same environment '
+                    'variable is exported.'))
 @usage_lib.entrypoint
 def api_start(deploy: bool, host: str, foreground: bool,
-              enable_basic_auth: bool):
+              enable_basic_auth: bool, port: Optional[int]):
     """Starts the SkyPilot API server locally."""
     sdk.api_start(deploy=deploy,
                   host=host,
                   foreground=foreground,
-                  enable_basic_auth=enable_basic_auth)
+                  enable_basic_auth=enable_basic_auth,
+                  port=port)
     api_server_url = server_common.get_server_url(host)
     # Dial via a reachable loopback URL: wildcard bind hosts (0.0.0.0 / ::) are
     # not valid connect targets on all platforms.

@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import yaml_utils
@@ -323,7 +324,7 @@ def load_server_config() -> config_utils.Config:
     Returns:
         A Config object containing the server configuration.
     """
-    config_path = os.path.expanduser(SERVER_CONFIG_PATH)
+    config_path = runtime_utils.expanduser(SERVER_CONFIG_PATH)
     if not os.path.exists(config_path):
         return config_utils.Config()
 

@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
+from typing import (Any, Callable, cast, Dict, Generic, List, Literal, Optional,
                     Tuple, TypeVar, Union)
 from urllib.request import Request
 import uuid
@@ -40,6 +40,7 @@ from sky.server import rest
 from sky.server import versions
 from sky.server.blob import blob_storage as bs
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -60,7 +61,33 @@ else:
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
-DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
+DEFAULT_SERVER_PORT = 46580
+
+
+def get_local_api_server_port() -> int:
+    """Port of the local API server.
+
+    Defaults to 46580 and can be overridden with the
+    SKYPILOT_API_SERVER_LOCAL_PORT environment variable, which both the
+    client and the server honor. Together with SKY_RUNTIME_DIR this allows
+    running multiple isolated API servers on the same machine.
+    """
+    port_str = os.environ.get(constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR)
+    if port_str is None:
+        return DEFAULT_SERVER_PORT
+    try:
+        return int(port_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid {constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR} '
+                f'value: {port_str!r}. Expected an integer port '
+                'number.') from None
+
+
+def get_default_server_url() -> str:
+    """Default URL of the local API server, honoring the port override."""
+    return f'http://127.0.0.1:{get_local_api_server_port()}'
 
 
 def _host_to_url_host(host: str) -> str:
@@ -80,16 +107,27 @@ def _host_to_url_host(host: str) -> str:
 AVAILBLE_LOCAL_API_SERVER_HOSTS = [
     '0.0.0.0', 'localhost', '127.0.0.1', '::', '::1'
 ]
-AVAILABLE_LOCAL_API_SERVER_URLS = [
-    f'http://{_host_to_url_host(host)}:46580'
-    for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
-]
+
+
+def get_available_local_api_server_urls() -> List[str]:
+    """URLs at which a locally-started API server may be addressed."""
+    port = get_local_api_server_port()
+    return [
+        f'http://{_host_to_url_host(host)}:{port}'
+        for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
+    ]
+
 
 API_SERVER_CMD = '-m sky.server.server'
 # The client dir on the API server for storing user-specific data, such as file
 # mounts, logs, etc. This dir is ephemeral and will be cleaned up when the API
-# server is restarted.
-API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
+# server is restarted. The '~' form is deliberate: paths under this dir also
+# appear in wire responses (e.g., sync-down log paths) that clients
+# prefix-match machine-independently. When SKY_RUNTIME_DIR is set, the dir is
+# anchored there instead, so that one API server restarting does not wipe the
+# transient client state of another server on the same machine.
+API_SERVER_CLIENT_DIR = pathlib.Path(
+    runtime_utils.runtime_tilde_path('~/.sky/api_server/clients'))
 RETRY_COUNT_ON_TIMEOUT = 3
 
 # The maximum time to wait for the API server to start, set to a conservative
@@ -452,9 +490,10 @@ async def make_authenticated_request_async(
 
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
-    endpoint = DEFAULT_SERVER_URL
+    endpoint = get_default_server_url()
     if host is not None:
-        endpoint = f'http://{_host_to_url_host(host)}:46580'
+        endpoint = (f'http://{_host_to_url_host(host)}:'
+                    f'{get_local_api_server_port()}')
 
     url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
@@ -505,7 +544,7 @@ def get_dashboard_url(server_url: str,
 @annotations.lru_cache(scope='global')
 def is_api_server_local(endpoint: Optional[str] = None):
     server_url = endpoint if endpoint is not None else get_server_url()
-    return server_url in AVAILABLE_LOCAL_API_SERVER_URLS
+    return server_url in get_available_local_api_server_urls()
 
 
 def _handle_non_200_server_status(
@@ -725,7 +764,7 @@ def _start_api_server(deploy: bool = False,
     """Starts a SkyPilot API server locally."""
     check_local_api_server_enabled_or_raise()
     server_url = get_server_url(host)
-    assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
+    assert server_url in get_available_local_api_server_urls(), (
         f'server url {server_url} is not a local url')
     # URL to *dial* the server we are about to start. Differs from server_url
     # for wildcard bind hosts (0.0.0.0 / ::), which are not valid connect
@@ -765,6 +804,9 @@ def _start_api_server(deploy: bool = False,
             args += ['--deploy']
         if host is not None:
             args += [f'--host={host}']
+        # Always pass the port explicitly so that `sky api stop` can tell
+        # apart multiple API servers running on the same machine.
+        args += [f'--port={get_local_api_server_port()}']
         if metrics_port is not None:
             args += [f'--metrics-port={metrics_port}']
 
@@ -783,7 +825,7 @@ def _start_api_server(deploy: bool = False,
                                   server_constants.WEBSOCKETS_MAX_NUM_HEADERS)
             os.execvp(args[0], args)
 
-        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        log_path = runtime_utils.expanduser(constants.API_SERVER_LOGS)
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
         # For spawn mode, copy the environ to avoid polluting the SDK process.
@@ -991,8 +1033,10 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
         check_local_api_server_enabled_or_raise()
         # Lock to prevent multiple processes from starting the server at the
         # same time, causing issues with database initialization.
-        with filelock.FileLock(
-                os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+        creation_lock_path = runtime_utils.expanduser(
+            constants.API_SERVER_CREATION_LOCK_PATH)
+        os.makedirs(os.path.dirname(creation_lock_path), exist_ok=True)
+        with filelock.FileLock(creation_lock_path):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
             get_api_server_status_response.cache_clear()  # type: ignore

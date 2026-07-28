@@ -870,6 +870,90 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     smoke_tests_utils.run_one_test(test)
 
 
+# The whole script is embedded as a *single-quoted* argument to `sky jobs
+# launch` (see below), so it must avoid single quotes (') entirely -- one
+# would prematurely close that quoting before the job is even submitted.
+# Every other character (including '$' and double quotes) is left alone so
+# it's evaluated inside the pod, where the script actually runs.
+_VERIFY_ACCELERATOR_NODE_CONSTRAINT_SH = """\
+set -e
+arch=$(uname -m)
+if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+  arch=arm64
+else
+  arch=amd64
+fi
+if ! command -v kubectl &>/dev/null; then
+  ver=$(curl -sL https://dl.k8s.io/release/stable.txt)
+  curl -sL -o /tmp/kubectl "https://dl.k8s.io/release/$ver/bin/linux/$arch/kubectl"
+  chmod +x /tmp/kubectl
+  kubectl=/tmp/kubectl
+else
+  kubectl=kubectl
+fi
+
+pod_name=$(hostname)
+namespace=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+# The accelerator label key differs per cluster flavor (the SkyPilot
+# labeler, GKE, CoreWeave, GPU Feature Discovery, Karpenter, Nebius, ...), so
+# pull the whole nodeSelector/nodeAffinity portion of the pod spec instead
+# of hardcoding one key, and grep it for the requested GPU name.
+node_selector=$($kubectl get pod "$pod_name" -n "$namespace" -o jsonpath="{.spec.nodeSelector}")
+node_affinity=$($kubectl get pod "$pod_name" -n "$namespace" -o jsonpath="{.spec.affinity.nodeAffinity}")
+constraint="$node_selector $node_affinity"
+echo "pod scheduling constraint: $constraint"
+
+if [ -z "$(echo "$constraint" | tr -d "[:space:]")" ]; then
+  echo "FAIL: pod spec has no nodeSelector/nodeAffinity at all"
+  exit 1
+fi
+if ! echo "$constraint" | grep -qiF -- "__WANT_ACCELERATOR__"; then
+  echo "FAIL: __WANT_ACCELERATOR__ not found in the pod nodeSelector/nodeAffinity"
+  exit 1
+fi
+echo ACCELERATOR_NODE_CONSTRAINT_OK
+"""
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+@pytest.mark.resource_heavy
+def test_managed_jobs_kubernetes_accelerator_node_constraint():
+    """A managed job's pod must self-verify its own accelerator scheduling
+    constraint.
+
+    SkyPilot pins a Kubernetes pod to nodes carrying the requested
+    accelerator type via a nodeSelector/nodeAffinity constraint on the
+    cluster's accelerator label (see the ``k8s_acc_label_key`` /
+    ``k8s_acc_label_values`` block in
+    ``sky/templates/kubernetes-ray.yml.j2``). This test asserts that
+    contract end-to-end: the job's own pod fetches its own manifest via
+    kubectl (using its bound ServiceAccount for in-cluster auth) and checks
+    that the requested GPU type is present in its own nodeSelector/
+    nodeAffinity values.
+    """
+    gpu_type = smoke_tests_utils.get_available_gpus(infra='kubernetes')
+    if not gpu_type:
+        pytest.fail('No GPUs available on the kubernetes infra.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    run_command = _VERIFY_ACCELERATOR_NODE_CONSTRAINT_SH.replace(
+        '__WANT_ACCELERATOR__', gpu_type)
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_kubernetes_accelerator_node_constraint',
+        [
+            f"s=$(sky jobs launch --infra kubernetes -n {name} "
+            f"--gpus {gpu_type}:1 -y '{run_command}' 2>&1); echo \"$s\"; "
+            'echo "$s" | grep -q ACCELERATOR_NODE_CONSTRAINT_OK',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.aws
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
@@ -1867,6 +1951,54 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                 }
             })
         smoke_tests_utils.run_one_test(test)
+
+
+# Only run this test on Kubernetes since this test relies on
+# kubernetes.pod_config
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_pod_config_ray_node_container(generic_cloud: str):
+    """pod_config targeting the main container by name must merge into it.
+
+    The main container in SkyPilot Kubernetes pods is named ``ray-node``, and
+    user pod_configs commonly target it by that name (e.g. to add
+    volumeMounts). Container entries are patch-merged by name, so a named
+    entry must merge into the existing ``ray-node`` container rather than
+    being treated as a new container. The pod_config lives in the task YAML's
+    ``config`` section (tests/test_yamls/test_k8s_pod_config_ray_node.yaml),
+    which adds an env var and an emptyDir volume mount to the ``ray-node``
+    container; the test asserts both are visible from inside the job.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_pod_config_ray_node.yaml'
+    test = smoke_tests_utils.Test(
+        'managed_jobs_pod_config_ray_node_container',
+        [
+            # The task sleeps 60 so the job is still RUNNING when we tail its
+            # logs by name (same workaround as
+            # test_managed_jobs_env_isolation).
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d {task_yaml}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+            f's=$(sky jobs logs -n {name} --no-follow) && echo "$s" && '
+            f'echo "$s" | grep "pod_env_check: ray-node-pod-config-merged" && '
+            f'echo "$s" | grep "mount_check: ok"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600
+                if smoke_tests_utils.is_remote_server_test() else 120),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_remote_server

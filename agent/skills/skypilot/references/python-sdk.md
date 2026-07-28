@@ -976,7 +976,7 @@ Deletes a storage.
 ### `sky.api_start`
 
 ```python
-sky.api_start(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False) -> None
+sky.api_start(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False, port: Optional[int] = None) -> None
 ```
 
 Starts the API server.
@@ -997,6 +997,10 @@ exist.
     metrics_port: The port to export metrics of the API server.
     enable_basic_auth: Whether to enable basic authentication
         in the API server.
+    port: The port to bind the API server to. Defaults to the
+        SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580.
+        Other client commands only find a server on a non-default port
+        if the same environment variable is exported.
 **Returns:**
     None
 

@@ -176,7 +176,7 @@ def docker_start_cmds(
 
 def _with_interactive(cmd):
     force_interactive = (
-        f'source ~/.bashrc; '
+        f'[ -f ~/.bashrc ] && source ~/.bashrc; '
         f'export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore && ({cmd})')
     return ['bash', '--login', '-c', '-i', shlex.quote(force_interactive)]
 
