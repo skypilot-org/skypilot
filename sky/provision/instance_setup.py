@@ -39,9 +39,17 @@ _MAX_RETRY = 6
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
 # all the sessions to be reloaded. This is a workaround.
+# `command -v` rather than `which`: minimal non-Debian images (RHEL/UBI/Rocky)
+# do not ship the `which` binary, so `which prlimit` exits 127. This string is
+# the LAST command of the Ray worker start command, so on Kubernetes its status
+# becomes the worker's whole runtime-setup step status -- a 127 here writes
+# runtime-setup.failed and kills the worker pod, failing every multi-node launch
+# on such an image. Trailing `true` so this best-effort tuning can never decide
+# the exit status of whatever it is appended to, regardless of why it fails.
 _RAY_PRLIMIT = (
-    'which prlimit && for id in $(pgrep -f raylet/raylet); '
-    'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
+    'command -v prlimit >/dev/null 2>&1 && '
+    'for id in $(pgrep -f raylet/raylet); '
+    'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done; true;')
 
 DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'runtime_dir = os.path.expanduser(os.environ.get('
