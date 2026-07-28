@@ -1314,15 +1314,20 @@ class JobController:
                             f'--controller {self._job_id}')
                         # Fall through to recovery
                     else:
-                        if exit_code_desc is not None:
-                            # failure_reason feeds the dashboard details
-                            # column, the CLI queue, and the FAILED job
-                            # event; state that the user program failed and
-                            # with what exit code, not just where the logs
-                            # are.
-                            failure_reason = (
-                                f'{exit_code_desc} (user program failure). '
-                                f'{failure_reason}')
+                        # failure_reason feeds the dashboard details column,
+                        # the CLI queue, and the FAILED job event; state that
+                        # the user program failed (with the exit code when
+                        # the fetch above succeeded), not just where the
+                        # logs are.
+                        terminal_desc = exit_code_desc
+                        if terminal_desc is None:
+                            # job_status is non-None here: this branch is
+                            # only entered for user-code-failure statuses.
+                            assert job_status is not None
+                            terminal_desc = f'Job failed ({job_status.value})'
+                        failure_reason = (
+                            f'{terminal_desc} (user program failure). '
+                            f'{failure_reason}')
                         logger.info(
                             f'Task {task_id} failed and will not be retried')
                         await managed_job_state.set_failed_async(

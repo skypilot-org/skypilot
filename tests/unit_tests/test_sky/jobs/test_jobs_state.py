@@ -959,6 +959,44 @@ class TestSetFailedEventCode:
         assert args[4] is None
 
 
+class TestCancelEventsOnlyOnTransition:
+    """CANCELLING/CANCELLED events are recorded only on a real transition.
+
+    The controller also calls these setters on already-terminal jobs (e.g.
+    right after a task fails); previously the event was written before the
+    row update was attempted, so every failed job's event log ended with a
+    spurious CANCELLING/CANCELLED pair.
+    """
+
+    async def _run(self, func, updated):
+        with mock.patch.object(state, 'add_job_event_async',
+                               new=mock.AsyncMock()) as mock_add_event, \
+             mock.patch.object(state, '_retry_session',
+                               new=mock.AsyncMock(return_value=updated)):
+            await func(1, mock.AsyncMock())
+        return mock_add_event
+
+    @pytest.mark.asyncio
+    async def test_cancelling_event_written_on_transition(self):
+        mock_add_event = await self._run(state.set_cancelling_async, True)
+        mock_add_event.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_event_skipped_when_terminal(self):
+        mock_add_event = await self._run(state.set_cancelling_async, False)
+        mock_add_event.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_written_on_transition(self):
+        mock_add_event = await self._run(state.set_cancelled_async, True)
+        mock_add_event.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_skipped_when_not_cancelling(self):
+        mock_add_event = await self._run(state.set_cancelled_async, False)
+        mock_add_event.assert_not_awaited()
+
+
 # Fixed epoch timestamps (seconds) for the time-range fixture. submitted_at is
 # stored as epoch seconds (a sqlalchemy.Float column), matching time.time().
 _T100 = 100.0

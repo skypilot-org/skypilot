@@ -1318,6 +1318,20 @@ class TestUserJobStatusClassification:
         # The log pointer is appended, not replaced.
         assert 'sky jobs logs --controller' in failure_reason
 
+    @pytest.mark.asyncio
+    async def test_terminal_failure_attribution_without_exit_codes(self):
+        """The user-program attribution is added even when the exit-code
+        fetch fails (returns None), falling back to the job status."""
+
+        controller = self._make_controller()
+        controller._get_cluster_job_exit_codes = AsyncMock(return_value=None)
+        mock_set_failed = await self._run_until_terminal(
+            controller, job_lib.JobStatus.FAILED)
+
+        failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
+        assert 'Job failed (FAILED) (user program failure)' in failure_reason
+        assert 'sky jobs logs --controller' in failure_reason
+
 
 class TestUserJobFailureRecoveryEventReason:
     """The RECOVERING job event must state the real trigger (SKY-6411).

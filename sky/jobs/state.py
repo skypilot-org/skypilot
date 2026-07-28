@@ -3607,8 +3607,6 @@ def update_links(job_id: int, task_id: Optional[int], links: Dict[str,
 async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
     states."""
-    await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
-                              'Job is cancelling')
 
     async def _op(session):
         result = await session.execute(
@@ -3624,6 +3622,13 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
 
     updated = await _retry_session(_op)
     if updated:
+        # Only record the event when a task actually transitioned; the
+        # controller also calls this on already-terminal jobs (e.g. right
+        # after a task fails), and unconditionally writing the event made
+        # every failed job's event log end with a spurious
+        # CANCELLING/CANCELLED pair.
+        await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
+                                  'Job is cancelling')
         logger.info('Cancelling the job...')
         await callback_func('CANCELLING')
     else:
@@ -3632,8 +3637,6 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
 
 async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
-    await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
-                              'Job has been cancelled')
 
     async def _op(session):
         result = await session.execute(
@@ -3655,6 +3658,10 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
 
     updated = await _retry_session(_op)
     if updated:
+        # Only record the event when a task actually transitioned; see
+        # set_cancelling_async for why.
+        await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
+                                  'Job has been cancelled')
         logger.info('Job cancelled.')
         await callback_func('CANCELLED')
     else:
