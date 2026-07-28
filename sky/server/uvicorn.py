@@ -18,6 +18,7 @@ import filelock
 import uvicorn
 from uvicorn.supervisors import multiprocess
 
+from sky import exceptions
 from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
@@ -229,8 +230,18 @@ class Server(uvicorn.Server):
                     logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
             req.should_retry = True
-        logger.info(
-            f'Request {request_id} interrupted and will be retried by client.')
+            # Also record a terminal error so that clients polling
+            # /api/get get a definitive answer instead of a retryable
+            # 503 forever: the server does not re-execute interrupted
+            # requests after a restart, so the original request must be
+            # re-submitted by the client.
+            req.set_error(
+                exceptions.RequestInterruptedError(
+                    f'Request {request_id!r} was interrupted by an API '
+                    'server restart and will not be resumed. Please '
+                    're-submit the original request.'))
+        logger.info(f'Request {request_id} interrupted; the client will be '
+                    'instructed to re-submit it.')
 
     def run(self, *args, **kwargs):
         """Run the server process."""

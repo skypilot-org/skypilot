@@ -2103,3 +2103,38 @@ async def test_request_id_lookup_uses_index(isolated_database):
         f'WHERE {where}', params).fetchall()
     plan_text = ' '.join(str(row) for row in plan)
     assert 'SEARCH' in plan_text and 'SCAN' not in plan_text, plan_text
+
+
+@pytest.mark.asyncio
+async def test_interrupt_request_for_retry_records_terminal_error(
+        isolated_database):
+    """Interrupting a request records a terminal error.
+
+    Interrupted requests are never re-executed after a server restart, so
+    the stored error lets /api/get fail definitively (telling the client to
+    re-submit the original request) instead of serving a retryable 503
+    forever.
+    """
+    from sky import exceptions
+    from sky.server import uvicorn as sky_uvicorn
+
+    request = requests.Request(request_id='interrupt-me',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    assert await requests.create_if_not_exists_async(request)
+
+    # The method does not use self beyond being an instance method.
+    sky_uvicorn.Server.interrupt_request_for_retry(mock.MagicMock(),
+                                                   'interrupt-me')
+
+    interrupted = requests.get_request('interrupt-me')
+    assert interrupted is not None
+    assert interrupted.status == RequestStatus.CANCELLED
+    assert interrupted.should_retry is True
+    error = interrupted.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
