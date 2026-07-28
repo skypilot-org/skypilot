@@ -230,6 +230,10 @@ class Server(uvicorn.Server):
                     logger.debug(f'Process {req.pid} already finished.')
             req.status = requests_lib.RequestStatus.CANCELLED
             req.should_retry = True
+            # Stamp finished_at: retention cleanup selects finished
+            # requests with finished_at < cutoff, so a NULL finished_at
+            # would keep the cancelled row around forever.
+            req.finished_at = time.time()
             # Also record a terminal error so that clients polling
             # /api/get get a definitive answer instead of a retryable
             # 503 forever: the server does not re-execute interrupted

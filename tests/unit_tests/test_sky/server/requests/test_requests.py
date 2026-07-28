@@ -2135,6 +2135,9 @@ async def test_interrupt_request_for_retry_records_terminal_error(
     assert interrupted is not None
     assert interrupted.status == RequestStatus.CANCELLED
     assert interrupted.should_retry is True
+    # finished_at must be stamped, otherwise retention cleanup
+    # (finished_at < cutoff) never garbage-collects the row.
+    assert interrupted.finished_at is not None
     error = interrupted.get_error()
     assert error is not None
     assert isinstance(error['object'], exceptions.RequestInterruptedError)
