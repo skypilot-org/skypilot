@@ -49,6 +49,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import runtime_utils
 from sky.ssh_node_pools import utils as ssh_utils
+from sky.usage import scarf
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import annotations
@@ -221,6 +222,7 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@scarf.track('check')
 def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
@@ -667,6 +669,10 @@ def dashboard(starting_page: Optional[str] = None) -> None:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 @sky_context.contextual
+@scarf.track('launch',
+             skip=lambda a: (a.get('dryrun') or
+                             a.get('_is_launched_by_jobs_controller') or
+                             a.get('_is_launched_by_sky_serve_controller')))
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -1058,6 +1064,7 @@ def _launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@scarf.track('exec', skip=lambda a: a.get('dryrun'))
 def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -1878,6 +1885,7 @@ def cancel(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@scarf.track('status')
 def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
@@ -2115,6 +2123,7 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@scarf.track('local.up')
 def local_up(gpus: bool,
              name: Optional[str] = None,
              port_start: Optional[int] = None,
@@ -2221,6 +2230,7 @@ def _upload_ssh_key_and_wait(key_name: str, key_file_path: str) -> str:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+@scarf.track('ssh.up')
 def ssh_up(infra: Optional[str] = None,
            file: Optional[str] = None) -> server_common.RequestId[None]:
     """Deploys the SSH Node Pools defined in ~/.sky/ssh_targets.yaml.
@@ -3082,6 +3092,7 @@ def _try_manual_token_entry(endpoint: str) -> Optional[str]:
 
 @usage_lib.entrypoint
 @annotations.client_api
+@scarf.track('api.login')
 def api_login(endpoint: Optional[str] = None,
               relogin: bool = False,
               service_account_token: Optional[str] = None,
