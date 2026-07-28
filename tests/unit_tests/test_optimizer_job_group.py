@@ -596,10 +596,13 @@ class TestInterConnectionPlacement:
 
         with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
-        assert 'pin different infrastructures' in str(exc_info.value)
+        assert 'no common option' in str(exc_info.value)
+        # The error names each conflicting job with its own pins.
+        assert 'task-1' in str(exc_info.value)
+        assert 'ctx-b' in str(exc_info.value)
 
     def test_pins_conflict_unset_places_independently(self, mock_k8s_cloud):
-        """Unset + conflicting pins warns and places independently."""
+        """Unset + conflicting pins warns, degrades, places independently."""
         task1 = self._make_task('task-1',
                                 [self._make_resources(mock_k8s_cloud, 'ctx-a')])
         task2 = self._make_task('task-2',
@@ -611,6 +614,9 @@ class TestInterConnectionPlacement:
             mock_independent.return_value = dag
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
             mock_independent.assert_called_once()
+        # The degradation is persisted so the controller (which reads the
+        # serialized dag) skips all networking machinery.
+        assert dag.inter_connection is False
 
     def test_pins_conflict_partial_pinning(self, mock_k8s_cloud):
         """Conflict detection works when only some tasks are pinned."""
@@ -645,6 +651,122 @@ class TestInterConnectionPlacement:
             mock_same_infra.return_value = dag
             optimizer.Optimizer.optimize_job_group(dag, quiet=True)
             mock_same_infra.assert_called_once()
+
+    def test_cloud_level_pins_conflict_required_raises(self, mock_k8s_cloud,
+                                                       mock_aws_cloud):
+        """Cloud-only pins to different clouds conflict (k8s vs aws)."""
+        task1 = self._make_task('task-1',
+                                [self._make_resources(mock_k8s_cloud, None)])
+        task2 = self._make_task('task-2',
+                                [self._make_resources(mock_aws_cloud, None)])
+        dag = self._make_dag([task1, task2], inter_connection=True)
+
+        with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+        assert 'no common option' in str(exc_info.value)
+
+    def test_cloud_level_pins_conflict_unset_degrades(self, mock_k8s_cloud,
+                                                      mock_aws_cloud):
+        """k8s/ctx pin vs aws pin with unset degrades instead of erroring."""
+        task1 = self._make_task('task-1',
+                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
+        task2 = self._make_task('task-2',
+                                [self._make_resources(mock_aws_cloud, None)])
+        dag = self._make_dag([task1, task2], inter_connection=None)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_independent') as mock_independent:
+            mock_independent.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_independent.assert_called_once()
+        assert dag.inter_connection is False
+
+    def test_cloud_pin_with_context_pin_same_cloud_no_conflict(
+            self, mock_k8s_cloud):
+        """`infra: k8s` + `infra: k8s/ctx` share a cloud: no conflict."""
+        task1 = self._make_task('task-1',
+                                [self._make_resources(mock_k8s_cloud, None)])
+        task2 = self._make_task('task-2',
+                                [self._make_resources(mock_k8s_cloud, 'ctx-a')])
+        dag = self._make_dag([task1, task2], inter_connection=True)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_same_infra.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_same_infra.assert_called_once()
+
+    def test_mixed_options_task_is_flexible(self, mock_k8s_cloud):
+        """any_of [k8s/ctxA, k8s] is flexible: no conflict with a ctxB pin."""
+        mixed = self._make_task('mixed', [
+            self._make_resources(mock_k8s_cloud, 'ctx-a'),
+            self._make_resources(mock_k8s_cloud, None),
+        ])
+        pinned_b = self._make_task(
+            'pinned-b', [self._make_resources(mock_k8s_cloud, 'ctx-b')])
+        dag = self._make_dag([mixed, pinned_b], inter_connection=True)
+
+        with patch.object(optimizer.Optimizer,
+                          '_optimize_same_infra') as mock_same_infra:
+            mock_same_infra.return_value = dag
+            optimizer.Optimizer.optimize_job_group(dag, quiet=True)
+            mock_same_infra.assert_called_once()
+
+    def test_mixed_pin_narrows_group_to_pinned_context(self, mock_k8s_cloud):
+        """k8s/blah + k8s + k8s: everyone lands on blah, hard-pinned."""
+        res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
+        res_other = self._make_resources(mock_k8s_cloud, 'ctx-other', cost=0.1)
+
+        pinned = self._make_task('pinned', [res_blah])
+        flex1 = self._make_task('flex1')
+        flex2 = self._make_task('flex2')
+        dag = self._make_dag([pinned, flex1, flex2], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            if task == pinned:
+                # The region pin constrains candidate generation: no
+                # candidates outside ctx-blah exist for this task.
+                return ({'any': [res_blah]}, None, None, None)
+            return ({'any': [res_blah, res_other]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            optimizer.Optimizer._optimize_same_infra(
+                dag,
+                minimize=common.OptimizeTarget.COST,
+                blocked_resources=None,
+                quiet=True)
+
+        # ctx-other is cheaper, but the pin narrows the intersection to
+        # ctx-blah: every task must land there, hard-pinned.
+        for task in (pinned, flex1, flex2):
+            assert task.best_resources.region == 'ctx-blah'
+            task.set_resources_override.assert_called_once()
+
+    def test_mixed_pin_infeasible_fails_fast(self, mock_k8s_cloud):
+        """k8s/blah + a task infeasible on blah: error, no fallthrough."""
+        res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
+        res_other = self._make_resources(mock_k8s_cloud, 'ctx-other')
+
+        pinned = self._make_task('pinned', [res_blah])
+        other_only = self._make_task('other-only')
+        dag = self._make_dag([pinned, other_only], inter_connection=True)
+
+        def mock_fill(task, blocked_resources, quiet):
+            if task == pinned:
+                return ({'any': [res_blah]}, None, None, None)
+            return ({'any': [res_other]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with pytest.raises(
+                    exceptions.ResourcesUnavailableError) as exc_info:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+        assert 'No single infrastructure' in str(exc_info.value)
 
 
 class TestModuleLevelOptimizeJobGroup:

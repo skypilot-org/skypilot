@@ -1068,36 +1068,65 @@ class Optimizer:
             logger.info(
                 f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
 
-        # A job is "pinned" when every one of its resource options
-        # specifies a concrete infra (cloud+region). If the pinned jobs
-        # share no common infra option, the common-infra search below can
-        # never succeed: the placement is deliberately cross-infra.
+        # Detect deliberately cross-infra pins from the user's spec alone,
+        # at two levels of granularity:
+        # - cloud-pinned: every resource option of a job pins a cloud
+        #   (region optional, e.g. `infra: k8s`). Jobs whose cloud pin
+        #   sets share no cloud can never be co-located.
+        # - fully-pinned: every option pins cloud+region (e.g.
+        #   `infra: k8s/ctx`). Jobs whose pin sets share no infra can
+        #   never be co-located, even within one cloud.
+        # Either way the common-infra search below can never succeed.
         # Whether that is allowed depends on inter_connection (in-group
         # networking does not work across infras today):
         # - explicitly required (true): error;
         # - unset (default): allowed, networking degrades to off with a
         #   warning;
         # - false: allowed silently.
-        pinned_task_infras: List[Set[Tuple[str, str]]] = []
+        pinned_task_clouds: Dict[str, Set[str]] = {}
+        pinned_task_infras: Dict[str, Set[str]] = {}
         for task in tasks:
-            resource_infras: Set[Tuple[str, str]] = set()
+            cloud_pins: Set[str] = set()
+            infra_pins: Set[str] = set()
             fully_pinned = True
             for resource in task.resources:
-                if resource.cloud is None or resource.region is None:
-                    fully_pinned = False
+                if resource.cloud is None:
+                    # An option with no cloud can land anywhere: the job
+                    # is flexible and cannot cause a provable conflict.
                     break
-                resource_infras.add((str(resource.cloud), resource.region))
-            if fully_pinned and resource_infras:
-                pinned_task_infras.append(resource_infras)
-        pins_conflict = (len(pinned_task_infras) > 1 and
-                         not set.intersection(*pinned_task_infras))
+                cloud_pins.add(str(resource.cloud))
+                if resource.region is None:
+                    fully_pinned = False
+                else:
+                    infra_pins.add(f'{resource.cloud}/{resource.region}')
+            else:
+                task_name = str(task.name)
+                if cloud_pins:
+                    pinned_task_clouds[task_name] = cloud_pins
+                # A job only participates in infra-level conflict checks
+                # when EVERY option pins a region: a job with a mix of
+                # region-pinned and cloud-only options (e.g.
+                # any_of: [k8s/ctxA, k8s]) is still flexible within the
+                # cloud and cannot cause a provable infra conflict.
+                if fully_pinned and infra_pins:
+                    pinned_task_infras[task_name] = infra_pins
+        clouds_conflict = (len(pinned_task_clouds) > 1 and
+                           not set.intersection(*pinned_task_clouds.values()))
+        infras_conflict = (len(pinned_task_infras) > 1 and
+                           not set.intersection(*pinned_task_infras.values()))
+        pins_conflict = clouds_conflict or infras_conflict
         if pins_conflict:
-            pinned_infras = set.union(*pinned_task_infras)
+            # Show each job's own pins so the user can see exactly which
+            # jobs disagree, at the granularity that conflicted.
+            conflicting_pins = (pinned_task_infras
+                                if infras_conflict else pinned_task_clouds)
+            pins_desc = '; '.join(f'{name}: {sorted(pins)}'
+                                  for name, pins in conflicting_pins.items())
             if dag.inter_connection is True:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(
-                        f'Jobs in JobGroup "{dag.name}" pin different '
-                        f'infrastructures ({sorted(pinned_infras)}), but '
+                        f'Jobs in JobGroup "{dag.name}" pin infrastructures '
+                        f'with no common option ({pins_desc}), but '
                         '`inter_connection: true` requires in-group '
                         'networking, which does not work across '
                         'infrastructures. Unify the infra pins, or set '
@@ -1105,10 +1134,17 @@ class Optimizer:
                         'to reach each other by hostname.')
             if dag.inter_connection is None:
                 logger.warning(
-                    f'Jobs in JobGroup "{dag.name}" pin different '
-                    'infrastructures; in-group networking will not be set '
-                    'up and jobs cannot reach each other by hostname. Set '
-                    '`inter_connection: false` to silence this warning.')
+                    f'Jobs in JobGroup "{dag.name}" pin infrastructures '
+                    f'with no common option ({pins_desc}); in-group '
+                    'networking will not be set up and jobs cannot reach '
+                    'each other by hostname. Set `inter_connection: false` '
+                    'to silence this warning.')
+                # Persist the degradation so downstream consumers (the
+                # jobs controller) skip all networking machinery: without
+                # this, the controller would inject the (fatal)
+                # networking wait for a placement where hostnames can
+                # never resolve.
+                dag.inter_connection = False
             elif not quiet:
                 logger.info(f'Jobs in JobGroup "{dag.name}" pin different '
                             'infrastructures; optimizing each job '

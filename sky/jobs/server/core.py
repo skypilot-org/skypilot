@@ -754,6 +754,11 @@ def launch(
                     f'Kubernetes. Tasks will run on {best_cloud} but cannot '
                     f'communicate with each other using hostnames.'
                     f'{colorama.Style.RESET_ALL}')
+                # Persist the degradation so the controller skips all
+                # networking machinery (Phase 3 setup would fail and, with
+                # networking required, fail the group) for a placement
+                # where in-group networking cannot exist.
+                dag.inter_connection = False
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
