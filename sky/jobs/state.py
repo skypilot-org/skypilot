@@ -727,6 +727,12 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.DEPRECATED_SUBMITTED: colorama.Fore.BLUE,
 }
 
+# Machine-readable code stored on RECOVERING job events that were triggered
+# by the user job exiting non-zero (as opposed to preemption / infra failures,
+# whose codes come from ExternalClusterFailure). Consumed by dashboard event
+# styling; do not rename without updating consumers.
+USER_JOB_FAILURE_EVENT_CODE = 'USER_JOB_FAILURE'
+
 
 class RecoverySource(enum.Enum):
     """Why a managed job entered the RECOVERING status.
@@ -3098,6 +3104,7 @@ async def set_recovering_async(
         code = '; '.join(f.code for f in external_failures)
         reason = '; '.join(f.reason for f in external_failures)
     elif user_job_failure_reason:
+        code = USER_JOB_FAILURE_EVENT_CODE
         reason = user_job_failure_reason
     elif cluster_event_reason:
         reason = cluster_event_reason

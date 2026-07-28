@@ -897,7 +897,7 @@ class TestSetRecoveringEventReason:
         reason, code = await self._run(
             user_job_failure_reason='Job exited with exit code 1')
         assert reason == 'Job exited with exit code 1'
-        assert code is None
+        assert code == state.USER_JOB_FAILURE_EVENT_CODE
 
     @pytest.mark.asyncio
     async def test_user_job_failure_wins_over_cluster_event(self):
