@@ -1153,14 +1153,22 @@ def get_next_cluster_name(
 
     Returns:
         The cluster name if a suitable replica is found, None otherwise.
+
+    Raises:
+        exceptions.PoolDoesNotExistError: If the pool does not exist (e.g. it
+            was deleted while a job bound to it was still running). This is
+            unrecoverable for the calling job, unlike the None return which
+            means no worker is currently free.
     """
     # Check if service exists
     service_status = _get_service_status(service_name,
                                          pool=True,
                                          with_replica_info=False)
     if service_status is None:
-        logger.error(f'Service {service_name!r} does not exist.')
-        return None
+        logger.error(f'Pool {service_name!r} does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.PoolDoesNotExistError(
+                f'Pool {service_name!r} does not exist.')
     if not service_status['pool']:
         logger.error(f'Service {service_name!r} is not a pool.')
         return None
@@ -2150,7 +2158,18 @@ class ServeCodeGen:
             f'{service_name!r}, {job_id}, **kwargs)',
             'print(msg, end="", flush=True)'
         ]
-        return cls._build(code)
+        cmd = cls._build(code)
+        # When running in consolidation mode, the codegen subprocess inherits
+        # SKYPILOT_GLOBAL_CONFIG pointing to the client override config, which
+        # lacks serve.controller.consolidation_mode=true. The subprocess would
+        # then read the server config from the client override path and
+        # incorrectly conclude it is NOT in consolidation mode, causing a
+        # 300-second CONTROLLER_SETUP_TIMEOUT. Bake OVERRIDE_CONSOLIDATION_MODE
+        # into the shell command so the subprocess always sees the correct mode.
+        if is_consolidation_mode(pool):
+            cmd = (f'export {skylet_constants.OVERRIDE_CONSOLIDATION_MODE}'
+                   f'=true; {cmd}')
+        return cmd
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,

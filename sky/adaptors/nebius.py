@@ -1,8 +1,9 @@
 """Nebius cloud adaptor."""
 import asyncio
+import logging
 import os
 import threading
-from typing import Any, Awaitable, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -19,6 +20,27 @@ _loop_lock = threading.Lock()
 _loop = None
 
 
+def _loop_exception_handler(loop: asyncio.AbstractEventLoop,
+                            context: Dict[str, Any]) -> None:
+    """Exception handler for the dedicated nebius SDK event loop.
+
+    grpc.aio can raise exceptions in loop callbacks (e.g.
+    PollerCompletionQueue._handle_events) when a nebius API call fails.
+    The default asyncio handler logs these at ERROR level to stderr,
+    polluting user-facing CLI output. API errors are still raised to
+    callers through sync_call(), so log the callback noise at debug level
+    for diagnostics instead. This handler is scoped to the dedicated
+    nebius event loop and does not affect other event loops.
+    """
+    del loop  # Unused.
+    message = context.get('message', 'Exception in nebius SDK event loop')
+    exception = context.get('exception')
+    exc_info: Any = False
+    if exception is not None:
+        exc_info = (type(exception), exception, exception.__traceback__)
+    logger.debug(f'nebius SDK event loop: {message}', exc_info=exc_info)
+
+
 def _get_event_loop() -> asyncio.AbstractEventLoop:
     """Get event loop for nebius sdk."""
     global _loop
@@ -29,8 +51,10 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
     with _loop_lock:
         if _loop is None:
             # Create a new event loop in a dedicated thread
-            _loop = asyncio.new_event_loop()
-            threading.Thread(target=_loop.run_forever, daemon=True).start()
+            loop = asyncio.new_event_loop()
+            loop.set_exception_handler(_loop_exception_handler)
+            threading.Thread(target=loop.run_forever, daemon=True).start()
+            _loop = loop
 
         return _loop
 
@@ -119,11 +143,31 @@ POLL_INTERVAL = 5
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Nebius AI Cloud.'
                          'Try pip install "skypilot[nebius]"')
 
-nebius = common.LazyImport(
-    'nebius',
-    import_error_message=_IMPORT_ERROR_MESSAGE,
+
+class _NebiusDeprecationFilter(logging.Filter):
+    """Drops nebius SDK records logged to the 'deprecation' logger.
+
+    The nebius SDK emits deprecated-field warnings (e.g.
+    'Field .nebius.compute.v1.PreemptibleSpec.priority is deprecated')
+    to a logger named 'deprecation'. They are not actionable by users and
+    pollute user-facing CLI output. Only records originating from the
+    nebius package are dropped, so other libraries using the same logger
+    name are unaffected.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return f'{os.sep}nebius{os.sep}' not in record.pathname
+
+
+def _set_nebius_loggers() -> None:
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
-    set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
+    os.environ['GRPC_VERBOSITY'] = 'NONE'
+    logging.getLogger('deprecation').addFilter(_NebiusDeprecationFilter())
+
+
+nebius = common.LazyImport('nebius',
+                           import_error_message=_IMPORT_ERROR_MESSAGE,
+                           set_loggers=_set_nebius_loggers)
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)

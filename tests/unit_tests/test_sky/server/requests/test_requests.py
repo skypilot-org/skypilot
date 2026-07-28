@@ -9,11 +9,13 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky import core
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
 from sky.server.requests.requests import ScheduleType
+from sky.server.requests.serializers import encoders
 
 
 def dummy():
@@ -1840,6 +1842,31 @@ async def test_get_requests_with_prefix(isolated_database, test_async):
         assert req.status_msg is None
 
 
+def _raising_encoder(value):
+    raise RuntimeError('encoder boom')
+
+
+def _dummy_for_encoder_test():
+    return None
+
+
+def test_set_return_value_swallows_encoder_failure():
+    """Encoder failure must not propagate; return_value drops to None."""
+    req = requests.Request(
+        request_id='encoder-failure',
+        name='test',
+        entrypoint=_dummy_for_encoder_test,
+        request_body=payloads.RequestBody(),
+        status=RequestStatus.RUNNING,
+        created_at=0.0,
+        user_id='u',
+    )
+    with mock.patch('sky.server.requests.serializers.encoders.get_encoder',
+                    return_value=_raising_encoder):
+        req.set_return_value({'some': 'unencodable'})
+    assert req.return_value is None
+
+
 def test_waiting_status_ordering_and_color():
     """WAITING sits between PENDING and RUNNING and has a color mapping."""
     from sky.server.requests.requests import _STATUS_TO_COLOR
@@ -1928,3 +1955,151 @@ def test_to_row_keeps_true_status_for_old_clients(remote_api_version):
     # Same context: the wire encoding downgrades, the DB row does not.
     assert request.encode().status == 'RUNNING'
     assert request.to_row()[status_idx] == 'WAITING'
+
+
+def test_decode_entrypoint_resolves_known_symbol():
+    """A resolvable entrypoint decodes back to the original callable."""
+    encoded = encoders.pickle_and_encode(core.down)
+    assert requests.Request._decode_entrypoint(encoded) is core.down
+
+
+def test_decode_entrypoint_falls_back_when_unresolvable(monkeypatch):
+    """An entrypoint referencing a symbol this client lacks decodes to the
+    placeholder instead of raising.
+
+    Regression for the client/server version-skew break: the `/down` entrypoint
+    became `core.user_initiated_down` in #9916. The entrypoint is pickled by
+    reference in `Request.encode` and unpickled by the client in
+    `Request.decode`, so a client predating the symbol crashed with
+    `AttributeError: Can't get attribute 'user_initiated_down'`. The entrypoint
+    is never invoked on the client, so #9946 falls back to a placeholder.
+    """
+    # Encode while the symbol exists (mirrors the newer server) ...
+    encoded = encoders.pickle_and_encode(core.user_initiated_down)
+    # ... then simulate an older client whose `sky.core` lacks it.
+    monkeypatch.delattr(core, 'user_initiated_down')
+
+    decoded = requests.Request._decode_entrypoint(encoded)
+
+    assert decoded is requests._unresolved_entrypoint
+    # The placeholder is never called on the client, but guards that case.
+    with pytest.raises(RuntimeError, match='client/server version mismatch'):
+        decoded()
+
+
+def test_decode_tolerates_unresolvable_entrypoint(monkeypatch):
+    """`Request.decode` succeeds end-to-end when the entrypoint is unresolvable.
+
+    The whole request must still decode -- status, body, ids intact -- with only
+    the unused entrypoint falling back to the placeholder. Before #9946 the
+    unresolved entrypoint raised and failed the entire request (so `sky down`
+    crashed on an older client against a newer server).
+    """
+    request = requests.Request(request_id='down-req',
+                               name='down',
+                               entrypoint=core.user_initiated_down,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               finished_at=1.0,
+                               user_id='test-user')
+    # Encoded by the newer server, which has the symbol.
+    payload = request.encode()
+
+    # Older client: `sky.core` has no `user_initiated_down`.
+    monkeypatch.delattr(core, 'user_initiated_down')
+
+    decoded = requests.Request.decode(payload)
+
+    assert decoded.entrypoint is requests._unresolved_entrypoint
+    assert decoded.request_id == 'down-req'
+    assert decoded.name == 'down'
+    assert decoded.status == RequestStatus.SUCCEEDED
+
+
+def test_request_id_where_matches_like():
+    """The clause matches exactly the ids `LIKE prefix || '%'` would.
+
+    Also asserts a full-length id uses an exact `=` and a shorter string uses
+    the indexed range.
+    """
+    import sqlite3
+    import uuid
+    conn = sqlite3.connect(':memory:')
+    conn.execute('CREATE TABLE requests (request_id TEXT PRIMARY KEY)')
+    rows = [str(uuid.uuid4()) for _ in range(500)]
+    # Craft ids that stress the prefix upper-bound (chars near '9'/'f'/'-').
+    rows += ['ab9', 'ab9a', 'abaa', 'de-', 'de-x', 'deadbeef']
+    for r in rows:
+        conn.execute('INSERT OR IGNORE INTO requests VALUES (?)', (r,))
+    # '\U0010ffff' exercises the max-code-point upper-bound fallback.
+    for prefix in [
+            'a', 'ab9', 'de-', '9', 'f', rows[0], rows[0][:8], '\U0010ffff',
+            'a\U0010ffff'
+    ]:
+        like = {
+            x[0] for x in conn.execute(
+                'SELECT request_id FROM requests WHERE request_id LIKE ?', (
+                    prefix + '%',))
+        }
+        where, params = requests._request_id_where(prefix)
+        rng = {
+            x[0] for x in conn.execute(
+                f'SELECT request_id FROM requests WHERE {where}', params)
+        }
+        assert like == rng, prefix
+
+    # A full-length (>=36 char) id uses an exact `=`; a shorter string uses the
+    # indexed prefix range.
+    assert requests._request_id_where(rows[0]) == ('request_id = ?', (rows[0],))
+    where, _ = requests._request_id_where(rows[0][:8])
+    assert where == 'request_id >= ? AND request_id < ?'
+    # An empty id is never a valid lookup key.
+    with pytest.raises(ValueError):
+        requests._request_id_where('')
+
+
+@pytest.mark.asyncio
+async def test_request_id_lookup_uses_index(isolated_database):
+    """Request-id lookups must use the PK index, not a full table scan.
+
+    Regression test for the requests-DB full-table-scan: `get_request` /
+    `get_request_status_async` ran `WHERE request_id LIKE ?`, which SQLite
+    could not satisfy with the primary-key index (default case-insensitive
+    LIKE on a BINARY-collated key) and so scanned the whole table.
+    """
+    ids = [
+        '11111111-1111-1111-1111-111111111111',
+        '11111111-2222-2222-2222-222222222222',
+        'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    ]
+    for rid in ids:
+        await requests.create_if_not_exists_async(
+            requests.Request(request_id=rid,
+                             name='n',
+                             entrypoint=dummy,
+                             request_body=payloads.RequestBody(),
+                             status=RequestStatus.RUNNING,
+                             created_at=0.0,
+                             finished_at=0.0,
+                             user_id='u'))
+
+    # Full id -> exactly one; shared prefix -> both; miss -> None.
+    got = await requests.get_request_async(ids[0])
+    assert got is not None and got.request_id == ids[0]
+    status = await requests.get_request_status_async(ids[0])
+    assert status is not None and status.status == RequestStatus.RUNNING
+    both = await requests.get_requests_async_with_prefix('11111111-')
+    assert {r.request_id for r in both} == {ids[0], ids[1]}
+    assert await requests.get_request_async('no-such-id') is None
+    # Empty-input shell completion lists recent ids (must not raise on '').
+    all_ids = await requests.get_api_request_ids_start_with('')
+    assert set(ids).issubset(set(all_ids))
+
+    # The generated query must use the index (SEARCH), not a full SCAN.
+    where, params = requests._request_id_where(ids[0])
+    plan = requests._DB.conn.execute(
+        f'EXPLAIN QUERY PLAN SELECT status FROM {requests.REQUEST_TABLE} '
+        f'WHERE {where}', params).fetchall()
+    plan_text = ' '.join(str(row) for row in plan)
+    assert 'SEARCH' in plan_text and 'SCAN' not in plan_text, plan_text

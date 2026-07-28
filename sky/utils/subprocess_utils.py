@@ -246,7 +246,8 @@ def run_in_parallel(func: Callable,
 
     processes = (num_threads
                  if num_threads is not None else get_parallel_threads())
-
+    # len(args) is guaranteed to be greater than 1.
+    processes = min(processes, len(args))
     with pool.ThreadPool(processes=processes) as p:
         ordered_iterators = p.imap(func, args)
         return list(ordered_iterators)

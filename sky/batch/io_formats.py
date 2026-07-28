@@ -236,7 +236,8 @@ class JsonReader(InputReader):
 
     def download_batch(self, start_idx: int, end_idx: int,
                        cache_dir: str) -> List[Dict[str, Any]]:
-        path_hash = hashlib.md5(self.path.encode()).hexdigest()
+        path_hash = hashlib.md5(self.path.encode(),
+                                usedforsecurity=False).hexdigest()
         cache_path = os.path.join(cache_dir, f'dataset_{path_hash}.jsonl')
 
         if not os.path.exists(cache_path):

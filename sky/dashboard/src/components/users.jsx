@@ -27,7 +27,10 @@ import {
   isServiceAccountTokensPaginationAvailable,
 } from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  MANAGED_JOBS_SUMMARY_ARGS,
+} from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS } from '@/lib/config';
@@ -52,7 +55,10 @@ import {
   PlusIcon,
   MinusIcon,
   CopyIcon,
+  Users as UsersIcon,
 } from 'lucide-react';
+import { EmptyState } from '@/components/elements/EmptyState';
+import { isForceEmpty } from '@/lib/utils';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
 import { useSidebar } from '@/components/elements/sidebar';
@@ -73,6 +79,7 @@ import {
   BatchRemoveFromWorkspacesDialog,
 } from '@/components/users-batch-dialogs';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import { statusGroups } from '@/components/jobs';
 import {
   FilterDropdown,
@@ -194,10 +201,8 @@ export const getJobGpuCount = (job) => {
 const fetchClustersAndJobs = async () => {
   const [clustersResult, jobsResult] = await Promise.allSettled([
     dashboardCache.get(getClusters),
-    // Use shared cache key (no field filtering) - preloader uses same args
-    dashboardCache.get(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]),
+    // Shared cache key — must match the preloader's args exactly
+    dashboardCache.get(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]),
   ]);
 
   const clustersData =
@@ -545,9 +550,7 @@ export function Users() {
     trackUserAction('refresh');
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
-    ]);
+    dashboardCache.invalidate(getManagedJobs, [MANAGED_JOBS_SUMMARY_ARGS]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
@@ -2070,6 +2073,15 @@ function UsersTable({
     return '';
   };
 
+  // Columns contributed via useTableColumns() are rendered after the built-in
+  // Jobs column and sorted among themselves by header.order. Brings the Users
+  // table to parity with the clusters/jobs/volumes tables, which already render
+  // these dynamically-registered columns.
+  const extraColumns = useTableColumns('users', { deduplicateUsers });
+  const sortedExtraColumns = [...extraColumns].sort(
+    (a, b) => (a.header?.order ?? 100) - (b.header?.order ?? 100)
+  );
+
   const handleEditClick = async (userId, currentRole) => {
     await checkPermissionAndAct('cannot edit user role', () => {
       setEditingUserId(userId);
@@ -2241,20 +2253,27 @@ function UsersTable({
     );
   }
 
-  if (!filteredAndSortedUsers || filteredAndSortedUsers.length === 0) {
+  if (
+    !filteredAndSortedUsers ||
+    filteredAndSortedUsers.length === 0 ||
+    isForceEmpty()
+  ) {
     return (
-      <div className="text-center py-12">
-        <p className="text-lg font-semibold text-gray-500">
-          {filters.length > 0
-            ? 'No users match your filters.'
-            : 'No users found.'}
-        </p>
-        <p className="text-sm text-gray-400 mt-1">
-          {filters.length > 0
-            ? 'Try adjusting your filter criteria.'
-            : 'There are currently no users to display.'}
-        </p>
-      </div>
+      <Card>
+        <EmptyState
+          icon={<UsersIcon size={20} strokeWidth={1.75} />}
+          title={
+            filters.length > 0
+              ? 'No users match your filters'
+              : 'No users found'
+          }
+          description={
+            filters.length > 0
+              ? 'Try adjusting your filters'
+              : 'Add a user to grant them access'
+          }
+        />
+      </Card>
     );
   }
 
@@ -2442,6 +2461,23 @@ function UsersTable({
                 >
                   Jobs{getSortDirection('jobCount')}
                 </TableHead>
+                {sortedExtraColumns.map((col) => {
+                  const sortKey = col.header?.sortKey;
+                  return (
+                    <TableHead
+                      key={col.id}
+                      onClick={sortKey ? () => requestSort(sortKey) : undefined}
+                      className={`whitespace-nowrap w-1/6${
+                        sortKey
+                          ? ' sortable cursor-pointer hover:bg-gray-50'
+                          : ''
+                      }${col.header?.className ? ' ' + col.header.className : ''}`}
+                    >
+                      {col.header?.label}
+                      {sortKey ? getSortDirection(sortKey) : ''}
+                    </TableHead>
+                  );
+                })}
                 {/* Show Actions column if basicAuthEnabled and not deduplicating */}
                 {!deduplicateUsers &&
                   (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -2629,6 +2665,14 @@ function UsersTable({
                         </Link>
                       )}
                     </TableCell>
+                    {sortedExtraColumns.map((col) => (
+                      <TableCell
+                        key={col.id}
+                        className={col.cell?.className || ''}
+                      >
+                        {col.cell?.render?.(user, { item: user })}
+                      </TableCell>
+                    ))}
                     {/* Actions cell logic - hide when deduplicating */}
                     {!deduplicateUsers &&
                       (basicAuthEnabled || currentUserRole === 'admin') && (
@@ -3127,20 +3171,22 @@ function ServiceAccountTokensView({
   return (
     <>
       {/* Tokens Table */}
-      {filteredTokens.length === 0 ? (
-        <div className="text-center py-12">
-          <KeyRoundIcon className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            {searchQuery?.trim()
-              ? 'No tokens match your search'
-              : 'No service accounts'}
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {searchQuery?.trim()
-              ? 'Try adjusting your search terms.'
-              : 'No service accounts have been created yet.'}
-          </p>
-        </div>
+      {filteredTokens.length === 0 || isForceEmpty() ? (
+        <Card>
+          <EmptyState
+            icon={<KeyRoundIcon size={20} strokeWidth={1.75} />}
+            title={
+              searchQuery?.trim()
+                ? 'No tokens match your search'
+                : 'No service accounts'
+            }
+            description={
+              searchQuery?.trim()
+                ? 'Try a different search term'
+                : 'No service accounts have been created yet'
+            }
+          />
+        </Card>
       ) : (
         <>
           <div className="text-sm text-gray-500 mb-2">

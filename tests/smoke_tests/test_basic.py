@@ -27,7 +27,7 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import Generator, Optional
+from typing import Dict, Generator, Optional
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -1831,6 +1831,79 @@ def test_kubernetes_context_failover(unreachable_context):
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_debug_dump_unreachable_context_fast_fail(unreachable_context):
+    """Debug dump must fast-fail on a dead kube context.
+
+    With an unreachable context in allowed_contexts, the dump must (a)
+    complete within a hard wall-clock ceiling -- without fast-fail each dead
+    context stacked unbounded probe/exec timeouts -- and (b) still contain
+    the live cluster's data plus an explicit reachable:false marker for
+    the dead context, so fast-failing never silently drops resources.
+
+    The cluster-on-a-dead-context path (skylet-log and managed-jobs
+    gating) can't be built in CI -- a launch on a dead context fails -- and
+    is pinned by unit tests instead (test_debug_utils.py).
+
+    Marked no_remote_server: the fixture injects the dead context into the
+    kubeconfig on the machine running the test, but against a remote API
+    server the kubeconfig the server reads lives elsewhere, so the injected
+    context never reaches existing_allowed_contexts() and no marker is dumped.
+    """
+    if unreachable_context is None:
+        pytest.skip('No kubeconfig available to inject the dead context into')
+
+    live_context = subprocess.check_output('kubectl config current-context',
+                                           shell=True).decode('utf-8').strip()
+    config = textwrap.dedent(f"""\
+    kubernetes:
+      allowed_contexts:
+        - {live_context}
+        - {unreachable_context}
+    """)
+    name = smoke_tests_utils.get_cluster_name()
+    dump_prefix = f'/tmp/{name}-dump'
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(config.encode('utf-8'))
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'debug_dump_unreachable_context_fast_fail',
+            [
+                f'sky launch -y -c {name} --cpus 1 '
+                f'--infra kubernetes/{live_context} echo hi',
+                # The ceiling. Generous for a healthy dump (typically well
+                # under a minute here); far below what unbounded kubectl /
+                # credential-probe timeouts against the dead context stack
+                # up to. Asserted via $SECONDS rather than GNU timeout so
+                # the step also runs on macOS dev machines; a fully hung
+                # dump is still bounded by the Test-level timeout.
+                f'start=$SECONDS && sky debug-dump --recent-minutes 5 '
+                f'--output {dump_prefix}.zip && '
+                'elapsed=$((SECONDS - start)) && '
+                'echo "dump took ${elapsed}s" && [ "$elapsed" -lt 300 ]',
+                f'test -f {dump_prefix}.zip',
+                f'unzip -o {dump_prefix}.zip -d {dump_prefix}',
+                # Live cluster data is intact.
+                f'test -f {dump_prefix}/debug_dump_*/clusters/{name}/'
+                'cluster_info.json',
+                # The dead context is present and explicitly marked
+                # unreachable rather than silently missing.
+                f'grep -r \'"reachable": false\' '
+                f'{dump_prefix}/debug_dump_*/kubernetes_contexts/',
+            ],
+            f'sky down -y {name}; rm -rf {dump_prefix} {dump_prefix}.zip',
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: f.name,
+                constants.SKY_API_SERVER_URL_ENV_VAR:
+                    sky.server.common.get_server_url()
+            },
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_launch_image_pull_back_off():
     """The launch error message for an unresolvable image must contain the
     Kubernetes failure reason (ImagePullBackOff or ErrImagePull), not the
@@ -2825,6 +2898,106 @@ def test_nebius_security_group_attached_and_enforced():
             f'sky logs {name} 1 --status',
             _verify_sg_attached_and_enforced,
         ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout('nebius'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_sg_reaped_after_down():
+    """`sky down` must delete the cluster's SkyPilot-managed SG.
+
+    Nebius instance deletion is async: DeleteInstance is accepted before
+    the VM (and its NIC's SG attachment) is actually gone, and Nebius
+    refuses to delete an SG that a NIC still references. Without the
+    wait-for-termination in `terminate_instances`, teardowns orphan their
+    `sky-sg-<cluster>` SG; leaks accumulate until the per-network SG
+    quota is exhausted (`vpc.network.max-security-groups-count`) and all
+    launches in the region fail.
+
+    Launches a real 2-node cluster (multi-node covers the N-instance
+    drain and widens the reap window), records the managed SG while the
+    cluster is up, runs `sky down`, then asserts the SG is gone.
+
+    Cheap: 2 small CPU instances, ~5 min including teardown. Skipped by
+    default; runs only with `pytest --nebius`.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.provision.nebius import utils as nebius_utils
+
+    name = smoke_tests_utils.get_cluster_name()
+    region = 'eu-north1'
+    # Populated by `_record_sg` while the cluster is up; consumed by
+    # `_verify_sg_reaped` after `sky down`.
+    state: Dict[str, str] = {}
+
+    def _record_sg():
+        # `cluster_name_on_cloud` is `name` plus a user-hash suffix added
+        # by `make_cluster_name_on_cloud`, so the SG name can't be
+        # computed from `name` alone. Recover it from the head VM's name
+        # instead: `utils.launch` names nodes
+        # `<cluster_name_on_cloud>-<4-hex-uuid>-<node_type>`, so drop the
+        # last two dash-separated segments.
+        project_id = nebius_utils.get_project_by_region(region)
+        instances = nebius_utils.list_instances(project_id)
+        heads = [
+            info for info in instances.values()
+            if info.get('name', '').startswith(name) and
+            info['name'].endswith('-head')
+        ]
+        assert len(heads) == 1, (
+            f'expected exactly one head VM with name prefix {name!r}, '
+            f'got {[h["name"] for h in heads]}; all VM names in project: '
+            f'{[i.get("name") for i in instances.values()]}')
+        cluster_name_on_cloud = heads[0]['name'].rsplit('-', 2)[0]
+        sg_name = nebius_utils.SECURITY_GROUP_TEMPLATE.format(
+            cluster_name_on_cloud)
+        sg_id = nebius_utils.get_security_group_by_name(project_id, sg_name)
+        assert sg_id is not None, (
+            f'managed SG {sg_name!r} not found while the cluster is up; '
+            f'cannot verify its post-down reaping. Head VM: '
+            f'{heads[0]["name"]!r}, attached SGs: '
+            f'{heads[0].get("security_group_ids")}')
+        attached = heads[0].get('security_group_ids') or []
+        assert sg_id in attached, (
+            f'SG {sg_name!r} ({sg_id}) exists but is not attached to the '
+            f'head VM (attached: {attached}); the name-derivation in this '
+            f'test is probably stale vs. `utils.launch` naming.')
+        state['project_id'] = project_id
+        state['sg_name'] = sg_name
+
+    def _verify_sg_reaped():
+        assert state, '_record_sg did not run; nothing to verify.'
+        # The SG delete is issued before `sky down` returns, but Nebius
+        # deletes are async; give the control plane a short window to
+        # stop reporting the SG before declaring a leak.
+        sg_id = None
+        for _ in range(6):
+            sg_id = nebius_utils.get_security_group_by_name(
+                state['project_id'], state['sg_name'])
+            if sg_id is None:
+                return
+            time.sleep(5)
+        raise AssertionError(
+            f'security group {state["sg_name"]!r} ({sg_id}) still exists '
+            f'after `sky down` returned: terminate_instances leaked the '
+            f'SG. Each leak consumes one slot of the per-network SG quota '
+            f'until launches fail with '
+            f'vpc.network.max-security-groups-count.')
+
+    test = smoke_tests_utils.Test(
+        'nebius_sg_reaped_after_down',
+        [
+            f'sky launch -y -c {name} --infra nebius --num-nodes 2 '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/minimal.yaml',
+            _record_sg,
+            f'sky down -y {name}',
+            _verify_sg_reaped,
+        ],
+        # Safety net for failures above; `sky down` on an already-downed
+        # cluster is a no-op that exits 0.
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('nebius'),
     )

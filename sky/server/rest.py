@@ -69,7 +69,12 @@ _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
 adapter = requests.adapters.HTTPAdapter(
     pool_connections=50,
-    pool_maxsize=200,
+    # Sized for the jobs controller, the heaviest single-process consumer: it
+    # can hold one long-lived log stream per job with an in-flight launch
+    # request (up to MAX_JOBS_PER_WORKER=200), plus short-lived status polls
+    # on top. The pool never blocks (pool_block defaults to False); this cap
+    # only bounds how many connections are kept for reuse.
+    pool_maxsize=256,
     # We handle retries by ourselves in SDK.
     max_retries=0,
 )

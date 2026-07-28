@@ -59,7 +59,7 @@ def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 
-    endpoint = server_common.DEFAULT_SERVER_URL
+    endpoint = server_common.get_default_server_url()
 
     config = textwrap.dedent(f"""
     api_server:
@@ -100,7 +100,8 @@ def test_endpoint_output_env(generic_cloud: str):
                                   teardown=f'sky down -y {name}',
                                   env={
                                       constants.SKY_API_SERVER_URL_ENV_VAR:
-                                          server_common.DEFAULT_SERVER_URL
+                                          server_common.get_default_server_url(
+                                          )
                                   })
     smoke_tests_utils.run_one_test(test)
 
@@ -170,8 +171,14 @@ def test_cli_auto_retry(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'cli_auto_retry',
         [
-            # Chaos proxy will kill TCP connections every 30 seconds.
-            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
+            # Chaos proxy kills TCP connections roughly every 30 seconds.
+            # The +/-10s jitter keeps the kill schedule from phase-locking
+            # to the client's reconnect cadence: without it, a kill landing
+            # in the small window between the job finishing and the log
+            # stream closing repeats on every attempt (the job runtime and
+            # reconnect timing are ~deterministic), turning a rare race into
+            # a deterministic failure. See #9246.
+            f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 --jitter 10 & echo $! > /tmp/{name}-chaos.pid',
             # Wait until the proxy is actually listening on the port. The
             # background `&` returns control immediately and on slower CI
             # workers the first sky-launch would otherwise race the proxy
@@ -250,8 +257,14 @@ def test_debug_dump_recent(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'debug_dump_recent',
         [
-            # Create a debug dump with --recent-minutes (no clusters/jobs needed)
-            'sky debug-dump --recent-minutes 60 --output /tmp/test_debug_dump_recent.zip',
+            # Any positive value works for --recent-minutes: the server always
+            # injects a handful of system daemon request IDs into every dump
+            # regardless of the time window, so request_count > 0 is always
+            # satisfied. We use 5 rather than 60 because on a shared CI server
+            # that runs tests continuously, a 60-minute window collects
+            # thousands of user requests and takes 5+ minutes to zip up,
+            # blowing the per-command timeout.
+            'sky debug-dump --recent-minutes 5 --output /tmp/test_debug_dump_recent.zip',
             # Verify the zip file was created and is a valid zip
             'test -f /tmp/test_debug_dump_recent.zip',
             's=$(unzip -l /tmp/test_debug_dump_recent.zip) && echo "$s" && '
@@ -286,7 +299,9 @@ def test_debug_dump_recent(generic_cloud: str):
         ],
         teardown='rm -f /tmp/test_debug_dump_recent.zip && '
         'rm -rf /tmp/test_debug_dump_recent',
-        timeout=2 * 60,
+        # On shared staging servers the dump collects active managed jobs via
+        # controller SSH, which takes several minutes. 10 minutes is safe.
+        timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

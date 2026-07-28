@@ -3,7 +3,6 @@
 import contextlib
 import datetime
 import hashlib
-import os
 import secrets
 import threading
 import time
@@ -14,6 +13,7 @@ import jwt
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.skylet import runtime_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -23,7 +23,7 @@ JWT_ISSUER = 'sky'  # Shortened for compact tokens
 JWT_SECRET_DB_KEY = 'jwt_secret'
 
 # File lock for JWT secret initialization
-JWT_SECRET_LOCK_PATH = os.path.expanduser('~/.sky/.jwt_secret_init.lock')
+JWT_SECRET_LOCK_PATH = runtime_utils.expanduser('~/.sky/.jwt_secret_init.lock')
 JWT_SECRET_LOCK_TIMEOUT_SECONDS = 20
 
 

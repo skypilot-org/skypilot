@@ -301,8 +301,15 @@ available_node_types:
             kueue.x-k8s.io/queue-name: {{k8s_kueue_local_queue_name}}
             kueue.x-k8s.io/pod-group-name: {{cluster_name_on_cloud}}
             {% endif %}
-        {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
         annotations:
+          # The skypilot-user *label* (above) sanitizes characters that are
+          # invalid in Kubernetes label values (e.g. '@' and '.'), so a
+          # username like alice@example.com is recorded as aliceexamplecom.
+          # Always also record the original, uncleaned username as an
+          # annotation (annotation values have no such charset restrictions)
+          # so consumers can recover the exact username regardless of config.
+          skypilot-user: "{{ original_user }}"
+        {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
           skypilot-workspace: {{ workspace }}
           {% if priority_class is not none %}
           skypilot-priority-class: {{priority_class}}
@@ -313,7 +320,6 @@ available_node_types:
           {% if k8s_max_run_duration_seconds %}
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}
-          skypilot-user: "{{ original_user }}"
           {% endif %}
         # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
         # Values from google cloud guide
@@ -430,32 +436,10 @@ available_node_types:
             cloud.google.com/gke-flex-start: "true"
             {% endif %}
         {% endif %}
-        {% set _affinity_node = (k8s_acc_label_key is not none and k8s_acc_label_values is not none) or (avoid_label_keys is not none) %}
-        {% if _affinity_node or k8s_host_network %}
+        {% if k8s_node_affinity or k8s_host_network %}
         affinity:
-          {% if _affinity_node %}
-          nodeAffinity:
-            {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: {{k8s_acc_label_key}}
-                  operator: In
-                  values:
-                  {% for label_value in k8s_acc_label_values %}
-                  - {{label_value}}
-                  {% endfor %}
-            {% endif %}
-            {% if avoid_label_keys is not none %}
-            preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 1
-              preference:
-                matchExpressions:
-                {% for avoid_label_key in avoid_label_keys %}
-                - key: {{avoid_label_key}}
-                  operator: DoesNotExist
-                {% endfor %}
-            {% endif %}
+          {% if k8s_node_affinity %}
+          nodeAffinity: {{k8s_node_affinity | tojson}}
           {% if k8s_acc_label_key is not none and k8s_acc_label_values is not none %}
           podAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
@@ -468,6 +452,21 @@ available_node_types:
                         values:
                           - "gpu"
                   topologyKey: kubernetes.io/hostname
+            {% if k8s_efa_same_az %}
+            # Multi-node EFA co-location: an AWS EFA placement group is
+            # single-AZ, so every replica of this job must schedule into one
+            # zone or the fabric cannot form. Attract each pod to the zone of
+            # the other pods of the same SkyPilot cluster -- the first pod fixes
+            # the AZ (Karpenter provisions an EFA node wherever it has
+            # capacity) and the rest follow; the user names no zone. required
+            # (not preferred): cross-AZ EFA is broken, so pend loudly rather
+            # than silently fall back to TCP.
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    skypilot-cluster-name: {{cluster_name_on_cloud}}
+                topologyKey: topology.kubernetes.io/zone
+            {% endif %}
           {% endif %}
           {% endif %}
           {% if k8s_host_network %}
@@ -1103,49 +1102,7 @@ available_node_types:
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}
-                set -e
-                # Mask fusermount binary before enabling SSH access
-                FUSERMOUNT_PATH=$(which fusermount)
-                if [ -z "$FUSERMOUNT_PATH" ]; then
-                    echo "Error: fusermount binary not found"
-                    exit 1
-                fi
-                $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
-                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                # "|| true" because fusermount3 is not always available
-                FUSERMOUNT3_PATH=$(which fusermount3) || true
-                if [ -z "$FUSERMOUNT3_PATH" ]; then
-                    FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
-                fi
-                # Also mask fusermount3 for rclone and blobfuse2 (for unmount operation)
-                $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
-                # Add fusermount-wrapper to handle adapters that use libfuse directly, e.g. blobfuse2
-                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
-                # Wait for the server to setup the fusermount shim binary in case:
-                # 1. The server daemonset was just deployed and is still starting up.
-                # 2. The node was just started and the server Pod is still starting up.
-                wait_for_fusermount() {
-                    local timeout=60
-                    local start_time=$(date +%s)
-                    while ! command -v fusermount >/dev/null 2>&1; do
-                        current_time=$(date +%s)
-                        elapsed=$((current_time - start_time))
-                        if [ $elapsed -ge $timeout ]; then
-                            echo "Error: fusermount not ready after $timeout seconds"
-                            exit 1
-                        fi
-                        sleep 1
-                    done
-                }
-                wait_for_fusermount
-                # Some distributions may mount hostPath with noexec, copy the binary in this case.
-                if ! fusermount -V; then
-                    echo "fusermount -V failed, copying fusermount-shim directly"
-                    $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
-                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                    $(prefix_cmd) rm -f /bin/fusermount-wrapper
-                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
-                fi
+                {{ k8s_fusermount_setup_command | indent(16) }}
                 {% endif %}
 
                 $(prefix_cmd) mkdir -p /var/run/sshd;
@@ -1187,7 +1144,7 @@ available_node_types:
               (
                 (
                 set -e
-                # Create $SKY_RUNTIME_DIR/.sky early — conda_installation_commands
+                # Create $SKY_RUNTIME_DIR/.sky early — uv_installation_commands
                 # writes python_path there before ray_installation_commands (which
                 # contains SETUP_SKY_DIRS_COMMANDS) creates it.
                 mkdir -p ${SKY_RUNTIME_DIR:-$HOME}/.sky
@@ -1210,7 +1167,7 @@ available_node_types:
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # python_path is seeded by conda_installation_commands
+                # python_path is seeded by uv_installation_commands
                 VIRTUAL_ENV=${SKY_RUNTIME_DIR:-$HOME}/skypilot-runtime UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
                   {{sky_unset_pythonpath_and_set_cwd}} $(cat ${SKY_RUNTIME_DIR:-$HOME}/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }

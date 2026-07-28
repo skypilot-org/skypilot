@@ -119,16 +119,17 @@ def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
             continue
 
         ext_ctx = plugins.get_extension_context()
-        if ext_ctx is None:
-            raise RuntimeError(
-                'Task references managed_secrets but no plugin system '
-                'is available.')
-        provider = ext_ctx.managed_secrets_provider
+        provider = (ext_ctx.managed_secrets_provider
+                    if ext_ctx is not None else None)
         if provider is None:
+            names = ', '.join(
+                sorted(set(ref.name for ref in task.managed_secret_refs)))
             raise RuntimeError(
-                'Task references managed_secrets but no managed secrets '
-                'provider is configured. Install a secrets management '
-                'plugin.')
+                f'No value available for secret(s): {names}. A secret with '
+                'no inline value must be provided at launch with the '
+                '--secret flag (e.g. --secret NAME=value), or resolved by a '
+                'managed secrets provider. No managed secrets provider is '
+                'configured.')
 
         # The provider.resolve() is async; run it from this sync context.
         resolved = asyncio.run(
@@ -214,6 +215,7 @@ def _execute(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    resize: bool = False,
     *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
@@ -329,6 +331,7 @@ def _execute(
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+            resize=resize,
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
@@ -351,6 +354,7 @@ def _execute_dag(
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
+    resize: bool,
     # pylint: disable=invalid-name
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
@@ -561,7 +565,8 @@ def _execute_dag(
                 stream_logs=stream_logs,
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
-                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
+                skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+                resize=resize)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -693,6 +698,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
@@ -901,6 +907,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+        resize=resize,
         _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=

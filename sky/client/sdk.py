@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 import typing
@@ -46,6 +47,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.ssh_node_pools import utils as ssh_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -678,6 +680,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -751,6 +754,11 @@ def launch(
           different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
           skip provisioning and setup steps.
+        resize: if True, resize the existing cluster to the ``num_nodes``
+          specified in the task. Supports both scaling up (adding workers)
+          and scaling down (removing workers). Scale-down requires no
+          running jobs on the cluster. If True, requires ``cluster_name``
+          to be set.
         _need_confirmation: (Internal only) If True, show the confirmation
             prompt.
 
@@ -788,6 +796,11 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if resize and cluster_name is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'resize=True requires cluster_name to be set to an existing '
+                'cluster.')
     if cluster_name is None:
         cluster_name = cluster_utils.generate_cluster_name()
 
@@ -802,6 +815,12 @@ def launch(
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
+    if resize and (remote_api_version is None or remote_api_version < 56):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.APINotSupportedError(
+                'Cluster resize (--resize / resize=True) is not supported by '
+                'your API server. Please upgrade the API server to a version '
+                'that supports API_VERSION >= 56.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     # Override the autostop config from command line flags to task YAML.
@@ -847,6 +866,7 @@ def launch(
             no_setup,
             clone_disk_from,
             fast,
+            resize,
             _need_confirmation,
             _is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller,
@@ -870,6 +890,7 @@ def _launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    resize: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -916,13 +937,54 @@ def _launch(
                 cluster_user_hash_str = f' (hash: {cluster_user_hash})'
 
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
+        # it exists but is STOPPED, or (4) resize is requested and would
+        # change the node count.
         prompt = None
         if cluster_status is None:
-            prompt = (
-                f'Launching a new cluster {cluster_name!r}. '
-                # '{clone_source_str}. '
-                'Proceed?')
+            suffix = ''
+            if resize:
+                suffix = (f' (--resize will be ignored since {cluster_name!r} '
+                          f'does not exist)')
+            prompt = (f'Launching a new cluster {cluster_name!r}.{suffix} '
+                      'Proceed?')
+        elif resize:
+            # Check resize before STOPPED: a --resize on a stopped cluster
+            # should show a resize-aware prompt (and note the restart), not
+            # the generic "Restarting the stopped cluster" message.
+            current_nodes = cluster_record.get('nodes')
+            target_nodes = dag.tasks[0].num_nodes
+            user_name_str = ''
+            if cluster_user_hash != common_utils.get_user_hash():
+                user_name_str = (f' (created by another user '
+                                 f'{cluster_user_name!r}'
+                                 f'{cluster_user_hash_str})')
+            # A stopped cluster is restarted as part of the resize.
+            resume_str = ''
+            if cluster_status == status_lib.ClusterStatus.STOPPED:
+                resume_str = ' The stopped cluster will be restarted.'
+            if current_nodes is None:
+                # Record is missing the 'nodes' field (e.g. older server or
+                # partial status response). Avoid TypeError from comparing
+                # int to None; show a generic resize prompt without the
+                # delta.
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'to {target_nodes} node(s).{resume_str} Proceed?')
+            elif current_nodes == target_nodes:
+                prompt = (f'Cluster {cluster_name!r}{user_name_str} already '
+                          f'has {current_nodes} node(s); --resize is a '
+                          f'no-op.{resume_str} Proceed?')
+            elif target_nodes > current_nodes:
+                delta = target_nodes - current_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(+{delta} worker(s), scale up).{resume_str} '
+                          f'Proceed?')
+            else:
+                delta = current_nodes - target_nodes
+                prompt = (f'Resizing cluster {cluster_name!r}{user_name_str} '
+                          f'from {current_nodes} to {target_nodes} node(s) '
+                          f'(-{delta} worker(s), scale down). Excess '
+                          f'workers will be terminated.{resume_str} Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
             user_name_str = ''
             if cluster_user_hash != common_utils.get_user_hash():
@@ -984,6 +1046,7 @@ def _launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         file_mounts_blob_id=file_mounts_blob_id,
+        resize=resize,
         extra_launch_context=_extra_launch_context or {},
         include_credentials=include_credentials,
     )
@@ -2054,7 +2117,8 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @annotations.client_api
 def local_up(gpus: bool,
              name: Optional[str] = None,
-             port_start: Optional[int] = None) -> server_common.RequestId[None]:
+             port_start: Optional[int] = None,
+             num_nodes: int = 1) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -2068,7 +2132,10 @@ def local_up(gpus: bool,
             raise ValueError('`sky local up` is only supported when '
                              'running SkyPilot locally.')
 
-    body = payloads.LocalUpBody(gpus=gpus, name=name, port_start=port_start)
+    body = payloads.LocalUpBody(gpus=gpus,
+                                name=name,
+                                port_start=port_start,
+                                num_nodes=num_nodes)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -2522,16 +2589,41 @@ def api_cancel(request_ids: Optional[Union[server_common.RequestId[T],
     return server_common.get_request_id(response)
 
 
+def _cmdline_api_server_port(cmdline: List[str]) -> int:
+    """Parses the port of an API server process from its command line.
+
+    Falls back to the default port for servers started without an explicit
+    --port argument (e.g., by an older SkyPilot version). Operates on the
+    joined command line because some platforms (e.g., macOS) report the
+    whole command line as a single element.
+    """
+    match = re.search(r'--port[= ](\d+)', ' '.join(cmdline))
+    if match is not None:
+        return int(match.group(1))
+    return server_common.DEFAULT_SERVER_PORT
+
+
 def _local_api_server_running(kill: bool = False) -> bool:
-    """Checks if the local api server is running."""
+    """Checks if the local api server on the current port is running.
+
+    Only considers server processes bound to the port this client is
+    configured for, so that multiple API servers on one machine (e.g., dev
+    servers on different ports) do not interfere with each other.
+    """
+    target_port = server_common.get_local_api_server_port()
+    found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
+            if _cmdline_api_server_port(cmdline) != target_port:
+                continue
+            found = True
             if kill:
                 subprocess_utils.kill_children_processes(
                     parent_pids=[process.pid], force=True)
-            return True
-    return False
+            else:
+                return True
+    return found
 
 
 @usage_lib.entrypoint
@@ -2629,6 +2721,7 @@ def api_start(
     metrics: bool = False,
     metrics_port: Optional[int] = None,
     enable_basic_auth: bool = False,
+    port: Optional[int] = None,
 ) -> None:
     """Starts the API server.
 
@@ -2638,19 +2731,39 @@ def api_start(
     Args:
         deploy: Whether to deploy the API server, i.e. fully utilize the
             resources of the machine.
-        host: The host to deploy the API server. It will be set to 0.0.0.0
-            if deploy is True, to allow remote access.
+        host: The host to bind the API server to. Under deploy, the server
+            always binds a wildcard address for remote access: ``::`` when an
+            IPv6 host is given, otherwise ``0.0.0.0``. Without deploy the host
+            is used as-is.
         foreground: Whether to run the API server in the foreground (run in
             the current process).
         metrics: Whether to export metrics of the API server.
         metrics_port: The port to export metrics of the API server.
         enable_basic_auth: Whether to enable basic authentication
             in the API server.
+        port: The port to bind the API server to. Defaults to the
+            SKYPILOT_API_SERVER_LOCAL_PORT environment variable, or 46580.
+            Other client commands only find a server on a non-default port
+            if the same environment variable is exported.
     Returns:
         None
     """
+    if port is not None:
+        env_port = os.environ.get(constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR)
+        if env_port is not None and env_port != str(port):
+            logger.warning(
+                f'--port={port} overrides '
+                f'{constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR}={env_port} '
+                'for this command only.')
+        os.environ[constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR] = str(port)
+        # These caches may have been populated with URLs built from the old
+        # port; clear them so the override takes effect.
+        server_common.get_server_url.cache_clear()  # type: ignore
+        server_common.is_api_server_local.cache_clear()  # type: ignore
     if deploy:
-        host = '0.0.0.0'
+        # Deploy mode is for remote access, so always bind a wildcard of the
+        # requested host's address family.
+        host = '::' if server_common.is_ipv6_host(host) else '0.0.0.0'
     if host not in server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS:
         raise ValueError(f'Invalid host: {host}. Should be one of: '
                          f'{server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS}')
@@ -2675,6 +2788,12 @@ def api_start(
                 f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
+    local_port = server_common.get_local_api_server_port()
+    if local_port != server_common.DEFAULT_SERVER_PORT:
+        logger.info(
+            'Server is on a non-default port. For other commands and '
+            'terminals to reach it, run: export '
+            f'{constants.SKY_API_SERVER_LOCAL_PORT_ENV_VAR}={local_port}')
 
 
 @usage_lib.entrypoint
@@ -2697,8 +2816,10 @@ def api_stop() -> None:
 
     # Acquire the api server creation lock to prevent multiple processes from
     # stopping and starting the API server at the same time.
-    with filelock.FileLock(
-            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+    creation_lock_path = runtime_utils.expanduser(
+        constants.API_SERVER_CREATION_LOCK_PATH)
+    os.makedirs(os.path.dirname(creation_lock_path), exist_ok=True)
+    with filelock.FileLock(creation_lock_path):
         try:
             records = scheduler.get_controller_process_records()
             if records is not None:
@@ -2749,7 +2870,7 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
             tail_args.extend(['-n', '+1'])
         else:
             tail_args.extend(['-n', f'{tail}'])
-        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        log_path = runtime_utils.expanduser(constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)

@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { PaginationControls } from '@/components/elements/PaginationControls';
+import { SegmentedToggle } from '@/components/elements/SegmentedToggle';
 import { CircularProgress } from '@mui/material';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,7 +18,15 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import { EmptyState } from '@/components/elements/EmptyState';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
+import { BriefcaseIcon } from '@/components/elements/icons';
 import {
   formatDuration,
   REFRESH_INTERVAL,
@@ -48,6 +57,7 @@ import {
   ChevronRightIcon,
   CheckIcon,
   InfoIcon,
+  Layers,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -77,6 +87,11 @@ import {
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
 import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
+
+// Page-size ("rows per page") options for the managed jobs queue, and the
+// localStorage key used to remember the user's last choice across reloads.
+const JOBS_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const JOBS_PAGE_SIZE_STORAGE_KEY = 'skypilot-jobs-page-size';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -364,6 +379,28 @@ export function ManagedJobs() {
     trackFilterUsed('job', { property, value });
   };
 
+  // Clicking a user in the table adds (or replaces) a "User" filter rather
+  // than navigating to the users page. Replace-not-stack is intentional:
+  // two AND'd user filters would yield zero results.
+  const handleUserFilterClick = React.useCallback(
+    (username) => {
+      if (!username) return;
+      setFilters((prevFilters) => {
+        const withoutUser = prevFilters.filter(
+          (f) => (f.property || '').toLowerCase() !== 'user'
+        );
+        const updatedFilters = [
+          ...withoutUser,
+          { property: 'User', operator: ':', value: username },
+        ];
+        sharedUpdateURLParams(router, updatedFilters);
+        return updatedFilters;
+      });
+      trackFilterUsed('job', { property: 'User', value: username });
+    },
+    [router]
+  );
+
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
@@ -427,6 +464,7 @@ export function ManagedJobs() {
         setLoading={setLoading}
         refreshDataRef={jobsRefreshRef}
         filters={filters}
+        onUserFilter={handleUserFilterClick}
         onRefresh={handleRefresh}
         poolsData={poolsData}
         poolsLoading={poolsLoading}
@@ -470,11 +508,25 @@ function BatchProgressBar({ completed, total }) {
   );
 }
 
+function JobNameLink({ href, name }) {
+  return (
+    <NonCapitalizedTooltip content={name}>
+      <Link
+        href={href}
+        className="text-blue-600 block min-w-[200px] max-w-[240px] truncate"
+      >
+        {name}
+      </Link>
+    </NonCapitalizedTooltip>
+  );
+}
+
 export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
   filters,
+  onUserFilter,
   onRefresh,
   poolsData,
   poolsLoading,
@@ -498,9 +550,19 @@ export function ManagedJobsTable({
   });
   const [pageSize, setPageSize] = useState(() => {
     if (typeof window !== 'undefined') {
+      // An explicit URL query param wins (e.g. a shared/bookmarked link);
+      // otherwise fall back to the last choice persisted in localStorage,
+      // and finally to the default of 10.
       const params = new URLSearchParams(window.location.search);
       const ps = parseInt(params.get('pageSize'), 10);
-      return [10, 30, 50, 100, 200].includes(ps) ? ps : 10;
+      if (JOBS_PAGE_SIZE_OPTIONS.includes(ps)) {
+        return ps;
+      }
+      return getPersistedPageSize(
+        JOBS_PAGE_SIZE_STORAGE_KEY,
+        JOBS_PAGE_SIZE_OPTIONS,
+        10
+      );
     }
     return 10;
   });
@@ -1364,6 +1426,8 @@ export function ManagedJobsTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(JOBS_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
@@ -1469,9 +1533,7 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
-                    {item.name}
-                  </Link>
+                  <JobNameLink href={`/jobs/${jobId}`} name={item.name} />
                   {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
@@ -1510,9 +1572,7 @@ export function ManagedJobsTable({
           return (
             <TableCell className="whitespace-nowrap">
               <div className="flex items-center">
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                  {item.name}
-                </Link>
+                <JobNameLink href={`/jobs/${item.id}`} name={item.name} />
                 {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
@@ -1532,7 +1592,11 @@ export function ManagedJobsTable({
         ),
         renderCell: (item) => (
           <TableCell>
-            <UserDisplay username={item.user} userHash={item.user_hash} />
+            <UserDisplay
+              username={item.user}
+              userHash={item.user_hash}
+              onUserClick={onUserFilter}
+            />
           </TableCell>
         ),
       },
@@ -1886,6 +1950,7 @@ export function ManagedJobsTable({
       expandedRowId,
       poolsLoading,
       poolsData,
+      onUserFilter,
     ]
   );
 
@@ -1969,7 +2034,7 @@ export function ManagedJobsTable({
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex items-center justify-between text-sm mb-1">
+        <div className="flex items-center justify-between text-sm mb-4">
           <div className="flex flex-wrap items-center min-w-0">
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
@@ -2124,39 +2189,19 @@ export function ManagedJobsTable({
                     setCurrentPage(1);
                   });
                 };
-                const isActive = activeTab === 'active' && showAllMode;
-                const isAll = activeTab === 'all' && showAllMode;
+                // Neither segment is highlighted while a status chip
+                // narrows the view (showAllMode=false).
+                const activityValue = showAllMode ? activeTab : null;
                 return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by activity"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => selectTab('active')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isActive
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      Active
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isAll}
-                      onClick={() => selectTab('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isAll
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All
-                    </button>
-                  </div>
+                  <SegmentedToggle
+                    ariaLabel="Filter jobs by activity"
+                    options={[
+                      { value: 'active', label: 'Active' },
+                      { value: 'all', label: 'All' },
+                    ]}
+                    value={activityValue}
+                    onChange={selectTab}
+                  />
                 );
               })()}
               {(() => {
@@ -2170,36 +2215,15 @@ export function ManagedJobsTable({
                   : userScope === 'mine';
                 const isEveryone = !explicitUserFilter && userScope === 'all';
                 return (
-                  <div
-                    role="tablist"
-                    aria-label="Filter jobs by owner"
-                    className="inline-flex items-center bg-gray-100 rounded-md p-0.5 shrink-0"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={isMine}
-                      onClick={() => selectScope('mine')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isMine
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      My Jobs
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={isEveryone}
-                      onClick={() => selectScope('all')}
-                      className={`px-2.5 py-0.5 rounded text-xs font-medium transition-colors ${
-                        isEveryone
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      All Jobs
-                    </button>
-                  </div>
+                  <SegmentedToggle
+                    ariaLabel="Filter jobs by owner"
+                    options={[
+                      { value: 'mine', label: 'My Jobs' },
+                      { value: 'all', label: 'All Jobs' },
+                    ]}
+                    value={isMine ? 'mine' : isEveryone ? 'all' : null}
+                    onChange={selectScope}
+                  />
                 );
               })()}
               {/* Scope hint: when filtered to the current user's jobs,
@@ -2347,7 +2371,7 @@ export function ManagedJobsTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 <>
                   {Array.from(groupedJobs.entries()).map(([jobId, tasks]) => {
                     const isMultiTask = tasks.length > 1;
@@ -2447,12 +2471,12 @@ export function ManagedJobsTable({
                   })}
                 </>
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6"
-                  >
-                    <div className="flex flex-col items-center space-y-4">
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={totalColSpan} className="p-0">
+                    <div
+                      className="flex flex-col items-center justify-center space-y-4 px-6"
+                      style={{ minHeight: 280 }}
+                    >
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
                           <p className="text-gray-700">
@@ -2498,7 +2522,12 @@ export function ManagedJobsTable({
                             </Button>
                           </div>
                         ) : (
-                          <p className="text-gray-500">No active jobs</p>
+                          <EmptyState
+                            icon={<BriefcaseIcon className="w-5 h-5" />}
+                            title="No active jobs"
+                            description="Launch a managed job to run it with automatic recovery"
+                            minHeight={0}
+                          />
                         ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
@@ -2558,6 +2587,7 @@ export function ManagedJobsTable({
         }
         pageSize={pageSize}
         onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={JOBS_PAGE_SIZE_OPTIONS}
         itemLabel="Jobs"
       />
 
@@ -2845,7 +2875,7 @@ export function ClusterJobs({
                   </div>
                 </TableCell>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
+            ) : paginatedData.length > 0 && !isForceEmpty() ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -2905,14 +2935,12 @@ export function ClusterJobs({
                 </React.Fragment>
               ))
             ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No jobs found
-                </TableCell>
-              </TableRow>
+              <EmptyTableState
+                colSpan={8}
+                icon={<BriefcaseIcon className="w-5 h-5" />}
+                title="No jobs found"
+                description="Submit a job to run it on this cluster"
+              />
             )}
           </TableBody>
         </Table>
@@ -3125,6 +3153,10 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
     return <SharedInfraBadges replicaInfo={replicaInfo} />;
   };
 
+  // Number of columns in the pools table header (Pool, Jobs, Workers,
+  // Worker Details, Worker Resources) — used for the empty-state colSpan.
+  const poolColumnCount = 5;
+
   return (
     <Card>
       <div className="overflow-x-auto rounded-lg">
@@ -3171,7 +3203,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   </div>
                 </TableCell>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
+            ) : paginatedData.length > 0 && !isForceEmpty() ? (
               paginatedData.map((pool) => (
                 <TableRow key={pool.name}>
                   <TableCell>
@@ -3201,14 +3233,12 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                 </TableRow>
               ))
             ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={5}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No pools found
-                </TableCell>
-              </TableRow>
+              <EmptyTableState
+                colSpan={poolColumnCount}
+                icon={<Layers size={20} strokeWidth={1.75} />}
+                title="No pools found"
+                description="Create a pool to share workers across jobs"
+              />
             )}
           </TableBody>
         </Table>

@@ -17,11 +17,18 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  EmptyTableState,
 } from '@/components/ui/table';
+import {
+  isForceEmpty,
+  getPersistedPageSize,
+  persistPageSize,
+} from '@/lib/utils';
 import { getVolumes, deleteVolume } from '@/data/connectors/volumes';
 import { REFRESH_INTERVALS } from '@/lib/config';
 import { sortData } from '@/data/utils';
 import { RotateCwIcon, Trash2Icon, AlertTriangleIcon } from 'lucide-react';
+import { VolumeIcon } from '@/components/elements/icons';
 import { useMobile } from '@/hooks/useMobile';
 import { Card } from '@/components/ui/card';
 import {
@@ -44,6 +51,9 @@ import cachePreloader from '@/lib/cache-preloader';
 import { trackVolumeAction } from '@/lib/analytics';
 
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
+
+const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
+const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
 
 export function Volumes() {
   const router = useRouter();
@@ -185,7 +195,7 @@ export function Volumes() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4 h-5">
+      <div className="flex items-center justify-between mb-4 min-h-[20px]">
         <div className="text-base flex items-center">
           {hasPluginTabs ? (
             <>
@@ -468,7 +478,15 @@ function VolumesTable({
   const [loading, setLocalLoading] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Restore the last "rows per page" choice persisted in localStorage,
+  // falling back to the default of 10.
+  const [pageSize, setPageSize] = useState(() =>
+    getPersistedPageSize(
+      VOLUMES_PAGE_SIZE_STORAGE_KEY,
+      VOLUMES_PAGE_SIZE_OPTIONS,
+      10
+    )
+  );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -567,6 +585,8 @@ function VolumesTable({
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
     setPageSize(newSize);
+    // Remember the choice so it sticks across reloads.
+    persistPageSize(VOLUMES_PAGE_SIZE_STORAGE_KEY, newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
@@ -757,7 +777,7 @@ function VolumesTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : paginatedData.length > 0 ? (
+              ) : paginatedData.length > 0 && !isForceEmpty() ? (
                 paginatedData.map((volume) => (
                   <TableRow key={volume.name}>
                     {visibleColumns.map((col) =>
@@ -768,14 +788,12 @@ function VolumesTable({
                   </TableRow>
                 ))
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
-                  >
-                    No volumes found
-                  </TableCell>
-                </TableRow>
+                <EmptyTableState
+                  colSpan={totalColSpan}
+                  icon={<VolumeIcon className="w-5 h-5" />}
+                  title="No volumes found"
+                  description="Create a volume to mount storage in your clusters and jobs"
+                />
               )}
             </TableBody>
           </Table>
