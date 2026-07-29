@@ -3364,6 +3364,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # same mechanism. Only callers with no request context (no
                 # scheduler to hand the pause to) keep the blocking behavior
                 # below.
+                #
+                # Note on expected impact: in a healthy system controller
+                # launches should rarely contend on their own cluster lock at
+                # all -- the controller runs one launch attempt per job and
+                # reattaches to an in-flight or parked request on restart
+                # rather than submitting a duplicate, and a holder whose
+                # process died releases the lock (advisory locks are
+                # session-scoped). Parking here is consistency and defense in
+                # depth: when a bug does produce concurrent launches for one
+                # cluster (observed in practice), the losers release their
+                # workers instead of blocking one worker each for the
+                # duration of the holder's operation.
                 if common_utils.is_in_request_context():
                     raise exceptions.ExecutionPausedError(
                         f'Cluster {cluster_name!r} is locked by another '
