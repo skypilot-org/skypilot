@@ -3586,15 +3586,20 @@ async def complete_api_request(request: fastapi.Request,
     scope_user_id = role_filter.request_owner_scope(request)
     if scope_user_id is None:
         return await requests_lib.get_api_request_ids_start_with(incomplete)
-    # Non-admin: only complete the caller's own request IDs.
-    request_tasks = await requests_lib.get_requests_async_with_prefix(
-        incomplete, fields=['request_id', 'user_id'])
-    if request_tasks is None:
-        return []
+    # Non-admin: complete only the caller's own request IDs. Fetch their recent
+    # requests with the user_id filter, ordering, and 1000-row cap applied in
+    # SQL (via RequestTaskFilter), then prefix-match in memory. This keeps the
+    # bounded, recency-ordered behavior of the admin path instead of an
+    # unbounded full-table scan (an empty prefix would otherwise load every
+    # user's requests into memory).
+    request_tasks = await requests_lib.get_request_tasks_async(
+        req_filter=requests_lib.RequestTaskFilter(
+            user_id=scope_user_id, fields=['request_id'], sort=True, limit=1000)
+    )
     return [
         task.request_id
         for task in request_tasks
-        if task.user_id == scope_user_id
+        if task.request_id.startswith(incomplete)
     ]
 
 
