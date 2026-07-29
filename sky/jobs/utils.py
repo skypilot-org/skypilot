@@ -54,6 +54,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context as context_lib
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
@@ -1792,8 +1793,14 @@ def stream_logs_by_id(
                 os.kill(os.getpid(), signal.SIGTERM)
                 return
 
-    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
-    watchdog.start()
+    # The watchdog detects a dropped `kubectl exec` connection, which only
+    # happens when this runs as a subprocess on the controller. Inside a
+    # context we are in the API server, where a client disconnect arrives as
+    # ctx.cancel() instead, and this thread's own loop has no exit condition:
+    # it would outlive the request and accumulate one thread per tail call.
+    if context_lib.get() is None:
+        watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+        watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
