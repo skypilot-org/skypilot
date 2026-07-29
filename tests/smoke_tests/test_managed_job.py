@@ -320,6 +320,51 @@ def test_managed_jobs_num_jobs_without_pool(generic_cloud: str):
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_no_follow_pending_task_snapshot(generic_cloud: str):
+    """Non-following logs return while a pipeline task is still pending."""
+    name = smoke_tests_utils.get_cluster_name()
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/pipeline_cancel_logs.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud=generic_cloud)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'managed_jobs_no_follow_pending_task_snapshot',
+            [
+                f'sky jobs launch -n {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--infra {generic_cloud} {f.name} -y -d',
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=2,
+                    expected_status='RUNNING',
+                    timeout=360),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=3,
+                    expected_status='PENDING',
+                    timeout=60),
+                f'JOB_ID=$({get_job_id_cmd}) && '
+                'output=$(timeout 30 sky jobs logs "$JOB_ID" task-b '
+                '--no-follow) && echo "$output" && '
+                'echo "Pending task snapshot returned"',
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_cancelled_job_logs(generic_cloud: str):
     """Test that logs are accessible after a managed job is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
