@@ -26,6 +26,7 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 _VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
+_SLURM_USER_PATTERN = re.compile(r'^[a-z_][a-z0-9_.-]*$')
 
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
@@ -91,6 +92,27 @@ def get_slurm_ssh_config() -> SSHConfig:
     return slurm_config
 
 
+def get_submit_user(cluster_name: str) -> Optional[str]:
+    """Return the current SkyPilot user's Unix account for Slurm submission."""
+    enabled = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=cluster_name,
+        keys=('submit_as_user',),
+        default_value=False)
+    if not enabled:
+        return None
+
+    user_name = common_utils.get_current_user_name()
+    submit_user = user_name.split('@', 1)[0]
+    if _SLURM_USER_PATTERN.fullmatch(submit_user) is None:
+        raise ValueError(
+            'Cannot derive a valid Unix user from SkyPilot user '
+            f'{user_name!r}. Slurm submit users must start with a lowercase '
+            'letter or "_" '
+            'and contain only lowercase letters, digits, "_", ".", or "-".')
+    return submit_user
+
+
 def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
     """Get the first identity file from SSH config, or None if not specified."""
     identity_files = ssh_config_dict.get('identityfile')
@@ -110,14 +132,16 @@ def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
 
 @annotations.lru_cache(scope='request')
 def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
-    cache_key = f'slurm:nodes_info:{cluster}'
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    slurm_user = get_submit_user(cluster)
+    command_user = slurm_user or ssh_config_dict['user']
+    cache_key = f'slurm:nodes_info:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
         logger.debug(f'Slurm nodes info found in cache ({cache_key})')
         return [slurm.NodeInfo(**item) for item in json.loads(cached)]
 
-    ssh_config = get_slurm_ssh_config()
-    ssh_config_dict = ssh_config.lookup(cluster)
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
@@ -126,6 +150,7 @@ def get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=slurm_user,
     )
     nodes_info = client.info_nodes()
 
@@ -163,6 +188,7 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=get_submit_user(cluster),
     )
     proctrack_type = client.get_proctrack_type()
 
@@ -184,7 +210,7 @@ def _check_cluster_feature(
     check_fn: Callable[[slurm.SlurmClient], bool],
     cache_ttl: int,
 ) -> bool:
-    """Check if a feature is available on a Slurm cluster, with caching.
+    """Check if a feature is available to a Slurm user, with caching.
 
     Args:
         cluster: Name of the Slurm cluster.
@@ -193,15 +219,17 @@ def _check_cluster_feature(
             the feature is available.
         cache_ttl: Time-to-live for the cache entry in seconds.
     """
-    cache_key = f'slurm:{feature_name}_enabled:{cluster}'
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    slurm_user = get_submit_user(cluster)
+    command_user = slurm_user or ssh_config_dict['user']
+    cache_key = f'slurm:{feature_name}_enabled:{cluster}:{command_user}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
         logger.debug(f'Slurm {feature_name} check found in cache '
                      f'({cache_key})')
         return cached == 'true'
 
-    ssh_config = get_slurm_ssh_config()
-    ssh_config_dict = ssh_config.lookup(cluster)
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
@@ -210,6 +238,7 @@ def _check_cluster_feature(
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=slurm_user,
     )
     enabled = check_fn(client)
 
@@ -228,8 +257,8 @@ def check_pyxis_enabled(cluster: str) -> bool:
     """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
 
     Pyxis is required for Docker container support on Slurm. This function
-    caches the result per cluster since the plugin availability is unlikely
-    to change frequently.
+    caches the result per cluster and command user since the plugin
+    availability is unlikely to change frequently.
     """
     return _check_cluster_feature(cluster, 'pyxis',
                                   lambda c: c.check_pyxis_enabled(),
@@ -240,8 +269,8 @@ def check_fuse_enabled(cluster: str) -> bool:
     """Check if FUSE is available on a Slurm cluster.
 
     FUSE is required for storage mounting (MOUNT/MOUNT_CACHED modes) via
-    tools like goofys and rclone. This function caches the result per
-    cluster since FUSE availability is unlikely to change frequently.
+    tools like goofys and rclone. This function caches the result per cluster
+    and command user since FUSE availability is unlikely to change frequently.
     """
     return _check_cluster_feature(cluster, 'fuse',
                                   lambda c: c.check_fuse_enabled(),
@@ -269,6 +298,7 @@ def get_select_type_parameters(cluster: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=get_submit_user(cluster),
     )
     value = client.get_select_type_parameters()
 
@@ -485,6 +515,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
+        slurm_user=get_submit_user(cluster_name),
     )
 
     return client.get_default_partition()
@@ -984,6 +1015,9 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(slurm_config_dict),
+        # The SSH transport identity gives cluster-wide inventory callers one
+        # consistent view of monitoring and capacity data.
+        slurm_user=None,
     )
     node_infos = slurm_client.info_nodes()
 
@@ -1176,18 +1210,19 @@ def get_partition_info(cluster_name: str,
     return get_partition_infos(cluster_name=cluster_name).get(partition_name)
 
 
-# Cache the partitions for 1 hour, we do not expect the
-# partitions to change frequently.
-@annotations.ttl_cache(scope='global', timer=time.time, maxsize=10, ttl=60 * 60)
 def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
-    """Get the partition information for a Slurm cluster.
+    """Get the partition information visible to the current Slurm user."""
+    return _get_partition_infos(cluster_name, get_submit_user(cluster_name))
 
-    Args:
-        cluster_name: Name of the Slurm cluster.
 
-    Returns:
-        List of partition information.
-    """
+# Cache the partitions for 1 hour, we do not expect them to change frequently.
+@annotations.ttl_cache(scope='global',
+                       timer=time.time,
+                       maxsize=128,
+                       ttl=60 * 60)
+def _get_partition_infos(
+        cluster_name: str,
+        slurm_user: Optional[str]) -> Dict[str, slurm.SlurmPartition]:
     try:
         slurm_config = SSHConfig.from_path(
             os.path.expanduser(DEFAULT_SLURM_PATH))
@@ -1201,6 +1236,7 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
             identities_only=get_identities_only(slurm_config_dict),
+            slurm_user=slurm_user,
         )
 
         partitions_info = client.get_partitions_info()

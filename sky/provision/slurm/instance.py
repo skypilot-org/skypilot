@@ -325,6 +325,7 @@ def _create_virtual_instance(
     identities_only = ssh_config_dict.get('identities_only', False)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
+    slurm_user = provider_config.get('slurm_user')
     client = slurm.SlurmClient(
         ssh_host,
         ssh_port,
@@ -333,6 +334,7 @@ def _create_virtual_instance(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=slurm_user,
     )
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
@@ -460,7 +462,7 @@ def _create_virtual_instance(
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
-    login_node_runner = command_runner.SSHCommandRunner(
+    login_node_runner = command_runner.SlurmLoginNodeCommandRunner(
         (ssh_host, ssh_port),
         ssh_user,
         ssh_key,
@@ -468,6 +470,7 @@ def _create_virtual_instance(
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
         disable_identities_only=not identities_only,
+        slurm_user=slurm_user,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
@@ -797,6 +800,7 @@ def query_instances(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=provider_config.get('slurm_user'),
     )
 
     # Map Slurm job states to SkyPilot ClusterStatus
@@ -895,6 +899,7 @@ def get_cluster_info(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         identities_only=identities_only,
+        slurm_user=provider_config.get('slurm_user'),
     )
 
     # Find running job for this cluster
@@ -992,6 +997,7 @@ def terminate_instances(
             ssh_proxy_command=ssh_proxy_command,
             ssh_proxy_jump=ssh_proxy_jump,
             identities_only=identities_only,
+            slurm_user=provider_config.get('slurm_user'),
         )
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
@@ -1109,6 +1115,7 @@ def get_command_runners(
     # collisions between different Slurm clusters.
     ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
 
+    slurm_user = provider_config.get('slurm_user')
     client = slurm.SlurmClient(
         login_node_ssh_hostname,
         login_node_ssh_port,
@@ -1117,6 +1124,7 @@ def get_command_runners(
         ssh_proxy_command=login_node_ssh_proxy_command,
         ssh_proxy_jump=login_node_ssh_proxy_jump,
         identities_only=login_node_identities_only,
+        slurm_user=slurm_user,
     )
     remote_home_dir = client.get_remote_home_dir()
 
@@ -1165,6 +1173,7 @@ def get_command_runners(
             ssh_proxy_command=login_node_ssh_proxy_command,
             ssh_control_name=ssh_control_name,
             container_args=container_args,
+            slurm_user=slurm_user,
             enable_interactive_auth=True,
             # Allow ssh-agent and default key fallback for Slurm.
             disable_identities_only=True) for instance_info in instances

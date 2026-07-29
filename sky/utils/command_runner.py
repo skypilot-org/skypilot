@@ -82,6 +82,22 @@ _SSH_AUTH_FAILURE_PATTERNS = [
 ]
 
 
+def wrap_command_as_user(command: str,
+                         user: str,
+                         shell_argv0: Optional[str] = None,
+                         use_sudo: bool = False) -> str:
+    """Build a command that a privileged SSH user runs as a Unix user."""
+    argv = [
+        'su', '--login', '--shell', '/bin/bash', '--command', command, '--',
+        user
+    ]
+    if shell_argv0 is not None:
+        argv.append(shell_argv0)
+    if use_sudo:
+        argv = ['sudo', '--non-interactive', '--'] + argv
+    return shlex.join(argv)
+
+
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
     if ssh_control_filename is None:
@@ -462,7 +478,8 @@ class CommandRunner:
             max_retry: int = 1,
             prefix_command: Optional[str] = None,
             get_remote_home_dir: Callable[[], str] = lambda: '~',
-            timeout: Optional[int] = None) -> None:
+            timeout: Optional[int] = None,
+            remote_rsync_command: Optional[str] = None) -> None:
         """Builds the rsync command."""
         # Build command.
         rsync_command = []
@@ -492,6 +509,9 @@ class CommandRunner:
 
         if rsh_option is not None:
             rsync_command.append(f'-e {shlex.quote(rsh_option)}')
+        if remote_rsync_command is not None:
+            rsync_command.append(
+                f'--rsync-path={shlex.quote(remote_rsync_command)}')
         maybe_dest_prefix = ('' if node_destination is None else
                              f'{node_destination}:')
 
@@ -1433,6 +1453,7 @@ class SSHCommandRunner(CommandRunner):
         max_retry: int = 1,
         get_remote_home_dir: Callable[[], str] = lambda: '~',
         timeout: Optional[int] = None,
+        remote_rsync_command: Optional[str] = None,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1449,6 +1470,7 @@ class SSHCommandRunner(CommandRunner):
               directory. Defaults to '~'.
             timeout: Optional total timeout in seconds for the rsync, including
               all retries and backoff waits. None means no timeout (default).
+            remote_rsync_command: Command used to start rsync on the remote.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -1477,7 +1499,8 @@ class SSHCommandRunner(CommandRunner):
                     stream_logs=stream_logs,
                     max_retry=max_retry,
                     get_remote_home_dir=get_remote_home_dir,
-                    timeout=timeout)
+                    timeout=timeout,
+                    remote_rsync_command=remote_rsync_command)
 
 
 class KubernetesCommandRunner(CommandRunner):
@@ -1929,7 +1952,64 @@ class LocalProcessCommandRunner(CommandRunner):
                     timeout=timeout)
 
 
-class SlurmCommandRunner(SSHCommandRunner):
+class SlurmLoginNodeCommandRunner(SSHCommandRunner):
+    """SSH runner that can execute login-node commands as a Unix user."""
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        slurm_user: Optional[str],
+        **kwargs,
+    ):
+        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        self.slurm_user = slurm_user
+        self._use_sudo = ssh_user != 'root'
+
+    def run(
+        self,
+        cmd: Union[str, List[str]],
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        if self.slurm_user is not None:
+            if isinstance(cmd, list):
+                cmd = ' '.join(cmd)
+            cmd = wrap_command_as_user(cmd,
+                                       self.slurm_user,
+                                       use_sudo=self._use_sudo)
+        return super().run(cmd, **kwargs)
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+        timeout: Optional[int] = None,
+    ) -> None:
+        remote_rsync_command = None
+        if self.slurm_user is not None:
+            remote_rsync_command = wrap_command_as_user('exec rsync "$@"',
+                                                        self.slurm_user,
+                                                        shell_argv0='rsync',
+                                                        use_sudo=self._use_sudo)
+        super().rsync(source,
+                      target,
+                      up=up,
+                      log_path=log_path,
+                      stream_logs=stream_logs,
+                      max_retry=max_retry,
+                      get_remote_home_dir=self.get_remote_home_dir,
+                      timeout=timeout,
+                      remote_rsync_command=remote_rsync_command)
+
+
+class SlurmCommandRunner(SlurmLoginNodeCommandRunner):
     """Runner for Slurm commands.
 
     SlurmCommandRunner sends commands over an SSH connection through the Slurm
@@ -1953,6 +2033,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         job_id: str,
         slurm_node: str,
         container_args: Optional[str],
+        slurm_user: Optional[str] = None,
         **kwargs,
     ):
         """Initialize SlurmCommandRunner.
@@ -1981,10 +2062,16 @@ class SlurmCommandRunner(SSHCommandRunner):
             job_id: The Slurm job ID for this instance.
             slurm_node: The Slurm node hostname for this instance
               (compute node).
+            slurm_user: Unix user that owns the Slurm allocation. None runs
+              login-node commands as the SSH user.
             **kwargs: Additional arguments forwarded to SSHCommandRunner
               (e.g., ssh_proxy_command).
         """
-        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        super().__init__(node,
+                         ssh_user,
+                         ssh_private_key,
+                         slurm_user=slurm_user,
+                         **kwargs)
         self.sky_dir = sky_dir
         self.skypilot_runtime_dir = skypilot_runtime_dir
         self.job_id = job_id
@@ -2017,11 +2104,6 @@ class SlurmCommandRunner(SSHCommandRunner):
             timeout: Optional total timeout in seconds for the rsync, including
                 all retries and backoff waits. None means no timeout (default).
         """
-        ssh_command = ' '.join(
-            self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
-                                  port_forward=None,
-                                  connect_timeout=None))
-
         extra_srun_args = (f'{self.container_args} '
                            if in_container and self.container_args else '')
         if in_container:
@@ -2031,37 +2113,64 @@ class SlurmCommandRunner(SSHCommandRunner):
         else:
             remote_home_dir = self.sky_dir
 
-        script_content = f"""#!/bin/bash
+        if self.slurm_user is None:
+            ssh_command = ' '.join(
+                self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
+                                      port_forward=None,
+                                      connect_timeout=None))
+            script_content = f"""#!/bin/bash
 job_id=$(echo "$1" | cut -d+ -f1)
 node_list=$(echo "$1" | cut -d+ -f2)
 shift
 exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
     --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
 """
-        encoded_info = f'{self.job_id}+{self.slurm_node}'
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh',
-                                         delete=False) as f:
-            f.write(script_content)
-            rsh_script_path = f.name
-        try:
-            os.chmod(rsh_script_path, 0o755)
-            self._rsync(source,
-                        target,
-                        node_destination=encoded_info,
-                        up=up,
-                        rsh_option=rsh_script_path,
-                        log_path=log_path,
-                        stream_logs=stream_logs,
-                        max_retry=max_retry,
-                        get_remote_home_dir=lambda: remote_home_dir,
-                        timeout=timeout)
-        finally:
+            encoded_info = f'{self.job_id}+{self.slurm_node}'
+            with tempfile.NamedTemporaryFile(mode='w',
+                                             suffix='.sh',
+                                             delete=False) as f:
+                f.write(script_content)
+                rsh_script_path = f.name
             try:
-                os.unlink(rsh_script_path)
-            except OSError as e:
-                logger.warning('Failed to remove temporary rsh script '
-                               f'{rsh_script_path}: '
-                               f'{common_utils.exception_to_string(e)}')
+                os.chmod(rsh_script_path, 0o755)
+                self._rsync(source,
+                            target,
+                            node_destination=encoded_info,
+                            up=up,
+                            rsh_option=rsh_script_path,
+                            log_path=log_path,
+                            stream_logs=stream_logs,
+                            max_retry=max_retry,
+                            get_remote_home_dir=lambda: remote_home_dir,
+                            timeout=timeout)
+            finally:
+                try:
+                    os.unlink(rsh_script_path)
+                except OSError as e:
+                    logger.warning('Failed to remove temporary rsh script '
+                                   f'{rsh_script_path}: '
+                                   f'{common_utils.exception_to_string(e)}')
+            return
+
+        rsync_command = (
+            f'exec srun --unbuffered --quiet --overlap {extra_srun_args}'
+            f'--jobid={shlex.quote(self.job_id)} '
+            f'--nodelist={shlex.quote(self.slurm_node)} '
+            f'--nodes=1 --ntasks=1 rsync "$@"')
+        remote_rsync_command = wrap_command_as_user(rsync_command,
+                                                    self.slurm_user,
+                                                    shell_argv0='rsync',
+                                                    use_sudo=self._use_sudo)
+        SSHCommandRunner.rsync(self,
+                               source,
+                               target,
+                               up=up,
+                               log_path=log_path,
+                               stream_logs=stream_logs,
+                               max_retry=max_retry,
+                               get_remote_home_dir=lambda: remote_home_dir,
+                               timeout=timeout,
+                               remote_rsync_command=remote_rsync_command)
 
     def _run_via_srun(
         self,
@@ -2101,7 +2210,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
             f'--nodes=1 --ntasks=1 {extra_srun_args}'
             f'bash -c {shlex.quote(inner_cmd)}')
 
-        return SSHCommandRunner.run(self, srun_cmd, **kwargs)
+        return SlurmLoginNodeCommandRunner.run(self, srun_cmd, **kwargs)
 
     def rsync(
         self,

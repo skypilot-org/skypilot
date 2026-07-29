@@ -139,6 +139,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_clusters <config-yaml-slurm-allowed-clusters>`:
       - mycluster1
       - mycluster2
+    :ref:`submit_as_user <config-yaml-slurm-submit-as-user>`: false
     :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
     :ref:`pricing <config-yaml-slurm-pricing>`:
       cpu: 0.04        # $/vCPU/hr
@@ -150,6 +151,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`cpu_partition <config-yaml-slurm-cpu-partition>`: cpu-batch
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
+        submit_as_user: true
         workdir: /mnt/lustre/$USER
         tmpdir: /local_scratch/sky
         pricing:
@@ -2173,6 +2175,43 @@ If you want all available clusters to be allowed, set it to ``all`` like this:
   slurm:
     allowed_clusters: all
 
+.. _config-yaml-slurm-submit-as-user:
+
+``slurm.submit_as_user``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run Slurm operations as the Unix account matching the authenticated SkyPilot
+user (optional).
+
+SkyPilot maps the username to the portion before ``@``. For example,
+``alice@example.com`` maps to ``alice``. The resulting username must start with
+a lowercase letter or ``_`` and contain only lowercase letters, digits, ``_``,
+``.``, or ``-``. The account must already exist on the Slurm cluster.
+
+When enabled, the ``User`` in ``~/.slurm/config`` must be ``root`` or have
+passwordless ``sudo`` permission to run ``su``. SkyPilot connects as that SSH
+user, then runs job lifecycle commands and file transfers as the mapped Unix
+user. A missing account or insufficient privilege causes the operation to fail
+without falling back to the SSH user.
+
+Cluster-wide inventory commands run as the SSH user so monitoring and capacity
+views do not depend on the user requesting them. The SSH user must have
+permission to view the required Slurm node, partition, and job information.
+
+Default: ``false``. This is an API server setting and cannot be overridden by
+client, project, or task configuration.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    submit_as_user: true
+
+``submit_as_user`` can also be set per cluster using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`. The per-cluster
+value overrides the global value.
+
 .. _config-yaml-slurm-provision-timeout:
 
 ``slurm.provision_timeout``
@@ -2330,6 +2369,10 @@ global values.
 Per-cluster and per-partition configuration for Slurm (optional).
 
 Supported fields:
+
+- ``submit_as_user``:
+  :ref:`Submit as user <config-yaml-slurm-submit-as-user>` override for the
+  cluster.
 
 - ``workdir``: Base directory on a **shared filesystem** for SkyPilot
   cluster files (provision scripts, cluster home directories, sbatch logs, etc).
