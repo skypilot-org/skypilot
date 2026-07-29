@@ -40,6 +40,8 @@ _MAX_RETRY = 6
 # 65535; 1048576 is the higher value SkyPilot's templates apply everywhere
 # else (e.g. the limits.conf entries in the *-ray.yml.j2 templates).
 # https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+# TODO(kevin): ray only asks for 65535 (its own tooling uses `ulimit -n
+# 65536`); consider lowering this to 65536.
 _TARGET_NOFILE = 1048576
 
 # Increase the limit of the number of open files for the raylet process,
