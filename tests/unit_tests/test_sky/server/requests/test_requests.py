@@ -2268,3 +2268,83 @@ async def test_kill_requests_unscoped_cancels_all(isolated_database):
     cancelled = requests.kill_requests(request_ids=['shutdown-a', 'shutdown-b'],
                                        user_id=None)
     assert set(cancelled) == {'shutdown-a', 'shutdown-b'}
+
+
+# --- SKY-6429 P1: display-serializer redaction ------------------------------
+
+_SECRET_TASK_YAML = """name: t
+resources:
+  cloud: aws
+envs:
+  HF_TOKEN: env-marker-secret
+secrets:
+  WANDB_API_KEY: secret-marker-value
+run: echo hi
+"""
+
+
+def _launch_body_with_secrets():
+    return payloads.LaunchBody(
+        task=_SECRET_TASK_YAML,
+        cluster_name='c',
+        override_skypilot_config={'aws': {
+            'token': 'CONFIG-MARKER'
+        }})
+
+
+def test_redact_request_body_for_display_strips_secrets():
+    body = _launch_body_with_secrets()
+    out = requests._redact_request_body_for_display(body)
+    # No secret marker survives anywhere in the display serialization.
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER'):
+        assert marker not in out, f'{marker!r} leaked in display body'
+    assert '<redacted>' in out
+    # Non-secret structure is preserved for readability.
+    assert 'echo hi' in out
+    assert 'HF_TOKEN' in out  # key kept, value masked
+
+
+def test_redact_request_body_fail_closed_on_bad_yaml():
+    body = payloads.LaunchBody(task='{not: valid: yaml: :', cluster_name='c')
+    import json as _json
+    out = _json.loads(requests._redact_request_body_for_display(body))
+    # Unparseable task -> whole field replaced with the marker, never emitted
+    # verbatim.
+    assert out['task'] == '<redacted>'
+
+
+def test_encode_owner_path_keeps_real_values():
+    """Request.encode() (the /api/get owner path) must NOT be redacted."""
+    from sky.server.requests.serializers import decoders
+    request = requests.Request(request_id='redact-owner-1',
+                               name='sky.launch',
+                               entrypoint=dummy,
+                               request_body=_launch_body_with_secrets(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               user_id='alice')
+    encoded = request.encode()
+    decoded_body = decoders.decode_and_unpickle(encoded.request_body)
+    # The owner still gets the real task (with secrets) back.
+    assert 'env-marker-secret' in decoded_body.task
+    assert 'secret-marker-value' in decoded_body.task
+    assert decoded_body.override_skypilot_config == {
+        'aws': {
+            'token': 'CONFIG-MARKER'
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_readable_encode_redacts(isolated_database):
+    request = requests.Request(request_id='redact-readable-1',
+                               name='sky.launch',
+                               entrypoint=dummy,
+                               request_body=_launch_body_with_secrets(),
+                               status=RequestStatus.SUCCEEDED,
+                               created_at=0.0,
+                               user_id='alice')
+    await requests.create_if_not_exists_async(request)
+    payload = requests.get_request('redact-readable-1').readable_encode()
+    for marker in ('env-marker-secret', 'secret-marker-value', 'CONFIG-MARKER'):
+        assert marker not in payload.request_body

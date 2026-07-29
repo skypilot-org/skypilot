@@ -26,6 +26,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.metrics import utils as metrics_lib
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -41,6 +42,7 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -162,6 +164,69 @@ REQUEST_COLUMNS = [
     COL_FINISHED_AT,
     COL_FILE_MOUNTS_BLOB_ID,
 ]
+
+_REDACTED = '<redacted>'
+
+
+def _redact_request_body_for_display(body: 'payloads.RequestBody') -> str:
+    """Serialize a request body for display, with secrets stripped.
+
+    Used by the request-listing serializers (`readable_encode`,
+    `encode_requests`) whose output can be shown to admins listing every
+    user's requests. It removes the values most likely to be sensitive:
+
+      * ``override_skypilot_config`` — the caller's ``~/.sky/config.yaml``
+        overrides, which can carry cloud credentials.
+      * ``env_vars`` — client env; values masked, keys kept.
+      * the task YAML's ``secrets:`` / docker password (via
+        ``redact_task_yaml_dict``) and its ``envs:`` values, since users
+        commonly place tokens in ``envs:``.
+
+    The full, unredacted body is still available to the owner via the
+    ``encode()`` path (``/api/get``); this only affects display listings.
+    Fails closed: if the task YAML cannot be parsed, the whole task field is
+    replaced with a redaction marker rather than emitted verbatim.
+    """
+    data = body.model_dump(mode='json')
+    if data.get('override_skypilot_config'):
+        data['override_skypilot_config'] = _REDACTED
+    if data.get('env_vars'):
+        data['env_vars'] = {k: _REDACTED for k in data['env_vars']}
+    task = data.get('task')
+    if isinstance(task, str) and task:
+        data['task'] = _redact_task_yaml_str(task)
+    return orjson.dumps(data).decode('utf-8')
+
+
+def _redact_task_yaml_str(task_yaml_str: str) -> str:
+    """Redact inline secrets and env values from a serialized task YAML.
+
+    Handles both the single-document chain-DAG form (a list of task configs)
+    and the multi-document form (e.g. job groups). Fails closed to a marker
+    on any parse/dump error so a body is never emitted unredacted.
+    """
+
+    def _redact_node(node: Any) -> None:
+        if isinstance(node, dict):
+            task_lib.redact_task_yaml_dict(node)
+            if isinstance(node.get('envs'), dict):
+                node['envs'] = {k: _REDACTED for k in node['envs']}
+        elif isinstance(node, list):
+            for item in node:
+                _redact_node(item)
+
+    try:
+        docs = list(yaml_utils.safe_load_all(task_yaml_str))
+        for doc in docs:
+            _redact_node(doc)
+        return yaml_utils.dump_yaml_str(
+            docs[0] if len(docs) == 1 else docs)  # type: ignore[arg-type]
+    except Exception:  # pylint: disable=broad-except
+        logger.warning(
+            'Failed to redact task YAML for display; '
+            'replacing with a redaction marker.',
+            exc_info=True)
+        return _REDACTED
 
 
 def validate_fields(fields: Optional[List[str]]) -> None:
@@ -321,7 +386,7 @@ class Request:
             request_id=self.request_id,
             name=self.name,
             entrypoint=self.entrypoint.__name__,
-            request_body=self.request_body.model_dump_json(),
+            request_body=_redact_request_body_for_display(self.request_body),
             status=_status_value_for_client(self.status.value),
             return_value=orjson.dumps(None).decode('utf-8'),
             error=orjson.dumps(None).decode('utf-8'),
@@ -464,7 +529,7 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
             name=request.name,
             entrypoint=request.entrypoint.__name__
             if request.entrypoint is not None else '',
-            request_body=request.request_body.model_dump_json()
+            request_body=_redact_request_body_for_display(request.request_body)
             if request.request_body is not None else
             orjson.dumps(None).decode('utf-8'),
             status=_status_value_for_client(request.status.value),
