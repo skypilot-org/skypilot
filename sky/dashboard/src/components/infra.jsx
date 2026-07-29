@@ -219,11 +219,11 @@ const GpuTypeSummaryStrip = ({ gpus }) => {
                 <span className="text-[13px] font-medium text-gray-800 truncate">
                   {canonicalizeGpuName(gpu.gpu_name)}
                 </span>
-                <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums">
+                <span className="text-xs text-gray-600 whitespace-nowrap tabular-nums">
                   <span
-                    className={
-                      free > 0 ? 'font-semibold text-gray-600' : 'text-gray-500'
-                    }
+                    className={`font-semibold ${
+                      free > 0 ? 'text-gray-900' : 'text-gray-500'
+                    }`}
                   >
                     {free.toLocaleString()}
                   </span>
@@ -536,11 +536,11 @@ export function InfrastructureSection({
                         </td>
                         <td className="p-3 text-gray-500 tabular-nums whitespace-nowrap">
                           <span
-                            className={
+                            className={`font-semibold ${
                               typeEntry.gpu_free > 0
-                                ? 'font-semibold text-gray-600'
+                                ? 'text-gray-600'
                                 : 'text-gray-500'
-                            }
+                            }`}
                           >
                             {typeEntry.gpu_free.toLocaleString()}
                           </span>
