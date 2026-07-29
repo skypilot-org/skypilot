@@ -794,6 +794,8 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_kubernetes  # Kubernetes pulls images outside DockerInitializer
+@pytest.mark.no_slurm  # Slurm does not use the VM DockerInitializer path
 def test_docker_pull_progress_streaming(generic_cloud: str):
     """Docker pull progress must stream into the launch output.
 
