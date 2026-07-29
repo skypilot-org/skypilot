@@ -13,13 +13,21 @@ exist:
 - ``write`` — "may I create resources in this workspace". Required by the
   requests that stamp the active workspace onto a *new* resource.
 
-One rule, no exceptions: the level is derived from the **endpoint**. An
-endpoint declared read-only for the strictly-read-only ``viewer`` role
-(`sky/users/rbac.py::_DEFAULT_VIEWER_ALLOWLIST`,
-``BasePlugin.viewer_allowlist``, and the operator's
-``rbac.roles.viewer.permissions.allowlist``) needs only ``read``; anything
-else needs ``write``. Two reasons for deriving rather than listing request
-names:
+The level is derived from the **endpoint**, in two ordered rules:
+
+0. An endpoint in ``rbac._ALWAYS_WRITE_ENDPOINTS`` (the create endpoints —
+   launch, jobs launch, serve up/update, pool apply, volume apply) always
+   needs ``write``, regardless of any viewer-allowlist declaration. This
+   short-circuit (``permission.is_read_only_endpoint`` checks
+   ``rbac.is_always_write_endpoint`` first) is what stops a wildcard viewer
+   entry from relaxing a create endpoint to read.
+1. Otherwise: an endpoint declared read-only for the strictly-read-only
+   ``viewer`` role (`sky/users/rbac.py::_DEFAULT_VIEWER_ALLOWLIST`,
+   ``BasePlugin.viewer_allowlist``, and the operator's
+   ``rbac.roles.viewer.permissions.allowlist``) needs only ``read``; anything
+   else needs ``write``.
+
+Two reasons for deriving rather than listing request names:
 
 1. "Which endpoints only read" is already declared, in one place, and is
    already populated by plugins for their own endpoints. A list of OSS
@@ -43,7 +51,7 @@ from sky.workspaces import constants as workspace_constants
 logger = sky_logging.init_logger(__name__)
 
 # The (path, method) of the HTTP request currently being dispatched, recorded
-# by `RequestEndpointMiddleware`. A ContextVar is how the existing
+# by `APIVersionMiddleware`. A ContextVar is how the existing
 # `client_api_version` capture bridges the same gap: the endpoint is only
 # known in the FastAPI dispatch context, while the classification is consumed
 # by `executor.prepare_request_async` further down the same call chain.

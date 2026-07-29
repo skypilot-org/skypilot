@@ -455,9 +455,9 @@ class PermissionService:
 
         Equivalent to calling `get_accessible_workspace_names` with
         ``action='read'`` and ``action='write'``, but scans the casbin policy
-        once instead of twice. Used by the hot ``GET /workspaces`` path, which
-        needs both the read-only-visible set (what to show) and the writable
-        set (what the user may act in).
+        once instead of twice. Used by callers that need both sets: the hot
+        ``GET /workspaces`` path (dashboard polling, what-to-show vs what-is-
+        writable) and ``GET /users/me/workspace`` (accessible vs read-only).
         """
         writable = self._writable_workspace_names(user_id, workspace_names)
         if writable is None:
@@ -553,6 +553,11 @@ class PermissionService:
         Derived from `rbac.get_read_only_endpoints`, so plugin endpoints are
         classified by the declaration plugins already maintain for the viewer
         role.
+
+        First checks `rbac.is_always_write_endpoint`: an always-write (create)
+        endpoint returns False here regardless of the read-only declaration —
+        this is what makes a wildcard viewer entry unable to relax a create
+        endpoint to read.
 
         Returns False for anything not declared read-only — the caller treats
         that as "needs write", which is the fail-safe direction.

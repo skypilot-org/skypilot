@@ -491,6 +491,12 @@ def get_read_only_endpoints(
     treated as a write here. That errs on the strict side, which is the safe
     direction for a workspace the caller can only read.
 
+    This returns the *declaration*, not the final verdict: an entry here can
+    still be classified write by `is_read_only_endpoint`, which first checks
+    `is_always_write_endpoint` and short-circuits a create endpoint to write
+    even if a (plugin- or operator-supplied) allowlist entry declared it
+    read-only. Such a collision is logged as a warning below.
+
     Args:
         plugin_allowlist: Optional list of `{path, method}` records
             collected from loaded plugins.

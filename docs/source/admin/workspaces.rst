@@ -368,7 +368,7 @@ Members (the ``allowed_users``) and admins retain full access.
 ``non_member_access`` accepts:
 
 - ``none`` (default): the workspace and its resources are hidden from
-  non-members (the behavior described above).
+  non-members (the default described at the start of this section).
 - ``read-only``: non-members can view the workspace and its workloads but
   cannot modify them.
 

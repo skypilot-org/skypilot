@@ -254,9 +254,9 @@ def get_user_workspace(
         # accessible workspaces" next to a list of them). Re-resolve at read
         # level to report where that user's reads land, under a distinct state
         # so the CLI / dashboard can say "read-only".
+        # `note` is set in both branches below (they always run one), so it is
+        # not seeded here; only `source` (which the success branch keeps).
         response['source'] = workspace_constants.WORKSPACE_SOURCE_READ_ONLY
-        response['note'] = ('read-only access only: launching requires '
-                            'membership of a writable workspace')
         try:
             resolution = workspaces_core.resolve_workspace_for_user(
                 user_for_resolve,

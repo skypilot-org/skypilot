@@ -1911,13 +1911,18 @@ async def _reject_cluster_write_for_unauthorized(
         request: fastapi.Request, cluster_name: Optional[str]) -> None:
     """Rejects a mutating request on a cluster the user cannot write to.
 
-    Mutating an *existing* cluster (down/stop/start/autostop/cancel/exec/ssh)
-    must be gated by the cluster's *own* workspace. The executor's active-
-    workspace gate only checks the caller's active workspace (resolved from
-    their own context), which is not the cluster's workspace, so it does not
-    protect an existing cluster from a non-member (see
+    Mutating an *existing* cluster (down/stop/start/autostop/cancel/exec) must
+    be gated by the cluster's *own* workspace. The executor's active-workspace
+    gate only checks the caller's active workspace (resolved from their own
+    context), which is not the cluster's workspace, so it does not protect an
+    existing cluster from a non-member (see
     ``workspaces_core.check_cluster_write_permission`` and
     https://github.com/skypilot-org/skypilot/issues/8072).
+
+    This helper only covers the HTTP endpoints. SSH/VSCode go over a websocket,
+    which does not pass through here; that path calls the same
+    ``check_cluster_write_permission`` inline in
+    ``_validate_cluster_for_ssh_proxy_ws``.
 
     Runs at the API boundary (before a worker is scheduled) so external
     requests are gated while internal ``core.*`` callers (controllers,

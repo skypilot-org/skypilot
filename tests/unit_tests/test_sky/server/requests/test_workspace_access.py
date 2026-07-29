@@ -1,9 +1,13 @@
 """Tests for the workspace-access classification.
 
 `workspace_access.for_current_request` decides whether a request needs `read`
-or `write` access to the caller's *active* workspace. One rule: the level comes
-from the dispatched endpoint, via the read-only endpoint declaration that also
-backs the `viewer` role. Anything not declared read-only needs `write`.
+or `write` access to the caller's *active* workspace. The level comes from the
+dispatched endpoint, in two ordered rules: (0) an endpoint in
+`rbac._ALWAYS_WRITE_ENDPOINTS` (the create endpoints) always needs `write`,
+short-circuiting the declaration below (this is what
+`test_always_write_overrides_read_declaration` asserts); (1) otherwise the
+level comes from the read-only endpoint declaration that also backs the
+`viewer` role, and anything not declared read-only needs `write`.
 
 `TestEveryExecutorEndpointIsClassified` is the drift guard: it discovers every
 endpoint that schedules a request through the executor and asserts the level
@@ -155,7 +159,15 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     # client discovers which workspaces it may use), so the level is moot.
     ('GET', '/workspaces'): READ,
 
-    # --- write: creates a resource stamped with the active workspace
+    # --- write: creates new compute. For launch / jobs launch / pool apply the
+    # workload lands in the caller's active workspace; serve up/update pull up
+    # new replicas the same way (the serve *controller* is pinned to the default
+    # workspace, so a service is not "stamped" with the active workspace, but it
+    # still creates compute, so write is the conservative and correct level).
+    # volumes/apply is currently workspace-agnostic; it is here so a read-only
+    # user cannot provision storage. All of these are in
+    # `rbac._ALWAYS_WRITE_ENDPOINTS`, so they stay write even if a viewer
+    # allowlist entry (e.g. a `/serve/*` wildcard) would otherwise match.
     ('POST', '/launch'): WRITE,
     ('POST', '/jobs/launch'): WRITE,
     ('POST', '/volumes/apply'): WRITE,
@@ -163,10 +175,14 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     ('POST', '/serve/update'): WRITE,
     ('POST', '/jobs/pool_apply'): WRITE,
 
-    # --- write: mutates an existing resource. The load-bearing check for
-    # these is on the *target's* own workspace (workspaces_core
-    # .check_cluster_write_permission, wired at the handler); requiring write
-    # on the active workspace as well is the pre-existing behaviour.
+    # --- write: mutates an existing resource. For clusters and managed jobs
+    # the load-bearing check is on the *target's* own workspace (clusters via
+    # workspaces_core.check_cluster_write_permission at the handler; jobs cancel
+    # via the workspace comparison in cancel_jobs_by_id), so classifying them
+    # write here is belt-and-suspenders. serve down / terminate-replica, pool
+    # down, and volume/storage delete have NO per-resource workspace gate yet
+    # (the gap recorded in docs/source/admin/workspaces.rst); write here only
+    # keeps a read-only user out, it is not their real protection.
     ('POST', '/exec'): WRITE,
     ('POST', '/stop'): WRITE,
     ('POST', '/start'): WRITE,
