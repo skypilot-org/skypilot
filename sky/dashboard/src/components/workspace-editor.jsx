@@ -242,7 +242,7 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
       )}
       {readOnly && (
         <span
-          className={`${base} whitespace-nowrap bg-amber-100 text-amber-700 border-amber-300`}
+          className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
           title="Non-members can view this workspace and its workloads but cannot modify them"
         >
           Non-member read-only
