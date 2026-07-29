@@ -123,10 +123,12 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/ssh_node_pools/{pool_name}/down', 'POST'),
     ('/ssh_node_pools/down', 'POST'),
     # --- Debug ---
-    # /debug/dump_create is intentionally on the viewer allowlist (see
-    # _DEFAULT_VIEWER_ALLOWLIST) so viewers can capture support diagnostics;
-    # only the download endpoint stays admin-only because the dump file
-    # itself may contain sensitive state.
+    # Both debug-dump endpoints are denied to viewers. A dump collects other
+    # users' request records and log files into a downloadable archive and is
+    # a side-effecting, long-scheduled operation, so the strictly-read-only
+    # viewer role must not trigger it; it is admin-only (the diagnose/support
+    # flow schedules the dump directly, not via this endpoint).
+    ('/debug/dump_create', 'POST'),
     ('/debug/dump_download/{dump_filename}', 'GET'),
     # --- /api/* paths: RBAC-skipped at middleware level, not on
     # viewer allowlist; explicitly enumerated here for documentation.
@@ -306,3 +308,20 @@ def test_allowlist_entries_match_real_routes():
         'Viewer allowlist entries that do not match any registered '
         f'route: {unknown!r}.  If the endpoint was renamed, update '
         'rbac._DEFAULT_VIEWER_ALLOWLIST.')
+
+
+def test_debug_dump_endpoints_denied_to_viewer():
+    """Both /debug/dump endpoints must be off the viewer allowlist.
+
+    A debug dump collects other users' request records and log files into a
+    downloadable archive, so the strictly-read-only viewer role must not be
+    able to trigger or fetch one. This guards against re-adding
+    /debug/dump_create to rbac._DEFAULT_VIEWER_ALLOWLIST.
+    """
+    allowlist = rbac._DEFAULT_VIEWER_ALLOWLIST  # pylint: disable=protected-access
+    assert not _matches_any('/debug/dump_create', 'POST', allowlist)
+    assert not _matches_any('/debug/dump_download/{dump_filename}', 'GET',
+                            allowlist)
+    # Sanity: a genuinely-allowlisted read is still matched, so the matcher
+    # isn't just returning False for everything.
+    assert _matches_any('/users', 'GET', allowlist)
