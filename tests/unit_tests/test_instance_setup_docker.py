@@ -14,16 +14,19 @@ the raise and one after, so that both the inheritance the Kubernetes
 entrypoint relies on and the prlimit backstop for a raylet that missed it are
 covered. See ``_SCRIPT``.
 
-The kernel caps RLIMIT_NOFILE's hard limit at ``fs.nr_open``, whose default is
-exactly _TARGET_NOFILE (1048576). Consequences for the scenarios:
+The kernel caps RLIMIT_NOFILE's hard limit at ``fs.nr_open`` -- 1048576
+(= _TARGET_NOFILE) by compiled-in default, though systemd typically raises it
+to 1073741816 at boot. Consequences for the scenarios:
 
-* a hard limit *above* the target cannot be granted by ``--ulimit`` on a stock
-  kernel. That scenario bootstraps it honestly instead: a ``--privileged``
-  container raises the daemon kernel's fs.nr_open, sets its own hard limit
-  above the target, then drops every capability with ``setpriv`` before
-  running the real commands (restoring fs.nr_open afterwards);
+* whether ``--ulimit`` can grant a hard limit *above* the target depends on
+  the daemon host's fs.nr_open, so that scenario constructs it independently:
+  a ``--privileged`` container raises the daemon kernel's fs.nr_open when it
+  is too low (restored afterwards), sets its own hard limit above the target,
+  then drops every capability with ``setpriv`` before running the real
+  commands;
 * an *unlimited* hard nofile limit is impossible on Linux (RLIM_INFINITY
-  always exceeds fs.nr_open), so there is no such scenario.
+  exceeds even fs.nr_open's maximum settable value), so there is no such
+  scenario.
 
 An unusable daemon (or no docker at all) FAILS these tests in CI -- a skip
 there would silently drop the only coverage of the container path. On a dev
@@ -47,7 +50,8 @@ _DOCKER = shutil.which('docker')
 # Generous: the first run may pull the image.
 _TIMEOUT = 300
 
-# The reported production shape: 1024:524288 is a common container default.
+# The reported production shape: 524288 is systemd's default hard nofile
+# limit, which containerd 2.0+, Docker and CRI-O deliberately inherit.
 _HARD_BELOW_TARGET = 524288
 _HARD_ABOVE_TARGET = 2 * _TARGET
 
@@ -197,16 +201,18 @@ def test_nofile_limit_clamp_hard_above_target():
     sets only the soft limit, unlike the plain `ulimit -n` this replaced.
 
     `--ulimit` cannot grant a hard limit above the daemon kernel's fs.nr_open
-    (= _TARGET on a stock kernel), so the container bootstraps it: raise
-    fs.nr_open (privileged, restored afterwards), raise its own hard limit,
-    then drop every capability with setpriv before running the real commands
-    -- the capability-less environment the commands see in production.
+    (which may or may not sit above the target -- see the module docstring),
+    so the container bootstraps its own: raise fs.nr_open if it is too low
+    (privileged, restored afterwards), raise its own hard limit, then drop
+    every capability with setpriv before running the real commands -- the
+    capability-less environment the commands see in production.
     """
     _require_daemon()
     orig = _docker('run', '--rm', _IMAGE, 'cat', '/proc/sys/fs/nr_open')
     assert orig.returncode == 0, orig.stderr
     orig_nr_open = int(orig.stdout)
-    bootstrap = (f'echo {_HARD_ABOVE_TARGET} > /proc/sys/fs/nr_open && '
+    bootstrap = (f'[ "$(cat /proc/sys/fs/nr_open)" -ge {_HARD_ABOVE_TARGET} ] '
+                 f'|| echo {_HARD_ABOVE_TARGET} > /proc/sys/fs/nr_open && '
                  f'prlimit --nofile=1024:{_HARD_ABOVE_TARGET} --pid $$ && '
                  'exec setpriv --bounding-set -all bash -s')
     try:

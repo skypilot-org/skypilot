@@ -36,7 +36,9 @@ logger = sky_logging.init_logger(__name__)
 
 _MAX_RETRY = 6
 
-# The open files (nofile) limit we want for ray, as recommended by ray:
+# The open files (nofile) limit we want for ray. Ray recommends at least
+# 65535; 1048576 is the higher value SkyPilot's templates apply everywhere
+# else (e.g. the limits.conf entries in the *-ray.yml.j2 templates).
 # https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
 _TARGET_NOFILE = 1048576
 
@@ -46,8 +48,9 @@ _TARGET_NOFILE = 1048576
 #
 # Raising a process' *hard* limit requires CAP_SYS_RESOURCE, which containers
 # usually do not have. Setting both limits to _TARGET_NOFILE therefore fails
-# outright whenever the container's hard limit is lower (1024:524288 is a
-# common default), leaving the raylet with the low default soft limit and
+# outright whenever the container's hard limit is lower (1024:524288 -- the
+# systemd default, which containerd 2.0+, Docker and CRI-O deliberately
+# inherit -- is common), leaving the raylet with the low default soft limit and
 # running it out of file descriptors once many workers start. Fall back to
 # raising the *soft* limit only, up to the raylet's own hard limit (the
 # `<hard>:` form), which needs no capability. The hard limit is read from
