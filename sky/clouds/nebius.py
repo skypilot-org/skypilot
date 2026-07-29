@@ -523,8 +523,9 @@ class Nebius(clouds.Cloud):
         sdk = nebius.sdk()
         try:
             service = nebius.iam().ProjectServiceClient(sdk)
-            service.list(
-                nebius.iam().ListProjectsRequest(parent_id=tenant_id)).wait()
+            nebius.sync_call(
+                service.list(
+                    nebius.iam().ListProjectsRequest(parent_id=tenant_id)))
         except nebius.request_error() as e:
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
@@ -657,8 +658,8 @@ class Nebius(clouds.Cloud):
         image_client = compute.ImageServiceClient(sdk)
         if image_id.startswith('computeimage-'):
             try:
-                image = image_client.get(
-                    compute.GetImageRequest(id=image_id)).wait()
+                image = nebius.sync_call(
+                    image_client.get(compute.GetImageRequest(id=image_id)))
             except RequestError as e:
                 if e.status.code == StatusCode.NOT_FOUND:
                     raise ValueError(f'Image {image_id} does not exist') from e
@@ -670,7 +671,8 @@ class Nebius(clouds.Cloud):
             request = compute.GetImageLatestByFamilyRequest(
                 image_family=image_id, parent_id=parent_id)
             try:
-                image = image_client.get_latest_by_family(request).wait()
+                image = nebius.sync_call(
+                    image_client.get_latest_by_family(request))
             except RequestError as e:
                 if e.status.code == StatusCode.NOT_FOUND:
                     raise ValueError(

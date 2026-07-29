@@ -102,7 +102,7 @@ def estimate_platforms(
         List[PresetInfo]: A list of PresetInfo objects containing details and
         estimated prices for each preset.
     """
-    return asyncio.run(
+    return nebius.sync_call(
         _estimate_platforms_async(platforms, parent_id, region, offer_types))
 
 
@@ -264,8 +264,8 @@ def fetch_platforms_for_project(project_id: str) -> List[Any]:
 
     platform_request = compute().ListPlatformsRequest(page_size=999,
                                                       parent_id=project_id)
-    platform_response = platform_service.list(platform_request,
-                                              timeout=TIMEOUT).wait()
+    platform_response = nebius.sync_call(
+        platform_service.list(platform_request, timeout=TIMEOUT))
 
     return platform_response.items
 
@@ -279,13 +279,14 @@ def _get_regions_map() -> Dict[str, str]:
                         and values are full region names (e.g., "eu-north1").
     """
     result = {}
-    response = iam().TenantServiceClient(nebius.sdk()).list(
-        iam().ListTenantsRequest(), timeout=TIMEOUT).wait()
+    response = nebius.sync_call(iam().TenantServiceClient(nebius.sdk()).list(
+        iam().ListTenantsRequest(), timeout=TIMEOUT))
 
     for tenant in response.items:
-        projects = (iam().ProjectServiceClient(nebius.sdk()).list(
-            iam().ListProjectsRequest(parent_id=tenant.metadata.id),
-            timeout=TIMEOUT).wait())
+        projects = nebius.sync_call(iam().ProjectServiceClient(
+            nebius.sdk()).list(
+                iam().ListProjectsRequest(parent_id=tenant.metadata.id),
+                timeout=TIMEOUT))
 
         for project in projects.items:
             match = re.match(r'^project-([a-z0-9]{3})', project.metadata.id)

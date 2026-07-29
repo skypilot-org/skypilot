@@ -67,6 +67,16 @@ def sync_call(awaitable: Awaitable[Any]) -> Any:
 
     Uses a dedicated background event loop to avoid conflicts
     with existing asyncio contexts and prevent BlockingIOError.
+
+    Every nebius SDK call must go through this helper, so that all requests
+    run on this single event loop. The SDK caches grpc.aio channels per
+    address and hands them to whichever loop asks next, while grpc.aio binds
+    a channel to the loop that created it ("gRPC Async API objects must be
+    used exclusively on the thread where they were created"). Driving the SDK
+    from a second loop - via the blocking Request.wait() helper, or an
+    asyncio.run() of our own - therefore fails with "RuntimeError: ... got
+    Future ... attached to a different loop". See
+    https://github.com/nebius/pysdk/issues/178
     """
     loop = _get_event_loop()
     future = asyncio.run_coroutine_threadsafe(_coro(awaitable), loop)
