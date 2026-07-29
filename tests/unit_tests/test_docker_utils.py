@@ -56,7 +56,9 @@ def test_acr_empty_password_uses_managed_identity():
     login_cmd = login_cmds[0]
     # The login must not touch the SSH user's persistent az profile.
     assert 'export AZURE_CONFIG_DIR=$(mktemp -d)' in login_cmd
-    assert f'--resource-id {_MSI_ID}' in login_cmd
+    assert 'az login --help | grep -q -- "--resource-id"' in login_cmd
+    assert 'printf %s --resource-id || printf %s --username' in login_cmd
+    assert _MSI_ID in login_cmd
     assert 'az acr login --name myregistry' in login_cmd
     assert (f'login {_ACR_SERVER} '
             f'--username {docker_utils.ACR_TOKEN_USERNAME} '
@@ -75,7 +77,9 @@ def test_acr_login_without_identity_omits_resource_id():
     initializer.initialize()
     login_cmds = [cmd for cmd, _ in runs if 'az login --identity' in cmd]
     assert len(login_cmds) == 1
-    assert '--resource-id' not in login_cmds[0]
+    managed_identity_login = login_cmds[0].split('az acr login', 1)[0]
+    assert '--resource-id' not in managed_identity_login
+    assert '--username' not in managed_identity_login
 
 
 def test_acr_password_takes_precedence_over_managed_identity():

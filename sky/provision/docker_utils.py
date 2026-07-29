@@ -367,10 +367,16 @@ class DockerInitializer:
                 identity = self.docker_config.get('azure_managed_identity',
                                                   None)
                 # With no explicit identity, `az login --identity` uses the
-                # VM's only identity; the resource ID disambiguates when the
-                # VM has more than one.
-                identity_flag = ('' if identity is None else
-                                 f' --resource-id {shlex.quote(identity)}')
+                # VM's only identity. New Azure CLI releases accept a resource
+                # ID via --resource-id; LTS releases use --username for the
+                # same value. Detect the supported spelling to work with an
+                # Azure CLI already present on a custom image.
+                identity_flag = ''
+                if identity is not None:
+                    identity_flag = (
+                        ' $(az login --help | grep -q -- "--resource-id" && '
+                        'printf %s --resource-id || printf %s --username) '
+                        f'{shlex.quote(identity)}')
                 registry_name = docker_login_config.server.split('.', 1)[0]
                 # An isolated, throwaway AZURE_CONFIG_DIR keeps the MSI
                 # login from clobbering any `az` account state of the SSH
