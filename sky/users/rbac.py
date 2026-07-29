@@ -336,6 +336,61 @@ _WORKSPACE_READ_EXTRA_ENDPOINTS = [
     },
 ]
 
+# Endpoints that must ALWAYS require write on the caller's active workspace,
+# regardless of the viewer allowlist. These create a resource in the active
+# workspace (the launched cluster / managed job / service replicas / pool
+# workers / volume land there), so the active-workspace write gate is their
+# real authorization -- misclassifying one as read (e.g. because a plugin or
+# operator added a matching entry, possibly a wildcard, to the viewer
+# allowlist) would let a non-member create into a workspace they cannot write.
+# Consulted by `is_read_only_endpoint` (via `is_always_write_endpoint`) which
+# short-circuits to "write" on a match, so a wildcard viewer entry can still
+# classify sibling *read* endpoints (e.g. `/serve/status`) as read while
+# `/serve/up` stays write.
+#
+# NOT included: existing-resource mutations (cluster exec/stop/down/start/
+# autostop/cancel, jobs cancel) -- those are gated per-resource in the handler
+# on the resource's own workspace, so they are safe even if classified read
+# and may legitimately live in the read set. serve down/update, pool_down and
+# volume delete act on a named resource and do not use the active workspace at
+# all; their real protection is a per-resource gate (tracked separately), not
+# this list.
+_ALWAYS_WRITE_ENDPOINTS = [
+    {
+        'path': '/launch',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/launch',
+        'method': 'POST'
+    },
+    {
+        'path': '/jobs/pool_apply',
+        'method': 'POST'
+    },
+    {
+        'path': '/serve/up',
+        'method': 'POST'
+    },
+    {
+        'path': '/volumes/apply',
+        'method': 'POST'
+    },
+]
+
+_ALWAYS_WRITE_ENDPOINT_KEYS = frozenset(
+    (rule['path'], rule['method']) for rule in _ALWAYS_WRITE_ENDPOINTS)
+
+
+def is_always_write_endpoint(path: str, method: str) -> bool:
+    """Whether this endpoint must always require active-workspace write.
+
+    Exact (path, method) match against `_ALWAYS_WRITE_ENDPOINTS`. Used as a
+    hard guardrail so a viewer-allowlist entry (operator- or plugin-supplied)
+    can never relax one of these create endpoints to read.
+    """
+    return (path, method) in _ALWAYS_WRITE_ENDPOINT_KEYS
+
 
 # Define roles
 class RoleName(str, enum.Enum):
@@ -439,6 +494,18 @@ def get_read_only_endpoints(
         entry = {'path': rule['path'], 'method': rule['method']}
         if entry not in combined:
             combined.append(entry)
+    # Guardrail observability: an always-write endpoint should never be
+    # declared read. `is_read_only_endpoint` already forces these to write at
+    # match time (which also catches wildcard viewer entries), but flag an
+    # exact-match declaration so the operator/plugin author notices. We only
+    # warn here; the runtime short-circuit does the actual enforcement.
+    for entry in combined:
+        if is_always_write_endpoint(entry['path'], entry['method']):
+            logger.warning(
+                f'Viewer allowlist declares {entry["method"]} '
+                f'{entry["path"]} as read-only, but it is an always-write '
+                f'(create) endpoint; it will still require active-workspace '
+                f'write.')
     return combined
 
 

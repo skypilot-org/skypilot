@@ -353,10 +353,17 @@ make a private workspace *visible* (read-only) to users who are not in its
          - alice@example.com
 
 With ``read-only``, non-members can see the workspace and list the clusters and
-managed jobs running in it (including viewing their logs), but cannot launch,
-modify, cancel, or otherwise mutate anything in it — SSH and VS Code access to
-its clusters are also blocked, since those open an interactive shell. Members
-(the ``allowed_users``) and admins retain full access.
+managed jobs running in it (including viewing their logs), but cannot launch
+into it or modify/cancel its **clusters and managed jobs** — SSH and VS Code
+access to its clusters are also blocked, since those open an interactive shell.
+Members (the ``allowed_users``) and admins retain full access.
+
+.. note::
+
+   Per-resource write protection currently covers clusters and managed jobs.
+   Other workspace-scoped resources (services, volumes, and pools) do not yet
+   enforce a per-resource workspace check, so this read-only guarantee does not
+   extend to them yet.
 
 ``non_member_access`` accepts:
 

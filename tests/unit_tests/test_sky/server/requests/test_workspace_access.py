@@ -30,16 +30,63 @@ WRITE = workspace_constants.WORKSPACE_ACTION_WRITE
 # Routers mounted by `sky/server/server.py`, and the prefix each is mounted
 # under. A new router needs an entry here for its endpoints to be covered by
 # the drift guard below.
-_SERVER_MODULES = {
-    'sky/server/server.py': '',
-    'sky/jobs/server/server.py': '/jobs',
-    'sky/serve/server/server.py': '/serve',
-    'sky/users/server.py': '/users',
-    'sky/workspaces/server.py': '/workspaces',
-    'sky/volumes/server/server.py': '/volumes',
-    'sky/ssh_node_pools/server.py': '/ssh_node_pools',
-    'sky/recipes/server.py': '/recipes',
-}
+_ROOT_SERVER_MODULE = 'sky/server/server.py'
+
+
+def _discover_server_modules(root: pathlib.Path) -> Dict[str, str]:
+    """Derive {module path -> route prefix} from `server.py`'s routers.
+
+    Parses the ``app.include_router(<alias>.router, prefix='/x')`` calls in
+    ``sky/server/server.py`` (plus its own root routes at prefix '') and
+    resolves each router alias back to the module file it was imported from.
+
+    Hand-maintaining this map (the previous approach) silently missed any new
+    router that wasn't added here, so the drift guard wouldn't scan it -- the
+    exact case it exists to catch. Deriving it from ``include_router`` means a
+    newly mounted router is scanned automatically.
+    """
+    server_py = root / _ROOT_SERVER_MODULE
+    if not server_py.exists():
+        pytest.skip(f'source tree not available: {_ROOT_SERVER_MODULE}')
+    tree = ast.parse(server_py.read_text())
+
+    # alias -> dotted module (e.g. 'jobs_rest' -> 'sky.jobs.server.server')
+    alias_to_module: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        for alias in node.names:
+            if alias.asname:
+                alias_to_module[alias.asname] = f'{node.module}.{alias.name}'
+
+    modules: Dict[str, str] = {_ROOT_SERVER_MODULE: ''}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and
+                func.attr == 'include_router'):
+            continue
+        # First positional arg is `<alias>.router`.
+        if not (node.args and isinstance(node.args[0], ast.Attribute) and
+                isinstance(node.args[0].value, ast.Name)):
+            continue
+        alias = node.args[0].value.id
+        prefix = ''
+        for kw in node.keywords:
+            if kw.arg == 'prefix' and isinstance(kw.value, ast.Constant):
+                prefix = kw.value.value
+        dotted = alias_to_module.get(alias)
+        if dotted is None:
+            # A router mounted from an alias we couldn't resolve to a module:
+            # fail loudly rather than silently skipping it.
+            raise AssertionError(
+                f'include_router uses alias {alias!r} that maps to no '
+                f'`from ... import ... as {alias}` import; the drift guard '
+                f'cannot locate its module to scan.')
+        modules[dotted.replace('.', '/') + '.py'] = prefix
+    return modules
+
 
 _SCHEDULERS = ('schedule_request_async', 'schedule_request',
                'prepare_request_async')
@@ -207,7 +254,7 @@ def _executor_endpoints() -> List[Tuple[str, str, str]]:
     """Discover (method, path, request name) for executor-backed endpoints."""
     root = _repo_root()
     found: List[Tuple[str, str, str]] = []
-    for relative, prefix in _SERVER_MODULES.items():
+    for relative, prefix in _discover_server_modules(root).items():
         source = root / relative
         if not source.exists():
             pytest.skip(f'source tree not available: {relative}')
@@ -397,6 +444,34 @@ class TestReadOnlyEndpointDeclaration:
         service._read_only_endpoints = [  # pylint: disable=protected-access
             (rule['path'], rule['method'])
             for rule in rbac.get_read_only_endpoints()
+        ]
+        with mock.patch.object(service, '_lazy_initialize'):
+            assert service.is_read_only_endpoint(path, method) is expected
+
+    @pytest.mark.parametrize(
+        'path, method, expected',
+        [
+            # An always-write (create) endpoint stays write even when it is
+            # (mis)declared read-only -- exact entry or a covering wildcard.
+            ('/serve/up', 'POST', False),
+            ('/launch', 'POST', False),
+            ('/jobs/launch', 'POST', False),
+            ('/jobs/pool_apply', 'POST', False),
+            ('/volumes/apply', 'POST', False),
+            # A sibling read under the same wildcard is still read.
+            ('/serve/status', 'POST', True),
+        ])
+    def test_always_write_overrides_read_declaration(self, path, method,
+                                                     expected):
+        service = permission.PermissionService()
+        # A read declaration that wrongly includes the create endpoints, plus a
+        # `/serve/*` wildcard that would otherwise relax `/serve/up` too.
+        service._read_only_endpoints = [  # pylint: disable=protected-access
+            ('/serve/*', 'POST'),
+            ('/launch', 'POST'),
+            ('/jobs/launch', 'POST'),
+            ('/jobs/pool_apply', 'POST'),
+            ('/volumes/apply', 'POST'),
         ]
         with mock.patch.object(service, '_lazy_initialize'):
             assert service.is_read_only_endpoint(path, method) is expected

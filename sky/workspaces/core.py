@@ -769,9 +769,10 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def check_workspace_permission(user: models.User,
-                               workspace: str,
-                               action: str = 'write') -> None:
+def check_workspace_permission(
+        user: models.User,
+        workspace: str,
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> None:
     """Checks that a user has permission to access the given workspace.
 
     Args:
@@ -791,8 +792,9 @@ def check_workspace_permission(user: models.User,
             f'permission to access workspace {workspace!r}')
 
 
-def reject_request_for_unauthorized_workspace(user: models.User,
-                                              action: str = 'write') -> None:
+def reject_request_for_unauthorized_workspace(
+        user: models.User,
+        action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> None:
     """Rejects a request that has no permission to access active workspace.
 
     Args:
@@ -1253,9 +1255,11 @@ def _try_resync_new_user_grants(user: models.User) -> None:
                      f'{common_utils.format_exception(e)}')
 
 
-def resolve_workspace_for_user(user: models.User,
-                               requested: Optional[str] = None,
-                               action: str = 'write') -> WorkspaceResolution:
+def resolve_workspace_for_user(
+    user: models.User,
+    requested: Optional[str] = None,
+    action: str = workspace_constants.WORKSPACE_ACTION_WRITE
+) -> WorkspaceResolution:
     """Resolves the effective workspace for a user when none was set.
 
     Auto-selection always considers only WRITABLE workspaces: the active
@@ -1327,14 +1331,14 @@ def resolve_workspace_for_user(user: models.User,
     def _active_candidates() -> Tuple[List[str], bool]:
         """(candidates, whether they came from the read-only fallback)."""
         all_ws = set(_load_workspaces().keys())
-        writable = _accessible_workspace_names_for_user(user.id,
-                                                        all_ws,
-                                                        action='write')
-        if not writable and action == 'read':
+        writable = _accessible_workspace_names_for_user(
+            user.id, all_ws, action=workspace_constants.WORKSPACE_ACTION_WRITE)
+        if not writable and action == workspace_constants.WORKSPACE_ACTION_READ:
             return sorted(
-                _accessible_workspace_names_for_user(user.id,
-                                                     all_ws,
-                                                     action='read')), True
+                _accessible_workspace_names_for_user(
+                    user.id,
+                    all_ws,
+                    action=workspace_constants.WORKSPACE_ACTION_READ)), True
         return sorted(writable), False
 
     accessible, read_only_only = _active_candidates()

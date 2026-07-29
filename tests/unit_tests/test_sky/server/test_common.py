@@ -755,14 +755,15 @@ def _fake_response(status_code, json_body=None, json_raises=False):
 
 
 def test_handle_request_error_403_detail_clean_message():
-    """A 403 with a server `detail` is surfaced as a clean RuntimeError
-    (no raw HTTPError traceback) so permission denials read as one line."""
+    """A 403 with a server `detail` is surfaced as a clean, typed
+    PermissionDeniedError (no raw HTTPError traceback) so permission denials
+    read as one line and callers can distinguish authz failures."""
     resp = _fake_response(403,
                           {'detail': 'You are not a member of workspace X.'})
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(exceptions.PermissionDeniedError) as exc_info:
         common.handle_request_error(resp)
     assert 'not a member of workspace X' in str(exc_info.value)
-    # Must be the clean RuntimeError, not the raw HTTPError.
+    # Must be the clean typed error, not the raw HTTPError.
     assert not isinstance(exc_info.value, requests.exceptions.HTTPError)
 
 

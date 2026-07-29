@@ -1540,6 +1540,8 @@ def get_handle_from_cluster_name(
     return pickle.loads(row.handle)
 
 
+@db_retries.retry
+@metrics_lib.time_me
 def get_cluster_workspace(cluster_name: str) -> Optional[str]:
     """Returns the workspace a cluster belongs to, or None if no such cluster.
 

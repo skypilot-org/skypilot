@@ -5,7 +5,7 @@ import logging
 import os
 import threading
 import time
-from typing import Generator, List, Optional, Set
+from typing import Dict, Generator, List, Optional, Set, Tuple
 
 import casbin
 from casbin import util as casbin_util
@@ -61,6 +61,10 @@ class PermissionService:
         # allowlist plus the entries the viewer role cannot express. Also
         # materialised at boot. See `rbac.get_read_only_endpoints`.
         self._read_only_endpoints: List[tuple] = []
+        # Per-(path, method) memo for `is_read_only_endpoint`, which runs on
+        # every request in the main event loop. Cleared whenever the allowlist
+        # is rebuilt (`_build_viewer_allowlist_no_lock`).
+        self._read_only_endpoint_cache: Dict[Tuple[str, str], bool] = {}
 
     def initialize(self):
         self._lazy_initialize(full_initialize=True)
@@ -191,6 +195,7 @@ class PermissionService:
         self._read_only_endpoints = [(rule['path'], rule['method'])
                                      for rule in rbac.get_read_only_endpoints(
                                          plugin_allowlist=plugin_viewer_allow)]
+        self._read_only_endpoint_cache = {}
         logger.debug(f'Viewer allowlist has {len(self._viewer_allowlist)} '
                      f'entries, read-only endpoints '
                      f'{len(self._read_only_endpoints)}')
@@ -447,7 +452,7 @@ class PermissionService:
                                                       rule[0] == '*'):
                 if rule[1] in workspace_names:
                     accessible.add(rule[1])
-        if action == 'read':
+        if action == workspace_constants.WORKSPACE_ACTION_READ:
             # Read also includes read-only-visible workspaces, evaluated live
             # from config (not a materialized casbin grant) so changes take
             # effect immediately. Mirrors the read branch of
@@ -508,7 +513,20 @@ class PermissionService:
         # Ensures the allowlists are materialised in this process; a no-op
         # after the first call.
         self._lazy_initialize()
-        return self._matches_endpoint(self._read_only_endpoints, path, method)
+        key = (path, method)
+        cached = self._read_only_endpoint_cache.get(key)
+        if cached is not None:
+            return cached
+        # Always-write (create) endpoints can never be read, regardless of the
+        # viewer allowlist -- this also overrides a wildcard viewer entry that
+        # happens to match one (see `rbac._ALWAYS_WRITE_ENDPOINTS`).
+        if rbac.is_always_write_endpoint(path, method):
+            result = False
+        else:
+            result = self._matches_endpoint(self._read_only_endpoints, path,
+                                            method)
+        self._read_only_endpoint_cache[key] = result
+        return result
 
     @staticmethod
     def _matches_endpoint(entries: List[tuple], path: str, method: str) -> bool:
@@ -563,10 +581,11 @@ class PermissionService:
             prefix=_WORKSPACE_PERM_CACHE_PREFIX,
             suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
 
-    def check_workspace_permission(self,
-                                   user_id: str,
-                                   workspace_name: str,
-                                   action: str = 'write') -> bool:
+    def check_workspace_permission(
+            self,
+            user_id: str,
+            workspace_name: str,
+            action: str = workspace_constants.WORKSPACE_ACTION_WRITE) -> bool:
         """Check workspace permission.
 
         This method checks if a user has permission to access a specific
@@ -599,8 +618,8 @@ class PermissionService:
         # workspace_config.non_member_access) rather than a materialized casbin
         # grant, so a change takes effect on the next request without a policy
         # re-sync or cache invalidation. Never cached.
-        if action == 'read' and workspaces_utils.is_read_only_workspace(
-                workspace_name):
+        if (action == workspace_constants.WORKSPACE_ACTION_READ and
+                workspaces_utils.is_read_only_workspace(workspace_name)):
             return True
 
         return False

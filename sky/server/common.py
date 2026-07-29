@@ -712,7 +712,9 @@ def handle_request_error(response: 'requests.Response') -> None:
             detail = None
         if detail:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
+                # Typed so callers can distinguish authz failures
+                # programmatically; the CLI already renders this cleanly.
+                raise exceptions.PermissionDeniedError(
                     detail if isinstance(detail, str) else str(detail))
     # Keep the original HTTPError if the response code >= 400
     response.raise_for_status()
