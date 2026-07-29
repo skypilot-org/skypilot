@@ -2874,6 +2874,69 @@ def test_job_group_basic(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.kubernetes
+def test_job_group_inter_connection_false(generic_cloud: str):
+    """JobGroup with inter_connection: false skips all networking machinery.
+
+    Tasks must start without the peer-hostname wait and succeed; the
+    networking wait banner must not appear in the task logs.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_inter_connection_false.yaml', name,
+        generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_inter_connection_false',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "JOB-A-DONE"',
+            # No networking machinery: the wait banner must not appear.
+            f'! sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "Waiting for network setup"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_inter_connection_non_k8s_pin_error(generic_cloud: str):
+    """inter_connection: true + a non-Kubernetes infra pin fails at
+    submission with an error naming the contradicting job, without
+    launching anything."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_inter_connection_pin_error.yaml', name,
+        generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_inter_connection_non_k8s_pin_error',
+        [
+            f'sky jobs launch {yaml_path} -y 2>&1 | '
+            f'grep "pins non-Kubernetes infra"',
+            # Nothing was submitted.
+            f'! sky jobs queue | grep {name}',
+        ],
+        f'sky jobs cancel -y -n {name} || true',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=5 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
 def test_job_group_cancelled_logs(generic_cloud: str):
     """Test that logs are accessible for all tasks after a job group is cancelled."""
     name = smoke_tests_utils.get_cluster_name()
