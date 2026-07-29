@@ -2484,6 +2484,64 @@ def test_lambda_cloud_open_ports():
                 # Don't fail the test if cleanup fails
 
 
+@pytest.mark.azure
+def test_azure_private_ip_managed_nsg():
+    """Private-IP bootstrap restricts SSH in the live Azure-managed NSG.
+
+    This exercises the ARM deployment without launching a VM. It creates an
+    isolated resource group, inspects the resulting SSH rule, and deletes the
+    resource group during teardown.
+    """
+    # pylint: disable=import-outside-toplevel
+    import uuid
+
+    from sky.adaptors import azure
+    from sky.provision import common as provision_common
+    from sky.provision.azure import config as azure_config
+
+    region = 'eastus'
+    suffix = uuid.uuid4().hex[:8]
+    cluster_name = f'nsg-smoke-{suffix}'
+    resource_group = f'sky-nsg-smoke-{suffix}'
+    subscription_id = azure.get_subscription_id()
+    config = provision_common.ProvisionConfig(
+        provider_config={
+            'subscription_id': subscription_id,
+            'resource_group': resource_group,
+            'location': region,
+            'use_external_resource_group': False,
+            'use_internal_ips': True,
+        },
+        authentication_config={},
+        docker_config={},
+        node_config={},
+        count=1,
+        tags={},
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=None,
+    )
+
+    try:
+        config = azure_config.bootstrap_instances(region, cluster_name, config)
+        nsg_name = config.provider_config['nsg'].rsplit('/', 1)[-1]
+        network_client = azure.get_client('network', subscription_id)
+        nsg = network_client.network_security_groups.get(
+            resource_group_name=resource_group,
+            network_security_group_name=nsg_name)
+        ssh_rule = next(
+            rule for rule in nsg.security_rules if rule.name == 'SSH')
+        assert ssh_rule.source_address_prefix == 'VirtualNetwork'
+    finally:
+        resource_client = azure.get_client('resource', subscription_id)
+        delete_resource_group = azure_config.get_azure_sdk_function(
+            client=resource_client.resource_groups, function_name='delete')
+        try:
+            delete_resource_group(resource_group_name=resource_group,
+                                  force_deletion_types=None).wait()
+        except azure.exceptions().ResourceNotFoundError:
+            pass
+
+
 @pytest.mark.nebius
 # Smoke test verifies API integration; `list_security_rules` is the only
 # way to introspect SG state, hence the protected-access exception here.
