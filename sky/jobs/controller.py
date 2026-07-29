@@ -1922,26 +1922,27 @@ class JobController:
             handles[task_id] = handle
 
         # Phase 3: Set up networking
+        # Build list of (task, handle) for non-terminal tasks with valid
+        # handles. Skip tasks that inline the DNS mapping — they already
+        # start the DNS updater from task.run. Built unconditionally: the
+        # per-task monitors take this list for their on-recovery
+        # networking refresh (which itself no-ops when networking is off).
+        tasks_handles: List[Tuple[
+            'sky.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
+        for tid, task in enumerate(tasks):
+            task_handle = handles[tid]
+            if task_handle is None:
+                continue
+            if (job_group_networking.dns_addresses_for_task(task, self._job_id)
+                    is not None):
+                continue
+            tasks_handles.append((task, task_handle))
+
         if not self._dag.inter_connection_enabled():
             logger.info('Phase 3: Skipping JobGroup networking setup '
                         '(inter_connection disabled).')
         else:
             logger.info('Phase 3: Setting up JobGroup networking...')
-            # Build list of (task, handle) for non-terminal tasks with valid
-            # handles. Skip tasks that inline the DNS mapping — they already
-            # start the DNS updater from task.run.
-            tasks_handles: List[
-                Tuple['sky.Task',
-                      'cloud_vm_ray_backend.CloudVmRayResourceHandle']] = []
-            for tid, task in enumerate(tasks):
-                task_handle = handles[tid]
-                if task_handle is None:
-                    continue
-                if (job_group_networking.dns_addresses_for_task(
-                        task, self._job_id) is not None):
-                    continue
-                tasks_handles.append((task, task_handle))
-
             if tasks_handles:
                 networking_success = await (
                     job_group_networking.setup_job_group_networking(
