@@ -59,19 +59,8 @@ def test_minimal(generic_cloud: str):
     disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
         generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
-    # The raylet's soft nofile limit should be clamped to min(1048576, its
-    # own hard limit). Read soft and hard from the raylet process itself and
-    # assert soft == expected, failing (non-zero) loudly otherwise.
-    check_raylet_cmd = (
-        '"PID=\$(pgrep -f \'raylet/raylet --raylet_socket_name\'); '
-        'SOFT=\$(prlimit --nofile --pid=\$PID --noheadings --output=SOFT); '
-        'HARD=\$(prlimit --nofile --pid=\$PID --noheadings --output=HARD); '
-        'EXPECTED=1048576; '
-        'if [ \\"\$HARD\\" != unlimited ] && [ \\"\$HARD\\" -lt 1048576 ]; '
-        'then EXPECTED=\$HARD; fi; '
-        '[ \\"\$SOFT\\" = \\"\$EXPECTED\\" ] || '
-        '( echo \\"raylet nofile soft=\$SOFT expected=\$EXPECTED '
-        '(hard=\$HARD)\\" >&2; exit 1 )"')
+    # Ensure the raylet process has the correct file descriptor limit.
+    check_raylet_cmd = smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name)
     if generic_cloud == 'slurm':
         check_raylet_cmd = 'true'
     test = smoke_tests_utils.Test(
@@ -91,8 +80,7 @@ def test_minimal(generic_cloud: str):
             # expand it when having it in a variable.
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
-            # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} {check_raylet_cmd}',
+            check_raylet_cmd,
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
@@ -168,17 +156,7 @@ def test_minimal_arm64(generic_cloud: str):
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "PID=\$(pgrep -f '
-            '\'raylet/raylet --raylet_socket_name\'); '
-            'SOFT=\$(prlimit --nofile --pid=\$PID --noheadings '
-            '--output=SOFT); '
-            'HARD=\$(prlimit --nofile --pid=\$PID --noheadings '
-            '--output=HARD); EXPECTED=1048576; '
-            'if [ \\"\$HARD\\" != unlimited ] '
-            '&& [ \\"\$HARD\\" -lt 1048576 ]; then EXPECTED=\$HARD; fi; '
-            '[ \\"\$SOFT\\" = \\"\$EXPECTED\\" ] || '
-            '( echo \\"raylet nofile soft=\$SOFT '
-            'expected=\$EXPECTED (hard=\$HARD)\\" >&2; exit 1 )"',
+            smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name),
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',

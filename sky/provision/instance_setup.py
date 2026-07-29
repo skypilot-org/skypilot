@@ -36,48 +36,41 @@ logger = sky_logging.init_logger(__name__)
 
 _MAX_RETRY = 6
 
+# The open files (nofile) limit we want for ray, as recommended by ray:
+# https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+_TARGET_NOFILE = 1048576
+
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
 # all the sessions to be reloaded. This is a workaround.
 #
-# prlimit acts on a *different* process (the raylet), so the calling shell's
-# own `ulimit -Hn` is irrelevant here: a process's soft limit can only be
-# raised up to *its own* hard limit, and raising a hard limit needs
-# CAP_SYS_RESOURCE (which containers usually lack). So:
-#   1. Try to set both soft+hard to 1048576. This works only when the runtime
-#      already grants a high (or unlimited) hard limit.
-#   2. Otherwise read the raylet's *own* hard limit from /proc/<pid>/limits
-#      (field 5 of the "Max open files" line) and raise only its soft limit
-#      up to that hard limit (the trailing-colon `--nofile=<hard>:` form),
-#      which needs no capability and never lowers the existing hard limit.
-# The fallback attempt keeps its stderr (no 2>/dev/null) so a genuine failure
-# (EPERM vs ESRCH vs missing sudo) is visible; the first attempt is expected
-# to fail on locked-down runtimes and is silenced. When the resulting clamp
-# is below 1048576 we emit an actionable NOTE pointing at the container
-# runtime's nofile default.
-_RAY_PRLIMIT = (
+# Raising a process' *hard* limit requires CAP_SYS_RESOURCE, which containers
+# usually do not have. Setting both limits to _TARGET_NOFILE therefore fails
+# outright whenever the container's hard limit is lower (1024:524288 is a
+# common default), leaving the raylet with the low default soft limit and
+# running it out of file descriptors once many workers start. Fall back to
+# raising the *soft* limit only, up to the raylet's own hard limit (the
+# `<hard>:` form), which needs no capability. The hard limit is read from
+# /proc/<pid>/limits (field 5 of the "Max open files" row) so that it is the
+# raylet's own limit rather than this shell's.
+#
+# Inlined into ibm-ray.yml.j2 as `ray_prlimit_command`.
+RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); do '
-    'hard=$(awk \'/Max open files/ {print $5}\' /proc/$id/limits '
-    '2>/dev/null); '
-    'sudo prlimit --nofile=1048576:1048576 --pid=$id 2>/dev/null || '
-    '{ [ -n "$hard" ] && sudo prlimit --nofile="$hard": --pid=$id && '
-    '{ [ "$hard" -lt 1048576 ] && echo "NOTE: raylet pid $id nofile '
-    'clamped to $hard (< 1048576); raise the container runtime nofile '
-    'default (e.g. containerd LimitNOFILE / --default-ulimit nofile)" >&2; '
-    'true; }; } || '
-    'echo "WARNING: unable to raise nofile limit for raylet pid $id" >&2; '
-    'done;')
+    'hard=$(awk \'/Max open files/ {print $5}\' /proc/$id/limits); '
+    f'sudo prlimit --nofile={_TARGET_NOFILE}:{_TARGET_NOFILE} --pid=$id '
+    '2>/dev/null || sudo prlimit --nofile="$hard:" --pid=$id || '
+    'echo "Failed to raise the open files limit of raylet $id." >&2; done;')
 
-# Raises the *soft* nofile limit of the current shell toward 1048576,
-# clamped down to the container's own hard limit when that hard limit is
-# lower. `ulimit -Sn` only touches the soft limit, so it never lowers the
-# hard limit and needs no capability (unlike raising a hard limit, which
-# requires CAP_SYS_RESOURCE). The Kubernetes/SSH pod template inlines this
-# exact command at two sites (the pod entrypoint and the Ray setup_commands);
-# a unit test asserts those literals stay byte-identical to this constant, so
-# keep them in sync when editing either.
-RAISE_NOFILE_SOFT_LIMIT_CMD = (
-    'ulimit -Sn 1048576 2>/dev/null || ulimit -Sn "$(ulimit -Hn)" || true')
+# Raise the *soft* open files limit of the current shell to _TARGET_NOFILE,
+# falling back to the hard limit when that is lower (see RAY_PRLIMIT above for
+# why the hard limit cannot simply be raised). `-Sn` rather than plain `-n` is
+# deliberate: `-n` sets both limits, which would *lower* a hard limit that is
+# already higher than (or unlimited compared to) _TARGET_NOFILE.
+#
+# Inlined into kubernetes-ray.yml.j2 as `raise_nofile_limit_command`.
+RAISE_NOFILE_LIMIT_CMD = (f'ulimit -Sn {_TARGET_NOFILE} 2>/dev/null || '
+                          'ulimit -Sn "$(ulimit -Hn)" || true')
 
 DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'runtime_dir = os.path.expanduser(os.environ.get('
@@ -474,7 +467,7 @@ def ray_head_start_command(custom_resource: Optional[str],
         # the warning when the worker count is >12x CPUs.
         'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
         f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
-        _RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+        RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     return cmd
 
 
@@ -499,7 +492,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
     cmd = (
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
-        'exit 1;' + _RAY_PRLIMIT)
+        'exit 1;' + RAY_PRLIMIT)
     if no_restart:
         # We do not use ray status to check whether ray is running, because
         # on worker node, if the user started their own ray cluster, ray status

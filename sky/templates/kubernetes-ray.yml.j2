@@ -817,23 +817,12 @@ available_node_types:
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
-              # Raise the open-files (nofile) soft limit before starting Ray
-              # so the raylet does not exhaust file descriptors at startup.
-              # The raylet inherits this raised soft limit via either path: Ray
-              # is started inline by a backgrounded STEP of this entrypoint
-              # shell (the "runtime-setup" STEP below), and a STEP also restarts
-              # sshd as a descendant of this shell, so processes launched later
-              # over SSH inherit it too.
-              # Raising the soft limit up to the hard limit needs no special
-              # capability, but raising the hard limit needs CAP_SYS_RESOURCE,
-              # which containers commonly lack. `ulimit -Sn` (soft only) is
-              # deliberate: plain `ulimit -n` sets both soft AND hard, which
-              # would silently LOWER an `unlimited` hard limit to 1048576. We
-              # request the large value and, if it exceeds the hard limit, fall
-              # back to the hard limit ($(ulimit -Hn)).
-              # Kept byte-identical to instance_setup.RAISE_NOFILE_SOFT_LIMIT_CMD
-              # (a unit test asserts this); update both together.
-              ulimit -Sn 1048576 2>/dev/null || ulimit -Sn "$(ulimit -Hn)" || true
+              # Raise the open files limit before the STEPS below fork, so that
+              # both ray (started by the "runtime-setup" STEP) and anything
+              # later launched over SSH (the "apt-ssh-setup" STEP restarts sshd
+              # as a descendant of this shell) inherit it. Otherwise the raylet
+              # can run out of file descriptors while starting its workers.
+              {{raise_nofile_limit_command}}
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
@@ -1771,7 +1760,7 @@ setup_commands:
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
-    ulimit -Sn 1048576 2>/dev/null || ulimit -Sn "$(ulimit -Hn)" || true;
+    {{raise_nofile_limit_command}};
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);
