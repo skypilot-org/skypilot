@@ -568,3 +568,63 @@ class TestGetProctrackType:
             result = client.get_proctrack_type()
 
             assert result is None
+
+
+class TestGetAllNodeDetails:
+    """Test SlurmClient.get_all_node_details()."""
+
+    def test_parses_one_line_per_node(self):
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = (
+            'NodeName=node1 Arch=x86_64 CPUAlloc=8 CPUEfctv=72 CPUTot=72 '
+            'CPULoad=3.50 Gres=gpu:gh200:1 RealMemory=430080 AllocMem=102400 '
+            'FreeMem=421339 State=MIXED Partitions=all,gh200\n'
+            'NodeName=node2 Arch=x86_64 CPUAlloc=0 CPUEfctv=2 CPUTot=2 '
+            'CPULoad=N/A Gres=(null) RealMemory=14000 AllocMem=0 FreeMem=N/A '
+            'State=DOWN* Partitions=dev\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_all_node_details()
+            mock_run.assert_called_once_with(
+                'scontrol show node -o',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+        assert set(result.keys()) == {'node1', 'node2'}
+        assert result['node1']['CPUAlloc'] == '8'
+        assert result['node1']['CPUTot'] == '72'
+        assert result['node1']['CPULoad'] == '3.50'
+        assert result['node1']['AllocMem'] == '102400'
+        assert result['node1']['FreeMem'] == '421339'
+        assert result['node1']['State'] == 'MIXED'
+        assert result['node2']['CPULoad'] == 'N/A'
+        assert result['node2']['FreeMem'] == 'N/A'
+
+    def test_skips_blank_lines_and_lines_without_node_name(self):
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = ('\n'
+                       'NodeName=node1 CPUTot=8\n'
+                       '   \n'
+                       'Arch=x86_64 CPUTot=4\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+            result = client.get_all_node_details()
+
+        assert list(result.keys()) == ['node1']
