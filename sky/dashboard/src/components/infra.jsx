@@ -534,11 +534,11 @@ export function InfrastructureSection({
                             </span>
                           </NonCapitalizedTooltip>
                         </td>
-                        <td className="p-3 text-gray-600 tabular-nums whitespace-nowrap">
+                        <td className="p-3 text-gray-500 tabular-nums whitespace-nowrap">
                           <span
                             className={`font-semibold ${
                               typeEntry.gpu_free > 0
-                                ? 'text-gray-900'
+                                ? 'text-gray-600'
                                 : 'text-gray-500'
                             }`}
                           >
@@ -628,14 +628,14 @@ export function InfrastructureSection({
                           )}
                         </td>
                         <td
-                          className={`${sharedCellClass} text-gray-700 tabular-nums whitespace-nowrap`}
+                          className={`${sharedCellClass} text-gray-500 tabular-nums whitespace-nowrap`}
                           rowSpan={subRowCount}
                         >
                           {!hasNodeData ? <SkeletonBadge /> : nodes.length}
                         </td>
                         {!isSlurm && (
                           <td
-                            className={`${sharedCellClass} text-gray-700 tabular-nums whitespace-nowrap`}
+                            className={`${sharedCellClass} text-gray-500 tabular-nums whitespace-nowrap`}
                             rowSpan={subRowCount}
                           >
                             {!hasNodeData ? (
@@ -647,7 +647,7 @@ export function InfrastructureSection({
                         )}
                         {!isSlurm && (
                           <td
-                            className={`${sharedCellClass} text-gray-700 tabular-nums whitespace-nowrap`}
+                            className={`${sharedCellClass} text-gray-500 tabular-nums whitespace-nowrap`}
                             rowSpan={subRowCount}
                           >
                             {!hasNodeData ? (
@@ -774,7 +774,7 @@ export function InfrastructureSection({
                         {s.loading ? (
                           <SkeletonBadge />
                         ) : (
-                          <span className="text-sm text-gray-700">
+                          <span className="text-sm text-gray-500">
                             {s.value}
                           </span>
                         )}
