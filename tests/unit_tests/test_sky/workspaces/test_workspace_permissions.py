@@ -415,6 +415,45 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
         self.assertTrue(result['w-ro']['read_only'])
         self.assertFalse(result['w-priv']['read_only'])
 
+    def test_non_writable_config_is_stripped_of_sensitive_fields(self):
+        # A read-only-visible workspace the caller is NOT a member of must not
+        # leak its member roster (allowed_users) or infra settings (gcp, etc.)
+        # through /workspaces. Only the badges are exposed.
+        result = self._run(
+            workspaces={
+                'w-priv': {
+                    'private': True,
+                    'allowed_users': ['alice@example.com', 'bob@example.com'],
+                    'gcp': {
+                        'project_id': 'secret-project'
+                    },
+                },
+                'w-mine': {
+                    'private': True,
+                    'allowed_users': ['carol@example.com'],
+                    'gcp': {
+                        'project_id': 'my-project'
+                    },
+                },
+            },
+            global_default='read-only',
+            accessible={'w-priv', 'w-mine'},
+            writable={'w-mine'},
+        )
+        # Non-member workspace: stripped to badges only.
+        self.assertEqual(set(result['w-priv'].keys()),
+                         {'private', 'writable', 'read_only'})
+        self.assertNotIn('allowed_users', result['w-priv'])
+        self.assertNotIn('gcp', result['w-priv'])
+        self.assertFalse(result['w-priv']['writable'])
+        self.assertTrue(result['w-priv']['read_only'])
+        self.assertTrue(result['w-priv']['private'])
+        # Member workspace: full config retained.
+        self.assertEqual(result['w-mine']['allowed_users'],
+                         ['carol@example.com'])
+        self.assertEqual(result['w-mine']['gcp'], {'project_id': 'my-project'})
+        self.assertTrue(result['w-mine']['writable'])
+
 
 class TestAccessibleDefaultsToWritable(unittest.TestCase):
     """"Accessible" must keep meaning "where can I act".

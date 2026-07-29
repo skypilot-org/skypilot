@@ -26,12 +26,12 @@ export const DEFAULT_WORKSPACE = 'default';
  *   boolean, loaded: boolean}}
  */
 export function useWorkspacesConfig() {
-  const [workspacesConfig, setWorkspacesConfig] = useState(
-    () => dashboardCache.getCached(getWorkspaces) || {}
-  );
-  const [loaded, setLoaded] = useState(
-    () => dashboardCache.getCached(getWorkspaces) != null
-  );
+  // One synchronous cache peek at mount, shared by both bits of initial state.
+  const [state, setState] = useState(() => {
+    const cached = dashboardCache.getCached(getWorkspaces);
+    return { config: cached || {}, loaded: cached != null };
+  });
+  const { config: workspacesConfig, loaded } = state;
 
   useEffect(() => {
     let cancelled = false;
@@ -39,8 +39,7 @@ export function useWorkspacesConfig() {
       .get(getWorkspaces)
       .then((cfg) => {
         if (!cancelled) {
-          setWorkspacesConfig(cfg || {});
-          setLoaded(true);
+          setState({ config: cfg || {}, loaded: true });
         }
       })
       .catch(() => {
@@ -48,7 +47,7 @@ export function useWorkspacesConfig() {
         // than leaving every action disabled forever (this is only a visual
         // gate; the server still enforces workspace writes).
         if (!cancelled) {
-          setLoaded(true);
+          setState((prev) => ({ ...prev, loaded: true }));
         }
       });
     return () => {

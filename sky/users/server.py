@@ -292,10 +292,7 @@ def get_user_workspace(
     # launch into. Everything downstream treats it as a set of usable choices
     # (dropdowns, "where do I create this"), so read-only-visible workspaces
     # must NOT be folded in — they go in `read_only`, additively.
-    writable = workspaces_core.get_accessible_workspace_names(
-        action=workspace_constants.WORKSPACE_ACTION_WRITE)
-    readable = workspaces_core.get_accessible_workspace_names(
-        action=workspace_constants.WORKSPACE_ACTION_READ)
+    readable, writable = workspaces_core.get_workspace_access_sets()
     response['accessible'] = sorted(writable)
     # Workspaces the user can only view (read-only visibility for non-members):
     # visible but not writable. Lets the CLI/dashboard list them separately.

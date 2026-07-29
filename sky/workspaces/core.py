@@ -130,6 +130,19 @@ def get_accessible_workspace_names(
         action=action)
 
 
+def get_workspace_access_sets() -> Tuple[Set[str], Set[str]]:
+    """Returns ``(readable, writable)`` workspace names for the current user.
+
+    Single-scan equivalent of calling `get_accessible_workspace_names` with
+    ``action='read'`` and ``action='write'``. Use when a caller needs both sets
+    (e.g. to list read-only-visible workspaces separately from writable ones)
+    so the casbin policy is scanned once instead of twice.
+    """
+    workspaces = _load_workspaces()
+    return permission.permission_service.get_workspace_access_sets(
+        common_utils.get_current_user().id, set(workspaces.keys()))
+
+
 def _update_workspaces_config(
         workspace_modifier_fn: Callable[[Dict[str, Any]],
                                         None]) -> Dict[str, Any]:
@@ -1175,16 +1188,34 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
             user_id, set(workspaces.keys())))
     result: Dict[str, Any] = {}
     for name in accessible_names:
-        # Copy so the request-cached config isn't mutated with computed state.
-        ws_config = dict(workspaces[name])
-        ws_config['writable'] = name in writable_names
-        # Whether non-members see this workspace read-only. Computed here (not
-        # derived client-side from the raw `non_member_access` field) so the
-        # org-wide ``workspace_config.non_member_access`` fallback is applied:
-        # a private workspace with no per-workspace override is still read-only
-        # when the global default is ``read-only``.
-        ws_config['read_only'] = workspaces_utils.is_read_only_for_non_members(
+        writable = name in writable_names
+        read_only = workspaces_utils.is_read_only_for_non_members(
             workspaces[name])
+        if not writable:
+            # Read-only-visible to a non-member: expose only what the dashboard
+            # needs to render the row (the private/read-only badges), NOT the
+            # stored config. The raw config carries `allowed_users` (the member
+            # roster) and provider/infra settings (e.g. gcp.project_id,
+            # kubernetes.allowed_contexts); the read-only-visibility feature is
+            # "see the workspace and its workloads", not "read its membership
+            # and infra". Members/admins (writable) still get the full config.
+            ws_config: Dict[str, Any] = {
+                'writable': False,
+                'read_only': read_only,
+            }
+            if workspaces[name].get('private') is not None:
+                ws_config['private'] = workspaces[name]['private']
+        else:
+            # Copy so the request-cached config isn't mutated with computed
+            # state.
+            ws_config = dict(workspaces[name])
+            ws_config['writable'] = True
+            # Whether non-members see this workspace read-only. Computed here
+            # (not derived client-side from the raw `non_member_access` field)
+            # so the org-wide ``workspace_config.non_member_access`` fallback is
+            # applied: a private workspace with no per-workspace override is
+            # still read-only when the global default is ``read-only``.
+            ws_config['read_only'] = read_only
         result[name] = ws_config
     return result
 

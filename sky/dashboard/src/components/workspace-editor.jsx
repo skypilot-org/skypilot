@@ -253,8 +253,16 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
 };
 
 // Detailed allowed users component for workspace editor
-const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
+const DetailedAllowedUsers = ({
+  workspaceConfig,
+  allUsers,
+  writable = true,
+}) => {
   if (!workspaceConfig.private) return null;
+  // Non-member (read-only-visible) view: the server strips allowed_users from
+  // the config, so there is no roster to show. Render nothing rather than a
+  // misleading "0 users" — the members exist, they are just not disclosed.
+  if (!writable) return null;
 
   // Get allowed users from config
   const allowedUsersFromConfig = workspaceConfig.allowed_users || [];
@@ -322,6 +330,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   // workspace_config.non_member_access fallback). Held separately from the
   // editable config, which strips computed fields.
   const [isReadOnlyVisible, setIsReadOnlyVisible] = useState(false);
+  // False when the caller is a non-member of this workspace (server strips the
+  // config down to the badges — no allowed_users / infra to show).
+  const [isWritable, setIsWritable] = useState(true);
   const [yamlValue, setYamlValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -364,13 +375,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         // unknown infra keys, or get written back on save. `read_only` is kept
         // separately for the badge.
         const {
-          writable: _writable,
+          writable: writableFlag,
           read_only: readOnly,
           ...config
         } = allWorkspaces[workspaceName] || {};
         setWorkspaceConfig(config);
         setOriginalConfig(config);
         setIsReadOnlyVisible(readOnly === true);
+        setIsWritable(writableFlag !== false);
         setAllUsers(usersResponse || []);
 
         // Format as YAML with workspace name as top-level key
@@ -813,6 +825,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       <DetailedAllowedUsers
                         workspaceConfig={originalConfig}
                         allUsers={allUsers}
+                        writable={isWritable}
                       />
                     </div>
                   </Card>
