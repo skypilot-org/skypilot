@@ -182,8 +182,9 @@ def test_pkg_present_maps_netcat_to_the_nc_binary():
 def _step1_harness(pkg_mgr: str, present: str, install_ok: bool,
                    marker: str) -> str:
     """The real STEP 1 install region, with only the network stubbed out."""
-    body = _extract('PACKAGES="rsync curl',
-                    'Error: core package installation failed across all sources')
+    body = _extract(
+        'PACKAGES="rsync curl',
+        'Error: core package installation failed across all sources')
     stub = textwrap.dedent(f"""
         # Presence stub must come AFTER the template's own pkg_present
         # definition to take effect.
@@ -249,8 +250,9 @@ def test_step1_publishes_core_marker_before_optional_packages():
     STEP 2 is meant to overlap with those; publishing late would serialize the
     launch behind gcc/pciutils/fuse3 and defeat the INSTALL_FIRST split.
     """
-    body = _extract('PACKAGES="rsync curl',
-                    'Error: core package installation failed across all sources')
+    body = _extract(
+        'PACKAGES="rsync curl',
+        'Error: core package installation failed across all sources')
     first_publish = body.index('touch "$CORE_PKGS_READY"')
     optional_install = body.index('MISSING_PACKAGES')
     # The earliest publish site must precede the optional-install machinery in
