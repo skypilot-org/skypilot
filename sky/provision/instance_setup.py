@@ -68,6 +68,17 @@ _RAY_PRLIMIT = (
     'echo "WARNING: unable to raise nofile limit for raylet pid $id" >&2; '
     'done;')
 
+# Raises the *soft* nofile limit of the current shell toward 1048576,
+# clamped down to the container's own hard limit when that hard limit is
+# lower. `ulimit -Sn` only touches the soft limit, so it never lowers the
+# hard limit and needs no capability (unlike raising a hard limit, which
+# requires CAP_SYS_RESOURCE). The Kubernetes/SSH pod template inlines this
+# exact command at two sites (the pod entrypoint and the Ray setup_commands);
+# a unit test asserts those literals stay byte-identical to this constant, so
+# keep them in sync when editing either.
+RAISE_NOFILE_SOFT_LIMIT_CMD = (
+    'ulimit -Sn 1048576 2>/dev/null || ulimit -Sn "$(ulimit -Hn)" || true')
+
 DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
                   f'runtime_dir = os.path.expanduser(os.environ.get('
                   f'"{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}", "~")); '
