@@ -600,13 +600,6 @@ def resolved_config() -> config_utils.Config:
     `active_workspace` is taken from `get_active_workspace()`. Callers that
     need the workspace a request actually runs in — e.g. admin policies —
     should use this rather than `to_dict()`.
-
-    Keep this separate from `to_dict()`, which also feeds the client's
-    `override_skypilot_config` on the wire
-    (`payloads.get_override_skypilot_config_from_client`): stamping
-    `active_workspace` there would make `is_active_workspace_set()` always
-    return True and disable the per-user workspace resolver
-    (`_should_apply_workspace_resolver`).
     """
     config = to_dict()
     config['active_workspace'] = get_active_workspace()
