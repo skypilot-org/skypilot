@@ -1205,7 +1205,18 @@ available_node_types:
                     # should not kill the launch.
                     _core_try=0
                     while :; do
-                      pkg_install $INSTALL_FIRST >> /tmp/apt-update.log 2>&1
+                      # `|| true` is load-bearing, not defensive: this function
+                      # runs under the `set -e` from the top of the install
+                      # section (unlike the apt path, which drops to `set +e`
+                      # inside its own helper). As a standalone command,
+                      # a non-zero pkg_install would abort STEP 1 right here --
+                      # before the _core_missing check, the sleep, or any retry
+                      # -- so the pod would fail with .failed instead of
+                      # retrying, defeating the point of this loop. It also
+                      # matters for zypper, whose >=100 informational-success
+                      # codes are non-zero. The exit status is deliberately
+                      # ignored; pkg_present below is what decides success.
+                      pkg_install $INSTALL_FIRST >> /tmp/apt-update.log 2>&1 || true
                       # Do NOT trust the exit status alone: zypper returns >=100
                       # for informational success (e.g. 106 = a repo had to be
                       # skipped, but the requested packages installed fine), and

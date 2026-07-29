@@ -45,8 +45,17 @@ def _extract(start_marker: str, end_marker: str) -> str:
             k8s_enable_docker_build=False)
 
 
-def _run(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(['bash', '-c', script],
+def _run(script: str, errexit: bool = False) -> subprocess.CompletedProcess:
+    """Runs a shell snippet.
+
+    errexit=True prepends `set -e`. Use it for anything extracted from the
+    install section, which really does run under `set -e` in the pod: a harness
+    without it silently passes code that would abort STEP 1 on the first
+    non-zero command. That is not hypothetical -- it let a broken retry loop
+    through here, and a reviewer caught it instead.
+    """
+    prefix = 'set -e\n' if errexit else ''
+    return subprocess.run(['bash', '-c', prefix + script],
                           capture_output=True,
                           text=True,
                           check=False)
@@ -260,3 +269,58 @@ def test_step1_publishes_core_marker_before_optional_packages():
     assert first_publish < body.rindex('Installing missing packages'), (
         'CORE_PKGS_READY is published after the best-effort install')
     assert optional_install > 0
+
+
+# --------------------------------------------------------------------------
+# The non-apt core install must survive a failing package manager
+# --------------------------------------------------------------------------
+
+
+def _nonapt_harness(install_rc: int, present_after: bool) -> str:
+    """The real run_pkg_install_nonapt(), with pkg_install/pkg_present stubbed."""
+    lines = _template_lines()
+    start = next(
+        i for i, l in enumerate(lines) if 'run_pkg_install_nonapt() {' in l)
+    end = None
+    for i in range(start + 1, len(lines)):
+        if 'INSTALL_SUCCESS=false' in lines[i]:
+            nxt = next((x for x in lines[i + 1:] if x.strip()), '')
+            if 'if [ -z "$INSTALL_FIRST" ]' in nxt:
+                end = i
+                break
+    assert end, 'dispatch site not found'
+    body = '\n'.join(l[16:] if l.startswith(' ' * 16) else l.strip()
+                     for l in lines[start:end])
+    body = jinja2.Environment(
+        undefined=jinja2.ChainableUndefined).from_string(body).render()
+    ret = 'return 0' if present_after else 'return 1'
+    return (f'CORE_PKGS_READY="$(mktemp)"\n'
+            f'pkg_install() {{ return {install_rc}; }}\n'
+            f'pkg_present() {{ {ret}; }}\n'
+            f'{body}\n'
+            'PKG_MGR=dnf; INSTALL_FIRST="curl rsync"; MISSING_PACKAGES=""\n'
+            'run_pkg_install_nonapt\n'
+            'echo "INSTALL_SUCCESS=$INSTALL_SUCCESS"\n')
+
+
+def test_nonapt_core_install_tolerates_a_nonzero_package_manager():
+    """A non-zero pkg_install must not abort STEP 1 under `set -e`.
+
+    zypper returns >=100 for informational success (106 = a repository had to be
+    skipped, but the requested packages installed), which is normal behind a
+    restrictive egress proxy. The install runs under `set -e`, so without a
+    tested-command guard the shell exits before the presence check can run.
+    """
+    result = _run(_nonapt_harness(install_rc=106, present_after=True),
+                  errexit=True)
+    assert 'INSTALL_SUCCESS=true' in result.stdout, (
+        f'rc=106 with packages present should succeed. '
+        f'stdout={result.stdout!r} rc={result.returncode}')
+
+
+def test_nonapt_core_install_fails_when_packages_are_really_absent():
+    """Negative control: a clean exit code must not be taken as success."""
+    result = _run(_nonapt_harness(install_rc=0, present_after=False),
+                  errexit=True)
+    assert 'INSTALL_SUCCESS=true' not in result.stdout, (
+        f'packages absent must not report success. stdout={result.stdout!r}')
