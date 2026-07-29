@@ -951,6 +951,25 @@ VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
     '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
 )
 
+# Asserts that the raylet's soft nofile limit was raised. SkyPilot targets
+# 1048576, but a host whose hard limit is lower cannot reach it (raising a hard
+# limit requires CAP_SYS_RESOURCE, which containers usually lack), so the
+# expected value is min(1048576, hard limit).
+_CHECK_RAYLET_NOFILE_LIMIT = (
+    "pid=$(pgrep -f 'raylet/raylet --raylet_socket_name'); "
+    'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+    'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+    'expected=1048576; '
+    'if [ "$hard" != unlimited ] && [ "$hard" -lt 1048576 ]; then '
+    'expected=$hard; fi; '
+    'echo "raylet $pid nofile: soft=$soft hard=$hard expected=$expected"; '
+    '[ "$soft" = "$expected" ]')
+
+
+def get_check_raylet_nofile_limit_cmd(cluster_name: str) -> str:
+    """Returns a `sky exec` checking the raylet's open files limit."""
+    return f'sky exec {cluster_name} {shlex.quote(_CHECK_RAYLET_NOFILE_LIMIT)}'
+
 
 def get_disk_size_and_validate_launch_output(generic_cloud: str):
     """Get DISK_SIZE_PARAM and VALIDATE_LAUNCH_OUTPUT for a given cloud.

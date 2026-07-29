@@ -172,6 +172,7 @@ def base_variables() -> Dict[str, Any]:
         'uv_installation_commands': 'UV_INSTALLATION_COMMANDS',
         'skypilot_wheel_installation_commands': 'WHEEL_INSTALLATION_COMMANDS',
         'copy_skypilot_templates_commands': 'COPY_TEMPLATES_COMMANDS',
+        'raise_nofile_limit_command': 'RAISE_NOFILE_LIMIT_COMMAND',
         'ray_port': 6379,
         'ray_dashboard_port': 8265,
         'credentials': {},
