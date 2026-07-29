@@ -627,6 +627,32 @@ class TestInterConnectionPlacement:
         assert task1.best_resources == res
         assert task2.best_resources == res
 
+    def test_false_still_prefers_colocation(self, mock_k8s_cloud):
+        """`inter_connection: false` permits spreading, it does not ask for
+        it: when a common context exists, the group is still co-located
+        there and independent placement is not used."""
+        shared = self._make_resources(mock_k8s_cloud, 'ctx-shared')
+        task1 = self._make_task('task-1')
+        task2 = self._make_task('task-2')
+        dag = self._make_dag([task1, task2], inter_connection=False)
+
+        def mock_fill(task, blocked_resources, quiet):
+            return ({'any': [shared]}, None, None, None)
+
+        with patch('sky.optimizer._fill_in_launchable_resources',
+                   side_effect=mock_fill):
+            with patch.object(optimizer.Optimizer,
+                              '_optimize_independent') as mock_independent:
+                optimizer.Optimizer._optimize_same_infra(
+                    dag,
+                    minimize=common.OptimizeTarget.COST,
+                    blocked_resources=None,
+                    quiet=True)
+                mock_independent.assert_not_called()
+
+        assert task1.best_resources == shared
+        assert task2.best_resources == shared
+
     def test_mixed_pin_narrows_group_to_pinned_context(self, mock_k8s_cloud):
         """k8s/blah + k8s + k8s: everyone lands on blah, hard-pinned."""
         res_blah = self._make_resources(mock_k8s_cloud, 'ctx-blah')
