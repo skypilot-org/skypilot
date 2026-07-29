@@ -66,4 +66,14 @@ MAX_WAIT_COUNT=$((MAX_WAIT_TIME_SECONDS * 2))
 # Use --norc --noprofile to prevent bash from sourcing startup files that might
 # output to stdout and corrupt the rsync protocol. All debug output must go to
 # stderr (>&2) to keep stdout clean for rsync communication.
-eval "${kubectl_cmd_base% --} -i -- bash --norc --noprofile -c 'count=0; until which rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""
+#
+# Probe with `command -v`, not `which`: this runs INSIDE the pod, and minimal
+# non-Debian images (RHEL/UBI/Rocky) ship no `which` binary at all. With `which`
+# the condition can never become true even once rsync IS installed, so the loop
+# burned the full MAX_WAIT_TIME_SECONDS and then exit 1 -- which rsync reports as
+# `connection unexpectedly closed (0 bytes received)` / protocol error code 12,
+# under the misleading "Package installation may have failed" message. Retried
+# _MAX_RETRIES_FOR_RSYNC times, that hung `sky launch` for ~15 minutes on an
+# image where rsync was present the whole time. `command -v` is a POSIX shell
+# builtin and needs no package.
+eval "${kubectl_cmd_base% --} -i -- bash --norc --noprofile -c 'count=0; until command -v rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""
