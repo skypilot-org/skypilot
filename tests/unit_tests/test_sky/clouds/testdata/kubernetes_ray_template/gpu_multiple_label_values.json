@@ -252,6 +252,21 @@
             "list",
             "watch"
           ]
+        },
+        {
+          "apiGroups": [
+            "resource.k8s.io"
+          ],
+          "resources": [
+            "deviceclasses",
+            "resourceslices",
+            "resourceclaims"
+          ],
+          "verbs": [
+            "get",
+            "list",
+            "watch"
+          ]
         }
       ]
     },

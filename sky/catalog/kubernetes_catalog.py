@@ -16,6 +16,7 @@ from sky.adaptors import kubernetes
 from sky.catalog import CloudFilter
 from sky.catalog import common
 from sky.clouds import cloud
+from sky.provision.kubernetes import dra_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
@@ -154,27 +155,35 @@ def _list_accelerators(
     if not kubernetes_utils.check_credentials(context, cloud='kubernetes')[0]:
         return {}, {}, {}
 
-    has_gpu = kubernetes_utils.detect_accelerator_resource(context)
+    has_gpu, _ = kubernetes_utils.detect_accelerator_resource(context)
     if not has_gpu:
         return {}, {}, {}
 
     lf, _ = kubernetes_utils.detect_gpu_label_formatter(context)
-    if not lf:
+    # Per-node GPU capacity advertised via DRA ResourceSlices (empty on
+    # device-plugin-only clusters). Best-effort: failure to read
+    # resource.k8s.io must not break device-plugin listing.
+    try:
+        dra_capacity = dra_utils.get_dra_node_capacity(context)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get DRA node capacity: {e}')
+        dra_capacity = {}
+    if not lf and not dra_capacity:
         return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
-    keys = lf.get_label_keys()
+    keys = lf.get_label_keys() if lf else []
     nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
 
     # Check if any nodes have accelerators before fetching pods
-    has_accelerator_nodes = False
+    has_accelerator_nodes = bool(dra_capacity)
     for node in nodes:
+        if has_accelerator_nodes:
+            break
         for key in keys:
             if key in node.metadata.labels:
                 has_accelerator_nodes = True
                 break
-        if has_accelerator_nodes:
-            break
 
     # Only fetch pods if we have accelerator nodes and realtime is requested
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
@@ -203,6 +212,85 @@ def _list_accelerators(
     configured_tolerations = kubernetes_utils.get_configured_tolerations(
         context)
 
+    # Per-node allocation not yet attributed to an accelerator row, so a
+    # node accounted through both node labels and DRA does not have its
+    # allocated GPUs subtracted twice. Note allocated_qty_by_node already
+    # includes GPUs allocated via DRA ResourceClaims.
+    remaining_allocated: Dict[str, int] = dict(allocated_qty_by_node)
+    # DRA capacity not yet accounted through the label-driven pass.
+    remaining_dra: Dict[str, Dict[str, int]] = {
+        node_name: dict(accs) for node_name, accs in dra_capacity.items()
+    }
+
+    def _account_accelerator(node, accelerator_name: str,
+                             accelerator_count: int, node_is_ready: bool,
+                             node_is_cordoned: bool,
+                             node_is_tainted: bool) -> None:
+        """Accumulates one (node, accelerator) row into the result dicts."""
+        # Check if name_filter regex matches the accelerator_name
+        regex_flags = 0 if case_sensitive else re.IGNORECASE
+        if name_filter and not re.match(
+                name_filter, accelerator_name, flags=regex_flags):
+            return
+
+        if accelerator_count > 0:
+            # TPUs are counted in a different way compared to GPUs.
+            # Multi-node GPUs can be split into smaller units and be
+            # provisioned, but TPUs are considered as an atomic unit.
+            if kubernetes_utils.is_tpu_on_gke(accelerator_name):
+                accelerators_qtys.add((accelerator_name, accelerator_count))
+            else:
+                count = 1
+                while count <= accelerator_count:
+                    accelerators_qtys.add((accelerator_name, count))
+                    count *= 2
+                # Add the accelerator count if it's not already in the
+                # set (e.g., if there's 12 GPUs, we should have qtys 1,
+                # 2, 4, 8, 12)
+                if accelerator_count not in accelerators_qtys:
+                    accelerators_qtys.add((accelerator_name, accelerator_count))
+
+        if accelerator_count >= min_quantity_filter:
+            quantized_count = (min_quantity_filter *
+                               (accelerator_count // min_quantity_filter))
+            if accelerator_name not in total_accelerators_capacity:
+                total_accelerators_capacity[accelerator_name] = quantized_count
+            else:
+                total_accelerators_capacity[accelerator_name] += quantized_count
+
+        # Initialize the total_accelerators_available to make sure the
+        # key exists in the dictionary.
+        total_accelerators_available[accelerator_name] = (
+            total_accelerators_available.get(accelerator_name, 0))
+
+        # Skip availability counting for not-ready, cordoned,
+        # or tainted nodes
+        if not node_is_ready or node_is_cordoned or node_is_tainted:
+            return
+
+        if error_on_get_allocated_gpu_qty_by_node:
+            # If we can't get the allocated GPU quantity by each node,
+            # we can't get the GPU usage.
+            total_accelerators_available[accelerator_name] = -1
+            return
+
+        allocated_qty = min(remaining_allocated.get(node.metadata.name, 0),
+                            accelerator_count)
+        remaining_allocated[node.metadata.name] = (
+            remaining_allocated.get(node.metadata.name, 0) - allocated_qty)
+        accelerators_available = accelerator_count - allocated_qty
+
+        if accelerators_available >= min_quantity_filter:
+            quantized_availability = min_quantity_filter * (
+                accelerators_available // min_quantity_filter)
+            if quantized_availability > 0:
+                # only increment when quantized availability is positive
+                # to avoid assertion errors checking keyset sizes in
+                # core.py _realtime_kubernetes_gpu_availability_single
+                total_accelerators_available[accelerator_name] = (
+                    total_accelerators_available.get(accelerator_name, 0) +
+                    quantized_availability)
+
     for node in nodes:
         # Check if node is ready
         node_is_ready = node.is_ready()
@@ -221,6 +309,7 @@ def _list_accelerators(
 
         for key in keys:
             if key in node.metadata.labels:
+                assert lf is not None
                 accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(key))
 
@@ -234,76 +323,36 @@ def _list_accelerators(
                 if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
                     continue
 
-                # Check if name_filter regex matches the accelerator_name
-                regex_flags = 0 if case_sensitive else re.IGNORECASE
-                if name_filter and not re.match(
-                        name_filter, accelerator_name, flags=regex_flags):
-                    continue
+                # Generate the accelerator quantities. DRA nodes (appearing
+                # in GPU ResourceSlices) are counted from their
+                # DRA-advertised devices, which do not appear in
+                # allocatable; all other nodes from allocatable. Using a
+                # single per-node mechanism avoids double counting if a
+                # misconfigured node advertises the same GPUs through both.
+                # The DRA entry is consumed so the DRA-only pass below does
+                # not account this row again.
+                dra_count = remaining_dra.get(node.metadata.name,
+                                              {}).pop(accelerator_name, 0)
+                if node.metadata.name in dra_capacity:
+                    accelerator_count = dra_count
+                else:
+                    accelerator_count = (
+                        kubernetes_utils.get_node_accelerator_count(
+                            context, node.status.allocatable))
 
-                # Generate the accelerator quantities
-                accelerator_count = (
-                    kubernetes_utils.get_node_accelerator_count(
-                        context, node.status.allocatable))
+                _account_accelerator(node, accelerator_name, accelerator_count,
+                                     node_is_ready, node_is_cordoned,
+                                     node_is_tainted)
 
-                if accelerator_count > 0:
-                    # TPUs are counted in a different way compared to GPUs.
-                    # Multi-node GPUs can be split into smaller units and be
-                    # provisioned, but TPUs are considered as an atomic unit.
-                    if kubernetes_utils.is_tpu_on_gke(accelerator_name):
-                        accelerators_qtys.add(
-                            (accelerator_name, accelerator_count))
-                    else:
-                        count = 1
-                        while count <= accelerator_count:
-                            accelerators_qtys.add((accelerator_name, count))
-                            count *= 2
-                        # Add the accelerator count if it's not already in the
-                        # set (e.g., if there's 12 GPUs, we should have qtys 1,
-                        # 2, 4, 8, 12)
-                        if accelerator_count not in accelerators_qtys:
-                            accelerators_qtys.add(
-                                (accelerator_name, accelerator_count))
-
-                if accelerator_count >= min_quantity_filter:
-                    quantized_count = (
-                        min_quantity_filter *
-                        (accelerator_count // min_quantity_filter))
-                    if accelerator_name not in total_accelerators_capacity:
-                        total_accelerators_capacity[
-                            accelerator_name] = quantized_count
-                    else:
-                        total_accelerators_capacity[
-                            accelerator_name] += quantized_count
-
-                # Initialize the total_accelerators_available to make sure the
-                # key exists in the dictionary.
-                total_accelerators_available[accelerator_name] = (
-                    total_accelerators_available.get(accelerator_name, 0))
-
-                # Skip availability counting for not-ready, cordoned,
-                # or tainted nodes
-                if not node_is_ready or node_is_cordoned or node_is_tainted:
-                    continue
-
-                if error_on_get_allocated_gpu_qty_by_node:
-                    # If we can't get the allocated GPU quantity by each node,
-                    # we can't get the GPU usage.
-                    total_accelerators_available[accelerator_name] = -1
-                    continue
-
-                allocated_qty = allocated_qty_by_node[node.metadata.name]
-                accelerators_available = accelerator_count - allocated_qty
-
-                if accelerators_available >= min_quantity_filter:
-                    quantized_availability = min_quantity_filter * (
-                        accelerators_available // min_quantity_filter)
-                    if quantized_availability > 0:
-                        # only increment when quantized availability is positive
-                        # to avoid assertion errors checking keyset sizes in
-                        # core.py _realtime_kubernetes_gpu_availability_single
-                        total_accelerators_available[accelerator_name] = (
-                            total_accelerators_available.get(
-                                accelerator_name, 0) + quantized_availability)
+        # Account DRA-advertised accelerators not covered by the label pass
+        # (e.g. DRA-only nodes without GPU Feature Discovery labels).
+        node_dra_capacity = remaining_dra.get(node.metadata.name)
+        if node_dra_capacity:
+            for accelerator_name in list(node_dra_capacity.keys()):
+                accelerator_count = node_dra_capacity.pop(accelerator_name)
+                _account_accelerator(node, accelerator_name, accelerator_count,
+                                     node_is_ready, node_is_cordoned,
+                                     node_is_tainted)
 
     pricing = _get_pricing(context)
 

@@ -21,6 +21,7 @@ from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.gcp import constants as gcp_constants
+from sky.provision.kubernetes import dra_utils
 from sky.provision.kubernetes import fuse as kubernetes_fuse
 from sky.provision.kubernetes import host_network_probe
 from sky.provision.kubernetes import network_utils
@@ -804,6 +805,14 @@ class Kubernetes(clouds.Cloud):
             else:
                 k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
                     context)
+                # On clusters that advertise GPUs via DRA, verify the
+                # extended resource request is schedulable (KEP-5004
+                # DeviceClass mapping) and remap the key to the
+                # DeviceClass-declared name if needed. Raises with
+                # actionable guidance on DRA-only clusters without the
+                # mapping.
+                k8s_resource_key = dra_utils.maybe_remap_resource_key_for_dra(
+                    context, k8s_resource_key)
         else:
             # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
             # maintain GPU isolation. This is to override the default behavior

@@ -30,6 +30,7 @@ from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import constants as kubernetes_constants
+from sky.provision.kubernetes import dra_utils
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -1510,6 +1511,15 @@ def detect_accelerator_resource(
                        TPU_RESOURCE_KEY in cluster_resources or
                        NEURON_RESOURCE_KEY in cluster_resources)
 
+    if not has_accelerator and dra_utils.detect_dra(context):
+        # GPUs advertised via DRA (resource.k8s.io) do not appear in
+        # node.status.allocatable. Surface the extended resource names
+        # declared on DeviceClasses (KEP-5004) so error messages and
+        # downstream checks reflect the DRA-advertised resources.
+        has_accelerator = True
+        cluster_resources.update(
+            dra_utils.get_extended_resource_mapping(context).keys())
+
     return has_accelerator, cluster_resources
 
 
@@ -2222,6 +2232,10 @@ def diagnose_terminated_pod(context: Optional[str], namespace: str,
 @dataclasses.dataclass
 class V1PodStatus:
     phase: str
+    # True when the scheduler translated the pod's extended resource
+    # requests (e.g. nvidia.com/gpu) into a DRA ResourceClaim (KEP-5004).
+    # Such GPUs are accounted via ResourceClaims, not container requests.
+    has_extended_resource_claims: bool = False
 
 
 @dataclasses.dataclass
@@ -2254,7 +2268,11 @@ class V1Pod:
             labels=data['metadata'].get('labels', {}),
             namespace=data['metadata'].get('namespace'),
         ),
-                   status=V1PodStatus(phase=data['status'].get('phase'),),
+                   status=V1PodStatus(
+                       phase=data['status'].get('phase'),
+                       has_extended_resource_claims=bool(
+                           data['status'].get('extendedResourceClaimStatus')),
+                   ),
                    spec=V1PodSpec(
                        node_name=data['spec'].get('nodeName'),
                        containers=[
@@ -2300,6 +2318,15 @@ def get_allocated_resources_by_node(
         allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
         allocated_cpu_memory_by_node: Dict[str, Tuple[
             float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
+        # Nodes whose GPUs are managed via DRA: their GPU allocations are
+        # accounted from ResourceClaims below, not from container requests.
+        # Best-effort: a failure to read resource.k8s.io must not break
+        # device-plugin accounting.
+        try:
+            dra_node_names = dra_utils.get_dra_gpu_node_names(context)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get DRA node names: {e}')
+            dra_node_names = set()
         for item_dict in ijson.items(response,
                                      'items.item',
                                      buf_size=IJSON_BUFFER_SIZE):
@@ -2319,9 +2346,16 @@ def get_allocated_resources_by_node(
             for container in pod.spec.containers:
                 if container.resources.requests:
                     requests = container.resources.requests
-                    # Parse GPU
-                    pod_allocated_qty += get_node_accelerator_count(
-                        context, requests)
+                    # Parse GPU. On DRA nodes GPU allocations are accounted
+                    # from ResourceClaims, so skip container requests there
+                    # (KEP-5004-translated pods carry both a request and a
+                    # claim; counting both would double count). The
+                    # extendedResourceClaimStatus check is kept as defense
+                    # for pods not attributable to a DRA node.
+                    if (pod.spec.node_name not in dra_node_names and
+                            not pod.status.has_extended_resource_claims):
+                        pod_allocated_qty += get_node_accelerator_count(
+                            context, requests)
                     # Parse CPU
                     if 'cpu' in requests:
                         pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
@@ -2339,6 +2373,20 @@ def get_allocated_resources_by_node(
                 allocated_cpu_memory_by_node[pod.spec.node_name] = (
                     current_cpu + pod_allocated_cpu,
                     current_memory + pod_allocated_memory_gb)
+        # Merge in GPUs allocated via DRA ResourceClaims (including claims
+        # the scheduler created for KEP-5004 extended resource requests) on
+        # DRA nodes. Claims on non-DRA nodes are ignored: those nodes'
+        # capacity is accounted from allocatable, so their allocations must
+        # come from pod requests to stay consistent.
+        if dra_node_names:
+            try:
+                dra_allocated = dra_utils.get_dra_allocated_by_node(context)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get DRA allocations: {e}')
+                dra_allocated = {}
+            for node_name, acc_counts in dra_allocated.items():
+                if node_name in dra_node_names:
+                    allocated_qty_by_node[node_name] += sum(acc_counts.values())
         return allocated_qty_by_node, allocated_cpu_memory_by_node
     finally:
         response.release_conn()
@@ -2547,12 +2595,22 @@ def check_instance_fits(
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
-        # Get the set of nodes that have the GPU type
-        gpu_nodes = [
-            node for node in nodes
-            if node.is_ready() and gpu_label_key in node.metadata.labels and
-            node.metadata.labels[gpu_label_key] in gpu_label_values
-        ]
+        if gpu_label_key is None:
+            # DRA fallback: GPUs are advertised via ResourceSlices and the
+            # nodes carry no recognizable accelerator label. Select nodes by
+            # their DRA-advertised capacity instead.
+            gpu_nodes = [
+                node for node in nodes
+                if node.is_ready() and dra_utils.get_dra_node_count_for_acc(
+                    context, node.metadata.name, acc_type) > 0
+            ]
+        else:
+            # Get the set of nodes that have the GPU type
+            gpu_nodes = [
+                node for node in nodes
+                if node.is_ready() and gpu_label_key in node.metadata.labels and
+                node.metadata.labels[gpu_label_key] in gpu_label_values
+            ]
         if not gpu_nodes:
             return False, f'No ready GPU nodes found with {acc_type} on the cluster'
         if is_tpu_on_gke(acc_type):
@@ -2563,10 +2621,23 @@ def check_instance_fits(
             if reason is not None:
                 return fits, reason
         else:
+
+            def _node_gpu_capacity(node) -> int:
+                # DRA nodes (appearing in GPU ResourceSlices) are counted
+                # from their DRA-advertised devices; all other nodes from
+                # allocatable. Using a single per-node mechanism avoids
+                # double counting if a misconfigured node advertises the
+                # same GPUs through both.
+                if dra_utils.is_dra_node(context, node.metadata.name):
+                    return dra_utils.get_dra_node_count_for_acc(
+                        context, node.metadata.name, acc_type)
+                return get_node_accelerator_count(context,
+                                                  node.status.allocatable)
+
             # Check if any of the GPU nodes have sufficient number of GPUs.
             gpu_nodes = [
-                node for node in gpu_nodes if get_node_accelerator_count(
-                    context, node.status.allocatable) >= acc_count
+                node for node in gpu_nodes
+                if _node_gpu_capacity(node) >= acc_count
             ]
             if not gpu_nodes:
                 return False, (
@@ -2740,6 +2811,16 @@ def get_accelerator_label_key_values(
         label_formatter, node_labels = \
             detect_gpu_label_formatter(context)
         if label_formatter is None:
+            # DRA fallback: the cluster advertises GPUs via ResourceSlices
+            # but its nodes carry no recognizable accelerator label. Pod
+            # placement is then delegated to the kube-scheduler (via
+            # KEP-5004 extended resource translation), so no node label
+            # key/values are needed.
+            if check_mode and dra_utils.detect_dra(context):
+                return None, None, None, None
+            if not check_mode and dra_utils.has_dra_accelerator(
+                    context, acc_type, acc_count):
+                return None, None, None, None
             # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
             # detected, raise error
             with ux_utils.print_exception_no_traceback():
@@ -2826,6 +2907,14 @@ def get_accelerator_label_key_values(
                                     continue
                         else:
                             return label, [value], None, None
+
+            # DRA fallback: no labeled node carries the requested
+            # accelerator, but a node may still advertise it via DRA
+            # ResourceSlices (e.g. a mixed cluster where only some nodes
+            # run GPU Feature Discovery). Delegate placement to the
+            # kube-scheduler in that case.
+            if dra_utils.has_dra_accelerator(context, acc_type, acc_count):
+                return None, None, None, None
 
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
@@ -4503,12 +4592,21 @@ def get_kubernetes_node_info(
     else:
         label_keys = lf.get_label_keys()
 
+    # Per-node GPU capacity advertised via DRA ResourceSlices (empty on
+    # device-plugin-only clusters). Best-effort: a failure to read
+    # resource.k8s.io must not break node info for device-plugin clusters.
+    try:
+        dra_capacity = dra_utils.get_dra_node_capacity(context)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get DRA node capacity: {e}')
+        dra_capacity = {}
+
     # Check if all nodes have no accelerators to avoid fetching pods
     has_accelerator_nodes = False
     for node in nodes:
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
-        if accelerator_count > 0:
+        if accelerator_count > 0 or dra_capacity.get(node.metadata.name):
             has_accelerator_nodes = True
             break
 
@@ -4571,8 +4669,21 @@ def get_kubernetes_node_info(
                         node_ip = address.address
                         break
 
-        accelerator_count = get_node_accelerator_count(context,
-                                                       node.status.allocatable)
+        node_dra_capacity = dra_capacity.get(node.metadata.name)
+        if node_dra_capacity:
+            # DRA node: count the DRA-advertised devices (which do not
+            # appear in allocatable). Using a single per-node mechanism
+            # avoids double counting if a misconfigured node advertises
+            # the same GPUs through both the device plugin and DRA.
+            accelerator_count = sum(node_dra_capacity.values())
+            if accelerator_name is None:
+                # No recognizable node label; use the (most numerous)
+                # DRA-advertised accelerator name.
+                accelerator_name = max(node_dra_capacity.items(),
+                                       key=lambda item: item[1])[0]
+        else:
+            accelerator_count = get_node_accelerator_count(
+                context, node.status.allocatable)
 
         # Parse CPU and memory from node capacity
         cpu_count = None
