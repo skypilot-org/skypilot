@@ -151,6 +151,19 @@ def test_on_demand_executor_metrics(monkeypatch):
     executor = OnDemandThreadExecutor(name=name, max_workers=2)
     release_event = threading.Event()
     try:
+        # The gauges must use 'liveall': the multiprocess collector strips
+        # any label named 'pid' for the aggregating modes (livesum etc.) and
+        # merges all processes into one series, hiding per-process
+        # exhaustion. This registry-level test cannot catch that (the
+        # multiprocess merge only runs when PROMETHEUS_MULTIPROC_DIR is
+        # set), so pin the mode directly.
+        # pylint: disable=protected-access
+        assert (metrics_utils.SKY_APISERVER_THREADS_ACTIVE._multiprocess_mode ==
+                'liveall')
+        assert (metrics_utils.SKY_APISERVER_THREADS_MAX._multiprocess_mode ==
+                'liveall')
+        # pylint: enable=protected-access
+
         assert _gauge_value('sky_apiserver_threads_max', name) == 2
         assert _gauge_value('sky_apiserver_threads_active', name) == 0
 
