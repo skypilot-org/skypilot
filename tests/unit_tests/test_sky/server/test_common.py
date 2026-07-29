@@ -780,3 +780,41 @@ def test_handle_request_error_5xx_stays_httperror():
     resp = _fake_response(500, {'detail': 'server boom'})
     with pytest.raises(requests.exceptions.HTTPError):
         common.handle_request_error(resp)
+
+
+def test_redact_url_password_masks_password():
+    """The password is masked while the rest of the URL is preserved."""
+    redacted = common.redact_url_password(
+        'http://alice:s3cr3t@example.com:8080')
+    assert redacted == 'http://alice:<redacted>@example.com:8080'
+    # The real password must not survive anywhere in the output.
+    assert 's3cr3t' not in redacted
+
+
+def test_redact_url_password_preserves_path_and_query():
+    """Scheme, host, port, path and query are all kept intact."""
+    url = 'https://user:hunter2@host:443/api/v1?token=abc'
+    redacted = common.redact_url_password(url)
+    assert redacted == 'https://user:<redacted>@host:443/api/v1?token=abc'
+    assert 'hunter2' not in redacted
+
+
+def test_redact_url_password_without_password_is_unchanged():
+    # No credentials at all.
+    assert common.redact_url_password(
+        'http://example.com:46580') == 'http://example.com:46580'
+    # A username but no password should be left alone.
+    assert common.redact_url_password(
+        'http://alice@example.com') == 'http://alice@example.com'
+
+
+def test_redact_url_password_ipv6_keeps_brackets():
+    """IPv6 hosts must stay bracketed so the ':port' is unambiguous."""
+    redacted = common.redact_url_password('http://user:pw@[::1]:8080')
+    assert redacted == 'http://user:<redacted>@[::1]:8080'
+
+
+def test_redact_url_password_non_url_is_unchanged():
+    # Something that isn't a URL should pass through untouched.
+    assert common.redact_url_password('not-a-url') == 'not-a-url'
+    assert common.redact_url_password('') == ''
