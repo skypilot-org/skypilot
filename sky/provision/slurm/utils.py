@@ -18,6 +18,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import gpu_names
+from sky.utils import subprocess_utils
 from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
@@ -941,8 +942,7 @@ def resolve_gres_gpu_type(
     return chosen
 
 
-def _get_slurm_node_info_list(
-        slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
     Raises:
@@ -954,11 +954,6 @@ def _get_slurm_node_info_list(
 
     # can raise FileNotFoundError if config file does not exist.
     slurm_config = get_slurm_ssh_config()
-    if slurm_cluster_name is None:
-        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
-        if not slurm_cluster_names:
-            return []
-        slurm_cluster_name = slurm_cluster_names[0]
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
@@ -1044,18 +1039,39 @@ def _get_slurm_node_info_list(
 
 def slurm_node_info(
         slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Gets detailed information for each node in the Slurm cluster.
+    """Gets detailed information for each node in the Slurm cluster(s).
+
+    Args:
+        slurm_cluster_name: The Slurm cluster to query. If None, node info
+            is aggregated across all existing allowed Slurm clusters.
 
     Returns:
         List[Dict[str, Any]]: A list of dictionaries, each containing node info.
     """
-    try:
-        node_list = _get_slurm_node_info_list(
-            slurm_cluster_name=slurm_cluster_name)
-    except (FileNotFoundError, RuntimeError, exceptions.NotSupportedError) as e:
-        logger.debug(f'Could not retrieve Slurm node info: {e}')
-        return []
-    return node_list
+    if slurm_cluster_name is not None:
+        clusters_to_query = [slurm_cluster_name]
+    else:
+        clusters_to_query = clouds.Slurm.existing_allowed_clusters()
+        if not clusters_to_query:
+            return []
+
+    def _query_cluster(cluster_name: str) -> List[Dict[str, Any]]:
+        try:
+            return _get_slurm_node_info_list(slurm_cluster_name=cluster_name)
+        except (FileNotFoundError, RuntimeError,
+                exceptions.NotSupportedError) as e:
+            logger.debug('Could not retrieve Slurm node info for cluster '
+                         f'{cluster_name!r}: {e}')
+            return []
+
+    if len(clusters_to_query) == 1:
+        return _query_cluster(clusters_to_query[0])
+    node_info_lists = subprocess_utils.run_in_parallel(_query_cluster,
+                                                       clusters_to_query)
+    return [
+        node_info for node_info_list in node_info_lists
+        for node_info in node_info_list
+    ]
 
 
 def is_inside_slurm_cluster() -> bool:
