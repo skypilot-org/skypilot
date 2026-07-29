@@ -54,6 +54,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import debug_dump_helpers
 from sky.utils import infra_utils
@@ -1859,6 +1860,7 @@ def stream_logs_by_id(
         prev_msg = msg
         while (managed_job_status :=
                managed_job_state.get_status(job_id)) is None:
+            context_utils.raise_if_canceled()
             time.sleep(1)
 
         # Show hint about per-task filtering when there are multiple tasks
@@ -2068,6 +2070,7 @@ def stream_logs_by_id(
         task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
+            context_utils.raise_if_canceled()
             handle = None
             job_id_to_tail = None
             if task_id is not None:
@@ -2101,6 +2104,7 @@ def stream_logs_by_id(
                 # status every JOB_STATUS_CHECK_GAP_SECONDS.
                 waited = 0.0
                 while True:
+                    context_utils.raise_if_canceled()
                     # Keep the "Waiting for task to start" context and append
                     # the live cluster-launch status, so it's clear the job is
                     # waiting on its cluster to be provisioned.
@@ -2219,6 +2223,7 @@ def stream_logs_by_id(
                         while not is_managed_job_status_updated(
                                 managed_job_status :=
                                 managed_job_state.get_status(job_id)):
+                            context_utils.raise_if_canceled()
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         assert managed_job_status is not None, (
                             job_id, managed_job_status)
@@ -2247,6 +2252,7 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
+                        context_utils.raise_if_canceled()
                         latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
                         if original_task_id != latest_task_id:
@@ -2285,6 +2291,7 @@ def stream_logs_by_id(
             # controller, and check the managed job queue again.
             # Wait a bit longer than the controller, so as to make sure the
             # managed job state is updated.
+            context_utils.raise_if_canceled()
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, (job_id, managed_job_status)
@@ -2297,6 +2304,7 @@ def stream_logs_by_id(
     assert managed_job_status is not None, job_id
     while (should_keep_logging(managed_job_status) and follow and
            wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
+        context_utils.raise_if_canceled()
         time.sleep(1)
         wait_seconds += 1
         managed_job_status = managed_job_state.get_status(job_id)
@@ -2374,6 +2382,7 @@ def stream_logs(job_id: Optional[int],
 
         # Wait for the log file to be written
         while not os.path.exists(controller_log_path):
+            context_utils.raise_if_canceled()
             if not follow:
                 # Assume that the log file hasn't been written yet. Since we
                 # aren't following, just return.
@@ -2430,6 +2439,7 @@ def stream_logs(job_id: Optional[int],
                       encoding='utf-8') as f:
                 f.seek(end_pos)
                 while True:
+                    context_utils.raise_if_canceled()
                     # Print all new lines, if there are any.
                     line = f.readline()
                     while line is not None and line != '':
