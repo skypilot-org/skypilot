@@ -22,6 +22,7 @@
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -179,6 +180,64 @@ def test_minimal_arm64(generic_cloud: str):
         smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Clamp the nofile limit on low-soft-limit containers ----------
+@pytest.mark.kubernetes
+def test_kubernetes_nofile_limit_clamp():
+    """The raylet must not be left with a low soft nofile limit.
+
+    Kubernetes containers commonly start with 1024:524288 nofile limits
+    (systemd's default, which containerd 2.0+ inherits), and the hard limit
+    cannot be raised inside the container (no CAP_SYS_RESOURCE). On such
+    clusters an unclamped raise fails and the raylet runs out of file
+    descriptors while starting many workers at once.
+
+    Test clusters' containers start with a high soft limit, so the shape is
+    recreated with `kubernetes.post_provision_runcmd`, which runs at the top
+    of the pod entrypoint before SkyPilot raises the limit: lower the limits
+    to 1024:4096, then assert the raylet ends up at exactly 4096:4096.
+    Asserting the hard limit proves the runcmd applied, so the test cannot
+    pass vacuously on a cluster whose native soft limit is already high.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as config:
+        config.write(
+            textwrap.dedent("""\
+                kubernetes:
+                  post_provision_runcmd:
+                    - ulimit -Sn 1024 && ulimit -Hn 4096
+                """))
+        config.flush()
+        check_raylet_clamped = shlex.quote(
+            'pid=$(pgrep -f "raylet/raylet --raylet_socket_name"); '
+            'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+            'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+            'echo "raylet nofile: soft=$soft hard=$hard (want 4096 4096)"; '
+            '[ "$soft" = 4096 ] && [ "$hard" = 4096 ]')
+        # What actually breaks without the clamp: a job process (forked by the
+        # raylet, inheriting its limits) needing more fds than the container's
+        # 1024 default soft limit.
+        open_2000_fds = shlex.quote(
+            'python3 -c "import os; '
+            'fds = [os.open(os.devnull, os.O_RDONLY) for _ in range(2000)]; '
+            'print(\'opened\', len(fds), \'fds\')"')
+        test = smoke_tests_utils.Test(
+            'kubernetes_nofile_limit_clamp',
+            [
+                f'sky launch -y -c {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} --config {config.name} '
+                'tests/test_yamls/minimal.yaml',
+                f'sky logs {name} 1 --status',
+                f'sky exec {name} {check_raylet_clamped}',
+                f'sky logs {name} 2 --status',
+                f'sky exec {name} {open_2000_fds}',
+                f'sky logs {name} 3 --status',
+            ],
+            f'sky down -y {name}',
+            smoke_tests_utils.get_timeout('kubernetes'),
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- A minimal task with git repository workdir ----------
