@@ -817,11 +817,13 @@ available_node_types:
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
-              # Raise the open files limit before the STEPS below fork, so that
-              # both ray (started by the "runtime-setup" STEP) and anything
-              # later launched over SSH (the "apt-ssh-setup" STEP restarts sshd
-              # as a descendant of this shell) inherit it. Otherwise the raylet
-              # can run out of file descriptors while starting its workers.
+              # Raise the open files limit before the STEPS below fork, so
+              # that ray (started by the "runtime-setup" STEP) inherits it;
+              # otherwise the raylet can run out of file descriptors while
+              # starting its workers. SSH sessions do not inherit from this
+              # shell -- sshd resets its own soft limit; they get theirs from
+              # the limits.conf entry written in setup_commands, applied by
+              # pam_limits at login.
               {{raise_nofile_limit_command}}
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
