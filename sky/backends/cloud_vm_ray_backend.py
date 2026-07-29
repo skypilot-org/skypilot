@@ -263,6 +263,14 @@ def _format_provision_failure_blocks(
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
 
+# When a provision request cannot get the cluster lock within
+# _CLUSTER_LOCK_TIMEOUT and runs on an API server executor, it is parked as
+# WAITING (releasing the executor worker) until the lock is observed to be
+# acquirable, instead of holding the worker blocked on the lock for the whole
+# duration of the conflicting operation. This gap is the fallback reschedule
+# backoff when waiting on the lock condition fails (e.g. a database glitch).
+_CLUSTER_LOCK_RETRY_GAP_SECONDS = 30
+
 
 def _is_message_too_long(returncode: int,
                          output: Optional[str] = None,
@@ -3304,6 +3312,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
+            exceptions.ExecutionPausedError: when running on an API server
+                executor worker and the cluster lock is held by another
+                operation: the request is parked as WAITING (releasing the
+                worker) and re-enqueued once the lock is observed to be
+                acquirable, instead of blocking on the lock.
             RuntimeError: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
@@ -3326,7 +3339,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               retry_until_up,
                                               skip_unnecessary_provisioning,
                                               resize)
-            except locks.LockTimeout:
+            except locks.LockTimeout as e:
+                # When running a server request that the scheduler can park and
+                # resume, release the worker instead of holding it blocked on
+                # the cluster lock: raising ExecutionPausedError marks the
+                # request WAITING and re-enqueues it once the attached
+                # condition observes the lock to be acquirable. Launches issued
+                # by the jobs controller in-process do not go through the
+                # request scheduler, so they keep the blocking behavior.
+                if (common_utils.is_in_request_context() and
+                        not self._is_launched_by_jobs_controller):
+                    raise exceptions.ExecutionPausedError(
+                        f'Cluster {cluster_name!r} is locked by another '
+                        'operation (e.g. launch, start, stop, autostop or '
+                        'teardown).',
+                        hint=('Waiting for the other operation to finish; '
+                              'will resume once the cluster lock is '
+                              'released. Check concurrent requests: '
+                              f'sky api status -v | grep {cluster_name}'),
+                        retry_wait_seconds=_CLUSTER_LOCK_RETRY_GAP_SECONDS,
+                        continue_condition=locks.LockAcquirableCondition(
+                            lock_id)) from e
                 if not communicated_with_user:
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching - blocked by ' +

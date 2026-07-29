@@ -3,6 +3,7 @@
 import os
 
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
 # pylint: disable=line-too-long
 # The SkyPilot API version that the code currently use.
@@ -86,8 +87,10 @@ MIN_AVAIL_MEM_GB = 2
 MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE = 4
 # Default encoder/decoder handler name.
 DEFAULT_HANDLER_NAME = 'default'
-# The path to the API request database.
-API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
+# The path to the API request database. Anchored at SKY_RUNTIME_DIR when set,
+# so that multiple API servers on one machine keep separate request state.
+API_SERVER_REQUEST_DB_PATH = runtime_utils.runtime_tilde_path(
+    '~/.sky/api_server/requests.db')
 
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.
@@ -149,8 +152,10 @@ ON_BOOT_CHECK_REQUEST_ID = 'skypilot-server-on-boot-check'
 
 # Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
 # performance issues in Kubernetes deployments where ~/sky_logs/ may be on
-# shared storage.
-REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
+# shared storage. Anchored at SKY_RUNTIME_DIR when set, since this dir is
+# wiped on every server startup.
+REQUEST_LOG_PATH_PREFIX = runtime_utils.runtime_tilde_path(
+    '~/.sky/api_server/request_logs')
 
 # Default maximum size of a daemon log file before rotation (bytes).
 # When a daemon log exceeds this threshold, it is backed up to .log.1 and

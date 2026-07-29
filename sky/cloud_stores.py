@@ -119,16 +119,38 @@ class GcsCloudStorage(CloudStorage):
     @property
     def _gsutil_command(self):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+        default_credential_path = (
+            gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH.replace(
+                '~/', '$HOME/', 1))
+        credential_type_command = ('python3 -c \'import json, sys; '
+                                   'print(json.load(open(sys.argv[1], '
+                                   'encoding="utf-8")).get("type", ""))\' '
+                                   '"$credentials_file" 2> /dev/null || true')
+        gsutil_with_auth = 'skypilot_gsutil_with_auth'
         return (
-            f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
-            f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+            f'{alias_gen}; '
+            f'{gsutil_with_auth}() {{ '
+            'local credentials_file='
+            '"${GOOGLE_APPLICATION_CREDENTIALS:-'
+            f'{default_credential_path}'
+            '}"; '
+            'local credential_type; '
+            f'credential_type=$({credential_type_command}); '
+            'if [[ "$credential_type" == "external_account" ]]; then '
+            'export CLOUDSDK_CORE_PASS_CREDENTIALS_TO_GSUTIL=0; '
+            f'{gsutil_alias} '
+            '-o "Credentials:gs_external_account_file=$credentials_file" '
+            '"$@"; '
+            'else '
             # Explicitly activate service account. Unlike the gcp packages
             # and other GCP commands, gsutil does not automatically pick up
             # the default credential keys when it is a service account.
             'gcloud auth activate-service-account '
-            '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
-            '2> /dev/null || true; '
-            f'{gsutil_alias}')
+            '--key-file="$credentials_file" 2> /dev/null || true; '
+            f'{gsutil_alias} "$@"; '
+            'fi; '
+            '}; '
+            f'{gsutil_with_auth}')
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.

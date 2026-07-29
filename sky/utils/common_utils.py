@@ -109,6 +109,10 @@ def get_git_commit(path: Optional[str] = None) -> Optional[str]:
                                 cwd=path,
                                 check=True)
         return result.stdout.strip()
+    except FileNotFoundError as error:
+        if error.filename == 'git':
+            return None
+        raise
     except subprocess.CalledProcessError:
         return None
 
@@ -395,6 +399,20 @@ def get_current_request_id() -> str:
     if value is not None:
         return value
     return 'dummy-request-id'
+
+
+def is_in_request_context() -> bool:
+    """Whether this code runs inside a server-side request execution.
+
+    The API server sets the request context (see ``set_request_context``) for
+    the duration of a request running on an executor worker; it is unset for
+    in-process callers with no request scheduler (e.g. a client, or the jobs
+    controller launching in-process). Long-blocking backend paths use this to
+    decide whether raising ``exceptions.ExecutionRetryableError`` will be
+    handled by the scheduler (parked as WAITING and rescheduled) rather than
+    propagating to a caller that cannot reschedule it.
+    """
+    return context.get_context_var(_REQUEST_ID_KEY) is not None
 
 
 def get_current_command() -> str:

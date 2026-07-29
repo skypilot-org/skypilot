@@ -236,8 +236,21 @@ class Kubernetes(clouds.Cloud):
             (f'Local disk is not supported on {_REPR}'),
     }
 
-    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204'
-    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204'
+    # Default images. The `-vN` suffix is the *image contract version*: it is
+    # resolved to a concrete, immutable image via the service catalog
+    # (kubernetes/images.csv), so a given tag always maps to one built image.
+    #
+    # When to bump `-vN` (e.g. -v1 -> -v2): ONLY for a breaking image change
+    # that an older API server cannot use correctly (e.g. removing conda, which
+    # older servers assume is present). Bumping keeps the old tag frozen to the
+    # old image, so old servers keep working while new servers get the new one.
+    #
+    # When NOT to bump (most cases): routine / CVE rebuilds that keep the
+    # same contract. Do not change this string; instead repoint the same tag to
+    # the new image (a new concrete datetag) in the catalog, so existing servers
+    # pick up the update.
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2204-v1'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2204-v1'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -664,8 +677,12 @@ class Kubernetes(clouds.Cloud):
             Timeout in seconds
         """
         if is_using_queueing:
-            # Return a large timeout to let the
-            # queue system handle the provisioning
+            # Queued (e.g. Kueue) workloads wait for quota admission before
+            # they can schedule. The scheduling wait loop separately pauses
+            # the provisioning clock while pods are held by scheduling gates
+            # (see provision/kubernetes/instance.py), so this large default
+            # keeps the post-admission scheduling wait generous for
+            # deployments that have not set provision_timeout explicitly.
             return 24 * 60 * 60  # 24 hours
 
         base_timeout = 10  # Base timeout for single node
@@ -1012,6 +1029,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
+            'k8s_node_affinity': kubernetes_utils.get_node_affinity(
+                k8s_acc_label_key, k8s_acc_label_values, avoid_label_keys),
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,

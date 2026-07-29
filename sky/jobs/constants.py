@@ -1,6 +1,7 @@
 """Constants used for Managed Jobs."""
-import os
 from typing import Any, Dict, Union
+
+from sky.skylet import runtime_utils
 
 # Environment variable for JobGroup name, injected into all jobs in a JobGroup
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
@@ -25,7 +26,7 @@ DEFAULT_MANAGED_JOB_FIELDS = ('job_id', 'task_id', 'workspace', 'job_name',
 
 JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
-CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
+CONSOLIDATED_SIGNAL_PATH = runtime_utils.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 
 # The consolidation mode lock ensures that if multiple API servers are running
@@ -46,7 +47,7 @@ CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
 #   - _is_consolidation_mode(pool=True) — sizing-only helper.
 # Reading config directly instead diverges under deploy-mode auto-enable
 # (config stays null while this file is written).
-JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = runtime_utils.runtime_tilde_path(
     '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
 # Resources as a dict for the jobs controller.

@@ -59,7 +59,7 @@ def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
 def test_endpoint_output_config(generic_cloud: str):
     """Test that sky api info endpoint output is correct when config is set."""
 
-    endpoint = server_common.DEFAULT_SERVER_URL
+    endpoint = server_common.get_default_server_url()
 
     config = textwrap.dedent(f"""
     api_server:
@@ -100,7 +100,8 @@ def test_endpoint_output_env(generic_cloud: str):
                                   teardown=f'sky down -y {name}',
                                   env={
                                       constants.SKY_API_SERVER_URL_ENV_VAR:
-                                          server_common.DEFAULT_SERVER_URL
+                                          server_common.get_default_server_url(
+                                          )
                                   })
     smoke_tests_utils.run_one_test(test)
 

@@ -2521,15 +2521,32 @@ def test_kubernetes_pod_failed_mount_escalation():
         test = smoke_tests_utils.Test(
             'kubernetes_pod_failed_mount_escalation',
             [
+                # Pin the launch to a single context: the bad mount
+                # reproduces on every context, so on a multi-context API
+                # server an unpinned launch would fail over context after
+                # context — each attempt consuming the full mount-failure
+                # deadline — and could not exit within the test timeout.
+                # Launch the cloud-cmd helper and pin to the context it
+                # lands on (all three steps are no-ops on a local
+                # single-context server).
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Wait for the helper to be UP so its landed context is
+                # resolvable.
+                smoke_tests_utils.run_cloud_cmd_on_cluster(name, 'true'),
+                smoke_tests_utils.resolve_cloud_cmd_k8s_context_cmd(name),
                 # The launch must exit non-zero on its own (the
                 # mount-failure deadline, ~10 min) — a hang here trips the
                 # test timeout instead.
-                f's=$(sky launch -y -c {name} --infra kubernetes {f.name} '
+                f's=$(sky launch -y -c {name} '
+                f'--infra {smoke_tests_utils.cloud_cmd_landed_k8s_infra(name)} '
+                f'{f.name} '
                 f'2>&1); ret=$?; echo "$s"; [ $ret -ne 0 ] || exit 1; '
                 f'echo "$s" | grep "FailedMount" && '
                 f'echo "$s" | grep "MountVolume.SetUp failed"',
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
             timeout=25 * 60,
         )
         smoke_tests_utils.run_one_test(test)
@@ -3703,9 +3720,17 @@ def test_resize(generic_cloud: str):
     stopped_resize_commands = []
     if generic_cloud != 'kubernetes':
         stopped_resize_commands = [
-            # Stop the (now 1-node) cluster.
+            # Stop the (now 1-node) cluster. Poll for STOPPED instead of
+            # checking `sky status` output once: a background status refresh
+            # that raced with the teardown (its per-cluster lock is
+            # force-unlocked by `sky stop`) can transiently overwrite the
+            # freshly-written STOPPED state with INIT/UNHEALTHY, which
+            # self-corrects on the next refresh.
             f'sky stop -y {name}',
-            f's=$(sky status {name}) && echo "$s" && echo "$s" | grep {name} | grep STOPPED',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=120),
             # --- Resize a STOPPED cluster: scale up (restarts + grows) ---
             f'sky launch -y -c {name} --resize --num-nodes 2',
             f's=$(sky status {name}) && echo "$s" && echo "$s" | grep "2x" && echo "$s" | grep UP',

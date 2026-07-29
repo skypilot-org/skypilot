@@ -88,6 +88,7 @@ from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
 from sky.server.requests import workspace_access
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
@@ -2179,30 +2180,30 @@ async def download(download_body: payloads.DownloadBody,
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
         folder_str = str(folder_path)
-        expanded_str = str(folder_path.expanduser())
+        expanded_str = str(runtime_utils.expanduser_path(folder_path))
         if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp) or
-                expanded_str.startswith(os.path.expanduser(download_tmp))):
+                folder_str.startswith(download_tmp) or expanded_str.startswith(
+                    runtime_utils.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
                 f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
 
-        if not folder_path.expanduser().resolve().exists():
+        if not runtime_utils.expanduser_path(folder_path).resolve().exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
     # Create a temporary zip file
     log_id = str(uuid.uuid4().hex)
     zip_filename = f'folder_{log_id}.zip'
-    zip_path = pathlib.Path(
-        logs_dir_on_api_server).expanduser().resolve() / zip_filename
+    zip_path = runtime_utils.expanduser_path(
+        pathlib.Path(logs_dir_on_api_server)).resolve() / zip_filename
 
     try:
 
         def _zip_files_and_folders(folder_paths, zip_path):
             folders = [
-                str(folder_path.expanduser().resolve())
+                str(runtime_utils.expanduser_path(folder_path).resolve())
                 for folder_path in folder_paths
             ]
             # Check for optional query parameter to control zip entry structure
@@ -2467,13 +2468,26 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
         poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
-    # TODO(aylei): refine this, /api/get will not be retried and this is
-    # meaningless to retry. It is the original request that should be retried.
-    if request_task.should_retry:
-        raise fastapi.HTTPException(
-            status_code=503, detail=f'Request {request_id!r} should be retried')
+    # Check the error before should_retry: an interrupted request is in a
+    # terminal state (the server does not re-execute it after a restart),
+    # so clients polling /api/get must get a definitive error telling them
+    # to re-submit the original request. Returning a retryable 503 here
+    # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=request_task.encode().model_dump())
+    if request_task.should_retry:
+        # Interrupted by a server version that recorded no error object —
+        # including the very rolling update that ships this code, whose
+        # draining (old) servers still write bare should_retry rows.
+        # Synthesize the same terminal error at read time so those rows,
+        # and any already stuck in the database, stop 503ing on deploy.
+        request_task.set_error(
+            exceptions.RequestInterruptedError(
+                f'Request {request_id!r} was interrupted by an API server '
+                'restart and will not be resumed. Please re-submit the '
+                'original request.'))
         raise fastapi.HTTPException(status_code=500,
                                     detail=request_task.encode().model_dump())
     return request_task.encode()
@@ -2590,8 +2604,8 @@ async def stream(
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
-            resolved_log_path = pathlib.Path(
-                constants.API_SERVER_LOGS).expanduser()
+            resolved_log_path = runtime_utils.expanduser_path(
+                pathlib.Path(constants.API_SERVER_LOGS))
             if not resolved_log_path.exists():
                 raise fastapi.HTTPException(
                     status_code=404,
@@ -3745,7 +3759,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', default=46580, type=int)
+    parser.add_argument('--port',
+                        default=common.get_local_api_server_port(),
+                        type=int)
     parser.add_argument('--deploy', action='store_true')
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.
