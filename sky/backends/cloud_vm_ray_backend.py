@@ -3344,11 +3344,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # resume, release the worker instead of holding it blocked on
                 # the cluster lock: raising ExecutionPausedError marks the
                 # request WAITING and re-enqueues it once the attached
-                # condition observes the lock to be acquirable. Launches issued
-                # by the jobs controller in-process do not go through the
-                # request scheduler, so they keep the blocking behavior.
-                if (common_utils.is_in_request_context() and
-                        not self._is_launched_by_jobs_controller):
+                # condition observes the lock to be acquirable.
+                #
+                # The request context is the sole gate on purpose: it is
+                # exactly "a scheduler manages this request and can park and
+                # resume it". Launches issued by the jobs controller park too.
+                # The controller always launches through the SDK
+                # (recovery_strategy), so its launches run as scheduler-managed
+                # requests on whichever API server serves them: under
+                # consolidation that is the shared API server, where blocking
+                # on the lock pins one executor worker per contender (e.g.
+                # duplicate launch requests for the same cluster after
+                # controller retries) and starves the worker pool at scale;
+                # on a dedicated controller, it is the controller's local API
+                # server, where parking is equally safe -- the controller
+                # explicitly supports parked launch requests (see
+                # _wait_for_parked_request in recovery_strategy), since
+                # admission-wait pauses already park its launches via this
+                # same mechanism. Only callers with no request context (no
+                # scheduler to hand the pause to) keep the blocking behavior
+                # below.
+                if common_utils.is_in_request_context():
                     raise exceptions.ExecutionPausedError(
                         f'Cluster {cluster_name!r} is locked by another '
                         'operation (e.g. launch, start, stop, autostop or '
