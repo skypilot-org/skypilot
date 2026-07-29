@@ -20,7 +20,7 @@ import {
   streamClusterJobLogs,
 } from '@/data/connectors/clusters';
 import dashboardCache from '@/lib/cache';
-import { getWorkspaces } from '@/data/connectors/workspaces';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import {
   RotateCwIcon,
   ChevronDownIcon,
@@ -96,21 +96,10 @@ function ClusterDetails() {
   // cluster in a workspace the user can only read — matching the clusters
   // list, which gates the same actions per row. Missing entry -> treated as
   // writable (open/default workspace).
-  const [workspacesConfig, setWorkspacesConfig] = useState({});
-  useEffect(() => {
-    let cancelled = false;
-    dashboardCache
-      .get(getWorkspaces)
-      .then((cfg) => {
-        if (!cancelled) setWorkspacesConfig(cfg || {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const isClusterWorkspaceWritable =
-    workspacesConfig[clusterData?.workspace || 'default']?.writable !== false;
+  const { isWorkspaceWritable } = useWorkspacesConfig();
+  const isClusterWorkspaceWritable = isWorkspaceWritable(
+    clusterData?.workspace
+  );
 
   // Telemetry state
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);

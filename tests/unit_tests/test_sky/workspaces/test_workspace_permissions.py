@@ -352,8 +352,10 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
     def _run(self, workspaces, global_default, accessible, writable):
         """Invoke workspaces_for_user with permissions/config mocked."""
 
-        def _accessible(user_id, names, action):
-            return set(accessible) if action == 'read' else set(writable)
+        def _access_sets(user_id, names):
+            # workspaces_for_user computes the read (visible) and write sets in
+            # a single permission-service call.
+            return set(accessible), set(writable)
 
         with mock.patch('sky.skypilot_config.get_nested',
                         side_effect=self._config(workspaces, global_default)), \
@@ -362,8 +364,8 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
                                return_value=models.User(id='u', name='u')), \
              mock.patch.object(
                  workspaces_core.permission.permission_service,
-                 'get_accessible_workspace_names',
-                 side_effect=_accessible):
+                 'get_workspace_access_sets',
+                 side_effect=_access_sets):
             return workspaces_core.workspaces_for_user('u')
 
     def test_global_default_read_only_sets_flag_without_override(self):

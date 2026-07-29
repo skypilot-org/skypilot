@@ -1164,18 +1164,15 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     # that are only read-only-visible to a non-member, so the dashboard can
     # render them with the read-only badge. Consumers that need "where can I
     # create" must filter on the `writable` flag set below.
-    accessible_names = _accessible_workspace_names_for_user(
-        user_id,
-        set(workspaces.keys()),
-        action=workspace_constants.WORKSPACE_ACTION_READ)
-    # A workspace is 'writable' if the user can mutate it (a member, or the
-    # workspace is open); read-only workspaces surfaced to non-members are not.
-    # Exposed so the dashboard can enable/disable per-workspace action controls
-    # without recomputing membership client-side.
-    writable_names = _accessible_workspace_names_for_user(
-        user_id,
-        accessible_names,
-        action=workspace_constants.WORKSPACE_ACTION_WRITE)
+    #
+    # `accessible_names` (read set) is what to show; `writable_names` is where
+    # the user may act (a member, or an open workspace) -- read-only workspaces
+    # surfaced to non-members are not writable. Both are computed in a single
+    # casbin policy scan (this runs on the dashboard's clusters/jobs polling
+    # path) rather than two separate `action=` calls.
+    accessible_names, writable_names = (
+        permission.permission_service.get_workspace_access_sets(
+            user_id, set(workspaces.keys())))
     result: Dict[str, Any] = {}
     for name in accessible_names:
         # Copy so the request-cached config isn't mutated with computed state.

@@ -223,27 +223,6 @@ class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
-class RequestEndpointMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to record the dispatched endpoint context-locally.
-
-    The access level a request needs on the caller's active workspace is
-    derived from the endpoint rather than from the request name, so that
-    plugin endpoints are covered by the same declaration as OSS ones (see
-    `sky.server.requests.workspace_access`). The endpoint is only known here,
-    in the dispatch context; the classification happens further down the same
-    call chain in `executor.prepare_request_async`.
-
-    Registered as the innermost middleware so the recorded path is the one the
-    router matched — i.e. after the rewrites done by `PathCleanMiddleware` and
-    `InternalDashboardPrefixMiddleware`, which is also the path
-    `RBACMiddleware` evaluates.
-    """
-
-    async def dispatch(self, request: fastapi.Request, call_next):
-        workspace_access.set_request_endpoint(request.url.path, request.method)
-        return await call_next(request)
-
-
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
 
@@ -1027,9 +1006,25 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 @middleware_utils.websocket_aware
 class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to add API version to the request."""
+    """Middleware to add API version to the request.
+
+    Also records the dispatched endpoint context-locally for workspace-access
+    classification (see `sky.server.requests.workspace_access`). The access
+    level a request needs on the caller's active workspace is derived from the
+    endpoint rather than from the request name, so plugin endpoints are covered
+    by the same declaration as OSS ones. This is folded in here (rather than a
+    dedicated middleware) to avoid an extra `BaseHTTPMiddleware` layer -- each
+    such layer opens an anyio task group + memory stream per request, and the
+    API server is latency-sensitive.
+
+    This layer sits inside `PathCleanMiddleware` / `InternalDashboardPrefix
+    Middleware`, so `request.url.path` here is the router-matched path after
+    their rewrites -- the same path `RBACMiddleware` evaluates. It must stay
+    inside those two for the recorded path to be correct.
+    """
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        workspace_access.set_request_endpoint(request.url.path, request.method)
         version_info = versions.check_compatibility_at_server(request.headers)
         # Bypass version handling for backward compatibility with clients prior
         # to v0.11.0, the client will check the version in the body of
@@ -1067,10 +1062,10 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 # Use environment variable to make the metrics middleware optional.
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
-# Added first => innermost (wrapped by all the others), so the endpoint it
-# records is the router-matched path, after the rewrites done by
-# PathCleanMiddleware / InternalDashboardPrefixMiddleware.
-app.add_middleware(RequestEndpointMiddleware)
+# APIVersionMiddleware also records the dispatched endpoint for workspace-access
+# classification. Added near-first => inner to PathCleanMiddleware /
+# InternalDashboardPrefixMiddleware, so the path it records is the router-
+# matched one after their rewrites (see the class docstring).
 app.add_middleware(APIVersionMiddleware)
 # The order of all the authentication-related middleware is important.
 # RBACMiddleware must precede all the auth middleware, so it can access

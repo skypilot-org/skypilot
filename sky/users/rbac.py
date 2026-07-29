@@ -351,10 +351,12 @@ _WORKSPACE_READ_EXTRA_ENDPOINTS = [
 # NOT included: existing-resource mutations (cluster exec/stop/down/start/
 # autostop/cancel, jobs cancel) -- those are gated per-resource in the handler
 # on the resource's own workspace, so they are safe even if classified read
-# and may legitimately live in the read set. serve down/update, pool_down and
-# volume delete act on a named resource and do not use the active workspace at
-# all; their real protection is a per-resource gate (tracked separately), not
-# this list.
+# and may legitimately live in the read set. serve down, pool_down and volume
+# delete act on a named resource and do not use the active workspace at all --
+# there is currently NO per-resource workspace gate for services / volumes /
+# pools (see the note in docs/source/admin/workspaces.rst); classifying them
+# write here would not be their protection and would only mask that gap, so
+# they are left out on purpose.
 _ALWAYS_WRITE_ENDPOINTS = [
     {
         'path': '/launch',
@@ -370,6 +372,13 @@ _ALWAYS_WRITE_ENDPOINTS = [
     },
     {
         'path': '/serve/up',
+        'method': 'POST'
+    },
+    # `serve update` pulls up new replicas (new compute) just like `serve up`,
+    # so it is classified the same way -- keep them consistent so a wildcard
+    # `/serve/*` viewer entry cannot relax one but not the other.
+    {
+        'path': '/serve/update',
         'method': 'POST'
     },
     {

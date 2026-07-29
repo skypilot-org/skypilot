@@ -40,6 +40,14 @@ POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 # after the holder releases. See sky/utils/locks.py PostgresLock.acquire.
 POLICY_UPDATE_LOCK_POLL_INTERVAL_SECONDS = 0.1
 
+# Upper bound for `_read_only_endpoint_cache`. The key is the real request path,
+# which can carry user-supplied dynamic segments (e.g. `/ssh_node_pools/{name}/
+# down`, plugin `:id` routes), so the key space grows with traffic and the cache
+# is otherwise only cleared on allowlist rebuild (boot / config reload). Reset
+# the whole cache once it exceeds this, trading a rare cold miss (58 regexes)
+# for a hard memory bound in a long-lived server process.
+_READ_ONLY_ENDPOINT_CACHE_MAX = 4096
+
 _enforcer_instance: Optional['PermissionService'] = None
 
 # KV cache constants for workspace permission checks.
@@ -432,34 +440,73 @@ class PermissionService:
                 for visibility-only uses such as resource listings and
                 ``GET /workspaces``.
         """
-        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            # Server-off or admin: full access to everything requested.
             return workspace_names
+        if action == workspace_constants.WORKSPACE_ACTION_READ:
+            return writable | self._read_only_visible(workspace_names)
+        return writable
+
+    def get_workspace_access_sets(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Tuple[Set[str], Set[str]]:
+        """Return ``(readable, writable)`` workspace names in one policy scan.
+
+        Equivalent to calling `get_accessible_workspace_names` with
+        ``action='read'`` and ``action='write'``, but scans the casbin policy
+        once instead of twice. Used by the hot ``GET /workspaces`` path, which
+        needs both the read-only-visible set (what to show) and the writable
+        set (what the user may act in).
+        """
+        writable = self._writable_workspace_names(user_id, workspace_names)
+        if writable is None:
+            # Server-off or admin: everything requested is both readable and
+            # writable. Same object twice is fine -- callers only test
+            # membership / iterate, never mutate.
+            return workspace_names, workspace_names
+        readable = writable | self._read_only_visible(workspace_names)
+        return readable, writable
+
+    def _writable_workspace_names(
+            self, user_id: str,
+            workspace_names: Set[str]) -> Optional[Set[str]]:
+        """Workspace names the user can mutate (member '*' grants), one scan.
+
+        Returns None to mean "all of ``workspace_names``" (server-off or admin),
+        so callers short-circuit without materializing the set.
+
+        NOTE: this only matches direct (user_id, workspace, '*') and wildcard
+        ('*', workspace, '*') policies. It does NOT traverse casbin role
+        hierarchies (the g() function in the model matcher). If role-based
+        workspace grants are ever added, this method must be updated to use
+        enforcer.enforce() per workspace or expand roles via
+        enforcer.get_implicit_permissions_for_user().
+        """
+        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+            return None
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
-            return workspace_names
-        # Member/write access from the casbin '*' grant (member policy, or the
-        # ('*', ws, '*') public-workspace policy).
-        # NOTE: this only matches direct (user_id, workspace, '*') and wildcard
-        # ('*', workspace, '*') policies.  It does NOT traverse casbin role
-        # hierarchies (the g() function in the model matcher).  If role-based
-        # workspace grants are ever added, this method must be updated to use
-        # enforcer.enforce() per workspace or expand roles via
-        # enforcer.get_implicit_permissions_for_user().
+            return None
         enforcer = self._ensure_enforcer()
-        accessible = set()
+        writable = set()
         for rule in enforcer.get_policy():
             if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
                                                       rule[0] == '*'):
                 if rule[1] in workspace_names:
-                    accessible.add(rule[1])
-        if action == workspace_constants.WORKSPACE_ACTION_READ:
-            # Read also includes read-only-visible workspaces, evaluated live
-            # from config (not a materialized casbin grant) so changes take
-            # effect immediately. Mirrors the read branch of
-            # check_workspace_permission.
-            accessible |= (workspaces_utils.get_read_only_workspace_names() &
-                           workspace_names)
-        return accessible
+                    writable.add(rule[1])
+        return writable
+
+    @staticmethod
+    def _read_only_visible(workspace_names: Set[str]) -> Set[str]:
+        """Requested workspaces that are read-only-visible to non-members.
+
+        Evaluated live from config (not a materialized casbin grant) so changes
+        take effect immediately. Mirrors the read branch of
+        check_workspace_permission.
+        """
+        return (workspaces_utils.get_read_only_workspace_names() &
+                workspace_names)
 
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
@@ -525,6 +572,11 @@ class PermissionService:
         else:
             result = self._matches_endpoint(self._read_only_endpoints, path,
                                             method)
+        # Bound the cache: the key includes dynamic path segments, so drop the
+        # whole cache (rather than grow unbounded) once it gets too large. The
+        # replacement is atomic under the GIL, so concurrent readers are safe.
+        if len(self._read_only_endpoint_cache) >= _READ_ONLY_ENDPOINT_CACHE_MAX:
+            self._read_only_endpoint_cache = {}
         self._read_only_endpoint_cache[key] = result
         return result
 

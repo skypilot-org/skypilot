@@ -2058,6 +2058,25 @@ class TestWorkspaceReadOnlyAccess:
         assert service.get_accessible_workspace_names(
             'u1', names, action='write') == {'ws-mine', 'ws-pub'}
 
+    @mock.patch('sky.workspaces.utils.get_read_only_workspace_names')
+    def test_get_workspace_access_sets_single_scan(self, mock_ro_names):
+        # get_workspace_access_sets returns (readable, writable) in one policy
+        # scan: readable = member/open + read-only-visible, writable = member/
+        # open only. Used by the hot GET /workspaces path.
+        os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        service, enf = self._service()
+        enf.get_policy.return_value = [
+            ('u1', 'ws-mine', '*'),
+            ('*', 'ws-pub', '*'),
+        ]
+        mock_ro_names.return_value = {'ws-ro'}
+        names = {'ws-mine', 'ws-ro', 'ws-pub', 'ws-other'}
+        readable, writable = service.get_workspace_access_sets('u1', names)
+        assert readable == {'ws-mine', 'ws-ro', 'ws-pub'}
+        assert writable == {'ws-mine', 'ws-pub'}
+        # A single scan of the policy backs both sets.
+        assert enf.get_policy.call_count == 1
+
     def test_add_workspace_policy_only_member_grants(self):
         service, enf = self._service()
         with mock.patch('sky.users.permission._policy_lock'):

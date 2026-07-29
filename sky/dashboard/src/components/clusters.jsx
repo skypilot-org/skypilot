@@ -47,6 +47,7 @@ import {
   useClusterData,
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
+import { useWorkspacesConfig } from '@/hooks/useWorkspacesConfig';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
 import { ServerIcon } from '@/components/elements/icons';
@@ -779,22 +780,9 @@ export function ClusterTable({
 
   // Per-workspace writability, so the per-row Connect/VSCode actions can be
   // disabled for clusters in workspaces the user can only read (read-only
-  // visibility). Missing entry -> treated as writable (open/default).
-  const [workspacesConfig, setWorkspacesConfig] = useState({});
-  useEffect(() => {
-    let cancelled = false;
-    dashboardCache
-      .get(getWorkspaces)
-      .then((cfg) => {
-        if (!cancelled) setWorkspacesConfig(cfg || {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshInterval]);
-  const isWorkspaceWritable = (ws) =>
-    workspacesConfig[ws || 'default']?.writable !== false;
+  // visibility). Shared with the cluster detail page; missing entry -> treated
+  // as writable (open/default).
+  const { isWorkspaceWritable } = useWorkspacesConfig();
 
   // Read initial page/limit from URL
   const getInitialPage = () => {

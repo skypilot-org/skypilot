@@ -67,10 +67,18 @@ def _discover_server_modules(root: pathlib.Path) -> Dict[str, str]:
         if not (isinstance(func, ast.Attribute) and
                 func.attr == 'include_router'):
             continue
-        # First positional arg is `<alias>.router`.
+        # First positional arg is expected to be `<alias>.router`. Anything
+        # else (a bare Name, a nested Attribute, a Call) means the drift guard
+        # cannot statically locate the module to scan -- fail loudly rather
+        # than silently skip it, which is the exact blind spot this guard
+        # exists to close.
         if not (node.args and isinstance(node.args[0], ast.Attribute) and
                 isinstance(node.args[0].value, ast.Name)):
-            continue
+            raise AssertionError(
+                'drift guard cannot locate the module for an '
+                '`include_router(...)` call whose first argument is not '
+                '`<alias>.router`; rewrite it to that form or extend '
+                '`_discover_server_modules` to resolve it.')
         alias = node.args[0].value.id
         prefix = ''
         for kw in node.keywords:
