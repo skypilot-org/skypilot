@@ -33,8 +33,18 @@ SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
 # Examples: 'gpu:8', 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)'
-_GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
-                               re.IGNORECASE)
+# Also accepts '=' as the count separator to handle TRES-style strings
+# that appear in some Slurm outputs (e.g. squeue %b can return
+# 'gres/gpu=1' or 'gres/gpu:h100=2').
+_GRES_GPU_PATTERN = re.compile(
+    r'\bgpu[:=](?:(?P<type>[^:=(,]+)[:=])?(?P<count>\d+)', re.IGNORECASE)
+
+# Regex pattern for parsing GPU entries in TRES strings from
+# `scontrol show node` (CfgTRES/AllocTRES), e.g.
+# 'cpu=64,mem=800G,billing=64,gres/gpu=8' or typed entries such as
+# 'gres/gpu=8,gres/gpu:h100=8'.
+_TRES_GPU_PATTERN = re.compile(
+    r'(?:^|,)gres/gpu(?::(?P<type>[^=,]+))?=(?P<count>\d+)', re.IGNORECASE)
 
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 # Proctrack type is highly unlikely to change.
@@ -73,6 +83,24 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     if not match:
         return None, 0
     return match.group('type'), int(match.group('count'))
+
+
+def get_gpu_count_from_tres(tres_str: str) -> int:
+    """Parses the GPU count from a TRES string (CfgTRES/AllocTRES).
+
+    A TRES string may contain both an untyped total (``gres/gpu=8``) and
+    typed entries (``gres/gpu:h100=8``). The untyped total is preferred;
+    if only typed entries are present, their counts are summed.
+
+    Returns:
+        The GPU count. If no GPU entry is found, returns 0.
+    """
+    typed_total = 0
+    for match in _TRES_GPU_PATTERN.finditer(tres_str):
+        if match.group('type') is None:
+            return int(match.group('count'))
+        typed_total += int(match.group('count'))
+    return typed_total
 
 
 def pyxis_container_name(cluster_name_on_cloud: str) -> str:
@@ -942,6 +970,18 @@ def resolve_gres_gpu_type(
     return chosen
 
 
+@annotations.lru_cache(scope='request')
+def _get_all_jobs_gres(
+        slurm_client: 'slurm.SlurmClient') -> Dict[str, List[str]]:
+    """Request-scoped cached wrapper around SlurmClient.get_all_jobs_gres().
+
+    Fetched lazily: `squeue` is only queried when at least one node falls
+    back to job-level GPU accounting (see _get_slurm_node_info_list), and
+    at most once per client instance.
+    """
+    return slurm_client.get_all_jobs_gres()
+
+
 def _parse_int_or_none(value: Optional[str]) -> Optional[int]:
     """Parse an int from an scontrol attribute value; None on N/A/garbage."""
     if value is None:
@@ -1007,7 +1047,6 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     # 2. Process each node, aggregating partitions per node
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
 
-    nodes_to_jobs_gres = slurm_client.get_all_jobs_gres()
     for node_info in node_infos:
         node_name = node_info.node
         state = node_info.state
@@ -1026,22 +1065,47 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
             else:
                 node_gpu_type = 'GPU'
 
-        # Get allocated GPUs
+        # Per-node scontrol attributes (fetched once above); empty when
+        # scontrol was unavailable.
+        details = node_details_by_name.get(node_name, {})
+
+        # Get allocated GPUs.
+        # Node-level TRES accounting (AllocTRES from `scontrol show node`)
+        # is the preferred source for allocated GPUs: job-level
+        # `squeue -o "%b"` can be `N/A` even when the job has allocated
+        # GPUs (e.g. jobs requesting GPUs via --tres-per-task), or can use
+        # GRES formats the parser does not recognize, causing free GPUs to
+        # be overestimated.
+        # See https://github.com/skypilot-org/skypilot/issues/10283.
         allocated_gpus = 0
-        # TODO(zhwu): move to enum
-        if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
-                     'comp'):
-            jobs_gres = nodes_to_jobs_gres.get(node_name, [])
-            if jobs_gres:
-                for job_line in jobs_gres:
-                    _, job_gpu_count = get_gpu_type_and_count(job_line)
-                    allocated_gpus += job_gpu_count
-            elif state == 'alloc':
-                # If no GRES info found but node is fully allocated,
-                # assume all GPUs are in use.
-                allocated_gpus = total_gpus
-        elif state == 'idle':
-            allocated_gpus = 0
+        use_tres = False
+        if details and total_gpus > 0:
+            # Only trust AllocTRES if the cluster actually tracks
+            # gres/gpu in TRES: on clusters that do not project GRES
+            # into TRES, CfgTRES reports 0 GPUs while sinfo %G reports
+            # the real count, and AllocTRES would silently under-report
+            # the allocation.
+            cfg_tres = details.get('CfgTRES', '')
+            alloc_tres = details.get('AllocTRES', '')
+            if get_gpu_count_from_tres(cfg_tres) >= total_gpus:
+                allocated_gpus = get_gpu_count_from_tres(alloc_tres)
+                use_tres = True
+        if not use_tres and total_gpus > 0:
+            # Fall back to job-level accounting via squeue.
+            # TODO(zhwu): move to enum
+            if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
+                         'comp'):
+                jobs_gres = _get_all_jobs_gres(slurm_client).get(node_name, [])
+                if jobs_gres:
+                    for job_line in jobs_gres:
+                        _, job_gpu_count = get_gpu_type_and_count(job_line)
+                        allocated_gpus += job_gpu_count
+                elif state == 'alloc':
+                    # If no GRES info found but node is fully allocated,
+                    # assume all GPUs are in use.
+                    allocated_gpus = total_gpus
+            elif state == 'idle':
+                allocated_gpus = 0
 
         free_gpus = total_gpus - allocated_gpus if state not in ('down',
                                                                  'drain',
@@ -1052,7 +1116,6 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
         # CPU/memory allocation + sampled usage from scontrol. All of
         # these are None when scontrol was unavailable or reported N/A
         # (e.g. on down nodes).
-        details = node_details_by_name.get(node_name, {})
         cpu_alloc = _parse_int_or_none(details.get('CPUAlloc'))
         cpu_tot = _parse_int_or_none(details.get('CPUTot'))
         free_vcpus = None
