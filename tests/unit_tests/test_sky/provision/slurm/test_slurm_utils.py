@@ -175,3 +175,89 @@ class TestSlurmNodeInfo:
             utils, '_get_slurm_node_info_list',
             mock.Mock(side_effect=exceptions.NotSupportedError('nope')))
         assert not utils.slurm_node_info(slurm_cluster_name='cluster-a')
+
+
+class TestGetSlurmNodeInfoListEnrichment:
+    """Test scontrol-based CPU/memory enrichment in _get_slurm_node_info_list."""
+
+    def _run(self, monkeypatch, node_details_result):
+        from sky.adaptors import slurm as slurm_adaptor
+
+        client = mock.Mock()
+        client.info_nodes.return_value = [
+            slurm_adaptor.NodeInfo(node='node1',
+                                   state='mix',
+                                   gres='gpu:gh200:1',
+                                   cpus=72,
+                                   memory_gb=420.0,
+                                   partition='all*'),
+        ]
+        client.get_all_jobs_gres.return_value = {}
+        if isinstance(node_details_result, Exception):
+            client.get_all_node_details.side_effect = node_details_result
+        else:
+            client.get_all_node_details.return_value = node_details_result
+
+        ssh_config = mock.Mock()
+        ssh_config.lookup.return_value = {
+            'hostname': 'login.example.com',
+            'user': 'me',
+        }
+        monkeypatch.setattr(utils, 'get_slurm_ssh_config', lambda: ssh_config)
+        monkeypatch.setattr(utils.slurm, 'SlurmClient',
+                            mock.Mock(return_value=client))
+        return utils._get_slurm_node_info_list('cluster-a')
+
+    def test_enriches_from_scontrol(self, monkeypatch):
+        result = self._run(
+            monkeypatch, {
+                'node1': {
+                    'CPUAlloc': '8',
+                    'CPUTot': '72',
+                    'CPULoad': '3.50',
+                    'RealMemory': '430080',
+                    'AllocMem': '102400',
+                    'FreeMem': '421339',
+                },
+            })
+        assert len(result) == 1
+        node = result[0]
+        assert node['free_vcpus'] == 64
+        assert node['free_alloc_memory_gb'] == round((430080 - 102400) / 1024.0,
+                                                     2)
+        assert node['cpu_load'] == 3.5
+        assert node['free_memory_gb'] == round(421339 / 1024.0, 2)
+
+    def test_na_values_become_none(self, monkeypatch):
+        result = self._run(
+            monkeypatch, {
+                'node1': {
+                    'CPUAlloc': '0',
+                    'CPUTot': '72',
+                    'CPULoad': 'N/A',
+                    'RealMemory': '430080',
+                    'AllocMem': '0',
+                    'FreeMem': 'N/A',
+                },
+            })
+        node = result[0]
+        assert node['free_vcpus'] == 72
+        assert node['free_alloc_memory_gb'] == round(430080 / 1024.0, 2)
+        assert node['cpu_load'] is None
+        assert node['free_memory_gb'] is None
+
+    def test_missing_node_details_yields_none_fields(self, monkeypatch):
+        result = self._run(monkeypatch, {})
+        node = result[0]
+        assert node['free_vcpus'] is None
+        assert node['free_alloc_memory_gb'] is None
+        assert node['cpu_load'] is None
+        assert node['free_memory_gb'] is None
+
+    def test_scontrol_failure_does_not_break_node_info(self, monkeypatch):
+        result = self._run(monkeypatch, RuntimeError('scontrol failed'))
+        assert len(result) == 1
+        node = result[0]
+        assert node['node_name'] == 'node1'
+        assert node['free_vcpus'] is None
+        assert node['cpu_load'] is None

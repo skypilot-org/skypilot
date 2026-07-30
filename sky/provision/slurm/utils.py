@@ -942,6 +942,26 @@ def resolve_gres_gpu_type(
     return chosen
 
 
+def _parse_int_or_none(value: Optional[str]) -> Optional[int]:
+    """Parse an int from an scontrol attribute value; None on N/A/garbage."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _parse_float_or_none(value: Optional[str]) -> Optional[float]:
+    """Parse a float from an scontrol attribute value; None on N/A/garbage."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
 
@@ -972,6 +992,17 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
             f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. '
             f'No nodes found?')
         return []
+
+    # Best-effort enrichment with per-node scontrol attributes (CPU/memory
+    # allocation from the scheduler plus actual load/free-memory sampled
+    # by slurmd) — sinfo's format codes cannot express these. A failure
+    # here must not break basic node info.
+    try:
+        node_details_by_name = slurm_client.get_all_node_details()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not fetch scontrol node details on cluster '
+                     f'{slurm_cluster_name}: {e}')
+        node_details_by_name = {}
 
     # 2. Process each node, aggregating partitions per node
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
@@ -1018,6 +1049,27 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
                                                                  'maint') else 0
         free_gpus = max(0, free_gpus)
 
+        # CPU/memory allocation + sampled usage from scontrol. All of
+        # these are None when scontrol was unavailable or reported N/A
+        # (e.g. on down nodes).
+        details = node_details_by_name.get(node_name, {})
+        cpu_alloc = _parse_int_or_none(details.get('CPUAlloc'))
+        cpu_tot = _parse_int_or_none(details.get('CPUTot'))
+        free_vcpus = None
+        if cpu_alloc is not None and cpu_tot is not None:
+            free_vcpus = max(0, cpu_tot - cpu_alloc)
+        # scontrol reports memory in MB.
+        alloc_mem_mb = _parse_int_or_none(details.get('AllocMem'))
+        real_mem_mb = _parse_int_or_none(details.get('RealMemory'))
+        free_alloc_memory_gb = None
+        if alloc_mem_mb is not None and real_mem_mb is not None:
+            free_alloc_memory_gb = round(
+                max(0, real_mem_mb - alloc_mem_mb) / 1024.0, 2)
+        free_mem_mb = _parse_int_or_none(details.get('FreeMem'))
+        free_memory_gb = (round(free_mem_mb /
+                                1024.0, 2) if free_mem_mb is not None else None)
+        cpu_load = _parse_float_or_none(details.get('CPULoad'))
+
         slurm_nodes_info[node_name] = {
             'node_name': node_name,
             'slurm_cluster_name': slurm_cluster_name,
@@ -1028,6 +1080,14 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
             'free_gpus': free_gpus,
             'vcpu_count': node_info.cpus,
             'memory_gb': round(node_info.memory_gb, 2),
+            # Scheduler-allocation view: CPUs / memory not reserved by
+            # jobs on this node.
+            'free_vcpus': free_vcpus,
+            'free_alloc_memory_gb': free_alloc_memory_gb,
+            # Sampled-usage view: slurmd-reported load average and free
+            # OS memory.
+            'cpu_load': cpu_load,
+            'free_memory_gb': free_memory_gb,
         }
 
     for node_info in slurm_nodes_info.values():
@@ -1046,7 +1106,14 @@ def slurm_node_info(
             is aggregated across all existing allowed Slurm clusters.
 
     Returns:
-        List[Dict[str, Any]]: A list of dictionaries, each containing node info.
+        List[Dict[str, Any]]: One dictionary per node with keys:
+            node_name, slurm_cluster_name, partition (comma-joined),
+            node_state, gpu_type, total_gpus, free_gpus, vcpu_count,
+            memory_gb, and the scontrol-derived enrichment fields
+            free_vcpus / free_alloc_memory_gb (scheduler allocation) and
+            cpu_load / free_memory_gb (slurmd-sampled usage) — the
+            enrichment fields are None when scontrol is unavailable or
+            reports N/A.
     """
     if slurm_cluster_name is not None:
         clusters_to_query = [slurm_cluster_name]
