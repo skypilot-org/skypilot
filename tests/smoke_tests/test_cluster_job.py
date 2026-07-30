@@ -3143,26 +3143,33 @@ def test_kubernetes_stale_pod_cleanup():
         'kubernetes_stale_pod_cleanup',
         [
             # Launch a cluster with memory limits (2GB is enough to boot
-            # but tight enough to OOM on a large allocation).
+            # but tight enough to OOM on a large allocation). It may land on
+            # any context.
             f'sky launch -y -c {name} --infra kubernetes --cpus 1 --memory 2 '
             f'--config kubernetes.set_pod_resource_limits=true',
+            # Pin the cloud-cmd helper to the context the target landed on so
+            # its in-cluster kubectl can see the target's pod.
+            smoke_tests_utils.resolve_k8s_context_cmd(name),
+            smoke_tests_utils.launch_cloud_cmd_on_landed_context(name),
             # OOM the pod by writing 4GB to tmpfs, exceeding the 2GB limit.
             f'sky exec {name} -- dd if=/dev/zero of=/dev/shm/oom bs=1M count=4096 || true',
             # Wait for the pod to enter Failed phase.
-            f'for i in $(seq 1 30); do '
-            f'phase=$(kubectl get pod {head_pod} '
-            f'-o jsonpath=\'{{.status.phase}}\'); '
-            f'echo "attempt $i: phase=$phase"; '
-            f'if [ "$phase" = "Failed" ]; then break; fi; '
-            f'sleep 2; done && '
-            f'test "$phase" = "Failed"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, f'for i in $(seq 1 30); do '
+                f'phase=$(kubectl get pod {head_pod} '
+                f'-o jsonpath=\'{{.status.phase}}\'); '
+                f'echo "attempt $i: phase=$phase"; '
+                f'if [ "$phase" = "Failed" ]; then break; fi; '
+                f'sleep 2; done && '
+                f'test "$phase" = "Failed"'),
             # Refresh state and assert INIT before restart.
             f'sky status {name} -r | grep INIT',
             # sky start should clean up the Failed pod and succeed.
             f'sky start -y {name}',
         ],
-        f'sky down -y {name}',
-        timeout=10 * 60,
+        f'sky down -y {name}; '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
