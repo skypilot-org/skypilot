@@ -119,7 +119,6 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     ('POST', '/api/cancel'): READ,
     ('POST', '/cluster_events'): READ,
     ('POST', '/cost_report'): READ,
-    ('POST', '/debug/dump_create'): READ,
     ('POST', '/download_logs'): READ,
     ('GET', '/enabled_clouds'): READ,
     ('GET', '/enabled_clouds/batch'): READ,
@@ -200,6 +199,9 @@ _EXPECTED: Dict[Tuple[str, str], str] = {
     # These are gated by role, not by workspace; `write` is simply the
     # fallback and costs nothing, since the users entitled to call them are
     # members or admins.
+    # /debug/dump_create is admin-only (removed from the viewer allowlist by
+    # the request-endpoint scoping fix), so it is not viewer-read -> write.
+    ('POST', '/debug/dump_create'): WRITE,
     ('POST', '/check'): WRITE,
     ('POST', '/kubernetes_label_gpus'): WRITE,
     ('POST', '/local_up'): WRITE,
