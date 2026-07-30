@@ -38,6 +38,15 @@ def _sbatch_log_path(base_dir: str, job_id: str) -> str:
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
+# How long to wait for a job to exit after a graceful termination signal
+# before escalating to a plain scancel.
+_TERMINATION_GRACE_PERIOD_SECONDS = 30
+
+# Terminal states where scancel is not needed or will fail.
+_TERMINAL_JOB_STATES = {
+    'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
+    'SPECIAL_EXIT'
+}
 
 # sbatch options that SkyPilot controls and must not be overridden by users.
 # These are either set dynamically based on the resource spec, or are required
@@ -953,6 +962,25 @@ def stop_instances(
     raise NotImplementedError()
 
 
+def _wait_for_job_to_exit(client: 'slurm.SlurmClient', job_name: str,
+                          timeout: float) -> bool:
+    """Wait until no job with this name is running or pending.
+
+    Returns True if all jobs with this name have left the queue or are
+    COMPLETING (i.e. Slurm is already tearing them down), False if the
+    timeout expired first.
+    """
+    deadline = time.time() + timeout
+    while True:
+        jobs_state = client.get_jobs_state_by_name(job_name)
+        if all(state.strip() in _TERMINAL_JOB_STATES or
+               state.strip() == 'COMPLETING' for state in jobs_state):
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+
 def terminate_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
@@ -1003,12 +1031,7 @@ def terminate_instances(
     )
 
     job_state = jobs_state[0].strip()
-    # Terminal states where scancel is not needed or will fail.
-    terminal_states = {
-        'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
-        'SPECIAL_EXIT'
-    }
-    if job_state in terminal_states:
+    if job_state in _TERMINAL_JOB_STATES:
         logger.debug(
             f'Job for cluster {cluster_name_on_cloud} is already in a terminal '
             f'state {job_state}. No action needed.')
@@ -1023,10 +1046,40 @@ def terminate_instances(
             f'Job for cluster {cluster_name_on_cloud} is already completing. '
             'No action needed.')
     else:
-        # For other states (e.g., RUNNING, SUSPENDED), send a TERM signal.
+        # For other states (e.g., RUNNING, SUSPENDED), attempt a graceful
+        # termination first: TERM all job steps (the running task processes)
+        # and the batch script, whose TERM trap cleans up the cluster's
+        # runtime directories before exiting.
+        # Both scancel invocations are needed: without --full, scancel
+        # signals all job steps but not the batch script; with --full, it
+        # signals the batch script and its child processes, which does not
+        # reach steps launched from outside the batch script's process tree
+        # (e.g. task steps launched by the Skylet).
+        client.cancel_jobs_by_name(cluster_name_on_cloud, signal='TERM')
         client.cancel_jobs_by_name(cluster_name_on_cloud,
                                    signal='TERM',
                                    full=True)
+        # Graceful termination is not guaranteed to bring the job down: if
+        # any step survives the TERM, it keeps the allocation busy, which
+        # blocks the batch script's cleanup srun from starting a step and
+        # leaves the job RUNNING indefinitely. Verify the job exits within
+        # a grace period, and escalate to a plain scancel (Slurm's own
+        # TERM -> KillWait -> KILL sequence) if it does not.
+        if _wait_for_job_to_exit(client, cluster_name_on_cloud,
+                                 _TERMINATION_GRACE_PERIOD_SECONDS):
+            return
+        logger.warning(
+            f'Job for cluster {cluster_name_on_cloud} did not exit within '
+            f'{_TERMINATION_GRACE_PERIOD_SECONDS}s of the termination '
+            'signal. Escalating to a full cancellation.')
+        client.cancel_jobs_by_name(cluster_name_on_cloud)
+        if not _wait_for_job_to_exit(client, cluster_name_on_cloud,
+                                     _JOB_TERMINATION_TIMEOUT_SECONDS):
+            raise RuntimeError(
+                f'Slurm job for cluster {cluster_name_on_cloud} is still '
+                f'running {_JOB_TERMINATION_TIMEOUT_SECONDS}s after scancel. '
+                'The allocation may be leaked; check squeue and cancel the '
+                'job manually if needed.')
 
 
 def open_ports(
