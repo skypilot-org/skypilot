@@ -1181,16 +1181,20 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     accessible_names, writable_names = (
         permission.permission_service.get_workspace_access_sets(
             user_id, set(workspaces.keys())))
+    # Whether non-members see each workspace read-only. Computed server-side
+    # (not derived client-side from the raw `read_access` field) so the org-wide
+    # ``workspace_config.read_access`` fallback is applied: a private workspace
+    # with no per-workspace override is still read-only when the global default
+    # is ``all``.
+    #
+    # NOTE: this is not `accessible_names - writable_names` -- a *writable*
+    # workspace can also be read-only-visible to non-members, and members need
+    # that badge too (it tells them their workspace is visible to others).
+    read_only_names = workspaces_utils.get_read_only_workspace_names()
     result: Dict[str, Any] = {}
     for name in accessible_names:
         writable = name in writable_names
-        # Whether non-members see this workspace read-only. Computed here (not
-        # derived client-side from the raw `read_access` field) so the
-        # org-wide ``workspace_config.read_access`` fallback is applied:
-        # a private workspace with no per-workspace override is still read-only
-        # when the global default is ``read-only``.
-        read_only = workspaces_utils.is_read_only_for_non_members(
-            workspaces[name])
+        read_only = name in read_only_names
         if not writable:
             # Read-only-visible to a non-member: expose only what the dashboard
             # needs to render the row (the private/read-only badges), NOT the

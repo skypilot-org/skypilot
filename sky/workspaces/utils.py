@@ -6,7 +6,20 @@ from sky.users import resolver as user_resolver
 from sky.workspaces import constants as workspace_constants
 
 
-def is_read_only_for_non_members(workspace_config: Dict[str, Any]) -> bool:
+def get_default_read_access() -> str:
+    """The org-wide ``workspace_config.read_access`` default.
+
+    Split out so batch callers can look it up once. See the
+    ``default_read_access`` arg of ``is_read_only_for_non_members``.
+    """
+    return skypilot_config.get_nested(
+        ('workspace_config', 'read_access'),
+        default_value=workspace_constants.READ_ACCESS_ALLOWED_USERS)
+
+
+def is_read_only_for_non_members(
+        workspace_config: Dict[str, Any],
+        default_read_access: Optional[str] = None) -> bool:
     """Whether non-members may see this workspace read-only.
 
     True for a private workspace whose effective ``read_access`` is ``all``.
@@ -14,14 +27,18 @@ def is_read_only_for_non_members(workspace_config: Dict[str, Any]) -> bool:
     otherwise the org-wide default ``workspace_config.read_access`` (default
     ``allowed_users``). An open (non-private) workspace is usable by everyone,
     so the flag is moot there and this returns False.
+
+    Args:
+        workspace_config: The workspace's stored config.
+        default_read_access: The org-wide default, when the caller already has
+            it.
     """
     if not workspace_config.get('private', False):
         return False
     access = workspace_config.get('read_access')
     if access is None:
-        access = skypilot_config.get_nested(
-            ('workspace_config', 'read_access'),
-            default_value=workspace_constants.READ_ACCESS_ALLOWED_USERS)
+        access = (default_read_access if default_read_access is not None else
+                  get_default_read_access())
     return access == workspace_constants.READ_ACCESS_ALL
 
 
@@ -35,10 +52,12 @@ def get_read_only_workspace_names() -> Set[str]:
     """
     current_workspaces = skypilot_config.get_nested(('workspaces',),
                                                     default_value={})
+    # Read the org-wide default ONCE and pass it down
+    default_read_access = get_default_read_access()
     return {
         workspace_name
         for workspace_name, workspace_config in current_workspaces.items()
-        if is_read_only_for_non_members(workspace_config)
+        if is_read_only_for_non_members(workspace_config, default_read_access)
     }
 
 
