@@ -1,0 +1,275 @@
+{
+  "nodes": [
+    {
+      "architecture": "aarch64",
+      "burstbuffer_network_address": "",
+      "boards": 1,
+      "boot_time": {
+        "set": true,
+        "infinite": false,
+        "number": 1777315521
+      },
+      "tls_cert_last_renewal": {
+        "set": true,
+        "infinite": false,
+        "number": 0
+      },
+      "cert_flags": [],
+      "cluster_name": "",
+      "cores": 72,
+      "specialized_cores": 0,
+      "cpu_binding": 0,
+      "cpu_load": 93,
+      "free_mem": {
+        "set": true,
+        "infinite": false,
+        "number": 436979
+      },
+      "cpus": 72,
+      "effective_cpus": 72,
+      "specialized_cpus": "",
+      "energy": {
+        "average_watts": 0,
+        "base_consumed_energy": 0,
+        "consumed_energy": 0,
+        "current_watts": {
+          "set": true,
+          "infinite": false,
+          "number": 0
+        },
+        "previous_consumed_energy": 0,
+        "last_collected": 0
+      },
+      "external_sensors": {},
+      "extra": "",
+      "power": {},
+      "features": [
+        "cu130",
+        "driver-580.126.20",
+        "gh200",
+        "gpu"
+      ],
+      "active_features": [
+        "cu130",
+        "driver-580.126.20",
+        "gh200",
+        "gpu"
+      ],
+      "gpu_spec": "",
+      "gres": "gpu:gh200:1(S:0)",
+      "gres_drained": "N/A",
+      "gres_used": "gpu:gh200:0(IDX:N/A)",
+      "instance_id": "",
+      "instance_type": "",
+      "last_busy": {
+        "set": true,
+        "infinite": false,
+        "number": 1785387712
+      },
+      "mcs_label": "",
+      "specialized_memory": 0,
+      "name": "node-001",
+      "next_state_after_reboot": [
+        "INVALID"
+      ],
+      "address": "10.0.0.1",
+      "hostname": "node-001",
+      "state": [
+        "MIXED",
+        "DYNAMIC_NORM"
+      ],
+      "operating_system": "Linux 6.8.0-1029-nvidia-64k #32-Ubuntu SMP PREEMPT_DYNAMIC Fri May 23 23:55:03 UTC 2025",
+      "owner": "",
+      "partitions": [
+        "all",
+        "gh200"
+      ],
+      "port": 6818,
+      "real_memory": 430080,
+      "res_cores_per_gpu": 0,
+      "comment": "",
+      "reason": "",
+      "reason_changed_at": {
+        "set": true,
+        "infinite": false,
+        "number": 0
+      },
+      "reason_set_by_user": "",
+      "resume_after": {
+        "set": true,
+        "infinite": false,
+        "number": 0
+      },
+      "reservation": "",
+      "alloc_memory": 4096,
+      "alloc_cpus": 1,
+      "alloc_idle_cpus": 71,
+      "tres_used": "cpu=1,mem=4G",
+      "tres_weighted": 0.0,
+      "slurmd_start_time": {
+        "set": true,
+        "infinite": false,
+        "number": 1785388382
+      },
+      "sockets": 1,
+      "threads": 1,
+      "temporary_disk": 0,
+      "weight": 1,
+      "topology": "",
+      "tres": "cpu=72,mem=420G,billing=72,gres/gpu=1",
+      "version": "25.05.3"
+    },
+    {
+      "architecture": "aarch64",
+      "burstbuffer_network_address": "",
+      "boards": 1,
+      "boot_time": {
+        "set": true,
+        "infinite": false,
+        "number": 1777315498
+      },
+      "tls_cert_last_renewal": {
+        "set": true,
+        "infinite": false,
+        "number": 0
+      },
+      "cert_flags": [],
+      "cluster_name": "",
+      "cores": 72,
+      "specialized_cores": 0,
+      "cpu_binding": 0,
+      "cpu_load": 83,
+      "free_mem": {
+        "set": true,
+        "infinite": false,
+        "number": 416651
+      },
+      "cpus": 72,
+      "effective_cpus": 72,
+      "specialized_cpus": "",
+      "energy": {
+        "average_watts": 0,
+        "base_consumed_energy": 0,
+        "consumed_energy": 0,
+        "current_watts": {
+          "set": true,
+          "infinite": false,
+          "number": 0
+        },
+        "previous_consumed_energy": 0,
+        "last_collected": 0
+      },
+      "external_sensors": {},
+      "extra": "",
+      "power": {},
+      "features": [
+        "cu130",
+        "driver-580.126.20",
+        "gh200",
+        "gpu"
+      ],
+      "active_features": [
+        "cu130",
+        "driver-580.126.20",
+        "gh200",
+        "gpu"
+      ],
+      "gpu_spec": "",
+      "gres": "gpu:gh200:1(S:0)",
+      "gres_drained": "N/A",
+      "gres_used": "gpu:gh200:0(IDX:N/A)",
+      "instance_id": "",
+      "instance_type": "",
+      "last_busy": {
+        "set": true,
+        "infinite": false,
+        "number": 1785387712
+      },
+      "mcs_label": "",
+      "specialized_memory": 0,
+      "name": "node-002",
+      "next_state_after_reboot": [
+        "INVALID"
+      ],
+      "address": "10.0.0.2",
+      "hostname": "node-002",
+      "state": [
+        "MIXED",
+        "DYNAMIC_NORM"
+      ],
+      "operating_system": "Linux 6.8.0-1029-nvidia-64k #32-Ubuntu SMP PREEMPT_DYNAMIC Fri May 23 23:55:03 UTC 2025",
+      "owner": "",
+      "partitions": [
+        "all",
+        "gh200"
+      ],
+      "port": 6818,
+      "real_memory": 430080,
+      "res_cores_per_gpu": 0,
+      "comment": "",
+      "reason": "",
+      "reason_changed_at": {
+        "set": true,
+        "infinite": false,
+        "number": 0
+      },
+      "reason_set_by_user": "",
+      "resume_after": {
+        "set": true,
+        "infinite": false,
+        "number": 0
+      },
+      "reservation": "",
+      "alloc_memory": 4096,
+      "alloc_cpus": 1,
+      "alloc_idle_cpus": 71,
+      "tres_used": "cpu=1,mem=4G",
+      "tres_weighted": 0.0,
+      "slurmd_start_time": {
+        "set": true,
+        "infinite": false,
+        "number": 1785388382
+      },
+      "sockets": 1,
+      "threads": 1,
+      "temporary_disk": 0,
+      "weight": 1,
+      "topology": "",
+      "tres": "cpu=72,mem=420G,billing=72,gres/gpu=1",
+      "version": "25.05.3"
+    }
+  ],
+  "last_update": {
+    "set": true,
+    "infinite": false,
+    "number": 1785439304
+  },
+  "meta": {
+    "plugin": {
+      "type": "",
+      "name": "",
+      "data_parser": "data_parser/v0.0.43",
+      "accounting_storage": "accounting_storage/slurmdbd"
+    },
+    "client": {
+      "source": "",
+      "user": "skypilot",
+      "group": "skypilot"
+    },
+    "command": [
+      "show",
+      "node"
+    ],
+    "slurm": {
+      "version": {
+        "major": "25",
+        "micro": "3",
+        "minor": "05"
+      },
+      "release": "25.05.3",
+      "cluster": "slurm"
+    }
+  },
+  "errors": [],
+  "warnings": []
+}
