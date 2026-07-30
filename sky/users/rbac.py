@@ -338,25 +338,11 @@ _WORKSPACE_READ_EXTRA_ENDPOINTS = [
 
 # Endpoints that must ALWAYS require write on the caller's active workspace,
 # regardless of the viewer allowlist. These create a resource in the active
-# workspace (the launched cluster / managed job / service replicas / pool
-# workers / volume land there), so the active-workspace write gate is their
-# real authorization -- misclassifying one as read (e.g. because a plugin or
-# operator added a matching entry, possibly a wildcard, to the viewer
-# allowlist) would let a non-member create into a workspace they cannot write.
+# workspace, so the active-workspace write gate is their
+# real authorization -- misclassifying one as read
+# would let a non-member create into a workspace they cannot write.
 # Consulted by `is_read_only_endpoint` (via `is_always_write_endpoint`) which
-# short-circuits to "write" on a match, so a wildcard viewer entry can still
-# classify sibling *read* endpoints (e.g. `/serve/status`) as read while
-# `/serve/up` stays write.
-#
-# NOT included: existing-resource mutations (cluster exec/stop/down/start/
-# autostop/cancel, jobs cancel) -- those are gated per-resource in the handler
-# on the resource's own workspace, so they are safe even if classified read
-# and may legitimately live in the read set. serve down, pool_down and volume
-# delete act on a named resource and do not use the active workspace at all --
-# there is currently NO per-resource workspace gate for services / volumes /
-# pools (see the note in docs/source/admin/workspaces.rst); classifying them
-# write here would not be their protection and would only mask that gap, so
-# they are left out on purpose.
+# short-circuits to "write" on a match.
 _ALWAYS_WRITE_ENDPOINTS = [
     {
         'path': '/launch',
@@ -374,9 +360,6 @@ _ALWAYS_WRITE_ENDPOINTS = [
         'path': '/serve/up',
         'method': 'POST'
     },
-    # `serve update` pulls up new replicas (new compute) just like `serve up`,
-    # so it is classified the same way -- keep them consistent so a wildcard
-    # `/serve/*` viewer entry cannot relax one but not the other.
     {
         'path': '/serve/update',
         'method': 'POST'
@@ -486,16 +469,9 @@ def get_read_only_endpoints(
     and it is the only declaration that plugins already populate for their
     own endpoints.
 
-    An endpoint deliberately kept *off* the viewer allowlist because it
-    exposes secrets (e.g. ``GET /workspaces/config``, key paths) is therefore
+    An endpoint deliberately kept *off* the viewer allowlist is therefore
     treated as a write here. That errs on the strict side, which is the safe
     direction for a workspace the caller can only read.
-
-    This returns the *declaration*, not the final verdict: an entry here can
-    still be classified write by `is_read_only_endpoint`, which first checks
-    `is_always_write_endpoint` and short-circuits a create endpoint to write
-    even if a (plugin- or operator-supplied) allowlist entry declared it
-    read-only. Such a collision is logged as a warning below.
 
     Args:
         plugin_allowlist: Optional list of `{path, method}` records

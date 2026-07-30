@@ -1628,11 +1628,7 @@ export function Status2Actions({
             );
           }
           // The read-only hint is a full sentence, so it must not be
-          // title-cased. `CustomTooltip` hardcodes `capitalize` on the span
-          // that renders the content, and a `className` passed here lands on
-          // the wrapper instead — it cannot override that. Use the
-          // non-capitalizing variant for the sentence and keep the plain
-          // tooltip for the short action labels.
+          // title-cased.
           const DisabledTooltip = !writable ? NonCapitalizedTooltip : Tooltip;
           return (
             <DisabledTooltip

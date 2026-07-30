@@ -1915,9 +1915,7 @@ async def _reject_cluster_write_for_unauthorized(
     be gated by the cluster's *own* workspace. The executor's active-workspace
     gate only checks the caller's active workspace (resolved from their own
     context), which is not the cluster's workspace, so it does not protect an
-    existing cluster from a non-member (see
-    ``workspaces_core.check_cluster_write_permission`` and
-    https://github.com/skypilot-org/skypilot/issues/8072).
+    existing cluster from a non-member.
 
     This helper only covers the HTTP endpoints. SSH/VSCode go over a websocket,
     which does not pass through here; that path calls the same
@@ -1926,8 +1924,7 @@ async def _reject_cluster_write_for_unauthorized(
 
     Runs at the API boundary (before a worker is scheduled) so external
     requests are gated while internal ``core.*`` callers (controllers,
-    recovery, daemons) are untouched. A missing ``auth_user`` (loopback /
-    local CLI) is trusted, matching the RBAC middleware's loopback bypass.
+    recovery, daemons) are untouched.
     """
     auth_user = request.state.auth_user
     if auth_user is None or cluster_name is None:

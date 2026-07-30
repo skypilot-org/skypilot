@@ -8342,9 +8342,8 @@ def workspace_info(output_format: str):
     source_str = info.get('source') or '-'
     preferred = info.get('preferred')
     preferred_str = (f'{preferred!r}' if preferred is not None else '(not set)')
-    # `accessible` is the writable set (where a launch can land); `read_only`
-    # is listed separately so no line reads as "you can use these" for a
-    # workspace the user can only look at.
+    # `accessible` is the writable set (where a launch can land);
+    # `read_only` is listed separately.
     writable = info.get('accessible') or []
     read_only = info.get('read_only') or []
     writable_str = ', '.join(

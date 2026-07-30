@@ -117,11 +117,6 @@ def get_accessible_workspace_names(
     launch". ``action='read'`` additionally includes workspaces that are merely
     read-only-visible to a non-member; pass it explicitly at the call sites that
     want visibility rather than usability (resource listings, `/workspaces`).
-
-    The default is deliberately the narrower set: a caller that offers this list
-    as a choice (a "create here" dropdown, a target for a mutation) must not be
-    handed a workspace the user cannot write, and the failure would otherwise
-    only surface later, at the create.
     """
     workspaces = _load_workspaces()
     return _accessible_workspace_names_for_user(

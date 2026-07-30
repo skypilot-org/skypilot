@@ -610,15 +610,7 @@ class PermissionService:
 
     def _workspace_perm_cache_key(self, workspace_name: str,
                                   user_id: str) -> str:
-        """Build a KV cache key for a workspace *member* permission entry.
-
-        Only the member/write result (admin or the member '*' grant) is cached;
-        it is action-agnostic (the '*' grant covers both read and write), so
-        the key needs no action dimension. Read-only visibility is evaluated
-        live and never cached. The key keeps the ``perm:ws:<ws>:<user>`` shape
-        so by-workspace prefix invalidation and by-user suffix invalidation
-        both still match.
-        """
+        """Build a KV cache key for a workspace permission entry."""
         return (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
                 f'{workspace_name}'
                 f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'

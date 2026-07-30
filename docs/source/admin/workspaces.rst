@@ -340,7 +340,7 @@ Read-only visibility for non-members
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 By default a private workspace is readable only by its ``allowed_users`` (its
-members) and is completely hidden from everyone else. To instead let *anyone*
+members) and admins, and is hidden from everyone else. To instead let *anyone*
 see a private workspace (read-only), set ``read_access: all``:
 
 .. code-block:: yaml
@@ -354,23 +354,13 @@ see a private workspace (read-only), set ``read_access: all``:
 
 With ``read_access: all``, non-members can see the workspace and list the
 clusters and managed jobs running in it (including viewing their logs), but
-cannot launch into it or modify/cancel its **clusters and managed jobs** — SSH
-and VS Code access to its clusters are also blocked, since those open an
-interactive shell. Members (the ``allowed_users``) and admins retain full
-access.
-
-.. note::
-
-   Per-resource write protection currently covers clusters and managed jobs.
-   Other workspace-scoped resources (services, volumes, and pools) do not yet
-   enforce a per-resource workspace check, so this read-only guarantee does not
-   extend to them yet.
+cannot launch into it or modify/cancel its **clusters and managed jobs**.
+Members (the ``allowed_users``) and admins retain full access.
 
 ``read_access`` accepts:
 
 - ``allowed_users`` (default): only the workspace's ``allowed_users`` (its
-  members) can see it; it is hidden from everyone else (the default described at
-  the start of this section).
+  members) and admins can see it; it is hidden from everyone else.
 - ``all``: anyone can view the workspace and its workloads, but writes stay
   members-only, so non-members get read-only access.
 

@@ -2430,8 +2430,8 @@ def get_config_schema():
                     },
                 },
                 # Who may read a (private) workspace. 'allowed_users'
-                # (default): only the workspace's allowed users (members) can
-                # see it; it is hidden from everyone else (current behavior).
+                # (default): only the workspace's allowed users (members)
+                # and admins can see it; it is hidden from everyone else.
                 # 'all': anyone can see the workspace and its clusters/jobs, but
                 # writes stay members-only, so non-members get read-only access.
                 # Only meaningful for private workspaces; an open (non-private)

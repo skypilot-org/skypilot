@@ -249,13 +249,8 @@ def get_user_workspace(
     except exceptions.NoWorkspaceAccessError as e:
         # The resolver answers "where would a *write* land", so it reports no
         # access for a user whose every accessible workspace is read-only.
-        # Reporting `no-access` here would contradict the `accessible` /
-        # `read_only` lists filled in below (the payload would claim "no
-        # accessible workspaces" next to a list of them). Re-resolve at read
-        # level to report where that user's reads land, under a distinct state
-        # so the CLI / dashboard can say "read-only".
-        # `note` is set in both branches below (they always run one), so it is
-        # not seeded here; only `source` (which the success branch keeps).
+        # Re-resolve at read level to report where that user's reads land,
+        # under a distinct state so the CLI / dashboard can say "read-only".
         response['source'] = workspace_constants.WORKSPACE_SOURCE_READ_ONLY
         try:
             resolution = workspaces_core.resolve_workspace_for_user(

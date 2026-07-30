@@ -3944,9 +3944,8 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    # Visibility, not usability: a non-member of a read-only workspace must see
-    # its clusters (that is the point of read-only visibility). Whether they may
-    # act on one is decided per-resource, on the cluster's own workspace.
+    # Visibility, not usability: a non-member of a read-only workspace can see
+    # its clusters (that is the point of read-only visibility).
     accessible_workspaces = workspaces_core.get_accessible_workspace_names(
         action=workspace_constants.WORKSPACE_ACTION_READ)
 

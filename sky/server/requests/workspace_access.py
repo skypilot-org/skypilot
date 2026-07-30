@@ -5,18 +5,15 @@ Every request runs with an *active workspace* and is gated on it by
 exist:
 
 - ``read``  — "may I use this workspace as my context". Enough for a request
-  that only looks at state, but still required: the active workspace selects
-  the config (allowed contexts, namespaces, cloud credentials) the request
-  runs against, so a user with no access at all must not be able to point at
-  it. A non-member of a workspace whose ``read_access`` is ``all`` has this
-  level.
+  that only looks at state. A non-member of a workspace whose ``read_access``
+  is ``all`` has this level.
 - ``write`` — "may I create resources in this workspace". Required by the
   requests that stamp the active workspace onto a *new* resource.
 
 The level is derived from the **endpoint**, in two ordered rules:
 
 0. An endpoint in ``rbac._ALWAYS_WRITE_ENDPOINTS`` (the create endpoints —
-   launch, jobs launch, serve up/update, pool apply, volume apply) always
+   launch, jobs launch, serve up/update, volume apply) always
    needs ``write``, regardless of any viewer-allowlist declaration. This
    short-circuit (``permission.is_read_only_endpoint`` checks
    ``rbac.is_always_write_endpoint`` first) is what stops a wildcard viewer
@@ -26,15 +23,6 @@ The level is derived from the **endpoint**, in two ordered rules:
    ``BasePlugin.viewer_allowlist``, and the operator's
    ``rbac.roles.viewer.permissions.allowlist``) needs only ``read``; anything
    else needs ``write``.
-
-Two reasons for deriving rather than listing request names:
-
-1. "Which endpoints only read" is already declared, in one place, and is
-   already populated by plugins for their own endpoints. A list of OSS
-   request names cannot see plugin requests at all, even though plugin
-   handlers are scheduled through this same executor.
-2. The default for an undeclared endpoint is ``write``, so forgetting to
-   declare something denies a read rather than permitting a write.
 
 Mutating an *existing* resource is deliberately not what this classifies:
 that must be gated on the resource's own workspace (see

@@ -28,10 +28,7 @@ WORKSPACE_SOURCE_AMBIGUOUS = 'ambiguous'
 WORKSPACE_SOURCE_NO_ACCESS = 'no-access'
 WORKSPACE_SOURCE_PERMISSION_DENIED = 'permission-denied'
 # The user can read one or more workspaces but write none of them (every
-# accessible workspace is read-only-visible to them). Distinct from
-# 'no-access', which would contradict the non-empty `accessible` / `read_only`
-# lists in the same payload. `workspace` carries where the user's *reads* land,
-# or null when several readable workspaces give no basis to pick one.
+# accessible workspace is read-only-visible to them).
 WORKSPACE_SOURCE_READ_ONLY = 'read-only'
 
 # Values for the per-workspace ``read_access`` config key, which controls who
@@ -44,11 +41,10 @@ WORKSPACE_SOURCE_READ_ONLY = 'read-only'
 READ_ACCESS_ALLOWED_USERS = 'allowed_users'
 READ_ACCESS_ALL = 'all'
 
-# Access levels a request can require on the caller's *active* workspace,
-# passed as the ``action`` argument of
-# ``permission.check_workspace_permission`` and friends. 'read' means "may
-# I use this workspace as my context" (satisfied by membership OR by the
-# workspace being read-only-visible to non-members); 'write' means "may I
-# create resources in this workspace" (membership only). Write implies read.
+# Access levels a request can require on the caller's *active* workspace.
+# 'read' means "may I use this workspace as my context" (satisfied by
+#  membership OR by the workspace being read-only-visible to non-members);
+# 'write' means "may I create resources in this workspace" (membership only).
+# Write implies read.
 WORKSPACE_ACTION_READ = 'read'
 WORKSPACE_ACTION_WRITE = 'write'
