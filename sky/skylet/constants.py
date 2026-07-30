@@ -673,6 +673,21 @@ ENV_VAR_SERVER_AUTH_USER_HEADER = f'{SKYPILOT_ENV_VAR_PREFIX}AUTH_USER_HEADER'
 # skypilot server.
 ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 
+# Optional: route the state DB through a transaction-mode connection pooler
+# (e.g. PgBouncer). When set, regular state-DB engines connect through the
+# pooler while session-scoped advisory locks keep a direct connection (see
+# `sky.utils.db.db_utils.get_engine`). Both are unset by default, in which
+# case the state DB is reached directly via ENV_VAR_DB_CONNECTION_URI.
+#
+# ENV_VAR_DB_POOL_CONNECTION_URI: a full replacement connection URI for the
+# pooled engines (escape hatch, e.g. an entirely separate pooler endpoint).
+# ENV_VAR_DB_POOL_HOSTPORT: a `host:port` that replaces just the host:port of
+# ENV_VAR_DB_CONNECTION_URI, preserving user/password/dbname/query — so no DB
+# credentials need re-plumbing when the pooler runs as a local sidecar.
+ENV_VAR_DB_POOL_CONNECTION_URI = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_CONNECTION_URI')
+ENV_VAR_DB_POOL_HOSTPORT = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_POOL_HOSTPORT')
+
 # Environment variable that is set to 'true' if basic
 # authentication is enabled in the API server.
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
