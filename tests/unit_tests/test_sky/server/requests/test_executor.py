@@ -906,6 +906,64 @@ def test_pause_marks_executor_free_before_wait(pause_harness, monkeypatch):
     assert pause_harness.queue_items == [request_element]
 
 
+def test_monitor_thread_start_failure_returns_the_slot(pause_harness,
+                                                       monkeypatch):
+    """A monitor thread that never starts must not leak a free-executor slot.
+
+    handle_task_result, which runs in that thread, owns the increment matching
+    process_request()'s decrement. If the thread never starts the slot is gone
+    for the lifetime of the process, and enough of these drive the gauge
+    negative - indistinguishable from a genuine request backlog.
+    """
+    gauge = mock.Mock()
+    monkeypatch.setattr(executor.metrics_utils, 'METRICS_ENABLED', True)
+    monkeypatch.setattr(executor.metrics_utils, 'SKY_APISERVER_LONG_EXECUTORS',
+                        gauge)
+
+    class _UnstartableThread:
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    real_thread = executor.threading.Thread
+
+    def _thread_factory(*args, **kwargs):
+        # Only the monitor thread is made unstartable; anything else the
+        # request path spawns must keep working.
+        if kwargs.get('target') == pause_harness.worker.handle_task_result:
+            return _UnstartableThread()
+        return real_thread(*args, **kwargs)
+
+    monkeypatch.setattr(executor.threading, 'Thread', _thread_factory)
+
+    class _MockExecutor:
+
+        def submit_until_success(self, fn, *args, **kwargs):
+            del fn, args, kwargs
+            fut = concurrent.futures.Future()
+            fut.set_result(None)
+            return fut
+
+    class _OneShotQueue:
+
+        def __init__(self, item):
+            self._item = item
+
+        def get(self):
+            item, self._item = self._item, None
+            return item
+
+    request_queue = _OneShotQueue((pause_harness.request_id, False, True))
+
+    # The thread failure is still swallowed by process_request's handler, so
+    # the dispatcher loop survives it - only the accounting must be repaired.
+    pause_harness.worker.process_request(_MockExecutor(), request_queue)
+
+    # Assert the invariant, not where the decrement sits: a failed monitor
+    # thread must leave the gauge net-zero either way.
+    assert gauge.dec.call_count == gauge.inc.call_count
+
+
 def test_resolve_blob_valid(tmp_path, monkeypatch):
     """Test that resolve_blob_dir returns the shared extraction dir."""
     blob_id = 'a' * 64
