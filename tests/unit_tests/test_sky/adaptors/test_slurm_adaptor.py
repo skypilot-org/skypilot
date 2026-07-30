@@ -397,9 +397,12 @@ class TestGetAllJobsInfo:
         )
 
         squeue_output = (
-            f'101{slurm.SEP}train a{slurm.SEP}node01{slurm.SEP}gpu:h100:4\n'
-            f'102{slurm.SEP}cpu-only{slurm.SEP}node01{slurm.SEP}N/A\n'
-            f'103{slurm.SEP}pretrain{slurm.SEP}node[02-03]{slurm.SEP}gpu:h100:2\n'
+            f'101{slurm.SEP}train a{slurm.SEP}alice{slurm.SEP}node01'
+            f'{slurm.SEP}gpu:h100:4\n'
+            f'102{slurm.SEP}cpu-only{slurm.SEP}bob{slurm.SEP}node01'
+            f'{slurm.SEP}N/A\n'
+            f'103{slurm.SEP}pretrain{slurm.SEP}bob{slurm.SEP}node[02-03]'
+            f'{slurm.SEP}gpu:h100:2\n'
             f'malformed line without separators\n')
 
         with mock.patch.object(client._runner, 'run') as mock_run:
@@ -409,7 +412,7 @@ class TestGetAllJobsInfo:
 
             mock_run.assert_called_once_with(
                 f'squeue -h --states=running,completing '
-                f'-o "%i{slurm.SEP}%j{slurm.SEP}%N{slurm.SEP}%b"',
+                f'-o "%i{slurm.SEP}%j{slurm.SEP}%u{slurm.SEP}%N{slurm.SEP}%b"',
                 require_outputs=True,
                 separate_stderr=True,
                 stream_logs=False,
@@ -420,6 +423,7 @@ class TestGetAllJobsInfo:
             assert result['node01'] == [
                 slurm.JobGresInfo(job_id='101',
                                   job_name='train a',
+                                  user='alice',
                                   gres_str='gpu:h100:4')
             ]
             # Multi-node job 103 appears on both nodes with the same
@@ -428,6 +432,7 @@ class TestGetAllJobsInfo:
                 assert result[node] == [
                     slurm.JobGresInfo(job_id='103',
                                       job_name='pretrain',
+                                      user='bob',
                                       gres_str='gpu:h100:2')
                 ]
 
