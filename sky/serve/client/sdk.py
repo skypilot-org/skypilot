@@ -7,7 +7,6 @@ from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server.requests import payloads
-from sky.usage import scarf
 from sky.usage import usage_lib
 from sky.utils import context
 
@@ -21,7 +20,6 @@ if typing.TYPE_CHECKING:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@scarf.track('serve.up')
 def up(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
@@ -56,7 +54,6 @@ def up(
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@scarf.track('serve.update')
 def update(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,

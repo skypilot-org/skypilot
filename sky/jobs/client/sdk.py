@@ -23,7 +23,6 @@ from sky.server import versions
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.skylet import constants
-from sky.usage import scarf
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
@@ -44,7 +43,6 @@ logger = sky_logging.init_logger(__name__)
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@scarf.track('jobs.launch')
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
