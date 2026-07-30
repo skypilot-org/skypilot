@@ -1,9 +1,11 @@
 """Tests for Kubernetes provision."""
 
+import datetime
 import re
 from unittest import mock
 
 import pytest
+import urllib3
 
 from sky import clouds
 from sky import exceptions as sky_exceptions
@@ -1768,8 +1770,8 @@ class TestWaitForPodsToScheduleQueueGating:
         monkeypatch.setattr(instance.time, 'time', clock.time)
         monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
 
-        def list_pods(namespace, label_selector=None):
-            del namespace, label_selector  # unused
+        def list_pods(namespace, label_selector=None, **kwargs):
+            del namespace, label_selector, kwargs  # unused
             current = pod_timeline[0][1]
             for since, pod in pod_timeline:
                 if clock.now >= since:
@@ -1891,6 +1893,138 @@ class TestWaitForPodsToScheduleQueueGating:
         # The queue-specific error path is taken, not the generic
         # scheduling-error path (gated pods have no scheduler events).
         assert not raise_errors.called
+
+
+class TestWaitForPodsToScheduleTransportErrors:
+    """Transport failures of the pod poll must not wedge or kill the wait.
+
+    The production bug: the poll's list_namespaced_pod call had no request
+    timeout, so a connection silently dropped mid-response (e.g. by a NAT/LB
+    idle limit) blocked the call — and with it the whole launch — forever.
+    The poll is now bounded by _POD_POLL_REQUEST_TIMEOUT; a transport error
+    is treated as a missed tick and retried, and only a failure streak
+    lasting _POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS surfaces as an error.
+    """
+
+    _FakeClock = TestWaitForPodsToScheduleAutoscaleTimeout._FakeClock
+    _make_node = staticmethod(
+        TestWaitForPodsToScheduleAutoscaleTimeout._make_node)
+    _make_pending_pod = staticmethod(
+        TestWaitForPodsToScheduleAutoscaleTimeout._make_pending_pod)
+
+    def _setup(self, monkeypatch, list_side_effect):
+
+        def mock_config(cloud, region, keys, default_value=None, **kwargs):
+            del cloud, region, keys, kwargs  # unused; no autoscaler
+            return default_value
+
+        monkeypatch.setattr('sky.skypilot_config.get_effective_region_config',
+                            mock_config)
+
+        clock = self._FakeClock()
+        monkeypatch.setattr(instance.time, 'time', clock.time)
+        monkeypatch.setattr(instance.time, 'sleep', clock.sleep)
+
+        core_api = mock.MagicMock()
+        core_api.list_namespaced_pod.side_effect = list_side_effect
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *a, **kw: core_api)
+        monkeypatch.setattr(
+            instance, '_raise_pod_scheduling_errors',
+            mock.MagicMock(
+                side_effect=config_lib.KubernetesError('sched-errors')))
+        monkeypatch.setattr('sky.utils.rich_utils.force_update_status',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr(instance.global_user_state, 'add_cluster_event',
+                            mock.MagicMock())
+        return clock, core_api
+
+    @staticmethod
+    def _read_timeout():
+        return urllib3.exceptions.ReadTimeoutError(None, 'url',
+                                                   'Read timed out.')
+
+    def _wait(self, timeout=60):
+        node = self._make_node('pod-0', 'my-cluster')
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=timeout,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+    def _scheduled_pod(self):
+        pod = self._make_pending_pod('pod-0', 'my-cluster')
+        pod.status.phase = 'Running'
+        return pod
+
+    def _flaky_list(self, failures, error_factory):
+        """A list mock failing ``failures`` times, then serving a scheduled
+        pod. Asserts every poll is bounded by _POD_POLL_REQUEST_TIMEOUT."""
+        scheduled = self._scheduled_pod()
+        state = {'n': 0}
+
+        def list_pods(namespace, label_selector=None, **kwargs):
+            del namespace, label_selector  # unused
+            assert kwargs.get('_request_timeout') == (
+                instance._POD_POLL_REQUEST_TIMEOUT)
+            state['n'] += 1
+            if state['n'] <= failures:
+                raise error_factory()
+            result = mock.MagicMock()
+            result.items = [scheduled]
+            return result
+
+        return list_pods
+
+    def test_transient_transport_error_is_retried(self, monkeypatch):
+        """A couple of timed-out polls are missed ticks, not a failure."""
+        _, core_api = self._setup(monkeypatch,
+                                  self._flaky_list(2, self._read_timeout))
+        self._wait()
+        assert core_api.list_namespaced_pod.call_count == 3
+
+    def test_wrapped_ssl_error_is_retried(self, monkeypatch):
+        """The kubernetes client wraps urllib3 SSLError into
+        ApiException(status=0); it must be retried like any other transport
+        error, while ApiExceptions with a real HTTP status still raise."""
+        _, core_api = self._setup(
+            monkeypatch,
+            self._flaky_list(
+                2, lambda: kubernetes.api_exception()
+                (status=0, reason='TLS blip')))
+        self._wait()
+        assert core_api.list_namespaced_pod.call_count == 3
+
+    def test_api_error_response_is_not_retried(self, monkeypatch):
+        """An HTTP error response (e.g. 403) is not a transport failure and
+        must fail fast, unchanged."""
+        self._setup(
+            monkeypatch,
+            self._flaky_list(
+                1, lambda: kubernetes.api_exception()
+                (status=403, reason='Forbidden')))
+        with pytest.raises(kubernetes.api_exception()):
+            self._wait()
+
+    def test_persistent_transport_errors_raise(self, monkeypatch):
+        """A persistently unreachable API server surfaces as an error once
+        the failure streak outlasts the grace window, instead of retrying
+        silently forever."""
+        clock, core_api = self._setup(
+            monkeypatch, self._flaky_list(10**9, self._read_timeout))
+
+        with pytest.raises(config_lib.KubernetesError,
+                           match='Lost connectivity'):
+            # Timeout far larger than the grace window, so the raise comes
+            # from the transport-error budget, not the deadline.
+            self._wait(timeout=10**6)
+
+        assert clock.now >= instance._POD_POLL_TRANSPORT_ERROR_GRACE_SECONDS
+        # Each missed poll costs ~1s of (fake) sleep, so the streak is
+        # roughly one attempt per second of the grace window.
+        assert core_api.list_namespaced_pod.call_count > 2
 
 
 class TestWaitForPodsToScheduleBoundPod:

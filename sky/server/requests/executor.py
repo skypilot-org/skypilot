@@ -267,9 +267,16 @@ class RequestWorker:
                 elif self.schedule_type == api_requests.ScheduleType.SHORT:
                     metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
             # Monitor the result of the request execution.
-            threading.Thread(target=self.handle_task_result,
-                             args=(fut, request_element),
-                             daemon=True).start()
+            try:
+                threading.Thread(target=self.handle_task_result,
+                                 args=(fut, request_element),
+                                 daemon=True).start()
+            except Exception:  # pylint: disable=broad-except
+                # handle_task_result owns the matching increment, so a thread
+                # that never starts would leak the slot for the lifetime of
+                # the process.
+                self._mark_executor_free()
+                raise
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
