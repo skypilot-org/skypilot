@@ -489,17 +489,19 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to the bounded request thread executor
-            # so a slow/locked DB cannot stall the request event loop (this runs
-            # on the loop for every service-account-authenticated request).
-            # Using the dedicated executor (not asyncio's shared default thread
+            # Offload the sync DB lookups to the bounded auth thread executor so
+            # a slow/locked DB cannot stall the request event loop (this runs on
+            # the loop for every service-account-authenticated request).
+            # Using a dedicated executor (not asyncio's shared default thread
             # pool) avoids saturating that pool under DB slowness; when it is
             # exhausted it raises ConcurrentWorkerExhaustedError, which the
-            # app-level handler turns into a 503 so the client retries.
+            # app-level handler turns into a 503 so the client retries. The auth
+            # executor is kept separate from the request executor so long-lived
+            # streaming requests cannot starve authentication.
             loop = asyncio.get_running_loop()
-            request_executor = executor.get_request_thread_executor()
+            auth_executor = executor.get_auth_thread_executor()
             token_row = await loop.run_in_executor(
-                request_executor,
+                auth_executor,
                 global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
@@ -516,7 +518,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = await loop.run_in_executor(request_executor,
+            user_info = await loop.run_in_executor(auth_executor,
                                                    global_user_state.get_user,
                                                    user_id)
             if user_info is None:
@@ -530,7 +532,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # carries a different token_id than the DB row.
             try:
                 await loop.run_in_executor(
-                    request_executor,
+                    auth_executor,
                     global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
