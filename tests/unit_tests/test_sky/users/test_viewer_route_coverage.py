@@ -123,11 +123,6 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/ssh_node_pools/{pool_name}/down', 'POST'),
     ('/ssh_node_pools/down', 'POST'),
     # --- Debug ---
-    # Both debug-dump endpoints are denied to viewers. A dump collects other
-    # users' request records and log files into a downloadable archive and is
-    # a side-effecting, long-scheduled operation, so the strictly-read-only
-    # viewer role must not trigger it; it is admin-only (the diagnose/support
-    # flow schedules the dump directly, not via this endpoint).
     ('/debug/dump_create', 'POST'),
     ('/debug/dump_download/{dump_filename}', 'GET'),
     # --- /api/* paths: RBAC-skipped at middleware level, not on

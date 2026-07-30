@@ -293,13 +293,6 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'path': '/upload_v2/blob',
         'method': 'GET'
     },
-    # NOTE: /debug/dump_create is intentionally NOT allowlisted for viewers.
-    # A debug dump collects other users' request records and log files into a
-    # downloadable archive, and is a `long`-scheduled, side-effecting
-    # operation; the strictly-read-only viewer role must not trigger it. It is
-    # admin-only: the regular `user` role already blocks it via
-    # `_DEFAULT_USER_BLOCKLIST`, and the diagnose/support flow schedules the
-    # dump directly (not through this endpoint).
     # --- Dashboard / static / auth-flow surface ---
     {
         'path': '/dashboard/*',
