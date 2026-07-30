@@ -18,6 +18,24 @@ import hostlist
 from sky.skylet import constants
 from sky.skylet.log_lib import run_bash_command_with_log
 
+# Slurm populates step- and task-scoped SLURM_* variables for the executor's
+# own job step (e.g. SLURM_CPU_BIND, SLURM_CPUS_PER_TASK=1,
+# SLURM_NTASKS_PER_NODE=1). srun treats many of these as input defaults, so a
+# nested srun in the user script gets silently constrained to the executor
+# step's shape (1 CPU per task, the executor's CPU binding) instead of the
+# full job allocation. Unset them for the user script, keeping job-scoped
+# variables (SLURM_JOB_ID, SLURM_JOB_NODELIST, SLURM_GPUS_ON_NODE, ...) so
+# patterns like `srun --overlap --jobid=$SLURM_JOB_ID` keep working against
+# the full allocation.
+# See https://support.schedmd.com/show_bug.cgi?id=14298
+UNSET_STEP_SCOPED_SLURM_ENV = (
+    'unset "${!SLURM_STEP_@}" "${!SLURM_CPU_BIND@}" "${!SLURM_MEM_BIND@}" '
+    'SLURM_CPUS_PER_TASK SLURM_TRES_PER_TASK SLURM_CPUS_ON_NODE '
+    'SLURM_NTASKS SLURM_NPROCS SLURM_NTASKS_PER_NODE SLURM_TASKS_PER_NODE '
+    'SLURM_DISTRIBUTION SLURM_SRUN_COMM_HOST SLURM_SRUN_COMM_PORT '
+    'SLURM_LAUNCH_NODE_IPADDR SLURM_TASK_PID '
+    'SLURM_PROCID SLURM_LOCALID SLURM_NODEID SLURM_GTIDS SLURM_STEPID')
+
 
 def _is_proctrack_cgroup_enabled(shared_home_dir: str) -> bool:
     """Check if Slurm uses proctrack/cgroup.
@@ -145,6 +163,7 @@ def main():
             script = f.read()
     else:
         script = args.script
+    script = UNSET_STEP_SCOPED_SLURM_ENV + '\n' + script
 
     # Parse env vars and add SKYPILOT environment variables
     env_vars = json.loads(args.env_vars)
