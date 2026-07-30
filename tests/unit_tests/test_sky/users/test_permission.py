@@ -1960,7 +1960,7 @@ class TestWorkspaceReadOnlyAccess:
 
     Read-only visibility is NOT a materialized casbin grant; it is evaluated
     live from config (``workspaces_utils.is_read_only_workspace`` / the effective
-    ``non_member_access``) at check time. A read check accepts it; a write
+    ``read_access``) at check time. A read check accepts it; a write
     check never does. The casbin enforce only ever checks the member '*' grant.
     """
 

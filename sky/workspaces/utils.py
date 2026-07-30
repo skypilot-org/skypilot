@@ -9,28 +9,27 @@ from sky.workspaces import constants as workspace_constants
 def is_read_only_for_non_members(workspace_config: Dict[str, Any]) -> bool:
     """Whether non-members may see this workspace read-only.
 
-    True for a private workspace whose effective ``non_member_access`` is
-    ``read-only``. The effective value is the workspace's own
-    ``non_member_access`` if set, otherwise the org-wide default
-    ``workspace_config.non_member_access`` (default ``none``). An open
-    (non-private) workspace is usable by everyone, so the flag is moot there
-    and this returns False.
+    True for a private workspace whose effective ``read_access`` is ``all``.
+    The effective value is the workspace's own ``read_access`` if set,
+    otherwise the org-wide default ``workspace_config.read_access`` (default
+    ``allowed_users``). An open (non-private) workspace is usable by everyone,
+    so the flag is moot there and this returns False.
     """
     if not workspace_config.get('private', False):
         return False
-    access = workspace_config.get('non_member_access')
+    access = workspace_config.get('read_access')
     if access is None:
         access = skypilot_config.get_nested(
-            ('workspace_config', 'non_member_access'),
-            default_value=workspace_constants.NON_MEMBER_ACCESS_NONE)
-    return access == workspace_constants.NON_MEMBER_ACCESS_READ_ONLY
+            ('workspace_config', 'read_access'),
+            default_value=workspace_constants.READ_ACCESS_ALLOWED_USERS)
+    return access == workspace_constants.READ_ACCESS_ALL
 
 
 def get_read_only_workspace_names() -> Set[str]:
     """Names of workspaces that non-members may see read-only.
 
-    Evaluated live from the current config (per-workspace ``non_member_access``,
-    falling back to the org-wide ``workspace_config.non_member_access``) at
+    Evaluated live from the current config (per-workspace ``read_access``,
+    falling back to the org-wide ``workspace_config.read_access``) at
     permission-check time -- see ``is_read_only_for_non_members`` -- so changes
     take effect without a policy re-sync or restart.
     """

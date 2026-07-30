@@ -407,11 +407,11 @@ class TestWorkspaceManagement(unittest.TestCase):
 
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.workspaces.utils.get_workspace_users')
-    def test_compare_workspace_configs_non_member_access_only(
+    def test_compare_workspace_configs_read_access_only(
             self, mock_get_users, mock_get_users_for_role):
-        """Only non_member_access changed -> classified as a user-access change.
+        """Only read_access changed -> classified as a user-access change.
 
-        non_member_access is an access-control field like private/allowed_users,
+        read_access is an access-control field like private/allowed_users,
         so changing it alone must not be treated as an "other" (infra) change
         that requires the workspace to have no active resources.
         """
@@ -421,12 +421,12 @@ class TestWorkspaceManagement(unittest.TestCase):
         current_config = {
             'private': True,
             'allowed_users': ['user1'],
-            'non_member_access': 'none',
+            'read_access': 'allowed_users',
         }
         new_config = {
             'private': True,
             'allowed_users': ['user1'],
-            'non_member_access': 'read-only',
+            'read_access': 'all',
         }
 
         result = core._compare_workspace_configs(current_config, new_config)
@@ -441,10 +441,10 @@ class TestWorkspaceManagement(unittest.TestCase):
         'sky.utils.resource_checker.check_users_workspaces_active_resources')
     @mock.patch('sky.users.permission.permission_service.get_users_for_role')
     @mock.patch('sky.workspaces.utils.get_workspace_users')
-    def test_validate_non_member_access_change_allowed_with_active_resources(
+    def test_validate_read_access_change_allowed_with_active_resources(
             self, mock_get_users, mock_get_users_for_role, mock_check_users,
             mock_check_no_active):
-        """A non_member_access-only change is allowed even when the workspace
+        """A read_access-only change is allowed even when the workspace
         has active resources: it removes no member and touches no infra, so it
         must not reach the strict no-active-resources check.
         """
@@ -457,14 +457,14 @@ class TestWorkspaceManagement(unittest.TestCase):
         base = {'private': True, 'allowed_users': ['user1']}
         # Both directions must be allowed without raising.
         core._validate_workspace_config_changes('ws', {
-            **base, 'non_member_access': 'none'
+            **base, 'read_access': 'allowed_users'
         }, {
-            **base, 'non_member_access': 'read-only'
+            **base, 'read_access': 'all'
         })
         core._validate_workspace_config_changes('ws', {
-            **base, 'non_member_access': 'read-only'
+            **base, 'read_access': 'all'
         }, {
-            **base, 'non_member_access': 'none'
+            **base, 'read_access': 'allowed_users'
         })
         mock_check_no_active.assert_not_called()
 

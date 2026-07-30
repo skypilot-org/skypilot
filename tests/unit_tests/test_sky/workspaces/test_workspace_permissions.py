@@ -214,30 +214,30 @@ class TestWorkspacePermissions(unittest.TestCase):
 
 
 class TestReadOnlyForNonMembers(unittest.TestCase):
-    """Test the non_member_access read-only predicate."""
+    """Test the read_access read-only predicate."""
 
     def test_private_read_only(self):
-        cfg = {'private': True, 'non_member_access': 'read-only'}
+        cfg = {'private': True, 'read_access': 'all'}
         self.assertTrue(workspaces_utils.is_read_only_for_non_members(cfg))
 
     @mock.patch('sky.skypilot_config.get_nested')
     def test_private_none_default(self, mock_get_nested):
-        # With no org-wide default set (workspace_config.non_member_access),
-        # a private workspace without its own non_member_access is hidden (not
-        # read-only). Mock get_nested so the test is hermetic and doesn't read
-        # the ambient ~/.sky/config.yaml.
-        mock_get_nested.return_value = 'none'
+        # With no org-wide default set (workspace_config.read_access), a private
+        # workspace without its own read_access is members-only/hidden (not
+        # read-only-visible). Mock get_nested so the test is hermetic and
+        # doesn't read the ambient ~/.sky/config.yaml.
+        mock_get_nested.return_value = 'allowed_users'
         self.assertFalse(
             workspaces_utils.is_read_only_for_non_members({'private': True}))
         self.assertFalse(
             workspaces_utils.is_read_only_for_non_members({
                 'private': True,
-                'non_member_access': 'none'
+                'read_access': 'allowed_users'
             }))
 
     def test_public_read_only_is_moot(self):
         # An open workspace is usable by everyone; the flag doesn't apply.
-        cfg = {'private': False, 'non_member_access': 'read-only'}
+        cfg = {'private': False, 'read_access': 'all'}
         self.assertFalse(workspaces_utils.is_read_only_for_non_members(cfg))
 
     def test_empty_config(self):
@@ -245,19 +245,19 @@ class TestReadOnlyForNonMembers(unittest.TestCase):
 
     @mock.patch('sky.skypilot_config.get_nested')
     def test_global_default_applies_when_unset(self, mock_get_nested):
-        # With the org-wide default set to read-only, a private workspace that
-        # doesn't set its own non_member_access inherits it.
-        mock_get_nested.return_value = 'read-only'
+        # With the org-wide default set to `all`, a private workspace that
+        # doesn't set its own read_access inherits it.
+        mock_get_nested.return_value = 'all'
         self.assertTrue(
             workspaces_utils.is_read_only_for_non_members({'private': True}))
-        # The org-wide default is read from workspace_config.non_member_access.
+        # The org-wide default is read from workspace_config.read_access.
         self.assertEqual(mock_get_nested.call_args.args[0],
-                         ('workspace_config', 'non_member_access'))
+                         ('workspace_config', 'read_access'))
         # A per-workspace value overrides the global default.
         self.assertFalse(
             workspaces_utils.is_read_only_for_non_members({
                 'private': True,
-                'non_member_access': 'none'
+                'read_access': 'allowed_users'
             }))
         # The global default is moot for an open (non-private) workspace.
         self.assertFalse(
@@ -277,7 +277,7 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
         def _get_nested(keys, default_value=None):
             if keys == ('workspaces',):
                 return workspaces
-            if keys == ('workspace_config', 'non_member_access'):
+            if keys == ('workspace_config', 'read_access'):
                 return global_default
             return default_value
 
@@ -285,13 +285,13 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
 
     @mock.patch('sky.skypilot_config.get_nested')
     def test_per_workspace_override(self, mock_get_nested):
-        # Global default 'none': only the workspace with its own read-only
-        # override is read-only-visible.
+        # Global default 'allowed_users': only the workspace with its own
+        # read_access: all is read-only-visible.
         mock_get_nested.side_effect = self._config(
             {
                 'w-ro': {
                     'private': True,
-                    'non_member_access': 'read-only'
+                    'read_access': 'all'
                 },
                 'w-priv': {
                     'private': True
@@ -299,7 +299,7 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
                 'w-pub': {
                     'private': False
                 },
-            }, 'none')
+            }, 'allowed_users')
         self.assertEqual(workspaces_utils.get_read_only_workspace_names(),
                          {'w-ro'})
         self.assertTrue(workspaces_utils.is_read_only_workspace('w-ro'))
@@ -309,8 +309,8 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
 
     @mock.patch('sky.skypilot_config.get_nested')
     def test_global_default_read_only(self, mock_get_nested):
-        # Global default 'read-only': a private workspace with no override
-        # inherits it; a per-workspace 'none' opts back out.
+        # Global default 'all': a private workspace with no override
+        # inherits it; a per-workspace 'allowed_users' opts back out.
         mock_get_nested.side_effect = self._config(
             {
                 'w-priv': {
@@ -318,9 +318,9 @@ class TestReadOnlyWorkspaceQueries(unittest.TestCase):
                 },
                 'w-none': {
                     'private': True,
-                    'non_member_access': 'none'
+                    'read_access': 'allowed_users'
                 },
-            }, 'read-only')
+            }, 'all')
         self.assertEqual(workspaces_utils.get_read_only_workspace_names(),
                          {'w-priv'})
         self.assertTrue(workspaces_utils.is_read_only_workspace('w-priv'))
@@ -331,7 +331,7 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
     """workspaces_for_user annotates each workspace with a `read_only` flag.
 
     The flag is server-computed via is_read_only_for_non_members, so it applies
-    the org-wide workspace_config.non_member_access fallback -- the dashboard
+    the org-wide workspace_config.read_access fallback -- the dashboard
     must not have to re-derive it from the raw per-workspace field (which was
     the bug: a private workspace with no override but a global read-only default
     showed no badge).
@@ -343,7 +343,7 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
         def _get_nested(keys, default_value=None):
             if keys == ('workspaces',):
                 return dict(workspaces)
-            if keys == ('workspace_config', 'non_member_access'):
+            if keys == ('workspace_config', 'read_access'):
                 return global_default
             return default_value
 
@@ -378,18 +378,18 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
                 },
                 'w-none': {
                     'private': True,
-                    'non_member_access': 'none'
+                    'read_access': 'allowed_users'
                 },
                 'w-pub': {
                     'private': False
                 },
             },
-            global_default='read-only',
+            global_default='all',
             accessible={'w-priv', 'w-none', 'w-pub'},
             writable={'w-pub'},
         )
         self.assertTrue(result['w-priv']['read_only'])
-        # Per-workspace 'none' opts back out even under a read-only default.
+        # Per-workspace 'allowed_users' opts back out even under an 'all' default.
         self.assertFalse(result['w-none']['read_only'])
         # Public workspace: read-only is moot.
         self.assertFalse(result['w-pub']['read_only'])
@@ -402,13 +402,13 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
             workspaces={
                 'w-ro': {
                     'private': True,
-                    'non_member_access': 'read-only'
+                    'read_access': 'all'
                 },
                 'w-priv': {
                     'private': True
                 },
             },
-            global_default='none',
+            global_default='allowed_users',
             accessible={'w-ro', 'w-priv'},
             writable=set(),
         )
@@ -436,7 +436,7 @@ class TestWorkspacesForUserReadOnlyFlag(unittest.TestCase):
                     },
                 },
             },
-            global_default='read-only',
+            global_default='all',
             accessible={'w-priv', 'w-mine'},
             writable={'w-mine'},
         )

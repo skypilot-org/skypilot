@@ -671,8 +671,8 @@ class PermissionService:
             return True
 
         # Read-only visibility is evaluated live from the current config
-        # (per-workspace non_member_access, falling back to the org-wide
-        # workspace_config.non_member_access) rather than a materialized casbin
+        # (per-workspace read_access, falling back to the org-wide
+        # workspace_config.read_access) rather than a materialized casbin
         # grant, so a change takes effect on the next request without a policy
         # re-sync or cache invalidation. Never cached.
         if (action == workspace_constants.WORKSPACE_ACTION_READ and

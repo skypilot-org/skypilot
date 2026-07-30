@@ -2429,15 +2429,16 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                # What non-members of a (private) workspace may do with it.
-                # 'none' (default): the workspace and its resources are hidden
-                # from non-members (current behavior). 'read-only': non-members
-                # can see the workspace and its clusters/jobs but cannot mutate
-                # anything. Only meaningful for private workspaces; an open
-                # (non-private) workspace is usable by everyone regardless.
-                'non_member_access': {
+                # Who may read a (private) workspace. 'allowed_users'
+                # (default): only the workspace's allowed users (members) can
+                # see it; it is hidden from everyone else (current behavior).
+                # 'all': anyone can see the workspace and its clusters/jobs, but
+                # writes stay members-only, so non-members get read-only access.
+                # Only meaningful for private workspaces; an open (non-private)
+                # workspace is usable by everyone regardless.
+                'read_access': {
                     'type': 'string',
-                    'enum': ['none', 'read-only'],
+                    'enum': ['allowed_users', 'all'],
                 },
                 'gcp': {
                     'type': 'object',
@@ -2822,12 +2823,11 @@ def get_config_schema():
                 'required': [],
                 'additionalProperties': False,
                 'properties': {
-                    # Default visibility of a private workspace to
-                    # non-members. A per-workspace `non_member_access`
-                    # overrides this.
-                    'non_member_access': {
+                    # Default read access for private workspaces. A
+                    # per-workspace `read_access` overrides this.
+                    'read_access': {
                         'type': 'string',
-                        'enum': ['none', 'read-only'],
+                        'enum': ['allowed_users', 'all'],
                     },
                 },
             },

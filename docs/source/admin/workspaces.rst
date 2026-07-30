@@ -339,24 +339,25 @@ users who cannot access the workspace, they cannot see/access/operate on the wor
 Read-only visibility for non-members
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default a private workspace is completely hidden from non-members. To instead
-make a private workspace *visible* (read-only) to users who are not in its
-``allowed_users``, set ``non_member_access: read-only``:
+By default a private workspace is readable only by its ``allowed_users`` (its
+members) and is completely hidden from everyone else. To instead let *anyone*
+see a private workspace (read-only), set ``read_access: all``:
 
 .. code-block:: yaml
 
    workspaces:
      private-ws:
        private: true
-       non_member_access: read-only
+       read_access: all
        allowed_users:
          - alice@example.com
 
-With ``read-only``, non-members can see the workspace and list the clusters and
-managed jobs running in it (including viewing their logs), but cannot launch
-into it or modify/cancel its **clusters and managed jobs** — SSH and VS Code
-access to its clusters are also blocked, since those open an interactive shell.
-Members (the ``allowed_users``) and admins retain full access.
+With ``read_access: all``, non-members can see the workspace and list the
+clusters and managed jobs running in it (including viewing their logs), but
+cannot launch into it or modify/cancel its **clusters and managed jobs** — SSH
+and VS Code access to its clusters are also blocked, since those open an
+interactive shell. Members (the ``allowed_users``) and admins retain full
+access.
 
 .. note::
 
@@ -365,29 +366,30 @@ Members (the ``allowed_users``) and admins retain full access.
    enforce a per-resource workspace check, so this read-only guarantee does not
    extend to them yet.
 
-``non_member_access`` accepts:
+``read_access`` accepts:
 
-- ``none`` (default): the workspace and its resources are hidden from
-  non-members (the default described at the start of this section).
-- ``read-only``: non-members can view the workspace and its workloads but
-  cannot modify them.
+- ``allowed_users`` (default): only the workspace's ``allowed_users`` (its
+  members) can see it; it is hidden from everyone else (the default described at
+  the start of this section).
+- ``all``: anyone can view the workspace and its workloads, but writes stay
+  members-only, so non-members get read-only access.
 
 It only applies to private workspaces; an open (non-private) workspace is usable
 by everyone regardless.
 
-To make read-only the org-wide default for private workspaces (each workspace
-can still override with its own ``non_member_access``), set
-``workspace_config.non_member_access``:
+To open up read access org-wide by default for private workspaces (each
+workspace can still override with its own ``read_access``), set
+``workspace_config.read_access``:
 
 .. code-block:: yaml
 
    workspace_config:
-     non_member_access: read-only         # org-wide default
+     read_access: all                     # org-wide default
 
    workspaces:
      locked-ws:
        private: true
-       non_member_access: none            # opt this one back to hidden
+       read_access: allowed_users         # opt this one back to members-only
        allowed_users:
          - alice@example.com
 

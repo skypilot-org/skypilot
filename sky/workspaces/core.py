@@ -295,13 +295,13 @@ def _compare_workspace_configs(
     removed_users = list(old_users_set - new_users_set)
     added_users = list(new_users_set - old_users_set)
 
-    # Check if only user access related fields changed. `non_member_access`
+    # Check if only user access related fields changed. `read_access`
     # is an access-control field like `private`/`allowed_users`: changing it
     # adds/removes no member and touches no infra, so it must not be treated
     # as an "other" change that requires the workspace to have no active
-    # resources. Exclude it here so a non_member_access-only change is
+    # resources. Exclude it here so a read_access-only change is
     # classified as a (safe) user-access change.
-    access_fields = ['private', 'allowed_users', 'non_member_access']
+    access_fields = ['private', 'allowed_users', 'read_access']
     current_without_access = {
         k: v for k, v in current_config.items() if k not in access_fields
     }
@@ -1190,8 +1190,8 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     for name in accessible_names:
         writable = name in writable_names
         # Whether non-members see this workspace read-only. Computed here (not
-        # derived client-side from the raw `non_member_access` field) so the
-        # org-wide ``workspace_config.non_member_access`` fallback is applied:
+        # derived client-side from the raw `read_access` field) so the
+        # org-wide ``workspace_config.read_access`` fallback is applied:
         # a private workspace with no per-workspace override is still read-only
         # when the global default is ``read-only``.
         read_only = workspaces_utils.is_read_only_for_non_members(

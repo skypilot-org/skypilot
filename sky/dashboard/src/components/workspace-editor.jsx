@@ -94,7 +94,7 @@ const WorkspaceConfigDescription = ({
     if (
       cloud === 'private' ||
       cloud === 'allowed_users' ||
-      cloud === 'non_member_access'
+      cloud === 'read_access'
     ) {
       return;
     }
@@ -221,7 +221,7 @@ const WorkspaceConfigDescription = ({
 };
 
 // Workspace badge component for private/public status. `readOnly` marks a
-// private workspace visible read-only to non-members (non_member_access); the
+// private workspace visible read-only to non-members (read_access: all); the
 // "Read-only" chip's tooltip names the scope (non-members, not the whole
 // workspace).
 const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
@@ -327,7 +327,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   const [workspaceConfig, setWorkspaceConfig] = useState({});
   const [originalConfig, setOriginalConfig] = useState({});
   // Server-computed read-only-visibility flag (accounts for the org-wide
-  // workspace_config.non_member_access fallback). Held separately from the
+  // workspace_config.read_access fallback). Held separately from the
   // editable config, which strips computed fields.
   const [isReadOnlyVisible, setIsReadOnlyVisible] = useState(false);
   // False when the caller is a non-member of this workspace (server strips the
@@ -877,8 +877,8 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
   private: true
-  # non-members can view but not modify (default: none = hidden)
-  non_member_access: read-only
+  # who can read it (default: allowed_users = members only; all = anyone)
+  read_access: all
   allowed_users:
   - user1@mydomain.com
   - user2@mydomain.com

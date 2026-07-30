@@ -8,8 +8,8 @@ exist:
   that only looks at state, but still required: the active workspace selects
   the config (allowed contexts, namespaces, cloud credentials) the request
   runs against, so a user with no access at all must not be able to point at
-  it. A non-member of a workspace whose ``non_member_access`` is
-  ``read-only`` has this level.
+  it. A non-member of a workspace whose ``read_access`` is ``all`` has this
+  level.
 - ``write`` — "may I create resources in this workspace". Required by the
   requests that stamp the active workspace onto a *new* resource.
 

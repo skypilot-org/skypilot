@@ -34,14 +34,15 @@ WORKSPACE_SOURCE_PERMISSION_DENIED = 'permission-denied'
 # or null when several readable workspaces give no basis to pick one.
 WORKSPACE_SOURCE_READ_ONLY = 'read-only'
 
-# Values for the per-workspace ``non_member_access`` config key, which
-# controls what a non-member of a (private) workspace may do with it.
-# 'none' (default): the workspace and its resources are hidden from
-# non-members. 'read-only': non-members can see the workspace and its
-# clusters/jobs but cannot mutate anything. Only meaningful for private
-# workspaces; an open (non-private) workspace is usable by everyone.
-NON_MEMBER_ACCESS_NONE = 'none'
-NON_MEMBER_ACCESS_READ_ONLY = 'read-only'
+# Values for the per-workspace ``read_access`` config key, which controls who
+# may read a (private) workspace. 'allowed_users' (default): only the
+# workspace's allowed users (its members) can see it — it is hidden from
+# everyone else. 'all': anyone can see the workspace and its clusters/jobs, but
+# writes stay members-only, so non-members effectively get read-only access.
+# Only meaningful for private workspaces; an open (non-private) workspace is
+# usable by everyone regardless.
+READ_ACCESS_ALLOWED_USERS = 'allowed_users'
+READ_ACCESS_ALL = 'all'
 
 # Access levels a request can require on the caller's *active* workspace,
 # passed as the ``action`` argument of
