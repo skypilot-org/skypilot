@@ -30,6 +30,35 @@ function getPaginationFetch() {
   return typeof window !== 'undefined' ? window.__skyPaginationFetch : null;
 }
 
+/**
+ * Count clusters owned by users other than `currentUser`.
+ *
+ * Used to gate the "View all clusters" empty-state CTA when the
+ * current-user scope has no rows. When the pagination extension is
+ * available, ask it for the all-users total with a single-row page
+ * instead of fetching every row just to count them (mirrors the jobs
+ * page's empty-state probe). That total includes the caller's own
+ * clusters, but callers only use this when the current user's view is
+ * empty, so the difference is nil.
+ */
+export async function getOtherUsersClustersCount(currentUser) {
+  if (isPaginationPluginAvailable()) {
+    const pluginFetch = getPaginationFetch();
+    const result = await dashboardCache.get(pluginFetch, [
+      { page: 1, limit: 1, allUsers: true },
+    ]);
+    return result?.total || 0;
+  }
+  const all = (await dashboardCache.get(getClusters)) || [];
+  if (!currentUser) {
+    return all.length;
+  }
+  return all.filter(
+    (item) =>
+      item.user_hash !== currentUser.id && item.user !== currentUser.name
+  ).length;
+}
+
 const DEFAULT_TAIL_LINES = 5000;
 
 /**

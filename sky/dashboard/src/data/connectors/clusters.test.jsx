@@ -31,6 +31,7 @@ import { apiClient } from '@/data/connectors/client';
 import {
   getClusters,
   getClusterHistory,
+  getOtherUsersClustersCount,
   useClusterData,
 } from '@/data/connectors/clusters';
 
@@ -54,6 +55,44 @@ describe('getClusters all_users scoping', () => {
     expect(apiClient.fetch).toHaveBeenCalledTimes(1);
     const [, body] = apiClient.fetch.mock.calls[0];
     expect(body.all_users).toBe(false);
+  });
+});
+
+describe('getOtherUsersClustersCount', () => {
+  const currentUser = { id: 'u-1', name: 'alice' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete window.__skyPaginationFetch;
+  });
+
+  it('probes the pagination extension with a single-row page when available', async () => {
+    const pluginFetch = jest.fn();
+    window.__skyPaginationFetch = pluginFetch;
+    dashboardCache.get.mockResolvedValue({ total: 1234, items: [{}] });
+
+    const count = await getOtherUsersClustersCount(currentUser);
+
+    expect(count).toBe(1234);
+    // The probe must go through the plugin fetch with limit 1 rather than
+    // fetching every row just to count them.
+    expect(dashboardCache.get).toHaveBeenCalledWith(pluginFetch, [
+      { page: 1, limit: 1, allUsers: true },
+    ]);
+    expect(dashboardCache.get).not.toHaveBeenCalledWith(getClusters);
+  });
+
+  it("falls back to counting other users' rows from the shared cache", async () => {
+    dashboardCache.get.mockResolvedValue([
+      { cluster: 'mine', user_hash: 'u-1', user: 'alice' },
+      { cluster: 'other-1', user_hash: 'u-2', user: 'bob' },
+      { cluster: 'other-2', user_hash: 'u-3', user: 'carol' },
+    ]);
+
+    const count = await getOtherUsersClustersCount(currentUser);
+
+    expect(count).toBe(2);
+    expect(dashboardCache.get).toHaveBeenCalledWith(getClusters);
   });
 });
 

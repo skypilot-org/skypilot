@@ -260,123 +260,131 @@ export function Config() {
     );
   }
 
-  return (
-    <>
-      {header}
+  // The default editor card. Plugins can replace it via the
+  // `settings.config.editor` slot below; this card renders when nothing is
+  // registered for the slot.
+  const editorCard = (
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle className="text-base font-normal flex items-center justify-between">
+          <span>Edit SkyPilot API Server Configuration</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-gray-600 mb-3">
+          Refer to the{' '}
+          <a
+            href="https://docs.skypilot.co/en/latest/reference/config.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            SkyPilot Docs
+          </a>{' '}
+          for details. The configuration should be in YAML format.
+        </p>
 
-      {/* Main Content */}
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="text-base font-normal flex items-center justify-between">
-            <span>Edit SkyPilot API Server Configuration</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-gray-600 mb-3">
-            Refer to the{' '}
-            <a
-              href="https://docs.skypilot.co/en/latest/reference/config.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
-            >
-              SkyPilot Docs
-            </a>{' '}
-            for details. The configuration should be in YAML format.
-          </p>
-
-          {/* Success Message */}
-          {saveSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
+        {/* Success Message */}
+        {saveSuccess && (
+          <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg
+                    className="h-5 w-5 text-green-400"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-green-800">
+                    Configuration saved successfully!
+                  </p>
+                </div>
+              </div>
+              <div className="ml-auto pl-3">
+                <div className="-mx-1.5 -my-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSuccessDismiss}
+                    className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                  >
+                    <span className="sr-only">Dismiss</span>
                     <svg
-                      className="h-5 w-5 text-green-400"
+                      className="h-5 w-5"
                       viewBox="0 0 20 20"
                       fill="currentColor"
                     >
                       <path
                         fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
                         clipRule="evenodd"
                       />
                     </svg>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-green-800">
-                      Configuration saved successfully!
-                    </p>
-                  </div>
-                </div>
-                <div className="ml-auto pl-3">
-                  <div className="-mx-1.5 -my-1.5">
-                    <button
-                      type="button"
-                      onClick={handleSuccessDismiss}
-                      className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
-                    >
-                      <span className="sr-only">Dismiss</span>
-                      <svg
-                        className="h-5 w-5"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  </div>
+                  </button>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Error Display */}
-          {error && (
-            <div className="mb-6">
-              <ErrorDisplay
-                error={error}
-                title="Failed to apply new configuration"
-                onDismiss={() => setError(null)}
-              />
-            </div>
-          )}
-
-          <div className="w-full">
-            <YamlEditor
-              value={editableConfig}
-              onChange={(val) => setEditableConfig(val)}
-              minHeight="384px"
-              maxHeight="600px"
-              disabled={loading || saving}
+        {/* Error Display */}
+        {error && (
+          <div className="mb-6">
+            <ErrorDisplay
+              error={error}
+              title="Failed to apply new configuration"
+              onDismiss={() => setError(null)}
             />
           </div>
+        )}
 
-          <div className="flex justify-end space-x-3 pt-3">
-            <Button
-              onClick={handleSave}
-              disabled={loading || saving}
-              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
-            >
-              {saving ? (
-                <>
-                  <CircularProgress size={16} className="mr-2" />
-                  Applying...
-                </>
-              ) : (
-                <>
-                  <SaveIcon className="w-4 h-4 mr-1.5" />
-                  Apply
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="w-full">
+          <YamlEditor
+            value={editableConfig}
+            onChange={(val) => setEditableConfig(val)}
+            minHeight="384px"
+            maxHeight="600px"
+            disabled={loading || saving}
+          />
+        </div>
+
+        <div className="flex justify-end space-x-3 pt-3">
+          <Button
+            onClick={handleSave}
+            disabled={loading || saving}
+            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+          >
+            {saving ? (
+              <>
+                <CircularProgress size={16} className="mr-2" />
+                Applying...
+              </>
+            ) : (
+              <>
+                <SaveIcon className="w-4 h-4 mr-1.5" />
+                Apply
+              </>
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <>
+      {header}
+
+      {/* Main Content */}
+      <PluginSlot name="settings.config.editor" fallback={editorCard} />
+      <PluginSlot name="settings.config.history" />
     </>
   );
 }

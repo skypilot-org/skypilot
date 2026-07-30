@@ -21,6 +21,7 @@ import pytest
 
 from sky.jobs import controller as controller_module
 from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.controller import ControllerManager
 from sky.jobs.controller import JobController
 from sky.skylet import job_lib
@@ -1300,6 +1301,170 @@ class TestUserJobStatusClassification:
         failure_type = mock_set_failed.call_args.kwargs['failure_type']
         assert failure_type == managed_job_state.ManagedJobStatus.FAILED
 
+    @pytest.mark.asyncio
+    async def test_terminal_failure_reason_includes_exit_code(self):
+        """A non-retried user failure surfaces the exit code and user-error
+        attribution in failure_reason, which feeds the dashboard details
+        and the FAILED job event (SKY-6411)."""
+
+        controller = self._make_controller()
+        controller._get_cluster_job_exit_codes = AsyncMock(return_value=[7])
+        mock_set_failed = await self._run_until_terminal(
+            controller, job_lib.JobStatus.FAILED)
+
+        failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
+        assert ('Job exited with exit code 7 (user program failure)'
+                in failure_reason)
+        # The log pointer is appended, not replaced.
+        assert 'sky jobs logs --controller' in failure_reason
+
+    @pytest.mark.asyncio
+    async def test_terminal_failure_attribution_without_exit_codes(self):
+        """The user-program attribution is added even when the exit-code
+        fetch fails (returns None), falling back to the job status."""
+
+        controller = self._make_controller()
+        controller._get_cluster_job_exit_codes = AsyncMock(return_value=None)
+        mock_set_failed = await self._run_until_terminal(
+            controller, job_lib.JobStatus.FAILED)
+
+        failure_reason = mock_set_failed.call_args.kwargs['failure_reason']
+        assert 'Job failed (FAILED) (user program failure)' in failure_reason
+        assert 'sky jobs logs --controller' in failure_reason
+
+
+class TestUserJobFailureRecoveryEventReason:
+    """The RECOVERING job event must state the real trigger (SKY-6411).
+
+    When recovery is triggered by the user job exiting non-zero on a healthy
+    cluster (max_restarts_on_errors / recover_on_exit_codes), the RECOVERING
+    event must carry the exit code and a pointer to the job logs instead of
+    the generic 'Cluster preempted or failed, recovering' copy, which is
+    misleading (the cluster was not preempted) and unactionable.
+    """
+
+    class _StopLoop(Exception):
+        """Sentinel raised from recover() to end the monitoring loop."""
+
+    def _make_controller(self, exit_codes):
+        controller = JobController.__new__(JobController)
+        controller._job_id = 42
+        controller._pool = None
+        controller._backend = MagicMock()
+        controller.download_log_and_stream = MagicMock()
+        controller._get_cluster_job_exit_codes = AsyncMock(
+            return_value=exit_codes)
+        controller._cleanup_cluster = AsyncMock()
+        return controller
+
+    def _make_executor(self, recover_on_exit_codes=None):
+        executor = MagicMock()
+        executor.should_restart_on_failure.return_value = True
+        executor.max_restarts_on_errors = 3
+        executor.restart_cnt_on_failure = 1
+        executor.recover_on_exit_codes = recover_on_exit_codes
+        executor.recover = AsyncMock(
+            side_effect=TestUserJobFailureRecoveryEventReason._StopLoop())
+        return executor
+
+    async def _run_recovery(self,
+                            controller,
+                            executor,
+                            cluster_status=status_lib.ClusterStatus.UP):
+        """Drive _monitor_one_task through one failed-job iteration up to
+        set_recovering_async, returning its call kwargs."""
+        mock_task = MagicMock()
+        mock_task.name = 'test-task'
+        mock_task.num_nodes = 1
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        state = controller_module.managed_job_state
+        with patch('asyncio.sleep', new=AsyncMock()), \
+             patch('sky.backends.backend_utils.async_check_network_connection',
+                   new=AsyncMock()), \
+             patch('sky.jobs.utils.get_job_status',
+                   new=AsyncMock(
+                       return_value=(job_lib.JobStatus.FAILED, None))), \
+             patch('sky.jobs.utils.try_to_get_job_end_time',
+                   return_value=12345.0), \
+             patch('sky.backends.backend_utils.refresh_cluster_status_handle',
+                   return_value=(cluster_status, handle)), \
+             patch.object(controller_module.global_user_state,
+                          'get_cluster_events', return_value=[]), \
+             patch.object(controller_module.ExternalFailureSource,
+                          'is_registered', return_value=False), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock()) as mock_set_recovering:
+            with pytest.raises(TestUserJobFailureRecoveryEventReason._StopLoop):
+                await controller._monitor_one_task(
+                    task_id=0,
+                    task=mock_task,
+                    cluster_name='test-cluster',
+                    executor=executor,
+                    callback_func=MagicMock(),
+                )
+
+        mock_set_recovering.assert_awaited_once()
+        return mock_set_recovering.await_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_reason_has_exit_code_and_log_pointer(self):
+        controller = self._make_controller(exit_codes=[137])
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(controller, executor)
+
+        reason = kwargs['user_job_failure_reason']
+        assert 'exit code 137' in reason
+        assert 'sky jobs logs --controller 42' in reason
+        assert 'restart 1 of 3' in reason
+        # The event must not claim the cluster was preempted.
+        assert 'preempted' not in reason
+        assert (kwargs['recovery_source'] ==
+                managed_job_state.RecoverySource.FAILURE)
+
+    @pytest.mark.asyncio
+    async def test_multiple_exit_codes(self):
+        controller = self._make_controller(exit_codes=[137, 1])
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(controller, executor)
+
+        assert 'exit codes [137, 1]' in kwargs['user_job_failure_reason']
+
+    @pytest.mark.asyncio
+    async def test_recover_on_exit_codes_match(self):
+        controller = self._make_controller(exit_codes=[137])
+        executor = self._make_executor(recover_on_exit_codes=[137])
+        kwargs = await self._run_recovery(controller, executor)
+
+        reason = kwargs['user_job_failure_reason']
+        assert 'exit code 137' in reason
+        assert 'recover_on_exit_codes' in reason
+
+    @pytest.mark.asyncio
+    async def test_no_exit_codes_falls_back_to_job_status(self):
+        controller = self._make_controller(exit_codes=None)
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(controller, executor)
+
+        reason = kwargs['user_job_failure_reason']
+        assert 'Job failed (FAILED)' in reason
+        assert 'sky jobs logs --controller 42' in reason
+
+    @pytest.mark.asyncio
+    async def test_preemption_path_has_no_user_job_failure_reason(self):
+        """A real preemption (cluster not UP) keeps the preemption copy."""
+        controller = self._make_controller(exit_codes=[137])
+        executor = self._make_executor()
+        kwargs = await self._run_recovery(
+            controller, executor, cluster_status=status_lib.ClusterStatus.INIT)
+
+        assert kwargs['user_job_failure_reason'] is None
+
 
 class TestDunderMainDispatchesToImportedModule:
     """Regression: running this file as `__main__` must dispatch into the
@@ -1360,3 +1525,143 @@ class TestDunderMainDispatchesToImportedModule:
         # The imported module's `main` -- not the `__main__` copy's -- must be
         # the one that was called.
         mock_main.assert_called_once_with('test-uuid')
+
+
+class TestTransientJobStatusRecoveryWindow:
+    """Tests for the transient job-status-check retry window across recovery.
+
+    When the controller cannot fetch a task's job status but the cluster is
+    healthy, it retries for up to JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS before
+    recovering, to avoid a false alarm from a transient control-plane error.
+    That window (`transient_job_check_error_start_time`) must be reset after a
+    recovery; otherwise the first status-fetch failure after a recovery is
+    measured from before the recovery, exceeds the timeout immediately, and
+    triggers another recovery with no retries -- turning one transient error
+    into an unbounded recovery loop.
+    """
+
+    class _StopLoop(Exception):
+        """Sentinel to break the otherwise-infinite monitoring loop."""
+
+    @pytest.mark.asyncio
+    async def test_window_reset_after_recovery(self, monkeypatch):
+        """A transient failure after a recovery starts a fresh retry window.
+
+        Drives ``_monitor_one_task_impl`` through: transient failure (retry) ->
+        transient failure past the timeout (recover) -> transient failure
+        again. With the window reset, the third failure retries instead of
+        recovering, so ``recover`` is called exactly once. Without the reset it
+        would recover a second time immediately.
+
+        Calls the ``_impl`` body rather than ``_monitor_one_task``: the retry
+        window lives entirely in the body, and the wrapper only owns the status
+        logger's lifecycle (covered by
+        ``test_status_logger_flushed_when_body_raises``).
+        """
+        monkeypatch.setattr(managed_job_utils,
+                            'JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS', 60)
+        monkeypatch.setattr(managed_job_utils, 'JOB_STATUS_CHECK_GAP_SECONDS',
+                            0)
+
+        # A logical clock advanced at the top of each loop iteration (inside
+        # the get_job_status stub) so `elapsed` is fully deterministic:
+        #   iter 1: +0   -> elapsed 0   < 60 -> retry
+        #   iter 2: +100 -> elapsed 100 >= 60 -> recover (#1); window reset
+        #   iter 3: +50  -> fresh window, elapsed 0 < 60 -> retry
+        #   iter 4: stub raises _StopLoop to end the loop
+        clock = {'t': 1000.0}
+        deltas = iter([0.0, 100.0, 50.0])
+        recover_calls = 0
+
+        async def fake_get_job_status(*args, **kwargs):
+            try:
+                clock['t'] += next(deltas)
+            except StopIteration:
+                raise TestTransientJobStatusRecoveryWindow._StopLoop()
+            return None, 'Job status check timed out after 30s.'
+
+        async def fake_recover(*args, **kwargs):
+            nonlocal recover_calls
+            recover_calls += 1
+            return clock['t']
+
+        handle = MagicMock()
+        handle.launched_resources.need_cleanup_after_preemption_or_failure.\
+            return_value = False
+
+        def fake_refresh(*args, **kwargs):
+            return status_lib.ClusterStatus.UP, handle
+
+        mock_self = MagicMock()
+        mock_self._job_id = 1
+        mock_self._pool = None
+
+        executor = MagicMock()
+        executor.recover = AsyncMock(side_effect=fake_recover)
+
+        state = controller_module.managed_job_state
+        with patch.object(controller_module.time, 'time',
+                          side_effect=lambda: clock['t']), \
+             patch.object(managed_job_utils, 'get_job_status',
+                          side_effect=fake_get_job_status), \
+             patch.object(controller_module.backend_utils,
+                          'refresh_cluster_status_handle',
+                          side_effect=fake_refresh), \
+             patch.object(controller_module.backend_utils,
+                          'async_check_network_connection',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.managed_job_runtime,
+                          'is_registered', return_value=False), \
+             patch.object(state, 'set_recovering_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_recovered_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(state, 'set_started_async',
+                          new=AsyncMock(return_value=None)), \
+             patch.object(controller_module.asyncio, 'sleep',
+                          new=AsyncMock(return_value=None)):
+            with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+                await controller_module.JobController._monitor_one_task_impl(
+                    mock_self,
+                    task_id=0,
+                    task=MagicMock(name='task'),
+                    cluster_name='cluster',
+                    executor=executor,
+                    status_logger=managed_job_utils.JobStatusLogger(),
+                    callback_func=MagicMock(),
+                    force_transit_to_recovering=False)
+
+        assert recover_calls == 1, (
+            'expected exactly one recovery; a second recovery means the '
+            'transient retry window was not reset after the first recovery')
+
+    @pytest.mark.asyncio
+    async def test_status_logger_flushed_when_body_raises(self, monkeypatch):
+        """The status logger is flushed even when the loop exits by raising.
+
+        ``_monitor_one_task`` owns the logger outside the loop precisely so the
+        last status the controller observed reaches the log when the loop exits
+        by raising (job cancelled, controller torn down) rather than by
+        observing a terminal status. Without the ``finally``, a collapsed run's
+        closing logline -- the only record of when that status was last seen --
+        would be dropped on exactly the paths where it is most useful.
+        """
+        status_logger = MagicMock()
+        monkeypatch.setattr(managed_job_utils, 'JobStatusLogger',
+                            lambda: status_logger)
+
+        async def raise_stop_loop(*args, **kwargs):
+            raise TestTransientJobStatusRecoveryWindow._StopLoop()
+
+        mock_self = MagicMock()
+        mock_self._monitor_one_task_impl = raise_stop_loop
+
+        with pytest.raises(TestTransientJobStatusRecoveryWindow._StopLoop):
+            await controller_module.JobController._monitor_one_task(
+                mock_self,
+                task_id=0,
+                task=MagicMock(name='task'),
+                cluster_name='cluster',
+                executor=MagicMock())
+
+        status_logger.flush.assert_called_once()

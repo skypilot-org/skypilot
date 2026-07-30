@@ -1429,6 +1429,82 @@ class TestDashboardSchema(unittest.TestCase):
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(instance=config, schema=self._get_schema())
 
+    def test_accepts_valid_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [
+                    {
+                        'label': 'Ray Dashboard',
+                        'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                        'scope': ['cluster'],
+                    },
+                    {
+                        'label': 'Experiment Platform',
+                        'url': 'https://exp.internal.example.com/jobs/${job_id}',
+                        'scope': ['jobs'],
+                    },
+                    {
+                        'label': 'Grafana',
+                        'regex': r'https://grafana\.internal\.example\.com/.*',
+                        'scope': ['cluster', 'jobs'],
+                    },
+                ],
+            },
+        }
+        jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_unknown_scope_value(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': ['clusters'],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_empty_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': [],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_non_array_scope(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': 'cluster',
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
+    def test_rejects_duplicate_scope_values(self):
+        config = {
+            'dashboard': {
+                'external_links': [{
+                    'label': 'Ray Dashboard',
+                    'url': 'https://ray.internal.example.com/dashboard/${cluster_name}',
+                    'scope': ['cluster', 'cluster'],
+                }],
+            },
+        }
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=config, schema=self._get_schema())
+
 
 class TestDashboardConfigRegexValidation(unittest.TestCase):
     """Tests for the runtime regex-compile validation in skypilot_config."""

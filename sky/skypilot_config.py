@@ -583,8 +583,27 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
 
 def to_dict() -> config_utils.Config:
-    """Returns a deep-copied version of the current config."""
+    """Returns a deep-copied version of the current config.
+
+    `active_workspace` here is only what the config itself sets; use
+    `resolved_config()` for the workspace the request actually runs in.
+    """
     return copy.deepcopy(_get_loaded_config())
+
+
+def resolved_config() -> config_utils.Config:
+    """Returns the config with the effective `active_workspace` filled in.
+
+    The active workspace can be resolved into a thread-local context instead
+    of the config (the server-side resolver in
+    `executor.override_request_env_and_config` sets it there), so
+    `active_workspace` is taken from `get_active_workspace()`. Callers that
+    need the workspace a request actually runs in — e.g. admin policies —
+    should use this rather than `to_dict()`.
+    """
+    config = to_dict()
+    config['active_workspace'] = get_active_workspace()
+    return config
 
 
 def _get_config_file_path(envvar: str) -> Optional[str]:
@@ -989,27 +1008,33 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
     original_config_path = loaded_config_path_serialized()
     original_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if new_configs != original_config:
-        # Modify the global config of current process or context
-        _set_loaded_config(new_configs)
-        with tempfile.NamedTemporaryFile(delete=False,
-                                         mode='w',
-                                         prefix='mutated-skypilot-config-',
-                                         suffix='.yaml') as temp_file:
-            yaml_utils.dump_yaml(temp_file.name, dict(**new_configs))
-        # Modify the env var of current process or context so that the
-        # new config will be used by spawned sub-processes.
-        # Note that this code modifies os.environ directly because it
-        # will be hijacked to be context-aware if a context is active.
-        os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
-        _set_loaded_config_path(temp_file.name)
-        yield
-        # Restore the original config and env var.
-        _set_loaded_config(original_config)
-        _set_loaded_config_path_serialized(original_config_path)
-        if original_env_var:
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
-        else:
-            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
+        try:
+            # Modify the global config of current process or context
+            _set_loaded_config(new_configs)
+            with tempfile.NamedTemporaryFile(delete=False,
+                                             mode='w',
+                                             prefix='mutated-skypilot-config-',
+                                             suffix='.yaml') as temp_file:
+                yaml_utils.dump_yaml(temp_file.name, dict(**new_configs))
+            # Modify the env var of current process or context so that the
+            # new config will be used by spawned sub-processes.
+            # Note that this code modifies os.environ directly because it
+            # will be hijacked to be context-aware if a context is active.
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+            _set_loaded_config_path(temp_file.name)
+            yield
+        finally:
+            # Restore the original config and env var. This must happen even
+            # if the body raises: while ENV_VAR_SKYPILOT_CONFIG is set,
+            # `reload_config()` reads the temporary file instead of the real
+            # config, so leaving it in place makes every later config reload
+            # in this process or context see the replacement config.
+            _set_loaded_config(original_config)
+            _set_loaded_config_path_serialized(original_config_path)
+            if original_env_var:
+                os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_var
+            else:
+                os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
     else:
         yield
 

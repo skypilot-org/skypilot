@@ -441,6 +441,19 @@ def max_retry_error():
     return urllib3.exceptions.MaxRetryError
 
 
+def urllib3_http_error():
+    """Base class of urllib3 transport errors.
+
+    Covers read timeouts, dropped/reset connections and exhausted connect
+    retries -- i.e. failures of the HTTP transport itself, as opposed to
+    HTTP error responses from the API server (``api_exception``). Note
+    that the kubernetes client re-wraps ``urllib3.exceptions.SSLError``
+    into an ``ApiException`` with ``status=0``, so TLS failures do NOT
+    surface as this type.
+    """
+    return urllib3.exceptions.HTTPError
+
+
 def stream():
     return kubernetes.stream.stream
 

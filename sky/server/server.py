@@ -87,6 +87,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.server.requests import role_filter
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.ssh_node_pools import server as ssh_node_pools_rest
 from sky.usage import usage_lib
 from sky.users import permission
@@ -104,6 +105,7 @@ from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
+from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -487,7 +489,18 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            token_row = global_user_state.get_service_account_token_by_hash(
+            # Offload the sync DB lookups to the bounded request thread executor
+            # so a slow/locked DB cannot stall the request event loop (this runs
+            # on the loop for every service-account-authenticated request).
+            # Using the dedicated executor (not asyncio's shared default thread
+            # pool) avoids saturating that pool under DB slowness; when it is
+            # exhausted it raises ConcurrentWorkerExhaustedError, which the
+            # app-level handler turns into a 503 so the client retries.
+            loop = asyncio.get_running_loop()
+            request_executor = executor.get_request_thread_executor()
+            token_row = await loop.run_in_executor(
+                request_executor,
+                global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
                 logger.warning(
@@ -503,7 +516,9 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = global_user_state.get_user(user_id)
+            user_info = await loop.run_in_executor(request_executor,
+                                                   global_user_state.get_user,
+                                                   user_id)
             if user_info is None:
                 logger.warning(
                     f'Service account user {user_id} no longer exists')
@@ -514,7 +529,9 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # DB row's token_id (not the JWT's): after rotation the JWT
             # carries a different token_id than the DB row.
             try:
-                global_user_state.update_service_account_token_last_used(
+                await loop.run_in_executor(
+                    request_executor,
+                    global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to update token last used time: {e}')
@@ -526,6 +543,10 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             logger.debug(f'Authenticated service account: {user_id}')
 
+        except exceptions.ConcurrentWorkerExhaustedError:
+            # Request thread executor is full: let the app-level handler return
+            # 503 so the client retries, instead of masking it as a 401 below.
+            raise
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
@@ -2086,30 +2107,30 @@ async def download(download_body: payloads.DownloadBody,
     download_tmp = bs.get_blob_storage().download_tmp_dir(user_hash)
     for folder_path in folder_paths:
         folder_str = str(folder_path)
-        expanded_str = str(folder_path.expanduser())
+        expanded_str = str(runtime_utils.expanduser_path(folder_path))
         if not (folder_str.startswith(str(logs_dir_on_api_server)) or
-                folder_str.startswith(download_tmp) or
-                expanded_str.startswith(os.path.expanduser(download_tmp))):
+                folder_str.startswith(download_tmp) or expanded_str.startswith(
+                    runtime_utils.expanduser(download_tmp))):
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=
                 f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
 
-        if not folder_path.expanduser().resolve().exists():
+        if not runtime_utils.expanduser_path(folder_path).resolve().exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
     # Create a temporary zip file
     log_id = str(uuid.uuid4().hex)
     zip_filename = f'folder_{log_id}.zip'
-    zip_path = pathlib.Path(
-        logs_dir_on_api_server).expanduser().resolve() / zip_filename
+    zip_path = runtime_utils.expanduser_path(
+        pathlib.Path(logs_dir_on_api_server)).resolve() / zip_filename
 
     try:
 
         def _zip_files_and_folders(folder_paths, zip_path):
             folders = [
-                str(folder_path.expanduser().resolve())
+                str(runtime_utils.expanduser_path(folder_path).resolve())
                 for folder_path in folder_paths
             ]
             # Check for optional query parameter to control zip entry structure
@@ -2374,13 +2395,26 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
         poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
-    # TODO(aylei): refine this, /api/get will not be retried and this is
-    # meaningless to retry. It is the original request that should be retried.
-    if request_task.should_retry:
-        raise fastapi.HTTPException(
-            status_code=503, detail=f'Request {request_id!r} should be retried')
+    # Check the error before should_retry: an interrupted request is in a
+    # terminal state (the server does not re-execute it after a restart),
+    # so clients polling /api/get must get a definitive error telling them
+    # to re-submit the original request. Returning a retryable 503 here
+    # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=request_task.encode().model_dump())
+    if request_task.should_retry:
+        # Interrupted by a server version that recorded no error object —
+        # including the very rolling update that ships this code, whose
+        # draining (old) servers still write bare should_retry rows.
+        # Synthesize the same terminal error at read time so those rows,
+        # and any already stuck in the database, stop 503ing on deploy.
+        request_task.set_error(
+            exceptions.RequestInterruptedError(
+                f'Request {request_id!r} was interrupted by an API server '
+                'restart and will not be resumed. Please re-submit the '
+                'original request.'))
         raise fastapi.HTTPException(status_code=500,
                                     detail=request_task.encode().model_dump())
     return request_task.encode()
@@ -2497,8 +2531,8 @@ async def stream(
     else:
         assert log_path is not None, (request_id, log_path)
         if log_path == constants.API_SERVER_LOGS:
-            resolved_log_path = pathlib.Path(
-                constants.API_SERVER_LOGS).expanduser()
+            resolved_log_path = runtime_utils.expanduser_path(
+                pathlib.Path(constants.API_SERVER_LOGS))
             if not resolved_log_path.exists():
                 raise fastapi.HTTPException(
                     status_code=404,
@@ -2648,6 +2682,13 @@ async def api_status(
         None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
+    # `fields` is caller-supplied and ends up in the SQL column list. Reject an
+    # unknown column here so the client gets a 400 instead of a 500 from the
+    # query layer.
+    try:
+        requests_lib.validate_fields(fields)
+    except ValueError as e:
+        raise fastapi.HTTPException(status_code=400, detail=str(e)) from e
     if request_ids is None:
         statuses = None
         if not all_status:
@@ -2683,7 +2724,8 @@ def _get_local_contexts() -> List[str]:
     Uses the same detection as the metrics federation routes, so the
     dashboard and the federation always agree on which contexts are
     local (their series are queried with cluster="" instead of a
-    context name).
+    context name). Non-blocking: verdicts come from the detection cache,
+    so this never stalls the event loop on a slow context.
     """
     local_contexts, _ = metrics_utils.split_local_remote_contexts(
         core.get_all_contexts())
@@ -2722,7 +2764,10 @@ async def dashboard_config() -> Dict[str, Any]:
     Exposes the optional `external_links` entries: `regex` entries that
     the dashboard matches against streamed logs, and `url` template
     entries that the dashboard resolves against cluster/job metadata to
-    render labeled external links on cluster and job detail pages. Also
+    render labeled external links on cluster and job detail pages. Each
+    entry may carry an optional `scope` (a subset of
+    schemas.DASHBOARD_EXTERNAL_LINK_SCOPES) restricting which pages
+    render the link; entries without a scope appear on all pages. Also
     exposes `local_contexts` (contexts pointing at the API server's own
     cluster); the field is omitted when detection raises, so the
     dashboard falls back to its ['in-cluster'] default instead of
@@ -2730,7 +2775,7 @@ async def dashboard_config() -> Dict[str, Any]:
     """
     external_links = skypilot_config.get_nested(('dashboard', 'external_links'),
                                                 [])
-    sanitized: List[Dict[str, str]] = []
+    sanitized: List[Dict[str, Any]] = []
     if isinstance(external_links, list):
         for entry in external_links:
             if not isinstance(entry, dict):
@@ -2738,13 +2783,26 @@ async def dashboard_config() -> Dict[str, Any]:
             label = entry.get('label')
             if not isinstance(label, str):
                 continue
+            sanitized_entry: Optional[Dict[str, Any]] = None
             regex = entry.get('regex')
-            if isinstance(regex, str):
-                sanitized.append({'label': label, 'regex': regex})
-                continue
             url = entry.get('url')
-            if isinstance(url, str):
-                sanitized.append({'label': label, 'url': url})
+            if isinstance(regex, str):
+                sanitized_entry = {'label': label, 'regex': regex}
+            elif isinstance(url, str):
+                sanitized_entry = {'label': label, 'url': url}
+            if sanitized_entry is None:
+                continue
+            # Optional page scope; only known values are passed through so
+            # the dashboard never sees an unrecognized scope.
+            scope = entry.get('scope')
+            if isinstance(scope, list):
+                valid_scope = [
+                    s for s in scope
+                    if s in schemas.DASHBOARD_EXTERNAL_LINK_SCOPES
+                ]
+                if valid_scope:
+                    sanitized_entry['scope'] = valid_scope
+            sanitized.append(sanitized_entry)
     dashboard_settings: Dict[str, Any] = {'external_links': sanitized}
     try:
         # May probe each uncached context once (blocking k8s API calls);
@@ -2911,6 +2969,40 @@ async def _get_cluster_and_validate(
     return handle
 
 
+async def _validate_cluster_for_ssh_proxy_ws(
+    websocket: fastapi.WebSocket,
+    cluster_name: str,
+    cloud_type: Type[clouds.Cloud],
+) -> Optional['backends.CloudVmRayResourceHandle']:
+    """Validate the cluster for an already-accepted SSH proxy websocket.
+
+    The websocket is accepted before this call, so a raised HTTPException
+    cannot be turned into an HTTP response: Starlette would emit
+    ``websocket.http.response.start``, which uvicorn rejects with a
+    ``RuntimeError``. On a websocket connection that error is unhandled and
+    surfaces as an ``Exception in ASGI application`` traceback in the server
+    logs, and the connection is dropped abnormally rather than closed
+    cleanly. This is easy to trigger, e.g. a client repeatedly reconnecting
+    to a deleted cluster spams the logs with tracebacks. Instead, close the
+    websocket with the error detail as the close reason and return None so
+    the caller can bail out cleanly.
+    """
+    try:
+        return await _get_cluster_and_validate(cluster_name, cloud_type)
+    except fastapi.HTTPException as e:
+        logger.info(f'Closing SSH proxy websocket for cluster '
+                    f'{cluster_name}: {e.detail}')
+        # 1008 (policy violation) signals the client that the connection
+        # cannot proceed; the reason carries the human-readable detail. A
+        # websocket close frame payload is capped at 125 bytes (RFC 6455) and
+        # 2 bytes go to the status code, so truncate the reason to 123 bytes
+        # to avoid a serialization error on long details (e.g. long cluster
+        # names) that would itself surface as the same unhandled RuntimeError.
+        reason = str(e.detail).encode('utf-8')[:123].decode('utf-8', 'ignore')
+        await websocket.close(code=1008, reason=reason)
+        return None
+
+
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
                                    cluster_name: str,
@@ -2941,7 +3033,10 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             await websocket.close()
             return
 
-    handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
+    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
+                                                      clouds.Kubernetes)
+    if handle is None:
+        return
 
     # Under hostNetwork the pod's sshd binds a probed port (not 22,
     # which is owned by the K8s node's own sshd). head_ssh_port flows
@@ -3077,7 +3172,10 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
 
-    handle = await _get_cluster_and_validate(cluster_name, clouds.Slurm)
+    handle = await _validate_cluster_for_ssh_proxy_ws(websocket, cluster_name,
+                                                      clouds.Slurm)
+    if handle is None:
+        return
 
     assert handle.cached_cluster_info is not None, 'Cached cluster info is None'
     provider_config = handle.cached_cluster_info.provider_config
@@ -3581,7 +3679,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', default=46580, type=int)
+    parser.add_argument('--port',
+                        default=common.get_local_api_server_port(),
+                        type=int)
     parser.add_argument('--deploy', action='store_true')
     # Serve metrics on a separate port to isolate it from the application APIs:
     # metrics port will not be exposed to the public network typically.

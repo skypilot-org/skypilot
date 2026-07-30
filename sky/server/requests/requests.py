@@ -164,6 +164,37 @@ REQUEST_COLUMNS = [
 ]
 
 
+def validate_fields(fields: Optional[List[str]]) -> None:
+    """Validates a caller-supplied column list for a request query.
+
+    `fields` reaches the SQL SELECT list by string interpolation (the column
+    list cannot be a bound parameter), and some callers pass it straight from
+    a client query param. Anything not an exact known column name is rejected
+    so the interpolation can only ever emit column names.
+
+    Raises:
+        ValueError: if any field is not a known request column.
+    """
+    if not fields:
+        return
+    unknown = [field for field in fields if field not in REQUEST_COLUMNS]
+    if unknown:
+        raise ValueError(f'Unknown request field(s): {unknown}. '
+                         f'Valid fields: {REQUEST_COLUMNS}')
+
+
+def _columns_str(fields: Optional[List[str]]) -> str:
+    """Returns the validated SELECT column list for a request query.
+
+    Raises:
+        ValueError: if any field is not a known request column.
+    """
+    if not fields:
+        return ', '.join(REQUEST_COLUMNS)
+    validate_fields(fields)
+    return ', '.join(fields)
+
+
 class ScheduleType(enum.Enum):
     """The schedule type for the requests."""
     LONG = 'long'
@@ -812,9 +843,7 @@ def _get_request_no_lock(
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Get a SkyPilot API request."""
     assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
-    if fields:
-        columns_str = ', '.join(fields)
+    columns_str = _columns_str(fields)
     where, params = _request_id_where(request_id)
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -833,9 +862,7 @@ async def _get_request_no_lock_async(
         fields: Optional[List[str]] = None) -> Optional[Request]:
     """Async version of _get_request_no_lock."""
     assert _DB is not None
-    columns_str = ', '.join(REQUEST_COLUMNS)
-    if fields:
-        columns_str = ', '.join(fields)
+    columns_str = _columns_str(fields)
     where, params = _request_id_where(request_id)
     async with _DB.execute_fetchall_async(
             f'SELECT {columns_str} FROM {REQUEST_TABLE} WHERE {where}',
@@ -1012,6 +1039,10 @@ class RequestTaskFilter:
             raise ValueError(
                 'Only one of exclude_request_names or include_request_names '
                 'can be provided, not both.')
+        # `fields` becomes the SELECT list by interpolation, and some callers
+        # pass it through from a client query param. Validate here so every
+        # caller of this filter is covered, not just the ones that remember to.
+        validate_fields(self.fields)
 
     def build_query(self) -> Tuple[str, List[Any]]:
         """Build the SQL query and filter parameters.
@@ -1022,26 +1053,29 @@ class RequestTaskFilter:
         filters = []
         filter_params: List[Any] = []
         if self.status is not None:
-            status_list_str = ','.join(
-                repr(status.value) for status in self.status)
-            filters.append(f'status IN ({status_list_str})')
+            status_placeholders = ','.join(['?'] * len(self.status))
+            filters.append(f'status IN ({status_placeholders})')
+            filter_params.extend(status.value for status in self.status)
         if self.include_request_names is not None:
-            request_names_str = ','.join(
-                repr(name) for name in self.include_request_names)
-            filters.append(f'name IN ({request_names_str})')
+            name_placeholders = ','.join(['?'] *
+                                         len(self.include_request_names))
+            filters.append(f'name IN ({name_placeholders})')
+            filter_params.extend(self.include_request_names)
         if self.exclude_request_names is not None:
-            exclude_request_names_str = ','.join(
-                repr(name) for name in self.exclude_request_names)
-            filters.append(f'name NOT IN ({exclude_request_names_str})')
+            exclude_placeholders = ','.join(['?'] *
+                                            len(self.exclude_request_names))
+            filters.append(f'name NOT IN ({exclude_placeholders})')
+            filter_params.extend(self.exclude_request_names)
         if self.cluster_names is not None:
             if len(self.cluster_names) == 0:
                 # Empty IN () is invalid SQL in PostgreSQL.
                 # An empty list means "match nothing".
                 filters.append('1=0')
             else:
-                cluster_names_str = ','.join(
-                    repr(name) for name in self.cluster_names)
-                filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+                cluster_placeholders = ','.join(['?'] * len(self.cluster_names))
+                filters.append(
+                    f'{COL_CLUSTER_NAME} IN ({cluster_placeholders})')
+                filter_params.extend(self.cluster_names)
         if self.user_id is not None:
             filters.append(f'{COL_USER_ID} = ?')
             filter_params.append(self.user_id)
@@ -1434,10 +1468,10 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         stale_ids = [rid for rid in existing if rid not in keep_ids]
         if not stale_ids:
             return
-        id_list_str = ','.join(repr(rid) for rid in stale_ids)
+        placeholders = ','.join(['?'] * len(stale_ids))
         await _DB.execute_and_commit_async(
             f'DELETE FROM {REQUEST_TABLE} '
-            f'WHERE request_id IN ({id_list_str})')
+            f'WHERE request_id IN ({placeholders})', tuple(stale_ids))
         logger.info(f'Deleted orphan internal daemon rows: {stale_ids}')
 
     @init_db
@@ -1477,13 +1511,13 @@ class SqliteRequestBackend(request_storage.RequestBackend):
         if not request_ids:
             return
         assert _DB is not None
-        id_list_str = ','.join(repr(rid) for rid in request_ids)
+        placeholders = ','.join(['?'] * len(request_ids))
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Start deleting requests {request_ids}')
         try:
             await _DB.execute_and_commit_async(
                 f'DELETE FROM {REQUEST_TABLE} '
-                f'WHERE request_id IN ({id_list_str})')
+                f'WHERE request_id IN ({placeholders})', tuple(request_ids))
         finally:
             if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                 logger.debug(f'End deleting requests {request_ids}')
@@ -1570,10 +1604,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_id_prefix: str,
             fields: Optional[List[str]] = None) -> Optional[List[Request]]:
         assert _DB is not None
-        if fields:
-            columns_str = ', '.join(fields)
-        else:
-            columns_str = ', '.join(REQUEST_COLUMNS)
+        columns_str = _columns_str(fields)
         clause, params = _request_id_prefix_clause(request_id_prefix)
         with _DB.conn:
             cursor = _DB.conn.cursor()
@@ -1593,10 +1624,7 @@ class SqliteRequestBackend(request_storage.RequestBackend):
             request_id_prefix: str,
             fields: Optional[List[str]] = None) -> Optional[List[Request]]:
         assert _DB is not None
-        if fields:
-            columns_str = ', '.join(fields)
-        else:
-            columns_str = ', '.join(REQUEST_COLUMNS)
+        columns_str = _columns_str(fields)
         clause, params = _request_id_prefix_clause(request_id_prefix)
         async with _DB.execute_fetchall_async(
                 f'SELECT {columns_str} FROM {REQUEST_TABLE} {clause}',

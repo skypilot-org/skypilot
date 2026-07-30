@@ -221,6 +221,33 @@ def get_cmd_wait_until_cluster_is_not_found(cluster_name: str, timeout: int):
                                                    timeout=timeout)
 
 
+_WAIT_UNTIL_VOLUME_IS_NOT_FOUND = (
+    # A while loop to wait until a volume no longer appears in
+    # `sky volumes ls`, or timeout. `sky volumes delete` tears down the backing
+    # storage asynchronously, so a single `sky volumes ls` right after the
+    # delete can still list the volume; poll instead of checking once.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'vols=$(sky volumes ls); '
+    'if ! echo "$vols" | grep -q "{volume_name}"; then '
+    '  echo "Volume {volume_name} successfully removed."; break; '
+    'fi; '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "$vols"; '
+    '  echo "Timeout after {timeout} seconds waiting for volume '
+    '{volume_name} to be removed"; exit 1; '
+    'fi; '
+    'echo "Waiting for volume {volume_name} to be removed..."; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_volume_is_not_found(volume_name: str,
+                                           timeout: int = 120):
+    return _WAIT_UNTIL_VOLUME_IS_NOT_FOUND.format(volume_name=volume_name,
+                                                  timeout=timeout)
+
+
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.
@@ -923,6 +950,25 @@ VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
     ' && echo "==Validating no pg conn closed error==" && '
     '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
 )
+
+# Asserts that the raylet's soft nofile limit was raised. SkyPilot targets
+# 1048576, but a host whose hard limit is lower cannot reach it (raising a hard
+# limit requires CAP_SYS_RESOURCE, which containers usually lack), so the
+# expected value is min(1048576, hard limit).
+_CHECK_RAYLET_NOFILE_LIMIT = (
+    "pid=$(pgrep -f 'raylet/raylet --raylet_socket_name'); "
+    'soft=$(prlimit --nofile --pid=$pid --noheadings --output=SOFT); '
+    'hard=$(prlimit --nofile --pid=$pid --noheadings --output=HARD); '
+    'expected=1048576; '
+    'if [ "$hard" != unlimited ] && [ "$hard" -lt 1048576 ]; then '
+    'expected=$hard; fi; '
+    'echo "raylet $pid nofile: soft=$soft hard=$hard expected=$expected"; '
+    '[ "$soft" = "$expected" ]')
+
+
+def get_check_raylet_nofile_limit_cmd(cluster_name: str) -> str:
+    """Returns a `sky exec` checking the raylet's open files limit."""
+    return f'sky exec {cluster_name} {shlex.quote(_CHECK_RAYLET_NOFILE_LIMIT)}'
 
 
 def get_disk_size_and_validate_launch_output(generic_cloud: str):

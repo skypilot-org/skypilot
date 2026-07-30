@@ -339,6 +339,23 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------- RunPod ---------------------------------- #
+def _runpod_key_label() -> str:
+    """Per-user identifier to stamp as the registered SSH key's comment.
+
+    RunPod derives a key's display name from its comment, reading only the
+    first whitespace-separated token after the key material, so the label must
+    contain no spaces.
+    """
+    user_hash = common_utils.get_user_hash()
+    try:
+        username = common_utils.get_cleaned_username()
+    except Exception:  # pylint: disable=broad-except
+        username = ''
+    if username:
+        return f'skypilot-{username}-{user_hash[:8]}'
+    return f'skypilot-{user_hash[:8]}'
+
+
 def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for RunPod.
     - Generates a new SSH key pair if one does not exist.
@@ -347,7 +364,10 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        runpod.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)
+    # Add a label to the public key so that it can be identified in the RunPod
+    # dashboard.
+    labeled_key = ' '.join(public_key.split()[:2] + [_runpod_key_label()])
+    runpod.runpod.cli.groups.ssh.functions.add_ssh_key(labeled_key)
 
     return configure_ssh_info(config)
 
