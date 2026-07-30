@@ -63,7 +63,9 @@ def test_minimal(generic_cloud: str):
     # Ensure the raylet process has the correct file descriptor limit.
     check_raylet_cmd = smoke_tests_utils.get_check_raylet_nofile_limit_cmd(name)
     if generic_cloud == 'slurm':
-        check_raylet_cmd = 'true'
+        # No raylet on Slurm, but keep the `sky exec` so this step still
+        # creates a job and the job IDs asserted below stay in sync.
+        check_raylet_cmd = f'sky exec {name} true'
     test = smoke_tests_utils.Test(
         'minimal',
         [
