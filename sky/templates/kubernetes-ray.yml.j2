@@ -423,18 +423,8 @@ available_node_types:
           fsGroupChangePolicy: OnRootMismatch
         {% endif %}
 
-        # Add node selector if GPU/TPUs are requested:
-        {% if (k8s_topology_label_key is not none and k8s_topology_label_value is not none) or (k8s_spot_label_key is not none) or (k8s_enable_flex_start) %}
-        nodeSelector:
-            {% if k8s_topology_label_key is not none and k8s_topology_label_value is not none %}
-            {{k8s_topology_label_key}}: {{k8s_topology_label_value}}
-            {% endif %}
-            {% if k8s_spot_label_key is not none %}
-            {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
-            {% endif %}
-            {% if k8s_enable_flex_start %}
-            cloud.google.com/gke-flex-start: "true"
-            {% endif %}
+        {% if k8s_node_selector %}
+        nodeSelector: {{k8s_node_selector | tojson}}
         {% endif %}
         {% if k8s_node_affinity or k8s_pod_affinity or k8s_host_network %}
         affinity:

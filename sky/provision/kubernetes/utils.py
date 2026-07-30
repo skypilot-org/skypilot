@@ -2719,6 +2719,49 @@ def get_pod_affinity(
     return pod_affinity
 
 
+def get_node_selector(
+    topology_label_key: Optional[str],
+    topology_label_value: Optional[str],
+    spot_label_key: Optional[str],
+    spot_label_value: Optional[str],
+    enable_flex_start: bool,
+) -> Optional[Dict[str, str]]:
+    """Builds the pod ``nodeSelector``.
+
+    Three independent entries, any of which may be absent:
+
+    * An accelerator topology label, pinning the pod to nodes belonging to a
+      slice of the requested shape (e.g.
+      ``cloud.google.com/gke-tpu-topology: 2x2``).
+    * A spot label, pinning the pod to preemptible nodes. The pod also carries
+      a matching toleration, rendered separately from the same key/value.
+    * ``cloud.google.com/gke-flex-start``, which selects GKE nodes provisioned
+      through flex-start (Dynamic Workload Scheduler).
+
+    Args:
+        topology_label_key: Node label key identifying the accelerator slice
+            topology, or None.
+        topology_label_value: Requested value for ``topology_label_key``, or
+            None.
+        spot_label_key: Node label key identifying preemptible nodes, or None.
+        spot_label_value: Value ``spot_label_key`` carries on preemptible
+            nodes, or None.
+        enable_flex_start: Whether the pod should schedule onto flex-start
+            nodes.
+
+    Returns:
+        A ``nodeSelector`` dict, or None when no entry applies.
+    """
+    node_selector: Dict[str, str] = {}
+    if topology_label_key is not None and topology_label_value is not None:
+        node_selector[topology_label_key] = topology_label_value
+    if spot_label_key is not None and spot_label_value is not None:
+        node_selector[spot_label_key] = spot_label_value
+    if enable_flex_start:
+        node_selector['cloud.google.com/gke-flex-start'] = 'true'
+    return node_selector or None
+
+
 def get_accelerator_label_keys(context: Optional[str],) -> List[str]:
     """Returns the label keys that should be avoided for scheduling
     CPU-only tasks.
