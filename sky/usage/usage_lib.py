@@ -797,7 +797,8 @@ def _send_scarf_ping(params: Dict[str, str]) -> None:
         pass
 
 
-def _maybe_start_scarf_ping(entrypoint_name: str) -> Optional[threading.Thread]:
+def _maybe_start_scarf_ping(entrypoint_name: str,
+                            internal: bool) -> Optional[threading.Thread]:
     """Starts a background thread sending the Scarf ping for an entrypoint.
 
     Returns the started thread, or None when the ping is skipped: on the
@@ -805,14 +806,21 @@ def _maybe_start_scarf_ping(entrypoint_name: str) -> Optional[threading.Thread]:
     operations marked via skip_scarf_ping_for_current_operation() (e.g.
     dryrun), when the user opted out, or when this entrypoint was already
     reported by this process.
+
+    Args:
+        entrypoint_name: the entrypoint to report.
+        internal: whether the operation was initiated by sky internal code.
+            Callers should pass the ``internal`` flag captured at entrypoint
+            entry: set_internal() calls made by nested sub-operations during
+            the entrypoint body (e.g. the implicit jobs queue query in
+            ``sky status``) do not make the entrypoint itself internal.
     """
     try:
         if _scarf_opted_out():
             return None
         if os.environ.get(skylet_constants.ENV_VAR_IS_SKYPILOT_SERVER):
             return None
-        usage = messages.usage
-        if usage.internal or usage.scarf_ping_skipped():
+        if internal or messages.usage.scarf_ping_skipped():
             return None
         if entrypoint_name in _scarf_pinged_entrypoints:
             return None
@@ -849,6 +857,11 @@ def entrypoint_context(name: str, fallback: bool = False):
     the global entrypoint to catch any exceptions that are not caught.
     """
     is_entry = messages.usage.entrypoint is None
+    # Capture the internal flag at entry for the Scarf ping decision:
+    # controllers call set_internal() before invoking an entrypoint, while
+    # set_internal() calls during the body come from nested sub-operations
+    # and do not make this entrypoint internal.
+    internal_at_entry = messages.usage.internal
     if is_entry and not fallback:
         for message in messages.values():
             message.start()
@@ -872,7 +885,7 @@ def entrypoint_context(name: str, fallback: bool = False):
         if fallback:
             messages.usage.update_entrypoint(name)
         else:
-            scarf_thread = _maybe_start_scarf_ping(name)
+            scarf_thread = _maybe_start_scarf_ping(name, internal_at_entry)
         _send_local_messages()
         if scarf_thread is not None:
             scarf_thread.join(timeout=_SCARF_TIMEOUT_SECONDS)

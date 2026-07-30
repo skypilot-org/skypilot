@@ -29,8 +29,8 @@ def sent_pings(monkeypatch) -> List[dict]:
     return sent
 
 
-def _ping(command: str = 'sky.client.sdk.launch'):
-    thread = usage_lib._maybe_start_scarf_ping(command)
+def _ping(command: str = 'sky.client.sdk.launch', internal: bool = False):
+    thread = usage_lib._maybe_start_scarf_ping(command, internal)
     if thread is not None:
         thread.join(timeout=5)
     return thread
@@ -81,9 +81,7 @@ def test_no_ping_on_api_server(scarf_env, sent_pings):
 
 
 def test_no_ping_for_internal_operations(scarf_env, sent_pings):
-    # Controllers call set_internal() before invoking the client SDK.
-    usage_lib.messages.usage.set_internal()
-    assert _ping() is None
+    assert _ping(internal=True) is None
     assert not sent_pings
 
 
@@ -137,6 +135,35 @@ def test_entrypoint_skip_set_inside_body_is_honored(scarf_env, sent_pings):
 
     dryrun_command()
     assert not sent_pings
+
+
+def test_internal_set_before_entrypoint_suppresses_ping(
+        scarf_env, sent_pings):
+    scarf_env.setattr(usage_lib, '_send_to_loki', lambda *args: None)
+
+    @usage_lib.entrypoint
+    def controller_launch():
+        pass
+
+    # Controllers call set_internal() before invoking the client SDK.
+    usage_lib.messages.usage.set_internal()
+    controller_launch()
+    assert not sent_pings
+
+
+def test_internal_set_during_body_does_not_suppress_ping(
+        scarf_env, sent_pings):
+    # E.g. `sky status` marks its implicit jobs queue sub-query internal;
+    # the user-initiated status command should still be reported.
+    scarf_env.setattr(usage_lib, '_send_to_loki', lambda *args: None)
+
+    @usage_lib.entrypoint
+    def status_command():
+        usage_lib.messages.usage.set_internal()
+
+    status_command()
+    assert len(sent_pings) == 1
+    assert sent_pings[0]['command'].endswith('status_command')
 
 
 def test_fallback_entrypoint_does_not_ping(scarf_env, sent_pings):
