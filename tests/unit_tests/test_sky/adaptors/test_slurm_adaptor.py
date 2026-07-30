@@ -50,6 +50,7 @@ class TestGetPartitions:
             ssh_user='root',
             ssh_key=None,
         )
+        client._json_output_supported['scontrol'] = False
 
         mock_output = """PartitionName=dev AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL AllocNodes=ALL Default=YES QoS=N/A DefaultTime=NONE DisableRootJobs=NO ExclusiveUser=NO ExclusiveTopo=NO GraceTime=0 Hidden=NO MaxNodes=UNLIMITED MaxTime=UNLIMITED MinNodes=0 LLN=NO MaxCPUsPerNode=UNLIMITED MaxCPUsPerSocket=UNLIMITED NodeSets=ALL Nodes=ip-10-3-0-193,ip-10-3-68-50,ip-10-3-200-46,ip-10-3-201-35,ip-10-3-215-227,ip-10-3-225-110 PriorityJobFactor=1 PriorityTier=1 RootOnly=NO ReqResv=NO OverSubscribe=NO OverTimeLimit=NONE PreemptMode=OFF State=UP TotalCPUs=248 TotalNodes=6 SelectTypeParameters=NONE JobDefaults=(null) DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED TRES=cpu=248,mem=1216G,node=6,billing=248,gres/gpu=12
 PartitionName=CPU nodes (amd) AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL AllocNodes=ALL Default=NO QoS=N/A DefaultTime=NONE DisableRootJobs=NO ExclusiveUser=NO ExclusiveTopo=NO GraceTime=0 Hidden=NO MaxNodes=UNLIMITED MaxTime=UNLIMITED MinNodes=0 LLN=NO MaxCPUsPerNode=UNLIMITED MaxCPUsPerSocket=UNLIMITED Nodes=ip-10-3-0-193,ip-10-3-215-227 PriorityJobFactor=1 PriorityTier=1 RootOnly=NO ReqResv=NO OverSubscribe=NO OverTimeLimit=NONE PreemptMode=OFF State=UP TotalCPUs=4 TotalNodes=2 SelectTypeParameters=NONE JobDefaults=(null) DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED TRES=cpu=4,mem=32G,node=2,billing=4
@@ -766,15 +767,14 @@ class TestParseDefaultTime:
         assert result is None
 
     def test_parse_default_time_hms(self):
-        """Returns the raw hh:mm:ss string verbatim."""
         line = 'PartitionName=dev DefaultTime=01:00:00 MaxTime=12:00:00'
         result = slurm._parse_default_time(line)
-        assert result == '01:00:00'
+        assert result == 3600
 
     def test_parse_default_time_with_days(self):
         line = 'PartitionName=dev DefaultTime=2-00:00:00 MaxTime=7-00:00:00'
         result = slurm._parse_default_time(line)
-        assert result == '2-00:00:00'
+        assert result == 2 * 86400
 
     def test_parse_default_time_no_match(self):
         line = 'PartitionName=dev MaxTime=12:00:00'
@@ -782,16 +782,125 @@ class TestParseDefaultTime:
         assert result is None
 
 
-class TestGetPartitionsInfoDefaultTime:
-    """Verify get_partitions_info() populates the default_time field."""
+def _partitions_json(times=None) -> str:
+    """The partitions fixture, with the two time fields optionally replaced.
 
-    def test_populates_default_time(self):
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
+    Args:
+        times: Per partition, a (MaxTime, DefaultTime) pair of minutes, or
+            None for the unlimited/unset encoding the fixture was captured
+            with.
+    """
+    payload = _load_fixture('scontrol_partitions.json')
+    for i, partition in enumerate(payload['partitions']):
+        if times is None or times[i] is None:
+            continue
+        maxtime, default_time = times[i]
+        partition['maximums']['time'] = {
+            'set': True,
+            'infinite': False,
+            'number': maxtime
+        }
+        partition['defaults']['time'] = {
+            'set': True,
+            'infinite': False,
+            'number': default_time
+        }
+    return json.dumps(payload)
+
+
+class TestGetPartitionsInfoJson:
+    """Test SlurmClient.get_partitions_info() on the `--json` path."""
+
+    # sinfo marks the default partition with a trailing '*'.
+    _SINFO_OUTPUT = 'default-partition*\ngpu\ncpu\n'
+
+    def test_returns_partitions_with_default_and_times(self):
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _partitions_json(times=[(120, 60), None, None]), ''),
+                (0, self._SINFO_OUTPUT, ''),
+            ]
+
+            result = client.get_partitions_info()
+
+            commands = [call[0][0] for call in mock_run.call_args_list]
+            assert commands == [
+                'scontrol show partitions --json', 'sinfo -h -a -o "%P"'
+            ]
+
+        assert [p.name for p in result] == ['default-partition', 'gpu', 'cpu']
+        assert [p.is_default for p in result] == [True, False, False]
+        # Slurm reports both times in minutes.
+        assert result[0].maxtime == 7200
+        assert result[0].default_time == 3600
+        # MaxTime=UNLIMITED and DefaultTime=NONE, as captured.
+        assert result[1].maxtime is None
+        assert result[1].default_time is None
+
+    def test_no_default_partition(self):
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, _partitions_json(), ''),
+                (0, 'default-partition\ngpu\ncpu\n', ''),
+            ]
+            result = client.get_partitions_info()
+
+        assert not any(p.is_default for p in result)
+
+    def test_star_in_partition_name_is_not_the_default_marker(self):
+        """A partition may be named with a trailing '*' itself."""
+        client = _make_client()
+        payload = _load_fixture('scontrol_partitions.json')
+        payload['partitions'][1]['name'] = 'gpu*'
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, json.dumps(payload), ''),
+                (0, 'default-partition\ngpu*\ncpu\n', ''),
+            ]
+            result = client.get_partitions_info()
+
+        assert not any(p.is_default for p in result)
+
+    def test_falls_back_when_json_unsupported(self):
+        client = _make_client()
+        text_output = ('PartitionName=cpu Default=YES DefaultTime=01:00:00 '
+                       'MaxTime=UNLIMITED')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (1, '', "scontrol: unrecognized option '--json'"),
+                (0, text_output, ''),
+            ]
+            result = client.get_partitions_info()
+
+            assert mock_run.call_count == 2
+            assert (mock_run.call_args_list[1][0][0] ==
+                    'scontrol show partitions -o')
+
+        assert result[0].name == 'cpu'
+        assert result[0].is_default is True
+        assert result[0].default_time == 3600
+
+    def test_missing_partitions_field(self):
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, json.dumps({'meta': {}}), '')
+            with pytest.raises(RuntimeError, match="no 'partitions' field"):
+                client.get_partitions_info()
+
+
+class TestGetPartitionsInfoText:
+    """Test SlurmClient.get_partitions_info() on the text path."""
+
+    def test_populates_times_and_default(self):
+        client = _make_client()
+        client._json_output_supported['scontrol'] = False
 
         mock_output = ('PartitionName=cpu Default=YES DefaultTime=01:00:00 '
                        'MaxTime=UNLIMITED\n'
@@ -806,7 +915,7 @@ class TestGetPartitionsInfoDefaultTime:
         assert result[0].name == 'cpu'
         assert result[0].is_default is True
         assert result[0].maxtime is None  # UNLIMITED
-        assert result[0].default_time == '01:00:00'
+        assert result[0].default_time == 3600
         assert result[1].name == 'gpu'
         assert result[1].is_default is False
         assert result[1].maxtime == 7200

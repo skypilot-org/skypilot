@@ -73,10 +73,9 @@ class SlurmPartition(NamedTuple):
     # The maximum time a job can run in seconds.
     # None if the maximum time is unlimited.
     maxtime: Optional[int]
-    # The raw Slurm time string the partition assigns when --time is omitted
-    # (e.g. '01:00:00', '2-00:00:00'). None if the partition has no
-    # DefaultTime configured (NONE/UNLIMITED).
-    default_time: Optional[str]
+    # The time in seconds the partition assigns when --time is omitted.
+    # None if the partition has no DefaultTime configured (NONE/UNLIMITED).
+    default_time: Optional[int]
 
 
 class NodeDetails(NamedTuple):
@@ -121,41 +120,39 @@ class JobGresInfo(NamedTuple):
     gres_str: str
 
 
-def _parse_maxtime(line: str) -> Optional[int]:
-    """Parse the maximum time a job can run from the scontrol output."""
-    maxtime_match = _MAXTIME_REGEX.search(line)
-    if not maxtime_match:
-        return None
-    maxtime_str = maxtime_match.group(1).strip()
-    if maxtime_str == 'UNLIMITED':
+def _parse_duration(raw: str) -> Optional[int]:
+    """Convert a Slurm '[days-]hours:minutes:seconds' duration into seconds.
+
+    Example: '2-12:30:05' => (2*86400) + (12*3600) + (30*60) + 5. Returns None
+    for the durations Slurm spells out (``UNLIMITED``/``NONE``).
+    """
+    if raw in ('NONE', 'UNLIMITED'):
         return None
 
-    # Convert maxTime from '[days-]hours:minutes:seconds' to seconds.
-    # Example: "2-12:30:05" => (2*86400) + (12*3600) + (30*60) + 5
     days = 0
-    time_part = maxtime_str
-    if '-' in maxtime_str:
-        days_part, time_part = maxtime_str.split('-', 1)
+    time_part = raw
+    if '-' in raw:
+        days_part, time_part = raw.split('-', 1)
         days = int(days_part)
 
     h, m, s = map(int, time_part.split(':'))
     return days * 86400 + h * 3600 + m * 60 + s
 
 
-def _parse_default_time(line: str) -> Optional[str]:
-    """Parse the DefaultTime a partition uses from the scontrol output.
+def _parse_maxtime(line: str) -> Optional[int]:
+    """Parse the maximum time a job can run from the scontrol output."""
+    maxtime_match = _MAXTIME_REGEX.search(line)
+    if not maxtime_match:
+        return None
+    return _parse_duration(maxtime_match.group(1).strip())
 
-    Returns the raw Slurm time string (e.g. '01:00:00', '2-00:00:00') so it
-    can be passed straight through to ``--time``. Returns None when the
-    partition has no DefaultTime configured (``NONE``/``UNLIMITED``).
-    """
+
+def _parse_default_time(line: str) -> Optional[int]:
+    """Parse the DefaultTime a partition uses from the scontrol output."""
     match = _DEFAULT_TIME_REGEX.search(line)
     if not match:
         return None
-    raw = match.group(1)
-    if raw in ('NONE', 'UNLIMITED'):
-        return None
-    return raw
+    return _parse_duration(match.group(1))
 
 
 def _parse_optional_number(value: Optional[str]) -> Optional[float]:
@@ -957,12 +954,72 @@ class SlurmClient:
 
         return job_id
 
-    def get_partitions_info(self) -> List[SlurmPartition]:
-        """Get the partitions information for the Slurm cluster.
+    def _get_default_partition_name(self, names: List[str]) -> Optional[str]:
+        """Ask sinfo which partition is the default, marked with a '*'.
 
-        Returns:
-            List of SlurmPartition objects.
+        `scontrol show partitions --json` does not serialize the partition
+        flags, so `Default=YES` is not available there on any Slurm version
+        released so far.
+
+        Args:
+            names: The cluster's partition names, used to tell a default
+                marker apart from a name that ends with a '*' itself.
         """
+        # --all so that a hidden partition is listed too.
+        cmd = 'sinfo -h -a -o "%P"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            'Failed to get the default Slurm partition.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+
+        known = set(names)
+        for line in stdout.splitlines():
+            name = line.strip()
+            if name.endswith('*') and name not in known and name[:-1] in known:
+                return name[:-1]
+        return None
+
+    def _get_partitions_info_json(self) -> List[SlurmPartition]:
+        """get_partitions_info() using Slurm's `--json` output.
+
+        `scontrol --json` ships since Slurm 23.02. Older versions reject the
+        option, and get_partitions_info() falls back to the text output.
+        """
+        cmd = 'scontrol show partitions --json'
+        rc, stdout, stderr = self._run_slurm_json_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get Slurm partitions.',
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
+
+        payload = self._load_slurm_json(cmd, stdout)
+        names: List[str] = []
+        # Slurm reports both times in minutes.
+        times: List[Tuple[Optional[int], Optional[int]]] = []
+        for partition in self._get_json_field(cmd, payload, 'partitions'):
+            names.append(self._get_json_field(cmd, partition, 'name'))
+            maximums = self._get_json_field(cmd, partition, 'maximums')
+            defaults = self._get_json_field(cmd, partition, 'defaults')
+            times.append((_json_optional_int(maximums.get('time')),
+                          _json_optional_int(defaults.get('time'))))
+
+        default_partition = self._get_default_partition_name(names)
+        return [
+            SlurmPartition(
+                name=name,
+                is_default=name == default_partition,
+                maxtime=None if maxtime is None else maxtime * 60,
+                default_time=None if default_time is None else default_time *
+                60,
+            ) for name, (maxtime, default_time) in zip(names, times)
+        ]
+
+    def _get_partitions_info_text(self) -> List[SlurmPartition]:
+        """get_partitions_info() for Slurm versions without `--json`."""
         cmd = 'scontrol show partitions -o'
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
@@ -988,6 +1045,16 @@ class SlurmClient:
                                        maxtime=maxtime,
                                        default_time=default_time))
         return partitions
+
+    def get_partitions_info(self) -> List[SlurmPartition]:
+        """Get the partitions information for the Slurm cluster.
+
+        Returns:
+            List of SlurmPartition objects.
+        """
+        return self._with_json_output(['scontrol'],
+                                      self._get_partitions_info_json,
+                                      self._get_partitions_info_text)
 
     def get_default_partition(self) -> Optional[str]:
         """Get the default partition name for the Slurm cluster.
