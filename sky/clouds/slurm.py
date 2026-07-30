@@ -496,6 +496,7 @@ class Slurm(clouds.Cloud):
         # cluster is our target slurmctld host.
         ssh_config = slurm_utils.get_slurm_ssh_config()
         ssh_config_dict = ssh_config.lookup(cluster)
+        slurm_user = slurm_utils.get_submit_user(cluster)
 
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -596,6 +597,7 @@ class Slurm(clouds.Cloud):
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),
             'ssh_user': ssh_config_dict['user'],
+            'slurm_user': slurm_user,
             'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
             'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
             'slurm_identities_only':
@@ -795,6 +797,7 @@ class Slurm(clouds.Cloud):
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
                     identities_only=slurm_utils.get_identities_only(
                         ssh_config_dict),
+                    slurm_user=slurm_utils.get_submit_user(cluster),
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')

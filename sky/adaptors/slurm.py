@@ -129,6 +129,7 @@ class SlurmClient:
         ssh_proxy_jump: Optional[str] = None,
         is_inside_slurm_cluster: bool = False,
         identities_only: Optional[bool] = None,
+        slurm_user: Optional[str] = None,
     ):
         """Initialize SlurmClient.
 
@@ -144,6 +145,8 @@ class SlurmClient:
             identities_only: If True, only use the specified identity file and
                 don't try ssh-agent keys. If None, defaults to False (allows
                 ssh-agent fallback for backward compatibility).
+            slurm_user: Unix user to run remote Slurm commands as. None runs
+                commands as the SSH user.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -165,7 +168,7 @@ class SlurmClient:
             assert ssh_user is not None
             # If user has IdentitiesOnly=yes in their config, respect it by
             # NOT disabling IdentitiesOnly. Otherwise, allow ssh-agent fallback.
-            self._runner = command_runner.SSHCommandRunner(
+            self._runner = command_runner.SlurmLoginNodeCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
                 ssh_key,
@@ -173,6 +176,7 @@ class SlurmClient:
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
                 disable_identities_only=not identities_only,
+                slurm_user=slurm_user,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:

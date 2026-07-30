@@ -94,6 +94,115 @@ class TestGetIdentityFile:
         assert result == expected
 
 
+class TestGetSlurmNodesInfo:
+    """Test user-scoped Slurm node discovery."""
+
+    @pytest.mark.parametrize('slurm_user,expected_command_user',
+                             [('alice', 'alice'), ('bob', 'bob'),
+                              (None, 'transport-user')])
+    def test_cache_and_query_are_scoped_by_command_user(self, monkeypatch,
+                                                        slurm_user,
+                                                        expected_command_user):
+        ssh_config = mock.Mock()
+        ssh_config.lookup.return_value = {
+            'hostname': 'login.example.com',
+            'user': 'transport-user',
+        }
+        monkeypatch.setattr(utils, 'get_slurm_ssh_config',
+                            mock.Mock(return_value=ssh_config))
+        monkeypatch.setattr(utils, 'get_submit_user',
+                            mock.Mock(return_value=slurm_user))
+        get_cache_entry = mock.Mock(return_value=None)
+        monkeypatch.setattr(utils.kv_cache, 'get_cache_entry', get_cache_entry)
+        monkeypatch.setattr(utils.kv_cache, 'add_or_update_cache_entry',
+                            mock.Mock())
+        client = mock.Mock()
+        client.info_nodes.return_value = []
+        slurm_client_cls = mock.Mock(return_value=client)
+        monkeypatch.setattr(utils.slurm, 'SlurmClient', slurm_client_cls)
+
+        assert utils.get_slurm_nodes_info('cluster-a') == []
+
+        get_cache_entry.assert_called_once_with(
+            f'slurm:nodes_info:cluster-a:{expected_command_user}')
+        assert slurm_client_cls.call_args.kwargs['slurm_user'] == slurm_user
+
+
+class TestClusterFeatureCache:
+    """Test user-scoped Slurm feature checks."""
+
+    @pytest.mark.parametrize('slurm_user,expected_command_user',
+                             [('alice', 'alice'), ('bob', 'bob'),
+                              (None, 'transport-user')])
+    def test_cache_and_query_are_scoped_by_command_user(self, monkeypatch,
+                                                        slurm_user,
+                                                        expected_command_user):
+        ssh_config = mock.Mock()
+        ssh_config.lookup.return_value = {
+            'hostname': 'login.example.com',
+            'user': 'transport-user',
+        }
+        monkeypatch.setattr(utils, 'get_slurm_ssh_config',
+                            mock.Mock(return_value=ssh_config))
+        monkeypatch.setattr(utils, 'get_submit_user',
+                            mock.Mock(return_value=slurm_user))
+        get_cache_entry = mock.Mock(return_value=None)
+        monkeypatch.setattr(utils.kv_cache, 'get_cache_entry', get_cache_entry)
+        monkeypatch.setattr(utils.kv_cache, 'add_or_update_cache_entry',
+                            mock.Mock())
+        slurm_client_cls = mock.Mock(return_value=mock.Mock())
+        monkeypatch.setattr(utils.slurm, 'SlurmClient', slurm_client_cls)
+
+        assert utils._check_cluster_feature('cluster-a', 'fuse', lambda _: True,
+                                            60)
+
+        get_cache_entry.assert_called_once_with(
+            f'slurm:fuse_enabled:cluster-a:{expected_command_user}')
+        assert slurm_client_cls.call_args.kwargs['slurm_user'] == slurm_user
+
+
+class TestGetPartitionInfos:
+    """Test user-scoped Slurm partition caching."""
+
+    def test_cache_is_scoped_by_submit_user(self, monkeypatch):
+        utils._get_partition_infos.cache_clear()
+        ssh_config = mock.Mock()
+        ssh_config.lookup.return_value = {
+            'hostname': 'login.example.com',
+            'user': 'transport-user',
+        }
+        monkeypatch.setattr(utils.SSHConfig, 'from_path',
+                            mock.Mock(return_value=ssh_config))
+        submit_users = iter(['alice', 'bob', 'alice'])
+        monkeypatch.setattr(utils, 'get_submit_user',
+                            mock.Mock(side_effect=lambda _: next(submit_users)))
+
+        def _make_client(*args, **kwargs):
+            del args
+            slurm_user = kwargs['slurm_user']
+            client = mock.Mock()
+            client.get_partitions_info.return_value = [
+                utils.slurm.SlurmPartition(f'{slurm_user}-partition', True,
+                                           None, None)
+            ]
+            return client
+
+        slurm_client_cls = mock.Mock(side_effect=_make_client)
+        monkeypatch.setattr(utils.slurm, 'SlurmClient', slurm_client_cls)
+
+        try:
+            alice = utils.get_partition_infos('cluster-a')
+            bob = utils.get_partition_infos('cluster-a')
+            alice_again = utils.get_partition_infos('cluster-a')
+
+            assert set(alice) == {'alice-partition'}
+            assert set(bob) == {'bob-partition'}
+            assert alice_again is alice
+            assert slurm_client_cls.call_count == 2
+        finally:
+            utils._get_partition_infos.cache_clear()
+
+
 def _make_node_info(node_name: str, cluster_name: str) -> dict:
     return {
         'node_name': node_name,
@@ -204,12 +313,22 @@ class TestGetSlurmNodeInfoListEnrichment:
             'user': 'me',
         }
         monkeypatch.setattr(utils, 'get_slurm_ssh_config', lambda: ssh_config)
-        monkeypatch.setattr(utils.slurm, 'SlurmClient',
-                            mock.Mock(return_value=client))
-        return utils._get_slurm_node_info_list('cluster-a')
+        slurm_client_cls = mock.Mock(return_value=client)
+        monkeypatch.setattr(utils.slurm, 'SlurmClient', slurm_client_cls)
+        result = utils._get_slurm_node_info_list('cluster-a')
+        return result, slurm_client_cls
+
+    def test_uses_transport_user(self, monkeypatch):
+        get_submit_user = mock.Mock(side_effect=AssertionError)
+        monkeypatch.setattr(utils, 'get_submit_user', get_submit_user)
+
+        _, slurm_client_cls = self._run(monkeypatch, {})
+
+        get_submit_user.assert_not_called()
+        assert slurm_client_cls.call_args.kwargs['slurm_user'] is None
 
     def test_enriches_from_scontrol(self, monkeypatch):
-        result = self._run(
+        result, _ = self._run(
             monkeypatch, {
                 'node1': {
                     'CPUAlloc': '8',
@@ -229,7 +348,7 @@ class TestGetSlurmNodeInfoListEnrichment:
         assert node['free_memory_gb'] == round(421339 / 1024.0, 2)
 
     def test_na_values_become_none(self, monkeypatch):
-        result = self._run(
+        result, _ = self._run(
             monkeypatch, {
                 'node1': {
                     'CPUAlloc': '0',
@@ -247,7 +366,7 @@ class TestGetSlurmNodeInfoListEnrichment:
         assert node['free_memory_gb'] is None
 
     def test_missing_node_details_yields_none_fields(self, monkeypatch):
-        result = self._run(monkeypatch, {})
+        result, _ = self._run(monkeypatch, {})
         node = result[0]
         assert node['free_vcpus'] is None
         assert node['free_alloc_memory_gb'] is None
@@ -255,7 +374,7 @@ class TestGetSlurmNodeInfoListEnrichment:
         assert node['free_memory_gb'] is None
 
     def test_scontrol_failure_does_not_break_node_info(self, monkeypatch):
-        result = self._run(monkeypatch, RuntimeError('scontrol failed'))
+        result, _ = self._run(monkeypatch, RuntimeError('scontrol failed'))
         assert len(result) == 1
         node = result[0]
         assert node['node_name'] == 'node1'
