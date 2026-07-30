@@ -137,8 +137,7 @@ def test_entrypoint_skip_set_inside_body_is_honored(scarf_env, sent_pings):
     assert not sent_pings
 
 
-def test_internal_set_before_entrypoint_suppresses_ping(
-        scarf_env, sent_pings):
+def test_internal_set_before_entrypoint_suppresses_ping(scarf_env, sent_pings):
     scarf_env.setattr(usage_lib, '_send_to_loki', lambda *args: None)
 
     @usage_lib.entrypoint
@@ -151,8 +150,7 @@ def test_internal_set_before_entrypoint_suppresses_ping(
     assert not sent_pings
 
 
-def test_internal_set_during_body_does_not_suppress_ping(
-        scarf_env, sent_pings):
+def test_internal_set_during_body_does_not_suppress_ping(scarf_env, sent_pings):
     # E.g. `sky status` marks its implicit jobs queue sub-query internal;
     # the user-initiated status command should still be reported.
     scarf_env.setattr(usage_lib, '_send_to_loki', lambda *args: None)
