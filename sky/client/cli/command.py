@@ -4897,10 +4897,18 @@ def _show_gpus_impl(
         # common GPUs.
         clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
-            clouds_to_list = [
+            cloud_catalogs = [
                 c for c in constants.ALL_CLOUDS
                 if c != 'kubernetes' and c != 'ssh' and c != 'slurm'
             ]
+            enabled_cloud_names = {c.lower() for c in enabled_clouds}
+            if enabled_cloud_names:
+                clouds_to_list = [
+                    c for c in cloud_catalogs
+                    if c.lower() in enabled_cloud_names
+                ]
+            else:
+                clouds_to_list = cloud_catalogs
 
         k8s_messages = ''
         slurm_messages = ''
@@ -4970,12 +4978,15 @@ def _show_gpus_impl(
                     yield slurm_messages
                 yield '\n\n'
 
-            list_accelerator_counts_result = sdk.stream_and_get(
-                sdk.list_accelerator_counts(
-                    gpus_only=True,
-                    clouds=clouds_to_list,
-                    region_filter=region,
-                ))
+            if clouds_to_list:
+                list_accelerator_counts_result = sdk.stream_and_get(
+                    sdk.list_accelerator_counts(
+                        gpus_only=True,
+                        clouds=clouds_to_list,
+                        region_filter=region,
+                    ))
+            else:
+                list_accelerator_counts_result = {}
             # TODO(zhwu): handle the case where no accelerators are found,
             # especially when --region specified a non-existent region.
 
