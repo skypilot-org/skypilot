@@ -1596,5 +1596,28 @@ class TestDashboardConfigUrlTemplateValidation(unittest.TestCase):
             config, 'test_config')
 
 
+class TestVastConfigSchema(unittest.TestCase):
+    """Tests for Vast provisioning watchdog configuration."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+
+    def test_valid_watchdog_config(self):
+        jsonschema.validate(instance={
+            'vast': {
+                'provision_timeout': 1800,
+                'reliable_hosts': True,
+            },
+        },
+                            schema=self.config_schema)
+
+    def test_non_positive_watchdog_timeout_is_invalid(self):
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance={'vast': {
+                'provision_timeout': 0,
+            }},
+                                schema=self.config_schema)
+
+
 if __name__ == "__main__":
     unittest.main()

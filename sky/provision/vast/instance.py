@@ -3,6 +3,7 @@ from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
 from sky.provision import docker_utils
@@ -13,6 +14,13 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 10
+DEFAULT_PROVISION_TIMEOUT = 30 * 60
+DIAGNOSTIC_LOG_TAIL = 2000
+
+_PENDING_STATUSES = frozenset(
+    ('NULL', 'CREATED', 'RESTARTING', 'REBOOTING', 'LOADING'))
+_FAILED_PROVISIONING_STATUSES = frozenset(
+    ('EXITED', 'STOPPED', 'FROZEN', 'UNKNOWN', 'OFFLINE'))
 
 logger = sky_logging.init_logger(__name__)
 # a much more convenient method
@@ -47,17 +55,194 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _format_instance_details(instances: Dict[str, Any]) -> str:
+    """Return safe, user-facing Vast status metadata for a failure."""
+    details = []
+    for instance_id, instance in instances.items():
+        status_msg = instance.get('status_msg')
+        details.append(
+            f'id={instance_id}, machine_id={instance.get("machine_id")}, '
+            f'status={instance.get("status")}, '
+            f'status_msg={status_msg!r}, '
+            f'ssh_host={instance.get("ssh_host")}, '
+            f'ssh_port={instance.get("ssh_port")}')
+    return '; '.join(details)
+
+
+def _provisioning_error(
+        reason: str, instances: Dict[str, Any],
+        created_instance_ids: List[str]) -> exceptions.VastProvisioningError:
+    return exceptions.VastProvisioningError(
+        f'Vast instance provisioning {reason}: '
+        f'{_format_instance_details(instances)}.',
+        instance_ids=created_instance_ids,
+    )
+
+
+def _wait_for_instances_ready(
+        cluster_name_on_cloud: str, expected_count: int, deadline: float,
+        created_instance_ids: List[str]) -> Dict[str, Any]:
+    """Wait until every requested Vast instance is running and SSH-ready.
+
+    Vast reports ``NULL`` while a contract is being created and ``LOADING``
+    while an image or container starts.  Neither state identifies a healthy
+    host, so this deadline is the final safety bound.  In contrast, terminal
+    container states and missing host heartbeats fail immediately; keeping a
+    SkyPilot provision call blocked cannot make those states recover.
+    """
+    while True:
+        instances = _filter_instances(cluster_name_on_cloud, None)
+        failed_instances = {
+            instance_id: instance
+            for instance_id, instance in instances.items()
+            if instance['status'] in _FAILED_PROVISIONING_STATUSES
+        }
+        if failed_instances:
+            raise _provisioning_error('failed', failed_instances,
+                                      created_instance_ids)
+
+        ready_instances = {
+            instance_id: instance
+            for instance_id, instance in instances.items()
+            if (instance['status'] == 'RUNNING' and
+                instance.get('ssh_port') is not None)
+        }
+        logger.info('Waiting for Vast instances to be ready: '
+                    f'({len(ready_instances)}/{expected_count}).')
+        if len(ready_instances) >= expected_count:
+            return ready_instances
+
+        now = time.monotonic()
+        if now >= deadline:
+            raise _provisioning_error(
+                'timed out waiting for RUNNING with '
+                'an SSH port', instances, created_instance_ids)
+        time.sleep(min(POLL_INTERVAL, deadline - now))
+
+
+def _wait_for_no_pending_instances(cluster_name_on_cloud: str,
+                                   deadline: float) -> Dict[str, Any]:
+    """Do not launch duplicate nodes while an earlier request is pending."""
+    while True:
+        instances = _filter_instances(cluster_name_on_cloud, None)
+        host_failures = {
+            instance_id: instance
+            for instance_id, instance in instances.items()
+            if instance['status'] in ('UNKNOWN', 'OFFLINE')
+        }
+        if host_failures:
+            raise _provisioning_error('failed', host_failures, [])
+
+        pending_instances = {
+            instance_id: instance
+            for instance_id, instance in instances.items()
+            if instance['status'] in _PENDING_STATUSES
+        }
+        if not pending_instances:
+            return instances
+
+        now = time.monotonic()
+        if now >= deadline:
+            raise _provisioning_error(
+                'timed out waiting for a previous '
+                'request to finish', pending_instances, [])
+        logger.info(f'Waiting for {len(pending_instances)} existing Vast '
+                    'instances to finish provisioning.')
+        time.sleep(min(POLL_INTERVAL, deadline - now))
+
+
+def _log_instance_diagnostics(instance_ids: List[str],
+                              sensitive_values: List[str]) -> None:
+    """Best-effort debug logging of bounded, redacted Vast instance logs."""
+    for instance_id in instance_ids:
+        for daemon_logs, source in ((False, 'container'), (True, 'daemon')):
+            try:
+                output = utils.get_instance_logs(instance_id,
+                                                 daemon_logs=daemon_logs,
+                                                 tail=DIAGNOSTIC_LOG_TAIL)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.debug('Could not collect Vast %s logs for %s: %s',
+                             source, instance_id, exc)
+                continue
+            logger.debug('Vast %s log tail for %s:\n%s', source, instance_id,
+                         utils.redact_log_output(output, sensitive_values))
+
+
+def _cleanup_failed_instances(
+        instance_ids: List[str]) -> Tuple[List[Any], bool]:
+    """Destroy only nodes from this attempt and retain their machine IDs.
+
+    A replacement is safe only after this cleanup succeeds; otherwise a retry
+    could create a duplicate paid instance while the failed contract remains.
+    """
+    try:
+        instances = utils.list_instances()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning('Could not inspect failed Vast instances before '
+                       f'cleanup: {exc}')
+        return [], False
+
+    machine_ids: List[Any] = []
+    for instance_id in instance_ids:
+        machine_id = instances.get(str(instance_id), {}).get('machine_id')
+        if machine_id is not None:
+            machine_ids.append(machine_id)
+
+    cleanup_succeeded = True
+    for instance_id in instance_ids:
+        try:
+            utils.remove(str(instance_id))
+        except Exception as exc:  # pylint: disable=broad-except
+            cleanup_succeeded = False
+            logger.warning(f'Failed to destroy Vast instance {instance_id}: '
+                           f'{exc}')
+    return machine_ids, cleanup_succeeded
+
+
+def _get_sensitive_values(create_instance_kwargs: Dict[str, Any],
+                          login_args: Optional[str],
+                          docker_login_config: Optional[Any]) -> List[str]:
+    """Collect known secret values that might be echoed in instance logs."""
+    sensitive_values = []
+    if login_args:
+        sensitive_values.append(login_args)
+    if docker_login_config is not None:
+        sensitive_values.append(docker_login_config.password)
+    for key in ('login', 'image_login'):
+        value = create_instance_kwargs.get(key)
+        if value:
+            sensitive_values.append(str(value))
+    try:
+        env = utils.normalize_env(create_instance_kwargs.get('env'))
+        sensitive_values.extend(
+            str(value)
+            for key, value in env.items()
+            if key != '__SOURCE' and not isinstance(value, (dict, list, tuple)))
+    except ValueError:
+        # The launch path will report invalid env configuration separately.
+        pass
+    try:
+        sensitive_values.append(utils.get_api_key())
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Could not read Vast API key for diagnostic redaction.')
+    return sensitive_values
+
+
 def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     del cluster_name  # unused
-    pending_status = ['CREATED', 'RESTARTING']
 
-    create_instance_kwargs = config.provider_config.get(
-        'create_instance_kwargs', {})
-    logger.debug(f'provider_config: {config.provider_config}')
-    logger.debug(f'create_instance_kwargs from provider_config: '
-                 f'{create_instance_kwargs}')
+    create_instance_kwargs = (config.provider_config.get(
+        'create_instance_kwargs', {}) or {})
+    provision_timeout = config.provider_config.get('provision_timeout',
+                                                   DEFAULT_PROVISION_TIMEOUT)
+    if (isinstance(provision_timeout, bool) or
+            not isinstance(provision_timeout,
+                           (int, float)) or provision_timeout <= 0):
+        raise ValueError('Vast provision_timeout must be a positive number of '
+                         'seconds.')
+    deadline = time.monotonic() + provision_timeout
 
     # Get SSH public key path and read the content for vast.ai key injection
     ssh_public_key_path = config.authentication_config.get('ssh_public_key')
@@ -74,6 +259,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     docker_login_config = config.docker_config.get('docker_login_config')
     login_args = None
+    login_config = None
     image_name = config.node_config['ImageId']
     if docker_login_config:
         login_config = (docker_login_config if isinstance(
@@ -84,49 +270,44 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                       f'{login_config.server}')
         image_name = login_config.format_image(image_name)
 
-    created_instance_ids = []
-    instances: Dict[str, Any] = {}
-
-    while True:
-        instances = _filter_instances(cluster_name_on_cloud, None)
-        if not status_filter(instances, pending_status):
-            break
-        logger.info(f'Waiting for {len(instances)} instances to be ready.')
-        time.sleep(POLL_INTERVAL)
+    sensitive_values = _get_sensitive_values(create_instance_kwargs, login_args,
+                                             login_config)
+    instances = _wait_for_no_pending_instances(cluster_name_on_cloud, deadline)
 
     running_instances = status_filter(instances, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
-    stopped_instances = status_filter(instances, ['EXITED', 'STOPPED'])
+    stopped_instances = status_filter(instances,
+                                      ['EXITED', 'STOPPED', 'FROZEN'])
 
     if config.resume_stopped_nodes and stopped_instances:
         for instance in stopped_instances.values():
             utils.start(instance['id'])
-    else:
-        to_start_count = config.count - (len(running_instances) +
-                                         len(stopped_instances))
-        if to_start_count < 0:
-            raise RuntimeError(f'Cluster {cluster_name_on_cloud} already has '
-                               f'{len(running_instances)} nodes,'
-                               f'but {config.count} are required.')
-        if to_start_count == 0:
-            if head_instance_id is None:
-                raise RuntimeError(
-                    f'Cluster {cluster_name_on_cloud} has no head node.')
-            logger.info(
-                f'Cluster {cluster_name_on_cloud} already has '
-                f'{len(running_instances)} nodes, no need to start more.')
-            return common.ProvisionRecord(provider_name='vast',
-                                          cluster_name=cluster_name_on_cloud,
-                                          region=region,
-                                          zone=None,
-                                          head_instance_id=head_instance_id,
-                                          resumed_instance_ids=[],
-                                          created_instance_ids=[])
 
-        secure_only = config.provider_config.get('secure_only', False)
-        for _ in range(to_start_count):
-            node_type = 'head' if head_instance_id is None else 'worker'
-            try:
+    to_start_count = config.count - (len(running_instances) +
+                                     len(stopped_instances))
+    if to_start_count < 0:
+        raise RuntimeError(f'Cluster {cluster_name_on_cloud} already has '
+                           f'{len(running_instances)} nodes, '
+                           f'but {config.count} are required.')
+    if to_start_count == 0:
+        if head_instance_id is None and not (config.resume_stopped_nodes and
+                                             stopped_instances):
+            raise RuntimeError(
+                f'Cluster {cluster_name_on_cloud} has no head node.')
+        logger.info(f'Cluster {cluster_name_on_cloud} already has '
+                    f'{len(running_instances)} nodes, no need to start more.')
+
+    secure_only = config.provider_config.get('secure_only', False)
+    reliable_hosts = config.provider_config.get('reliable_hosts', False)
+
+    def _launch_missing_instances(count: int,
+                                  current_head_instance_id: Optional[str],
+                                  excluded_machine_ids: List[Any]) -> List[str]:
+        created_instance_ids = []
+        try:
+            for _ in range(count):
+                node_type = ('head'
+                             if current_head_instance_id is None else 'worker')
                 instance_id = utils.launch(
                     name=f'{cluster_name_on_cloud}-{node_type}',
                     instance_type=config.node_config['InstanceType'],
@@ -136,32 +317,62 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     image_name=image_name,
                     ports=config.ports_to_open_on_launch,
                     secure_only=secure_only,
-                    private_docker_registry=docker_login_config is not None,
+                    reliable_hosts=reliable_hosts,
+                    excluded_machine_ids=excluded_machine_ids,
+                    private_docker_registry=login_config is not None,
                     login=login_args,
                     create_instance_kwargs=create_instance_kwargs,
                     ssh_public_key=ssh_public_key,
                 )
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'run_instances error: {e}')
-                raise
-            logger.info(f'Launched instance {instance_id}.')
-            created_instance_ids.append(instance_id)
-            if head_instance_id is None:
-                head_instance_id = instance_id
+                logger.info(f'Launched Vast instance {instance_id}.')
+                created_instance_ids.append(instance_id)
+                if current_head_instance_id is None:
+                    current_head_instance_id = instance_id
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(f'Vast instance launch failed: {exc}')
+            if created_instance_ids:
+                _cleanup_failed_instances(created_instance_ids)
+            raise
+        return created_instance_ids
 
-    # Wait for instances to be ready.
+    created_instance_ids = _launch_missing_instances(to_start_count,
+                                                     head_instance_id, [])
+    excluded_machine_ids: List[Any] = []
+    replacement_attempts_remaining = 1
+
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-        ready_instance_cnt = 0
-        for instance_id, instance in instances.items():
-            if instance.get('ssh_port') is not None:
-                ready_instance_cnt += 1
-        logger.info('Waiting for instances to be ready: '
-                    f'({ready_instance_cnt}/{config.count}).')
-        if ready_instance_cnt == config.count:
+        try:
+            _wait_for_instances_ready(cluster_name_on_cloud,
+                                      expected_count=config.count,
+                                      deadline=deadline,
+                                      created_instance_ids=created_instance_ids)
             break
+        except exceptions.VastProvisioningError:
+            if not created_instance_ids:
+                raise
 
-        time.sleep(POLL_INTERVAL)
+            _log_instance_diagnostics(created_instance_ids, sensitive_values)
+            failed_machine_ids, cleanup_succeeded = _cleanup_failed_instances(
+                created_instance_ids)
+            if not cleanup_succeeded:
+                logger.warning('Will not retry Vast provisioning because '
+                               'cleanup of the failed instance did not '
+                               'complete.')
+                raise
+            if replacement_attempts_remaining == 0 or time.monotonic(
+            ) >= deadline:
+                raise
+
+            excluded_machine_ids.extend(failed_machine_ids)
+            replacement_attempts_remaining -= 1
+            existing_running_instances = _filter_instances(
+                cluster_name_on_cloud, ['RUNNING'])
+            replacement_head_instance_id = _get_head_instance_id(
+                existing_running_instances)
+            logger.info('Retrying Vast provisioning on a different machine.')
+            created_instance_ids = _launch_missing_instances(
+                to_start_count, replacement_head_instance_id,
+                excluded_machine_ids)
 
     head_instance_id = _get_head_instance_id(utils.list_instances())
     assert head_instance_id is not None, 'head_instance_id should not be None'
@@ -279,20 +490,29 @@ def query_instances(
     del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
-    # "running", "frozen", "stopped", "unknown", "loading"
+    # Vast also reports NULL while a contract is being provisioned and can
+    # introduce lifecycle states without a SkyPilot release.  Preserve a
+    # usable cluster refresh result instead of raising a KeyError on either.
     status_map = {
+        'NULL': status_lib.ClusterStatus.INIT,
+        'CREATED': status_lib.ClusterStatus.INIT,
+        'RESTARTING': status_lib.ClusterStatus.INIT,
+        'REBOOTING': status_lib.ClusterStatus.INIT,
         'LOADING': status_lib.ClusterStatus.INIT,
+        'UNKNOWN': status_lib.ClusterStatus.INIT,
+        'OFFLINE': status_lib.ClusterStatus.INIT,
         'EXITED': status_lib.ClusterStatus.STOPPED,
         'STOPPED': status_lib.ClusterStatus.STOPPED,
+        'FROZEN': status_lib.ClusterStatus.STOPPED,
         'RUNNING': status_lib.ClusterStatus.UP,
     }
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
     for inst_id, inst in instances.items():
-        status = status_map[inst['status']]
+        status = status_map.get(inst['status'], status_lib.ClusterStatus.INIT)
         if non_terminated_only and status is None:
             continue
-        statuses[inst_id] = (status, None)
+        statuses[inst_id] = (status, inst.get('status_msg'))
     return statuses
 
 

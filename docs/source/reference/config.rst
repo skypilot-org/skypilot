@@ -253,6 +253,8 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
+    :ref:`reliable_hosts <config-yaml-vast-reliable-hosts>`: true
+    :ref:`provision_timeout <config-yaml-vast-provision-timeout>`: 1800
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
       template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
       env:
@@ -2763,6 +2765,39 @@ offer IDs are never stored as SkyPilot instance types.
 
 Default: ``false``
 
+.. _config-yaml-vast-reliable-hosts:
+
+``vast.reliable_hosts``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Use a stricter live-offer query intended for production launches (optional).
+When enabled, SkyPilot requires Vast offers to be verified, datacenter-hosted,
+have a reliability score of at least ``0.99``, and advertise at least
+``1000 Mbps`` download bandwidth. This can reduce capacity and increase price.
+It applies only while selecting the live marketplace offer; it does not change
+the stable catalog resource type used during planning.
+
+Default: ``false``
+
+.. _config-yaml-vast-provision-timeout:
+
+``vast.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum total seconds SkyPilot waits for a Vast request to finish provisioning
+and report every requested instance as ``RUNNING`` with an SSH port. The
+deadline includes waiting for a previously requested node with the same cluster
+name. ``NULL``, ``CREATED``, ``RESTARTING``, ``REBOOTING``, and ``LOADING``
+remain pending until this deadline; ``EXITED``, ``STOPPED``, ``FROZEN``,
+``UNKNOWN``, and ``OFFLINE`` fail immediately.
+
+For a new instance, SkyPilot collects redacted debug diagnostics, destroys the
+failed contract, and makes one replacement attempt on a different Vast machine
+when time remains. If that is not possible, the typed provisioning error allows
+normal SkyPilot cloud failover to continue.
+
+Default: ``1800`` (30 minutes)
+
 .. _config-yaml-vast-create-instance-kwargs:
 
 ``vast.create_instance_kwargs``
@@ -2843,7 +2878,9 @@ SkyPilot determines which fields are available.
         Force instance creation even if warnings are present (boolean true | false).
 
     ``cancel_unavail``
-        Cancel the request if the instance becomes unavailable (boolean true | false).
+        Cancel the request if the selected offer is unavailable when Vast creates
+        it (boolean true | false). This does not detect a host that stalls after
+        contract creation; use ``vast.provision_timeout`` for that case.
 
     ``template_hash`` / ``template_hash_id``
         Use a Vast template by its hash ID. When specified, ``image`` and ``disk``
@@ -2892,6 +2929,8 @@ Example:
 
   vast:
     datacenter_only: true
+    reliable_hosts: true
+    provision_timeout: 1800
     create_instance_kwargs:
       python_utf8: true
       lang_utf8: true
