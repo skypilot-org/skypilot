@@ -139,6 +139,21 @@ def test_live_search_without_capacity_raises_typed_resource_error(monkeypatch):
     assert "geolocation" not in client.search_offers.call_args.kwargs["query"]
 
 
+def test_list_instances_preserves_null_provisioning_status(monkeypatch):
+    client = _make_vast_client("show_instances")
+    client.show_instances.return_value = [{
+        'id': 123,
+        'actual_status': None,
+        'label': 'test-head',
+    }]
+    monkeypatch.setattr(vast_utils.vast, 'vast', lambda: client)
+
+    instances = vast_utils.list_instances()
+
+    assert instances['123']['status'] == 'NULL'
+    assert instances['123']['name'] == 'test-head'
+
+
 def test_launch_reconciles_eventual_instance_visibility(monkeypatch):
     """A successful create must not be retried merely because reads lag."""
     client = _make_vast_client("search_offers", "create_instance",
@@ -209,6 +224,45 @@ def test_launch_normalizes_template_login_startup_and_env_kwargs(monkeypatch):
     assert "disk" not in params
     assert ('echo "test-api-key" > ~/.vast_api_key' in params["onstart_cmd"])
     assert params["onstart_cmd"].endswith("echo ready")
+
+
+def test_launch_uses_reliable_filters_and_excludes_failed_machine(monkeypatch):
+    client = _make_vast_client("search_offers", "create_instance",
+                               "show_instance")
+    client.search_offers.return_value = [{
+        "id": 123,
+        "machine_id": 1,
+    }, {
+        "id": 456,
+        "machine_id": 2,
+    }]
+    client.create_instance.return_value = {"new_contract": 789}
+    client.show_instance.return_value = {"id": 789}
+    monkeypatch.setattr(vast_utils.vast, "vast", lambda: client)
+
+    assert vast_utils.launch(
+        name="test-head",
+        instance_type="1x-A100-4-8192",
+        region="catalog-region",
+        disk_size=30,
+        image_name="vastai/base:0.0.2",
+        ports=None,
+        preemptible=False,
+        secure_only=False,
+        reliable_hosts=True,
+        excluded_machine_ids=[1],
+    ) == 789
+
+    query = client.search_offers.call_args.kwargs["query"]
+    for filter_expression in (
+            "reliability>=0.99",
+            "verified=true",
+            "datacenter=true",
+            "hosting_type>=1",
+            "inet_down>=1000",
+    ):
+        assert filter_expression in query
+    assert client.create_instance.call_args.kwargs["id"] == 456
 
 
 def test_launch_rejects_invalid_env_value(monkeypatch):

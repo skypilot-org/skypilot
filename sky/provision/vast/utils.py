@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import shlex
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from sky import exceptions
 from sky import sky_logging
@@ -51,7 +51,7 @@ def _get_created_instance(contract_id: str) -> Dict[str, Any]:
     raise RuntimeError('Failed to read the newly created Vast instance.')
 
 
-def _normalize_env(user_env: Any) -> Dict[str, Any]:
+def normalize_env(user_env: Any) -> Dict[str, Any]:
     """Convert supported create-instance environment formats to a mapping."""
     env_dict: Dict[str, Any] = {'__SOURCE': 'skypilot'}
     if user_env is None:
@@ -67,22 +67,51 @@ def _normalize_env(user_env: Any) -> Dict[str, Any]:
         'Vast create_instance_kwargs[\'env\'] must be a mapping or string.')
 
 
+def redact_log_output(output: str, sensitive_values: Iterable[Any]) -> str:
+    """Redact known secret values before writing Vast diagnostics to logs."""
+    redacted_output = output
+    values = {str(value) for value in sensitive_values if value}
+    for value in sorted(values, key=len, reverse=True):
+        redacted_output = redacted_output.replace(value, '<redacted>')
+    return redacted_output
+
+
+def get_api_key() -> str:
+    """Returns the configured Vast API key for diagnostic-log redaction."""
+    return str(vast.vast().client.api_key)
+
+
+def get_instance_logs(instance_id: str,
+                      daemon_logs: bool,
+                      tail: int = 2000) -> str:
+    """Gets a bounded normal or daemon log tail for a Vast instance."""
+    output = vast.vast().logs(instance_id=int(instance_id),
+                              tail=str(tail),
+                              daemon_logs=daemon_logs)
+    return str(output)
+
+
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     instances = vast.vast().show_instances()
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
-        instance['id'] = str(instance['id'])
-        info = instance
+        info = dict(instance)
+        info['id'] = str(info['id'])
 
-        if isinstance(instance['actual_status'], str):
-            info['status'] = instance['actual_status'].upper()
+        actual_status = info.get('actual_status')
+        if isinstance(actual_status, str):
+            info['status'] = actual_status.upper()
+        elif actual_status is None:
+            # Vast reports null while a new contract is being provisioned.
+            # Treat it as a pending lifecycle state, not a host outage.
+            info['status'] = 'NULL'
         else:
             info['status'] = 'UNKNOWN'
-        info['name'] = instance['label']
+        info['name'] = info.get('label')
 
-        instance_dict[instance['id']] = info
+        instance_dict[info['id']] = info
 
     return instance_dict
 
@@ -95,6 +124,8 @@ def launch(name: str,
            ports: Optional[List[int]],
            preemptible: bool,
            secure_only: bool,
+           reliable_hosts: bool = False,
+           excluded_machine_ids: Optional[List[Any]] = None,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
            create_instance_kwargs: Optional[Dict[str, Any]] = None,
@@ -182,9 +213,26 @@ def launch(name: str,
     if secure_only:
         query.append('datacenter=true')
         query.append('hosting_type>=1')
+    if reliable_hosts:
+        query.extend([
+            'reliability>=0.99',
+            'verified=true',
+            'datacenter=true',
+            'hosting_type>=1',
+            'inet_down>=1000',
+        ])
     query_str = ' '.join(query)
 
     instance_list = vast.vast().search_offers(query=query_str)
+
+    excluded_machine_id_strings = {
+        str(machine_id) for machine_id in excluded_machine_ids or []
+    }
+    if not isinstance(instance_list, int):
+        instance_list = [
+            offer for offer in instance_list
+            if str(offer.get('machine_id')) not in excluded_machine_id_strings
+        ]
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise exceptions.VastOfferUnavailableError(
@@ -281,7 +329,7 @@ def launch(name: str,
     # Handle env - Vast.ai SDK requires env as a dict, not a CLI-style string.
     # Merge user-provided env (dict or legacy string) with skypilot metadata.
     user_env = launch_params.pop('env', None)
-    env_dict = _normalize_env(user_env)
+    env_dict = normalize_env(user_env)
     launch_params['env'] = env_dict
 
     try:
