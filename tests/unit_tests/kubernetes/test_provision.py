@@ -1834,6 +1834,41 @@ class TestWaitForPodsToScheduleQueueGating:
         ]
         assert len(queue_events) == 1
 
+    def test_spinner_message_updates_while_gated(self, monkeypatch):
+        """The per-poll spinner update must keep running while pods are
+        gated. The gated branch sets a status message once, on entry; the
+        admission wait after it can last hours, so skipping the per-poll
+        update would freeze the spinner on that static message for the
+        whole queue wait."""
+        cluster = 'my-cluster'
+        gated = self._add_gate(self._make_pending_pod('pod-0', cluster))
+        scheduled = self._make_pending_pod('pod-0', cluster)
+        scheduled.status.phase = 'Running'
+        clock, _, _ = self._setup(monkeypatch,
+                                  pod_timeline=[(0.0, gated),
+                                                (30.0, scheduled)])
+        update_spinner = mock.MagicMock()
+        monkeypatch.setattr(instance, '_update_spinner_message', update_spinner)
+
+        node = self._make_node('pod-0', cluster)
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        instance._wait_for_pods_to_schedule(
+            namespace='ns',
+            context='test-context',
+            new_nodes=[node],
+            timeout=5,
+            cluster_name='cn',
+            create_pods_start=datetime.datetime.now(datetime.timezone.utc))
+
+        assert clock.now >= 30.0
+        # Any call at all can only have come from the gated phase: the pod
+        # is Running (hence scheduled) from t=30 on, so the loop returns on
+        # that poll without reaching the post-gate spinner update.
+        assert update_spinner.call_count > 0, (
+            'Expected the spinner to keep updating during the 30s gated '
+            'phase, but _update_spinner_message was never called.')
+
     def test_provision_clock_starts_at_admission(self, monkeypatch):
         """Once pods are admitted (gates removed), provision_timeout applies
         from the admission moment — an unschedulable pod then times out at
