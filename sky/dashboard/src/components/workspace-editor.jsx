@@ -222,7 +222,7 @@ const WorkspaceConfigDescription = ({
 
 // Workspace badge component for private/public status. `readOnly` marks a
 // private workspace visible read-only to non-members (non_member_access); the
-// "Non-member read-only" chip names the scope (non-members, not the whole
+// "Read-only" chip's tooltip names the scope (non-members, not the whole
 // workspace).
 const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
   const base =
@@ -245,7 +245,7 @@ const WorkspaceBadge = ({ isPrivate, readOnly = false }) => {
           className={`${base} whitespace-nowrap bg-blue-100 text-blue-700 border-blue-300`}
           title="Non-members can view this workspace and its workloads but cannot modify them"
         >
-          Non-member read-only
+          Read-only
         </span>
       )}
     </span>
