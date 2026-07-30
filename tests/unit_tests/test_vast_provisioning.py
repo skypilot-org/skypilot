@@ -151,10 +151,13 @@ def test_diagnostics_redact_known_secrets(monkeypatch, caplog):
         return 'api-key registry-password env-secret'
 
     monkeypatch.setattr(vast_utils, 'get_instance_logs', get_logs)
-    caplog.set_level(logging.DEBUG, logger=vast_instance.logger.name)
-
-    vast_instance._log_instance_diagnostics(
-        ['instance-1'], ['api-key', 'registry-password', 'env-secret'])
+    vast_instance.logger.addHandler(caplog.handler)
+    try:
+        caplog.set_level(logging.DEBUG, logger=vast_instance.logger.name)
+        vast_instance._log_instance_diagnostics(
+            ['instance-1'], ['api-key', 'registry-password', 'env-secret'])
+    finally:
+        vast_instance.logger.removeHandler(caplog.handler)
 
     assert 'api-key' not in caplog.text
     assert 'registry-password' not in caplog.text

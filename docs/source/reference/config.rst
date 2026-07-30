@@ -2692,7 +2692,7 @@ Default: ``false``
 .. _config-yaml-vast-reliable-hosts:
 
 ``vast.reliable_hosts``
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Use a stricter live-offer query intended for production launches (optional).
 When enabled, SkyPilot requires Vast offers to be verified, datacenter-hosted,
