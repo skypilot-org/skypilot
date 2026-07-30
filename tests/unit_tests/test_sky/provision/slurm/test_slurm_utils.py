@@ -328,16 +328,16 @@ class TestGetSlurmNodeInfoListEnrichment:
         assert slurm_client_cls.call_args.kwargs['slurm_user'] is None
 
     def test_enriches_from_scontrol(self, monkeypatch):
+        from sky.adaptors import slurm as slurm_adaptor
+
         result, _ = self._run(
             monkeypatch, {
-                'node1': {
-                    'CPUAlloc': '8',
-                    'CPUTot': '72',
-                    'CPULoad': '3.50',
-                    'RealMemory': '430080',
-                    'AllocMem': '102400',
-                    'FreeMem': '421339',
-                },
+                'node1': slurm_adaptor.NodeDetails(alloc_cpus=8,
+                                                   total_cpus=72,
+                                                   alloc_memory_mb=102400,
+                                                   real_memory_mb=430080,
+                                                   free_memory_mb=421339,
+                                                   cpu_load=3.5),
             })
         assert len(result) == 1
         node = result[0]
@@ -347,17 +347,17 @@ class TestGetSlurmNodeInfoListEnrichment:
         assert node['cpu_load'] == 3.5
         assert node['free_memory_gb'] == round(421339 / 1024.0, 2)
 
-    def test_na_values_become_none(self, monkeypatch):
+    def test_unreported_counters_become_none(self, monkeypatch):
+        from sky.adaptors import slurm as slurm_adaptor
+
         result, _ = self._run(
             monkeypatch, {
-                'node1': {
-                    'CPUAlloc': '0',
-                    'CPUTot': '72',
-                    'CPULoad': 'N/A',
-                    'RealMemory': '430080',
-                    'AllocMem': '0',
-                    'FreeMem': 'N/A',
-                },
+                'node1': slurm_adaptor.NodeDetails(alloc_cpus=0,
+                                                   total_cpus=72,
+                                                   alloc_memory_mb=0,
+                                                   real_memory_mb=430080,
+                                                   free_memory_mb=None,
+                                                   cpu_load=None),
             })
         node = result[0]
         assert node['free_vcpus'] == 72

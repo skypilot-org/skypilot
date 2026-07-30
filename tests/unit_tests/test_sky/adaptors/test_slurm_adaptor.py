@@ -333,7 +333,10 @@ class TestGetJobNodesJson:
             assert commands[0] == 'squeue --jobs 935 --json'
             # The compact hostlist expression is passed to scontrol as is.
             assert commands[1] == "scontrol show node 'node-[001-002]' --json"
-            assert client._json_output_supported is True
+            assert client._json_output_supported == {
+                'squeue': True,
+                'scontrol': True
+            }
 
     def test_get_job_nodes_ordering_independent_of_scontrol(self):
         """Test that the ordering follows the job's hostlist expansion."""
@@ -448,8 +451,9 @@ class TestGetJobNodesJson:
                 client.get_job_nodes('935')
 
     def test_get_job_nodes_malformed_json_does_not_fall_back(self):
-        """Test that malformed JSON raises instead of using the text path."""
+        """Test that malformed JSON raises once squeue has produced JSON."""
         client = _make_client()
+        client._json_output_supported['squeue'] = True
 
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.return_value = (0, 'not json', '')
@@ -459,7 +463,6 @@ class TestGetJobNodesJson:
                 client.get_job_nodes('935')
 
             assert mock_run.call_count == 1
-            assert client._json_output_supported is None
 
     def test_get_job_nodes_missing_nodes_field(self):
         """Test that an unexpected squeue schema raises."""
@@ -488,7 +491,7 @@ class TestGetJobNodesJson:
 
             assert nodes == ['node1', 'node2']
             assert node_ips == ['10.0.0.1', '10.0.0.2']
-            assert client._json_output_supported is False
+            assert client._json_output_supported['squeue'] is False
 
         # The verdict is cached: the next call goes straight to the text path.
         with mock.patch.object(client._runner, 'run') as mock_run:
@@ -506,7 +509,7 @@ class TestGetJobNodesText:
     def test_get_job_nodes_returns_nodes_and_ips(self):
         """Test that get_job_nodes returns parsed nodes and IPs."""
         client = _make_client()
-        client._json_output_supported = False
+        client._json_output_supported['squeue'] = False
 
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.return_value = (0, 'node1 10.0.0.1\nnode2 10.0.0.2', '')
@@ -520,7 +523,7 @@ class TestGetJobNodesText:
     def test_get_job_nodes_resolves_hostnames_via_login_node(self):
         """Test hostnames are resolved via getent ahostsv4 on the login node."""
         client = _make_client()
-        client._json_output_supported = False
+        client._json_output_supported['squeue'] = False
 
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.side_effect = [
@@ -545,7 +548,7 @@ class TestGetJobNodesText:
     def test_get_job_nodes_hostname_resolution_failure(self):
         """Test error handling when hostname resolution fails."""
         client = _make_client()
-        client._json_output_supported = False
+        client._json_output_supported['squeue'] = False
 
         # One hostname resolves, one fails (getent returns empty)
         resolve_output = (f'worker-1 10.20.30.1\n'
@@ -566,7 +569,7 @@ class TestGetJobNodesText:
     def test_get_job_nodes_no_nodes(self):
         """Test that empty output raises."""
         client = _make_client()
-        client._json_output_supported = False
+        client._json_output_supported['squeue'] = False
 
         with mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.return_value = (0, '', '')
@@ -865,16 +868,119 @@ class TestGetProctrackType:
             assert result is None
 
 
-class TestGetAllNodeDetails:
-    """Test SlurmClient.get_all_node_details()."""
+class TestGetAllNodeDetailsJson:
+    """Test SlurmClient.get_all_node_details() on the `--json` path."""
+
+    def test_returns_counters_for_every_node(self):
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, _scontrol_json(), '')
+
+            result = client.get_all_node_details()
+            mock_run.assert_called_once_with(
+                'scontrol show node --json',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+        assert set(result.keys()) == {'node-001', 'node-002'}
+        node = result['node-001']
+        assert node.alloc_cpus == 1
+        assert node.total_cpus == 72
+        assert node.alloc_memory_mb == 4096
+        assert node.real_memory_mb == 430080
+        assert node.free_memory_mb == 436979
+        # Slurm reports the load average scaled by 100.
+        assert node.cpu_load == 0.93
+        assert result['node-002'].cpu_load == 0.83
+
+    def test_unreported_counters_are_none(self):
+        """Counters slurmd has not reported carry Slurm's unset sentinels."""
+        client = _make_client()
+        payload = _load_fixture('scontrol_nodes.json')
+        payload['nodes'][0]['cpu_load'] = 0xfffffffe
+        payload['nodes'][0]['free_mem'] = {
+            'set': False,
+            'infinite': False,
+            'number': 0
+        }
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, json.dumps(payload), '')
+            result = client.get_all_node_details()
+
+        assert result['node-001'].cpu_load is None
+        assert result['node-001'].free_memory_mb is None
+        # The other counters are still reported.
+        assert result['node-001'].total_cpus == 72
+
+    def test_falls_back_when_json_unsupported(self):
+        client = _make_client()
+        text_output = ('NodeName=node1 CPUAlloc=8 CPUTot=72 CPULoad=3.50 '
+                       'RealMemory=430080 AllocMem=102400 FreeMem=421339\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (1, '', "scontrol: unrecognized option '--json'"),
+                (0, text_output, ''),
+            ]
+            result = client.get_all_node_details()
+
+            assert mock_run.call_count == 2
+            assert mock_run.call_args_list[1][0][0] == 'scontrol show node -o'
+
+        assert result['node1'].cpu_load == 3.5
+        # The verdict is cached, so the next call skips the `--json` probe.
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, text_output, '')
+            client.get_all_node_details()
+            assert mock_run.call_args_list[0][0][0] == 'scontrol show node -o'
+
+    def test_falls_back_when_json_is_ignored(self):
+        """A subcommand may exit 0 and print its text output regardless."""
+        client = _make_client()
+        text_output = 'NodeName=node1 CPUAlloc=8 CPUTot=72 CPULoad=3.50\n'
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [(0, text_output, ''), (0, text_output, '')]
+            result = client.get_all_node_details()
+
+            assert mock_run.call_count == 2
+            assert mock_run.call_args_list[1][0][0] == 'scontrol show node -o'
+
+        assert result['node1'].total_cpus == 72
+
+    def test_malformed_json_does_not_fall_back(self):
+        """Garbage after a successful probe is a bug, not an old Slurm."""
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, _scontrol_json(), '')
+            client.get_all_node_details()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'not json', '')
+            with pytest.raises(RuntimeError, match='Failed to parse'):
+                client.get_all_node_details()
+            assert mock_run.call_count == 1
+
+    def test_missing_nodes_field(self):
+        client = _make_client()
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, json.dumps({'meta': {}}), '')
+            with pytest.raises(RuntimeError, match="no 'nodes' field"):
+                client.get_all_node_details()
+
+
+class TestGetAllNodeDetailsText:
+    """Test SlurmClient.get_all_node_details() on the text path."""
 
     def test_parses_one_line_per_node(self):
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
+        client = _make_client()
+        client._json_output_supported['scontrol'] = False
 
         mock_output = (
             'NodeName=node1 Arch=x86_64 CPUAlloc=8 CPUEfctv=72 CPUTot=72 '
@@ -896,22 +1002,19 @@ class TestGetAllNodeDetails:
             )
 
         assert set(result.keys()) == {'node1', 'node2'}
-        assert result['node1']['CPUAlloc'] == '8'
-        assert result['node1']['CPUTot'] == '72'
-        assert result['node1']['CPULoad'] == '3.50'
-        assert result['node1']['AllocMem'] == '102400'
-        assert result['node1']['FreeMem'] == '421339'
-        assert result['node1']['State'] == 'MIXED'
-        assert result['node2']['CPULoad'] == 'N/A'
-        assert result['node2']['FreeMem'] == 'N/A'
+        assert result['node1'].alloc_cpus == 8
+        assert result['node1'].total_cpus == 72
+        assert result['node1'].cpu_load == 3.5
+        assert result['node1'].alloc_memory_mb == 102400
+        assert result['node1'].real_memory_mb == 430080
+        assert result['node1'].free_memory_mb == 421339
+        assert result['node2'].cpu_load is None
+        assert result['node2'].free_memory_mb is None
+        assert result['node2'].alloc_cpus == 0
 
     def test_skips_blank_lines_and_lines_without_node_name(self):
-        client = slurm.SlurmClient(
-            ssh_host='localhost',
-            ssh_port=22,
-            ssh_user='root',
-            ssh_key=None,
-        )
+        client = _make_client()
+        client._json_output_supported['scontrol'] = False
 
         mock_output = ('\n'
                        'NodeName=node1 CPUTot=8\n'

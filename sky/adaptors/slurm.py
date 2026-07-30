@@ -5,7 +5,8 @@ import json
 import logging
 import re
 import shlex
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import (Any, Callable, Dict, List, NamedTuple, Optional, Tuple,
+                    TypeVar)
 
 from sky.adaptors import common
 from sky.utils import command_runner
@@ -42,11 +43,23 @@ _UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
 # versions predating `--json` output.
 _UNRECOGNIZED_OPTION_MARKER = 'unrecognized option'
 
+_JSON_OPTION = '--json'
+
 # squeue marker in stderr when slurmctld no longer knows the job ID.
 _INVALID_JOB_ID_MARKER = 'invalid job id'
 
 # How much of a malformed JSON payload to include in error messages.
 _JSON_SNIPPET_LEN = 500
+
+_T = TypeVar('_T')
+
+# Slurm's sentinel for an unset uint32, e.g. a CPU load slurmd has not
+# reported yet. Fields typed as a plain number in the JSON schema carry it
+# through verbatim.
+_NO_VAL32 = 0xfffffffe
+
+# Slurm reports CPULoad as the load average scaled by this factor.
+_CPU_LOAD_SCALE = 100.0
 
 
 class _JsonOutputUnsupportedError(Exception):
@@ -64,6 +77,24 @@ class SlurmPartition(NamedTuple):
     # (e.g. '01:00:00', '2-00:00:00'). None if the partition has no
     # DefaultTime configured (NONE/UNLIMITED).
     default_time: Optional[str]
+
+
+class NodeDetails(NamedTuple):
+    """Per-node counters that sinfo's format codes cannot express.
+
+    Every field is None when Slurm does not report the counter, e.g. on a node
+    slurmd has not reported in for.
+    """
+    # CPUs allocated to jobs by the scheduler, and the node's total.
+    alloc_cpus: Optional[int]
+    total_cpus: Optional[int]
+    # Memory in MB: allocated to jobs by the scheduler, the node's total, and
+    # the free memory slurmd last sampled from the OS.
+    alloc_memory_mb: Optional[int]
+    real_memory_mb: Optional[int]
+    free_memory_mb: Optional[int]
+    # Load average slurmd last sampled from the OS.
+    cpu_load: Optional[float]
 
 
 # TODO(kevin): Add more API types for other client functions.
@@ -127,6 +158,37 @@ def _parse_default_time(line: str) -> Optional[str]:
     return raw
 
 
+def _parse_optional_number(value: Optional[str]) -> Optional[float]:
+    """Parse a number from an scontrol attribute value; None on N/A."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _parse_optional_int(value: Optional[str]) -> Optional[int]:
+    """Parse an int from an scontrol attribute value; None on N/A."""
+    number = _parse_optional_number(value)
+    return None if number is None else int(number)
+
+
+def _json_optional_int(value: Any) -> Optional[int]:
+    """Read a Slurm JSON number, which is optional-typed or plain.
+
+    Optional numbers are wrapped as ``{'set': bool, 'infinite': bool,
+    'number': N}``; plain ones carry ``_NO_VAL32`` when unset.
+    """
+    if isinstance(value, dict):
+        if not value.get('set') or value.get('infinite'):
+            return None
+        value = value.get('number')
+    if not isinstance(value, int) or value == _NO_VAL32:
+        return None
+    return value
+
+
 def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
     """Parses the key=value output of 'scontrol show node'."""
     node_info = {}
@@ -181,9 +243,12 @@ class SlurmClient:
         self.ssh_proxy_command = ssh_proxy_command
         self.ssh_proxy_jump = ssh_proxy_jump
 
-        # Whether the cluster's Slurm CLI supports `--json` output. None until
-        # the first command that tries it.
-        self._json_output_supported: Optional[bool] = None
+        # Whether the cluster's Slurm CLI supports `--json` output, keyed by
+        # program name. `--json` ships in a different release per program
+        # (squeue since 21.08, scontrol since 23.02), so the verdict is probed
+        # and cached per program. A program is absent until the first command
+        # that tries it.
+        self._json_output_supported: Dict[str, bool] = {}
 
         self._runner: command_runner.CommandRunner
 
@@ -329,34 +394,38 @@ class SlurmClient:
 
         return nodes
 
-    def node_details(self, node_name: str) -> Dict[str, str]:
-        """Get detailed Slurm node information.
+    def _get_all_node_details_json(self) -> Dict[str, NodeDetails]:
+        """get_all_node_details() using Slurm's `--json` output.
 
-        Returns:
-            A dictionary of node attributes.
+        `scontrol --json` ships since Slurm 23.02. Older versions reject the
+        option, and get_all_node_details() falls back to the text output.
         """
-        cmd = f'scontrol show node {node_name}'
-        rc, node_details, stderr = self._run_slurm_cmd(cmd)
+        cmd = 'scontrol show node --json'
+        rc, stdout, stderr = self._run_slurm_json_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
-            f'Failed to get detailed node information for {node_name}.',
-            stderr=f'{node_details}\n{stderr}',
+            'Failed to get detailed node information.',
+            stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
-        node_info = _parse_scontrol_node_output(node_details)
-        return node_info
 
-    def get_all_node_details(self) -> Dict[str, Dict[str, str]]:
-        """Get detailed attributes for every node in a single scontrol call.
+        payload = self._load_slurm_json(cmd, stdout)
+        details: Dict[str, NodeDetails] = {}
+        for node in self._get_json_field(cmd, payload, 'nodes'):
+            cpu_load = _json_optional_int(node.get('cpu_load'))
+            details[self._get_json_field(cmd, node, 'name')] = NodeDetails(
+                alloc_cpus=_json_optional_int(node.get('alloc_cpus')),
+                total_cpus=_json_optional_int(node.get('cpus')),
+                alloc_memory_mb=_json_optional_int(node.get('alloc_memory')),
+                real_memory_mb=_json_optional_int(node.get('real_memory')),
+                free_memory_mb=_json_optional_int(node.get('free_mem')),
+                cpu_load=(None if cpu_load is None else cpu_load /
+                          _CPU_LOAD_SCALE),
+            )
+        return details
 
-        Uses ``scontrol show node -o`` (one line per node) so per-node
-        attributes that sinfo's format codes cannot express (CPUAlloc,
-        AllocMem, FreeMem, CPULoad, GresUsed, ...) are available without a
-        round-trip per node.
-
-        Returns:
-            A dictionary mapping node name to its attribute dictionary.
-        """
+    def _get_all_node_details_text(self) -> Dict[str, NodeDetails]:
+        """get_all_node_details() for Slurm versions without `--json`."""
         cmd = 'scontrol show node -o'
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
@@ -365,7 +434,7 @@ class SlurmClient:
             'Failed to get detailed node information.',
             stderr=f'{stdout}\n{stderr}',
             stream_logs=False)
-        details: Dict[str, Dict[str, str]] = {}
+        details: Dict[str, NodeDetails] = {}
         for line in stdout.splitlines():
             line = line.strip()
             if not line:
@@ -373,25 +442,31 @@ class SlurmClient:
             node_info = _parse_scontrol_node_output(line)
             node_name = node_info.get('NodeName')
             if node_name:
-                details[node_name] = node_info
+                details[node_name] = NodeDetails(
+                    alloc_cpus=_parse_optional_int(node_info.get('CPUAlloc')),
+                    total_cpus=_parse_optional_int(node_info.get('CPUTot')),
+                    alloc_memory_mb=_parse_optional_int(
+                        node_info.get('AllocMem')),
+                    real_memory_mb=_parse_optional_int(
+                        node_info.get('RealMemory')),
+                    free_memory_mb=_parse_optional_int(
+                        node_info.get('FreeMem')),
+                    cpu_load=_parse_optional_number(node_info.get('CPULoad')),
+                )
         return details
 
-    def get_jobs_gres(self, node_name: str) -> List[str]:
-        """Get the list of jobs GRES for a given node name.
+    def get_all_node_details(self) -> Dict[str, NodeDetails]:
+        """Get per-node counters for every node in a single scontrol call.
+
+        These are the counters sinfo's format codes cannot express, fetched
+        without a round-trip per node.
 
         Returns:
-            A list of GRES specs (e.g., 'gres/gpu:h100:4')
-            for jobs on the node.
+            A dictionary mapping node name to its counters.
         """
-        cmd = f'squeue -h --nodelist {node_name} -o "%b"'
-        rc, stdout, stderr = self._run_slurm_cmd(cmd)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd,
-            f'Failed to get jobs for node {node_name}.',
-            stderr=f'{stdout}\n{stderr}',
-            stream_logs=False)
-        return stdout.splitlines()
+        return self._with_json_output(['scontrol'],
+                                      self._get_all_node_details_json,
+                                      self._get_all_node_details_text)
 
     def get_all_jobs_gres(self) -> Dict[str, List[str]]:
         """Get GRES allocation for all running jobs, grouped by node.
@@ -623,24 +698,62 @@ class SlurmClient:
             node_to_ip[node_name] = hostname_to_ip[hostname]
         return node_to_ip
 
+    def _with_json_output(self, programs: List[str], json_impl: Callable[[],
+                                                                         _T],
+                          text_impl: Callable[[], _T]) -> _T:
+        """Run a `--json` implementation, falling back to the text one.
+
+        Args:
+            programs: The Slurm programs that `json_impl` runs with `--json`.
+            json_impl: The implementation parsing `--json` output.
+            text_impl: The implementation parsing the text output, used when
+                the cluster's Slurm is too old for `--json`.
+        """
+        if all(self._json_output_supported.get(p, True) for p in programs):
+            try:
+                return json_impl()
+            except _JsonOutputUnsupportedError as e:
+                logger.debug(f'Falling back to parsing the text output: {e}')
+        return text_impl()
+
     def _run_slurm_json_cmd(self, cmd: str) -> Tuple[int, str, str]:
         """Run a Slurm command with `--json`.
 
         Raises:
-            _JsonOutputUnsupportedError: The Slurm CLI does not know the
-                `--json` option.
+            _JsonOutputUnsupportedError: The Slurm CLI does not know one of the
+                command's options, so the caller has to use the text output.
         """
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         if rc != 0 and _UNRECOGNIZED_OPTION_MARKER in stderr:
+            if _JSON_OPTION in stderr:
+                # Any other option is specific to this command, so it must not
+                # disqualify the program's `--json` support as a whole.
+                self._json_output_supported[shlex.split(cmd)[0]] = False
             raise _JsonOutputUnsupportedError(
                 f'{cmd!r} failed: {stderr.strip()}')
         return rc, stdout, stderr
 
     def _load_slurm_json(self, cmd: str, stdout: str) -> Dict[str, Any]:
-        """Parse the JSON payload of a Slurm `--json` command."""
+        """Parse the JSON payload of a Slurm `--json` command.
+
+        Raises:
+            _JsonOutputUnsupportedError: The command exited successfully but
+                printed its text output, i.e. it ignored `--json`, and it has
+                never produced JSON before.
+            RuntimeError: The payload is not a JSON object.
+        """
+        program = shlex.split(cmd)[0]
         try:
             payload = json.loads(stdout)
         except json.JSONDecodeError as e:
+            if not self._json_output_supported.get(program):
+                # Some subcommands (e.g. `scontrol show config`) ignore
+                # `--json` and exit 0, so a successful exit is not proof that
+                # the output is JSON.
+                self._json_output_supported[program] = False
+                raise _JsonOutputUnsupportedError(
+                    f'{cmd!r} did not return JSON output: '
+                    f'{stdout[:_JSON_SNIPPET_LEN]!r}') from e
             raise RuntimeError(
                 f'Failed to parse the JSON output of {cmd!r}: {e}. '
                 f'Output: {stdout[:_JSON_SNIPPET_LEN]!r}') from e
@@ -649,6 +762,7 @@ class SlurmClient:
                 f'Unexpected JSON output of {cmd!r}: expected an object, got '
                 f'{type(payload).__name__}. '
                 f'Output: {stdout[:_JSON_SNIPPET_LEN]!r}')
+        self._json_output_supported[program] = True
         return payload
 
     def _get_json_field(self, cmd: str, payload: Dict[str, Any],
@@ -803,16 +917,9 @@ class SlurmClient:
             A tuple of (nodes, node_ips) where nodes is a list of node names
             and node_ips is a list of corresponding IP addresses.
         """
-        if self._json_output_supported is not False:
-            try:
-                nodes, node_ips = self._get_job_nodes_json(job_id)
-                self._json_output_supported = True
-                return nodes, node_ips
-            except _JsonOutputUnsupportedError as e:
-                logger.debug(f'Slurm does not support --json output ({e}), '
-                             'falling back to parsing the text output.')
-                self._json_output_supported = False
-        return self._get_job_nodes_text(job_id)
+        return self._with_json_output(['squeue', 'scontrol'],
+                                      lambda: self._get_job_nodes_json(job_id),
+                                      lambda: self._get_job_nodes_text(job_id))
 
     def submit_job(
         self,
