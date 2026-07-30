@@ -384,6 +384,73 @@ class TestGetAllJobsGres:
             assert result['node06'] == ['gpu:h100:2']
 
 
+class TestGetAllJobsInfo:
+    """Test SlurmClient.get_all_jobs_info()."""
+
+    def test_get_all_jobs_info_expansion(self):
+        """Multi-node jobs fan out to every node, keeping job identity."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        squeue_output = (
+            f'101{slurm.SEP}train a{slurm.SEP}alice{slurm.SEP}node01'
+            f'{slurm.SEP}gpu:h100:4\n'
+            f'102{slurm.SEP}cpu-only{slurm.SEP}bob{slurm.SEP}node01'
+            f'{slurm.SEP}N/A\n'
+            f'103{slurm.SEP}pretrain{slurm.SEP}bob{slurm.SEP}node[02-03]'
+            f'{slurm.SEP}gpu:h100:2\n'
+            f'malformed line without separators\n')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, squeue_output, '')
+
+            result = client.get_all_jobs_info()
+
+            mock_run.assert_called_once_with(
+                f'squeue -h --states=running,completing '
+                f'-o "%i{slurm.SEP}%j{slurm.SEP}%u{slurm.SEP}%N{slurm.SEP}%b"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            # Job 102 (no GRES) and the malformed line are skipped.
+            assert set(result.keys()) == {'node01', 'node02', 'node03'}
+            assert result['node01'] == [
+                slurm.JobGresInfo(job_id='101',
+                                  job_name='train a',
+                                  user='alice',
+                                  gres_str='gpu:h100:4')
+            ]
+            # Multi-node job 103 appears on both nodes with the same
+            # per-node GRES.
+            for node in ('node02', 'node03'):
+                assert result[node] == [
+                    slurm.JobGresInfo(job_id='103',
+                                      job_name='pretrain',
+                                      user='bob',
+                                      gres_str='gpu:h100:2')
+                ]
+
+    def test_get_all_jobs_info_empty_queue(self):
+        """Empty squeue output yields an empty mapping."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, '', '')
+
+            assert client.get_all_jobs_info() == {}
+
+
 class TestParseMaxtime:
     """Test _parse_maxtime()."""
 
