@@ -796,6 +796,9 @@ def launch(
 
     Other exceptions may be raised depending on the backend.
     """
+    if (dryrun or _is_launched_by_jobs_controller or
+            _is_launched_by_sky_serve_controller):
+        usage_lib.skip_scarf_ping_for_current_operation()
     if resize and cluster_name is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -1119,6 +1122,8 @@ def exec(  # pylint: disable=redefined-builtin
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
     """
+    if dryrun:
+        usage_lib.skip_scarf_ping_for_current_operation()
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
