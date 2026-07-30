@@ -1213,6 +1213,9 @@ def write_cluster_config(
             'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
             'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
             'dump_port_command': instance_setup.DUMP_RAY_PORTS,
+            # Commands raising the open files (nofile) limit for ray.
+            'ray_prlimit_command': instance_setup.RAY_PRLIMIT,
+            'raise_nofile_limit_command': instance_setup.RAISE_NOFILE_LIMIT_CMD,
             # Sky-internal constants.
             'sky_ray_cmd': constants.SKY_RAY_CMD,
             # pip install needs to have python env activated to make sure

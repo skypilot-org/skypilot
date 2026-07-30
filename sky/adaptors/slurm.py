@@ -101,6 +101,21 @@ def _parse_default_time(line: str) -> Optional[str]:
     return raw
 
 
+def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
+    """Parses the key=value output of 'scontrol show node'."""
+    node_info = {}
+    # Split by space, handling values that might have spaces
+    # if quoted. This is simplified; scontrol can be complex.
+    parts = output.split()
+    for part in parts:
+        if '=' in part:
+            key, value = part.split('=', 1)
+            # Simple quote removal, might need refinement
+            value = value.strip('\'"')
+            node_info[key] = value
+    return node_info
+
+
 class SlurmClient:
     """Client for Slurm control plane operations."""
 
@@ -286,21 +301,6 @@ class SlurmClient:
         Returns:
             A dictionary of node attributes.
         """
-
-        def _parse_scontrol_node_output(output: str) -> Dict[str, str]:
-            """Parses the key=value output of 'scontrol show node'."""
-            node_info = {}
-            # Split by space, handling values that might have spaces
-            # if quoted. This is simplified; scontrol can be complex.
-            parts = output.split()
-            for part in parts:
-                if '=' in part:
-                    key, value = part.split('=', 1)
-                    # Simple quote removal, might need refinement
-                    value = value.strip('\'"')
-                    node_info[key] = value
-            return node_info
-
         cmd = f'scontrol show node {node_name}'
         rc, node_details, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
@@ -311,6 +311,36 @@ class SlurmClient:
             stream_logs=False)
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
+
+    def get_all_node_details(self) -> Dict[str, Dict[str, str]]:
+        """Get detailed attributes for every node in a single scontrol call.
+
+        Uses ``scontrol show node -o`` (one line per node) so per-node
+        attributes that sinfo's format codes cannot express (CPUAlloc,
+        AllocMem, FreeMem, CPULoad, GresUsed, ...) are available without a
+        round-trip per node.
+
+        Returns:
+            A dictionary mapping node name to its attribute dictionary.
+        """
+        cmd = 'scontrol show node -o'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            'Failed to get detailed node information.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+        details: Dict[str, Dict[str, str]] = {}
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            node_info = _parse_scontrol_node_output(line)
+            node_name = node_info.get('NodeName')
+            if node_name:
+                details[node_name] = node_info
+        return details
 
     def get_jobs_gres(self, node_name: str) -> List[str]:
         """Get the list of jobs GRES for a given node name.
