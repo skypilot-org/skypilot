@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 
 from sky import exceptions
+from sky.adaptors import slurm as slurm_adaptor
 from sky.provision.slurm import utils
 
 
@@ -284,6 +285,247 @@ class TestSlurmNodeInfo:
             utils, '_get_slurm_node_info_list',
             mock.Mock(side_effect=exceptions.NotSupportedError('nope')))
         assert not utils.slurm_node_info(slurm_cluster_name='cluster-a')
+
+
+class TestGetGpuTypeAndCount:
+    """Test get_gpu_type_and_count() GRES parsing."""
+
+    @pytest.mark.parametrize(
+        'gres_str,expected',
+        [
+            # Colon-style GRES from sinfo %G / squeue %b.
+            ('gpu:8', (None, 8)),
+            ('gpu:H100:8', ('H100', 8)),
+            ('gpu:nvidia_h100_80gb_hbm3:8(S:0-1)',
+             ('nvidia_h100_80gb_hbm3', 8)),
+            # TRES/equals-style GRES that some Slurm versions return for
+            # squeue %b. See #10283.
+            ('gres/gpu=1', (None, 1)),
+            ('gres/gpu:8', (None, 8)),
+            ('gres/gpu:h100=2', ('h100', 2)),
+            ('gres/gpu:h100:4', ('h100', 4)),
+            # No GPU allocation.
+            ('N/A', (None, 0)),
+            ('(null)', (None, 0)),
+            ('', (None, 0)),
+            ('cpu=8,mem=32G', (None, 0)),
+        ])
+    def test_get_gpu_type_and_count(self, gres_str, expected):
+        assert utils.get_gpu_type_and_count(gres_str) == expected
+
+
+class TestGetGpuCountFromTres:
+    """Test get_gpu_count_from_tres() TRES parsing."""
+
+    @pytest.mark.parametrize(
+        'tres_str,expected',
+        [
+            ('cpu=64,mem=800G,node=1,billing=64,gres/gpu=8', 8),
+            # Untyped total is preferred over typed entries.
+            ('cpu=64,mem=800G,gres/gpu=8,gres/gpu:h100=8', 8),
+            ('gres/gpu:h100=8,gres/gpu=8', 8),
+            # Only typed entries: counts are summed.
+            ('cpu=8,gres/gpu:h100=4,gres/gpu:a100=2', 6),
+            # No GPU entries.
+            ('cpu=64,mem=400G', 0),
+            ('', 0),
+            # 'gres/gpu' should not match other gres types.
+            ('cpu=8,gres/shard=32', 0),
+        ])
+    def test_get_gpu_count_from_tres(self, tres_str, expected):
+        assert utils.get_gpu_count_from_tres(tres_str) == expected
+
+
+class _FakeSlurmClient:
+    """Fake SlurmClient for _get_slurm_node_info_list tests."""
+
+    def __init__(self,
+                 node_infos,
+                 node_details=None,
+                 jobs_gres=None,
+                 details_error=None):
+        self._node_infos = node_infos
+        self._node_details = node_details or {}
+        self._jobs_gres = jobs_gres or {}
+        self._details_error = details_error
+        self.jobs_gres_calls = 0
+
+    def info_nodes(self):
+        return self._node_infos
+
+    def get_all_node_details(self):
+        if self._details_error is not None:
+            raise self._details_error
+        return self._node_details
+
+    def get_all_jobs_gres(self):
+        self.jobs_gres_calls += 1
+        return self._jobs_gres
+
+
+class TestGetSlurmNodeInfoList:
+    """Test _get_slurm_node_info_list() GPU accounting."""
+
+    def _patch(self, monkeypatch, fake_client):
+        ssh_config = mock.Mock()
+        ssh_config.lookup.return_value = {
+            'hostname': 'host',
+            'user': 'user',
+        }
+        monkeypatch.setattr(utils, 'get_slurm_ssh_config', lambda: ssh_config)
+        monkeypatch.setattr(utils.slurm, 'SlurmClient',
+                            lambda *args, **kwargs: fake_client)
+
+    def _make_sinfo_node(self, state) -> slurm_adaptor.NodeInfo:
+        return slurm_adaptor.NodeInfo(node='node1',
+                                      state=state,
+                                      gres='gpu:h100:8',
+                                      cpus=192,
+                                      memory_gb=800.0,
+                                      partition='main')
+
+    def test_alloc_tres_used_when_squeue_gres_is_na(self, monkeypatch):
+        """Node-level AllocTRES should be used even if squeue %b is N/A.
+
+        Regression test for #10283: jobs requesting GPUs via
+        --tres-per-task report %b as N/A, so squeue-based accounting
+        counts 0 allocated GPUs.
+        """
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192,gres/gpu=8',
+                    'AllocTRES': 'cpu=64,mem=400G,gres/gpu=8',
+                },
+            },
+            # squeue %b returned N/A for the job, so no GRES was recorded.
+            jobs_gres={})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['total_gpus'] == 8
+        assert result[0]['free_gpus'] == 0
+
+    def test_alloc_tres_empty_on_idle_node(self, monkeypatch):
+        """An idle node with empty AllocTRES should have all GPUs free."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('idle')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192,gres/gpu=8',
+                    'AllocTRES': '',
+                },
+            })
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 8
+
+    def test_fallback_when_tres_lacks_gpu(self, monkeypatch):
+        """Fall back to squeue if the cluster does not track gres/gpu in TRES.
+
+        scontrol succeeds, but CfgTRES reports no GPUs while sinfo %G
+        reports 8: AllocTRES cannot be trusted for GPU accounting, so the
+        squeue-based path must be used.
+        """
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('alloc')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192',
+                    'AllocTRES': 'cpu=192,mem=800G,billing=192',
+                },
+            },
+            jobs_gres={'node1': ['gpu:h100:8']})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 0
+
+    def test_fallback_when_node_missing_from_details(self, monkeypatch):
+        """A sinfo node absent from scontrol output uses squeue accounting."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            # scontrol succeeded but did not report this node (e.g. node
+            # added between the two calls).
+            node_details={},
+            jobs_gres={'node1': ['gres/gpu=1']})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 7
+
+    def test_fallback_to_squeue_when_scontrol_fails(self, monkeypatch):
+        """If scontrol fails, fall back to squeue-based accounting."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            details_error=RuntimeError('scontrol failed'),
+            # Equals-style GRES string (see #10283 example 2).
+            jobs_gres={'node1': ['gres/gpu=1']})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 7
+
+    def test_fallback_fully_allocated_node_without_gres(self, monkeypatch):
+        """Fallback: alloc node with no job GRES info counts 0 free GPUs."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('alloc')],
+            details_error=RuntimeError('scontrol failed'),
+            jobs_gres={})
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 0
+
+    def test_squeue_not_queried_on_cpu_only_cluster(self, monkeypatch):
+        """CPU-only clusters never pay the squeue round-trip."""
+        cpu_node = slurm_adaptor.NodeInfo(node='node1',
+                                          state='alloc',
+                                          gres='(null)',
+                                          cpus=8,
+                                          memory_gb=32.0,
+                                          partition='main')
+        fake_client = _FakeSlurmClient(node_infos=[cpu_node])
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['total_gpus'] == 0
+        assert result[0]['free_gpus'] == 0
+        assert fake_client.jobs_gres_calls == 0
+
+    def test_squeue_not_queried_when_tres_covers_all_nodes(self, monkeypatch):
+        """squeue is not queried when AllocTRES covers every GPU node."""
+        fake_client = _FakeSlurmClient(
+            node_infos=[self._make_sinfo_node('mix')],
+            node_details={
+                'node1': {
+                    'CfgTRES': 'cpu=192,mem=800G,billing=192,gres/gpu=8',
+                    'AllocTRES': 'cpu=64,mem=400G,gres/gpu=4',
+                },
+            })
+        self._patch(monkeypatch, fake_client)
+
+        result = utils._get_slurm_node_info_list('cluster-a')
+
+        assert len(result) == 1
+        assert result[0]['free_gpus'] == 4
+        assert fake_client.jobs_gres_calls == 0
 
 
 class TestGetSlurmNodeInfoListEnrichment:
