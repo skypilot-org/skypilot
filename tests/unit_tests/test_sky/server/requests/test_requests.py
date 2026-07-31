@@ -1274,20 +1274,20 @@ def test_requests_filter():
         status=[RequestStatus.PENDING, RequestStatus.RUNNING], sort=True)
     sql, params = filter_status.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE status IN (\'PENDING\',\'RUNNING\') '
+                    'WHERE status IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['PENDING', 'RUNNING']
 
     # Test cluster_names filter
     filter_clusters = requests.RequestTaskFilter(
         cluster_names=['cluster1', 'cluster2'], sort=True)
     sql, params = filter_clusters.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE cluster_name IN (\'cluster1\',\'cluster2\') '
+                    'WHERE cluster_name IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['cluster1', 'cluster2']
 
     # Test user_id filter (uses parameterized query)
     filter_user = requests.RequestTaskFilter(user_id='test-user-123', sort=True)
@@ -1302,20 +1302,20 @@ def test_requests_filter():
         exclude_request_names=['request1', 'request2'], sort=True)
     sql, params = filter_exclude.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE name NOT IN (\'request1\',\'request2\') '
+                    'WHERE name NOT IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['request1', 'request2']
 
     # Test include_request_names filter
     filter_include = requests.RequestTaskFilter(
         include_request_names=['request3', 'request4'], sort=True)
     sql, params = filter_include.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE name IN (\'request3\',\'request4\') '
+                    'WHERE name IN (?,?) '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['request3', 'request4']
 
     # Test finished_before filter (uses parameterized query)
     timestamp = 1234567890.0
@@ -1337,13 +1337,17 @@ def test_requests_filter():
         sort=True)
     sql, params = filter_combined.build_query()
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE status IN (\'SUCCEEDED\',\'FAILED\') AND '
-                    'name NOT IN (\'internal-task\') AND '
-                    'cluster_name IN (\'prod-cluster\') AND '
+                    'WHERE status IN (?,?) AND '
+                    'name NOT IN (?) AND '
+                    'cluster_name IN (?) AND '
                     'user_id = ? AND finished_at < ? '
                     'ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == ['admin-user', 9876543210.0]
+    # Parameter order must match placeholder order in the SQL above.
+    assert params == [
+        'SUCCEEDED', 'FAILED', 'internal-task', 'prod-cluster', 'admin-user',
+        9876543210.0
+    ]
 
     # Test mutually exclusive filters raise ValueError
     with pytest.raises(ValueError, match='Only one of exclude_request_names'):
@@ -1351,17 +1355,55 @@ def test_requests_filter():
                                    include_request_names=['req2'],
                                    sort=True)
 
-    # Test special characters in names are properly escaped with repr()
+    # Names with quotes are bound as parameters, never interpolated. repr()
+    # was previously used here, which emitted a double-quoted value -- a
+    # SQL *identifier*, not a string literal.
     filter_special_chars = requests.RequestTaskFilter(
         cluster_names=['cluster\'with\'quotes', 'cluster\"with\"double'],
         sort=True)
     sql, params = filter_special_chars.build_query()
-    # repr() should properly escape the quotes
     expected_sql = (f'SELECT {expected_columns} FROM {requests.REQUEST_TABLE} '
-                    'WHERE cluster_name IN (\"cluster\'with\'quotes\",'
-                    '\'cluster\"with\"double\') ORDER BY created_at DESC')
+                    'WHERE cluster_name IN (?,?) ORDER BY created_at DESC')
     assert sql == expected_sql
-    assert params == []
+    assert params == ['cluster\'with\'quotes', 'cluster\"with\"double']
+    # The values themselves must not appear in the SQL text at all.
+    assert 'with\'quotes' not in sql
+    assert 'with\"double' not in sql
+
+
+def test_validate_fields_rejects_injection():
+    """`fields` reaches the SELECT list by interpolation -- allowlist it."""
+    # Every known column is accepted.
+    requests.validate_fields(requests.REQUEST_COLUMNS)
+    requests.validate_fields(['request_id', 'status'])
+    # None/empty mean "all columns".
+    requests.validate_fields(None)
+    requests.validate_fields([])
+
+    injections = [
+        'request_id) FROM requests--',
+        '(SELECT 1)',
+        'request_id, (SELECT user_id FROM requests LIMIT 1)',
+        '*',
+        'request_id;DROP TABLE requests',
+        'rowid',
+    ]
+    for payload in injections:
+        with pytest.raises(ValueError, match='Unknown request field'):
+            requests.validate_fields([payload])
+        # Also rejected when smuggled alongside a valid column.
+        with pytest.raises(ValueError, match='Unknown request field'):
+            requests.validate_fields(['request_id', payload])
+
+
+def test_requests_filter_rejects_bad_fields():
+    """RequestTaskFilter validates `fields` for every caller, at construction."""
+    filter_ok = requests.RequestTaskFilter(fields=['request_id', 'status'])
+    sql, _ = filter_ok.build_query()
+    assert sql.startswith('SELECT request_id, status FROM')
+
+    with pytest.raises(ValueError, match='Unknown request field'):
+        requests.RequestTaskFilter(fields=['request_id) FROM requests--'])
 
 
 def test_encode_requests_empty_list():
@@ -2103,3 +2145,75 @@ async def test_request_id_lookup_uses_index(isolated_database):
         f'WHERE {where}', params).fetchall()
     plan_text = ' '.join(str(row) for row in plan)
     assert 'SEARCH' in plan_text and 'SCAN' not in plan_text, plan_text
+
+
+@pytest.mark.asyncio
+async def test_interrupt_request_for_retry_records_terminal_error(
+        isolated_database):
+    """Interrupting a request records a terminal error.
+
+    Interrupted requests are never re-executed after a server restart, so
+    the stored error lets /api/get fail definitively (telling the client to
+    re-submit the original request) instead of serving a retryable 503
+    forever.
+    """
+    from sky import exceptions
+    from sky.server import uvicorn as sky_uvicorn
+
+    request = requests.Request(request_id='interrupt-me',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    assert await requests.create_if_not_exists_async(request)
+
+    # The method does not use self beyond being an instance method.
+    sky_uvicorn.Server.interrupt_request_for_retry(mock.MagicMock(),
+                                                   'interrupt-me')
+
+    interrupted = requests.get_request('interrupt-me')
+    assert interrupted is not None
+    assert interrupted.status == RequestStatus.CANCELLED
+    assert interrupted.should_retry is True
+    # finished_at must be stamped, otherwise retention cleanup
+    # (finished_at < cutoff) never garbage-collects the row.
+    assert interrupted.finished_at is not None
+    error = interrupted.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_request_without_retry_records_plain_cancellation(
+        isolated_database):
+    """should_retry=False marks the interrupt as a plain terminal
+    cancellation: no re-submit signal on /api/stream (Control.RETRY), just
+    the stored error. Used for requests whose client-side retry unit can
+    only re-attach the same dead request id (e.g. sky.launch at the
+    shutdown drain timeout)."""
+    from sky import exceptions
+    from sky.server import uvicorn as sky_uvicorn
+
+    request = requests.Request(request_id='interrupt-no-retry',
+                               name='sky.launch',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=time.time(),
+                               user_id='test-user')
+    assert await requests.create_if_not_exists_async(request)
+
+    sky_uvicorn.Server.interrupt_request_for_retry(mock.MagicMock(),
+                                                   'interrupt-no-retry',
+                                                   should_retry=False)
+
+    interrupted = requests.get_request('interrupt-no-retry')
+    assert interrupted is not None
+    assert interrupted.status == RequestStatus.CANCELLED
+    assert interrupted.should_retry is False
+    assert interrupted.finished_at is not None
+    error = interrupted.get_error()
+    assert error is not None
+    assert isinstance(error['object'], exceptions.RequestInterruptedError)

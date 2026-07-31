@@ -619,6 +619,13 @@ available_node_types:
                   fi
           {% endif %}
           env:
+            # Pin Ray's node IP to the address SkyPilot records as internal_ip
+            # (status.podIP). On multi-NIC / hostNetwork nodes Ray may otherwise
+            # auto-detect a different NIC and break multi-node rank ordering.
+            - name: SKYPILOT_RAY_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: SKYPILOT_POD_NODE_TYPE
               valueFrom:
                 fieldRef:
@@ -809,6 +816,15 @@ available_node_types:
               {% endfor %}
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
+
+              # Raise the open files limit before the STEPS below fork, so
+              # that ray (started by the "runtime-setup" STEP) inherits it;
+              # otherwise the raylet can run out of file descriptors while
+              # starting its workers. SSH sessions do not inherit from this
+              # shell -- sshd resets its own soft limit; they get theirs from
+              # the limits.conf entry written in setup_commands, applied by
+              # pam_limits at login.
+              {{raise_nofile_limit_command}}
 
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
@@ -1746,7 +1762,7 @@ setup_commands:
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
-    ulimit -n 1048576;
+    {{raise_nofile_limit_command}};
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/id_ed25519\n  IdentityFile ~/.ssh/id_ecdsa\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~/.ssh/sky-cluster-key\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);

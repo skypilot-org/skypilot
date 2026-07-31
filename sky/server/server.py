@@ -489,17 +489,19 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # JWT carries a freshly-generated token_id; only the hash is
             # consistent between the live JWT and the live DB row.
             incoming_hash = hashlib.sha256(sa_token.encode()).hexdigest()
-            # Offload the sync DB lookups to the bounded request thread executor
-            # so a slow/locked DB cannot stall the request event loop (this runs
-            # on the loop for every service-account-authenticated request).
-            # Using the dedicated executor (not asyncio's shared default thread
+            # Offload the sync DB lookups to the bounded auth thread executor so
+            # a slow/locked DB cannot stall the request event loop (this runs on
+            # the loop for every service-account-authenticated request).
+            # Using a dedicated executor (not asyncio's shared default thread
             # pool) avoids saturating that pool under DB slowness; when it is
             # exhausted it raises ConcurrentWorkerExhaustedError, which the
-            # app-level handler turns into a 503 so the client retries.
+            # app-level handler turns into a 503 so the client retries. The auth
+            # executor is kept separate from the request executor so long-lived
+            # streaming requests cannot starve authentication.
             loop = asyncio.get_running_loop()
-            request_executor = executor.get_request_thread_executor()
+            auth_executor = executor.get_auth_thread_executor()
             token_row = await loop.run_in_executor(
-                request_executor,
+                auth_executor,
                 global_user_state.get_service_account_token_by_hash,
                 incoming_hash)
             if token_row is None:
@@ -516,7 +518,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     {'detail': 'Service account token has expired'})
 
             # Verify user still exists in database
-            user_info = await loop.run_in_executor(request_executor,
+            user_info = await loop.run_in_executor(auth_executor,
                                                    global_user_state.get_user,
                                                    user_id)
             if user_info is None:
@@ -530,7 +532,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # carries a different token_id than the DB row.
             try:
                 await loop.run_in_executor(
-                    request_executor,
+                    auth_executor,
                     global_user_state.update_service_account_token_last_used,
                     token_row['token_id'])
             except Exception as e:  # pylint: disable=broad-except
@@ -2395,13 +2397,26 @@ async def api_get(request_id: str) -> payloads.RequestPayload:
         # Back off: 10ms -> 20ms -> 40ms -> 80ms -> 100ms (cap)
         poll_interval = min(poll_interval * 2, 0.1)
     request_task = await requests_lib.get_request_async(request_id)
-    # TODO(aylei): refine this, /api/get will not be retried and this is
-    # meaningless to retry. It is the original request that should be retried.
-    if request_task.should_retry:
-        raise fastapi.HTTPException(
-            status_code=503, detail=f'Request {request_id!r} should be retried')
+    # Check the error before should_retry: an interrupted request is in a
+    # terminal state (the server does not re-execute it after a restart),
+    # so clients polling /api/get must get a definitive error telling them
+    # to re-submit the original request. Returning a retryable 503 here
+    # would make the client retry /api/get itself forever.
     request_error = request_task.get_error()
     if request_error is not None:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=request_task.encode().model_dump())
+    if request_task.should_retry:
+        # Interrupted by a server version that recorded no error object —
+        # including the very rolling update that ships this code, whose
+        # draining (old) servers still write bare should_retry rows.
+        # Synthesize the same terminal error at read time so those rows,
+        # and any already stuck in the database, stop 503ing on deploy.
+        request_task.set_error(
+            exceptions.RequestInterruptedError(
+                f'Request {request_id!r} was interrupted by an API server '
+                'restart and will not be resumed. Please re-submit the '
+                'original request.'))
         raise fastapi.HTTPException(status_code=500,
                                     detail=request_task.encode().model_dump())
     return request_task.encode()
@@ -2669,6 +2684,13 @@ async def api_status(
         None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
+    # `fields` is caller-supplied and ends up in the SQL column list. Reject an
+    # unknown column here so the client gets a 400 instead of a 500 from the
+    # query layer.
+    try:
+        requests_lib.validate_fields(fields)
+    except ValueError as e:
+        raise fastapi.HTTPException(status_code=400, detail=str(e)) from e
     if request_ids is None:
         statuses = None
         if not all_status:
@@ -3138,6 +3160,31 @@ async def kubernetes_pod_ssh_proxy(websocket: fastapi.WebSocket,
             await loop.run_in_executor(None, proc.wait)
 
 
+def _build_slurm_job_ssh_command(
+    provider_config: Dict[str, Any],
+    job_id: str,
+    target_node: str,
+    cluster_name_on_cloud: str,
+    is_container_image: bool,
+) -> str:
+    login_node_user = provider_config['ssh']['user']
+    slurm_user = provider_config.get('slurm_user')
+    sshd_user = slurm_user if slurm_user is not None else login_node_user
+    if is_container_image:
+        sshd_user = 'root'
+    command = slurm_utils.srun_sshd_command(
+        job_id,
+        target_node,
+        sshd_user,
+        cluster_name_on_cloud,
+        is_container_image,
+    )
+    if slurm_user is not None:
+        command = command_runner.wrap_command_as_user(
+            command, slurm_user, use_sudo=login_node_user != 'root')
+    return command
+
+
 @app.websocket('/slurm-job-ssh-proxy')
 async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                               cluster_name: str,
@@ -3202,10 +3249,10 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     ) is not None
     ssh_cmd += [
         shlex.quote(
-            slurm_utils.srun_sshd_command(
+            _build_slurm_job_ssh_command(
+                provider_config,
                 job_id,
                 target_node,
-                login_node_user,
                 handle.cluster_name_on_cloud,
                 is_container_image,
             ))

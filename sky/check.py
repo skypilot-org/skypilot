@@ -387,7 +387,7 @@ def check_capabilities(
         # re-running cloud probes. Full-workspace runs replace the row;
         # scoped runs (clouds is not None) merge at cloud granularity.
         # Wrapped in try/except: this row is a cache, and the
-        # source-of-truth enabled_clouds_<workspace>_<cap> rows have
+        # source-of-truth enabled_clouds_<workspace>_<cap>[_<user>] rows have
         # already been written above. A transient DB failure or
         # unsupported dialect must not fail the user-visible
         # `sky check` command.

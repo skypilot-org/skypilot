@@ -293,16 +293,11 @@ def _caller_is_viewer() -> bool:
             rbac_mod.RoleName.ADMIN.value not in roles)
 
 
-def is_command_length_over_limit(command: str) -> bool:
-    """Check if the length of the command exceeds the limit.
-
-    We calculate the length of the command after quoting the command twice as
-    when it is executed by the CommandRunner, the command will be quoted twice
-    to ensure the correctness, which will add significant length to the command.
-    """
-
-    quoted_length = len(shlex.quote(shlex.quote(command)))
-    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
+def is_command_length_over_limit(command: str, quote_levels: int = 2) -> bool:
+    """Check if the quoted command exceeds the inline command limit."""
+    for _ in range(quote_levels):
+        command = shlex.quote(command)
+    return len(command) > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def is_ip(s: str) -> bool:
@@ -1284,6 +1279,9 @@ def write_cluster_config(
             'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
             'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
             'dump_port_command': instance_setup.DUMP_RAY_PORTS,
+            # Commands raising the open files (nofile) limit for ray.
+            'ray_prlimit_command': instance_setup.RAY_PRLIMIT,
+            'raise_nofile_limit_command': instance_setup.RAISE_NOFILE_LIMIT_CMD,
             # Sky-internal constants.
             'sky_ray_cmd': constants.SKY_RAY_CMD,
             # pip install needs to have python env activated to make sure

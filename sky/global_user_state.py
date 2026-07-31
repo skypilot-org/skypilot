@@ -2616,22 +2616,43 @@ def set_enabled_clouds(enabled_clouds: List[str],
         session.commit()
 
 
+def _slurm_submit_as_user_enabled() -> bool:
+    slurm_config = skypilot_config.get_nested(('slurm',), default_value={})
+    if slurm_config.get('submit_as_user', False):
+        return True
+    cluster_configs = slurm_config.get('cluster_configs', {})
+    return any(
+        config.get('submit_as_user', False)
+        for config in cluster_configs.values())
+
+
+def _scope_config_key_to_user(key: str) -> str:
+    if not _slurm_submit_as_user_enabled():
+        return key
+    user_id = common_utils.get_current_user().id
+    return f'{key}_{user_id}'
+
+
 def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
                             workspace: str) -> str:
-    return _ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' + cloud_capability.value
+    key = (_ENABLED_CLOUDS_KEY_PREFIX + workspace + '_' +
+           cloud_capability.value)
+    return _scope_config_key_to_user(key)
 
 
 _CHECK_RESULTS_KEY_PREFIX = 'check_results_'
 
 
 def _get_check_results_key(workspace: str) -> str:
-    return f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}'
+    return _scope_config_key_to_user(f'{_CHECK_RESULTS_KEY_PREFIX}{workspace}')
 
 
 @metrics_lib.time_me
 def get_cached_check_results(
         workspace: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """Return the persisted check_results dict for a workspace, or {}.
+    """Return persisted check results for a workspace, or {}.
+
+    With Slurm submit-as-user enabled, results are scoped to the current user.
 
     Shape:
         {cloud_repr: {context_or_empty_str: {"enabled": bool, "reason": str}}}.
@@ -2660,6 +2681,8 @@ def set_check_results(
 ) -> None:
     """Persist `results` for `workspace`.
 
+    With Slurm submit-as-user enabled, results are scoped to the current user.
+
     `is_full_workspace_run=True` replaces the entire row (drops clouds /
     contexts not present in `results`).  `False` merges at *context*
     granularity within a cloud: read the existing row, update only the
@@ -2687,7 +2710,7 @@ def set_check_results(
         else:
             # Read-modify-write under the default session isolation. This
             # is NOT race-safe against concurrent scoped writes for
-            # different clouds in the same workspace: SQLAlchemy
+            # different clouds for the same cache scope: SQLAlchemy
             # `orm.Session` does not acquire row locks, and under the
             # default isolation (READ COMMITTED on Postgres, deferred on
             # SQLite) two interleaved RMW cycles can clobber each
@@ -2695,7 +2718,7 @@ def set_check_results(
             # (one scoped run's leaves get overwritten until the next
             # write rewrites the row) and the source-of-truth
             # enabled_clouds_* rows are unaffected, so we accept the
-            # race here rather than serialize through a per-workspace
+            # race here rather than serialize through a per-key
             # advisory lock. If this row ever becomes load-bearing for
             # correctness, switch to `with_for_update()` (postgres) and
             # an explicit BEGIN IMMEDIATE (sqlite).

@@ -2073,6 +2073,9 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'submit_as_user': {
+                    'type': 'boolean',
+                },
                 'pricing': _PRICING_SCHEMA,
                 'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'gpu_partition_map': _GPU_PARTITION_MAP_SCHEMA,
@@ -2093,6 +2096,9 @@ def get_config_schema():
                             },
                             'tmpdir': {
                                 'type': 'string',
+                            },
+                            'submit_as_user': {
+                                'type': 'boolean',
                             },
                             'pricing': _PRICING_SCHEMA,
                             'sbatch_options': _SBATCH_OPTIONS_SCHEMA,

@@ -612,9 +612,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
-    # Slurm cluster configs (workdir, tmpdir, etc.) are admin-managed
-    # server-side settings and should not be overridden by clients.
+    # Slurm submit identity and cluster settings are managed server-side.
     ('slurm', 'cluster_configs'),
+    ('slurm', 'submit_as_user'),
 ]
 
 # Constants for Azure blob storage
