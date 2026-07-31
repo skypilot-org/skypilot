@@ -754,13 +754,13 @@ export function InfrastructureSection({
                             }
                             onClick={() => toggleExpanded(context)}
                           >
-                            {partitions.length} partition
-                            {partitions.length === 1 ? '' : 's'}
                             {isExpanded ? (
                               <ChevronDownIcon className="w-4 h-4" />
                             ) : (
                               <ChevronRightIcon className="w-4 h-4" />
                             )}
+                            {partitions.length} partition
+                            {partitions.length === 1 ? '' : 's'}
                           </button>
                         )}
                       </td>
