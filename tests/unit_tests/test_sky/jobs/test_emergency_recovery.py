@@ -982,3 +982,46 @@ class TestPoolEmergencyDuplicateGuard:
         # relaunch — so the two copies never overlap.
         assert order == [('cancel', [777]), ('recover', None)]
         cancel_spy.assert_called_once()
+
+
+class TestTaskPrepFailureIsTerminal:
+    """Preparing the task spec is deterministic, so it must not be retried.
+
+    _add_k8s_annotations runs before anything touches a cluster and reads only
+    the task and the job id. Letting its failures reach the job loop's
+    catch-all would spend the whole emergency-recovery budget (10 attempts,
+    ~3h of backoff) on an error that cannot change.
+    """
+
+    @pytest.mark.asyncio
+    async def test_prep_failure_becomes_precheck_error(self, monkeypatch):
+        jc = controller.JobController.__new__(controller.JobController)
+        jc._job_id = 1
+        boom = AssertionError('Expected only one imagePullSecret, found []')
+        monkeypatch.setattr('sky.jobs.controller._add_k8s_annotations',
+                            MagicMock(side_effect=boom))
+
+        with pytest.raises(exceptions.ProvisionPrechecksError) as exc_info:
+            await jc._run_one_task(0, MagicMock())
+
+        assert list(exc_info.value.reasons) == [boom]
+
+    @pytest.mark.asyncio
+    async def test_prep_failure_fails_job_without_spending_budget(
+            self, monkeypatch):
+        """End to end through run(): terminal, and no emergency attempt."""
+        boom = AssertionError('Expected only one imagePullSecret, found []')
+        h = _RetryLoopHarness(
+            monkeypatch, [exceptions.ProvisionPrechecksError(reasons=[boom])])
+
+        await h.jc.run()
+
+        assert h.jc._run_one_task.call_count == 1
+        h.jc._update_failed_task_state.assert_awaited_once()
+        assert h.jc._update_failed_task_state.await_args.args[1] == (
+            state.ManagedJobStatus.FAILED_PRECHECKS)
+        assert 'imagePullSecret' in (
+            h.jc._update_failed_task_state.await_args.args[2])
+        h.get_budget.assert_not_awaited()
+        h.record_attempt.assert_not_awaited()
+        assert not h.sleeps

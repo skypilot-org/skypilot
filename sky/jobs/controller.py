@@ -544,6 +544,8 @@ class JobController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+                It is also raised when preparing the task spec fails, which is
+                deterministic and so must not be retried.
             exceptions.ManagedJobReachedMaxRetriesError: This will be raised
                 when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -559,7 +561,16 @@ class JobController:
                 unrecoverable for the job.
         Other exceptions may be raised depending on the backend.
         """
-        _add_k8s_annotations(task, self._job_id)
+        try:
+            _add_k8s_annotations(task, self._job_id)
+        except Exception as e:
+            # Preparing the task spec reads only the task and the job id, so a
+            # failure here is deterministic and retrying cannot fix it. Report
+            # it as a precheck failure instead of letting the job loop's
+            # catch-all spend the emergency-recovery budget on it. This runs
+            # before the resume classification below, so a resumed task lands
+            # here too; its cluster is still torn down by the caller.
+            raise exceptions.ProvisionPrechecksError(reasons=[e]) from e
         logger.info(
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
 
