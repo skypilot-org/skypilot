@@ -1418,12 +1418,19 @@ def test_saturating_request_executor_does_not_block_auth():
     answered 503 to traffic that had nothing to do with streaming.
     """
     _reset_thread_executors()
+    release = threading.Event()
+    futures = []
     try:
-        request_executor = executor.get_request_thread_executor()
+        # Shrink the request pool for the duration: what matters is that it
+        # reaches *its* limit, not how big that limit is. Filling the real 128
+        # would spawn 128 threads inside a test worker, which under `pytest
+        # -n` starves the whole run -- enough to push neighbouring tests past
+        # their own timeouts.
+        with mock.patch.object(executor, '_REQUEST_THREADS_LIMIT', 4):
+            request_executor = executor.get_request_thread_executor()
         auth_executor = executor.get_auth_thread_executor()
+        assert request_executor.max_workers == 4
 
-        release = threading.Event()
-        futures = []
         # Fill the request executor to its limit with tasks that do not finish,
         # standing in for in-flight log streams.
         for _ in range(request_executor.max_workers):
