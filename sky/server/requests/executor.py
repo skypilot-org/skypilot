@@ -92,6 +92,15 @@ multiprocessing.set_start_method('spawn', force=True)
 # server process become overloaded.
 _REQUEST_THREADS_LIMIT = 128
 
+# Limit for the auth executor. Sized against the sync DB connection pool, not
+# against a request rate: these threads do DB lookups, so a worker cannot have
+# more of them doing useful work than it has connections, and the rest would
+# just queue inside the pool. The ceiling is single-digit per worker today, so
+# this leaves several times the headroom needed while staying far below the
+# point where the sheer number of threads in one process starts slowing its
+# request handling down.
+_AUTH_THREADS_LIMIT = 32
+
 # Max length of the retry reason in a request's backoff status message; the
 # reason comes from the exception message, so truncate to keep it readable.
 _RETRY_STATUS_MSG_REASON_MAX_LEN = 200
@@ -115,6 +124,37 @@ def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
                 name='request_thread_executor',
                 max_workers=_REQUEST_THREADS_LIMIT)
         return _REQUEST_THREAD_EXECUTOR
+
+
+_AUTH_THREAD_EXECUTOR_LOCK = threading.Lock()
+# A separate pool for the short DB lookups that authentication middleware runs
+# on every request. Kept apart from _REQUEST_THREAD_EXECUTOR because the two
+# have very different lifetimes: a worker in the request executor can be held
+# for the whole life of a streaming request (e.g. `sky jobs logs` on a queued
+# job runs for as long as the job does), while these lookups take under a
+# millisecond. Sharing one pool means enough concurrent streams starve
+# authentication, and every request fails with 503 -- including requests that
+# have nothing to do with streaming. Separate pools keep that failure confined
+# to the streaming endpoints.
+_AUTH_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
+
+
+def get_auth_thread_executor() -> threads.OnDemandThreadExecutor:
+    """Lazy init and return the auth thread executor for current process.
+
+    For short, latency-sensitive work on the request hot path -- primarily the
+    DB lookups done by authentication middleware. Do not submit long-running or
+    streaming work here; that belongs in ``get_request_thread_executor()``,
+    whose exhaustion must not be able to lock users out.
+    """
+    global _AUTH_THREAD_EXECUTOR
+    if _AUTH_THREAD_EXECUTOR is not None:
+        return _AUTH_THREAD_EXECUTOR
+    with _AUTH_THREAD_EXECUTOR_LOCK:
+        if _AUTH_THREAD_EXECUTOR is None:
+            _AUTH_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
+                name='auth_thread_executor', max_workers=_AUTH_THREADS_LIMIT)
+        return _AUTH_THREAD_EXECUTOR
 
 
 class RequestQueue:
