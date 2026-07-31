@@ -126,24 +126,27 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
     the kubernetes specific config is not used when launching
     a cluster on other clouds.
     """
-    original_resources = task.resources
-    new_resources_list: List['sky.Resources'] = []
-    for original_resource in original_resources:
-        # Get existing config overrides or create new dict
-        config_overrides = original_resource.cluster_config_overrides.copy()
-
-        # Initialize nested structure and add annotations
-        pod_annotations = config_overrides.setdefault(
-            'kubernetes',
-            {}).setdefault('pod_config',
-                           {}).setdefault('metadata',
-                                          {}).setdefault('annotations', {})
-        pod_annotations['skypilot-managed-job-id'] = str(job_id)
-        pod_annotations['skypilot-managed-job-name'] = str(task.name)
-        # Create new resource with updated config
-        new_resource = original_resource.copy(
-            _cluster_config_overrides=config_overrides)
-        new_resources_list.append(new_resource)
+    # Pass only the annotations we are adding: Resources.copy() overlays this
+    # on top of the resource's existing overrides, so passing the whole config
+    # would merge it with itself. That is not a no-op -- it duplicates every
+    # list without a patch merge key (e.g. tolerations) and trips the
+    # imagePullSecrets merge branch.
+    annotations_override = {
+        'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'annotations': {
+                        'skypilot-managed-job-id': str(job_id),
+                        'skypilot-managed-job-name': str(task.name),
+                    }
+                }
+            }
+        }
+    }
+    new_resources_list: List['sky.Resources'] = [
+        original_resource.copy(_cluster_config_overrides=annotations_override)
+        for original_resource in task.resources
+    ]
 
     # Set the new resources back to the task
     task.set_resources(new_resources_list)

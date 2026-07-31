@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 
 from sky.utils import config_utils
@@ -215,6 +217,95 @@ def test_merge_k8s_configs_with_image_pull_secrets():
     assert len(base_config['imagePullSecrets']) == 1
     assert base_config['imagePullSecrets'][0]['name'] == 'secret2'
     assert base_config['imagePullSecrets'][0]['namespace'] == 'test'
+
+
+def test_merge_k8s_configs_image_pull_secrets_empty_override_clears():
+    """An empty override list clears the inherited secrets."""
+    base_config = {'imagePullSecrets': [{'name': 'regcred'}]}
+
+    config_utils.merge_k8s_configs(base_config, {'imagePullSecrets': []})
+    assert base_config['imagePullSecrets'] == []
+
+
+def test_merge_k8s_configs_image_pull_secrets_multiple():
+    """More than one secret in the override replaces the base list."""
+    base_config = {'imagePullSecrets': [{'name': 'regcred'}]}
+    override_config = {
+        'imagePullSecrets': [{
+            'name': 'secret1'
+        }, {
+            'name': 'secret2'
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+    assert base_config['imagePullSecrets'] == [{
+        'name': 'secret1'
+    }, {
+        'name': 'secret2'
+    }]
+
+
+def test_merge_k8s_configs_image_pull_secrets_empty_base():
+    """An empty base list must not be indexed into."""
+    base_config = {'imagePullSecrets': []}
+
+    config_utils.merge_k8s_configs(base_config,
+                                   {'imagePullSecrets': [{
+                                       'name': 'regcred'
+                                   }]})
+    assert base_config['imagePullSecrets'] == [{'name': 'regcred'}]
+
+
+def test_merge_k8s_configs_self_merge_keyed_lists_are_idempotent():
+    """Self-merging must not duplicate items in lists with a patch merge key.
+
+    Lists without a patch merge key are appended by design, so they are
+    excluded here; callers that may self-merge must avoid it themselves.
+    """
+    pod_config = {
+        'metadata': {
+            'annotations': {
+                'existing': 'annotation'
+            }
+        },
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'env': [{
+                    'name': 'FOO',
+                    'value': 'bar'
+                }],
+                'args': ['--flag'],
+            }],
+            'volumes': [{
+                'name': 'vol',
+                'emptyDir': {}
+            }],
+            'imagePullSecrets': [{
+                'name': 'regcred'
+            }],
+        },
+    }
+    expected = copy.deepcopy(pod_config)
+
+    config_utils.merge_k8s_configs(pod_config, copy.deepcopy(pod_config))
+    assert pod_config == expected
+
+
+def test_merge_k8s_configs_self_merge_with_empty_image_pull_secrets():
+    """Self-merge of a config that clears imagePullSecrets must not raise."""
+    pod_config = {
+        'spec': {
+            'containers': [{
+                'imagePullPolicy': 'IfNotPresent'
+            }],
+            'imagePullSecrets': [],
+        }
+    }
+
+    config_utils.merge_k8s_configs(pod_config, copy.deepcopy(pod_config))
+    assert pod_config['spec']['imagePullSecrets'] == []
 
 
 def test_config_override_with_allowed_keys():

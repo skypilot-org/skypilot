@@ -15,8 +15,6 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # - If the value is None, the list is replaced atomically (e.g., args, command)
 # Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/
 #      #podspec-v1-core
-# NOTE: field imagePullSecrets are not included deliberately for backward
-# compatibility
 _PATCH_MERGE_KEYS = {
     'containers': 'name',
     'initContainers': 'name',
@@ -35,6 +33,11 @@ _PATCH_MERGE_KEYS = {
     # Atomic list fields - replaced entirely, not merged item-by-item
     'args': None,
     'command': None,
+    # Kubernetes patch-merges imagePullSecrets by 'name', but these items are
+    # credentials: unioning an admin-provided secret with a task's own would
+    # keep pulling with a credential the task meant to drop. Replace instead,
+    # which also lets an empty list clear inherited secrets.
+    'imagePullSecrets': None,
 }
 
 
@@ -237,17 +240,9 @@ def merge_k8s_configs(
         elif isinstance(value, list) and key in base_config:
             assert isinstance(base_config[key], list), \
                 f'Expected {key} to be a list, found {base_config[key]}'
-            if key == 'imagePullSecrets':
-                # For imagePullSecrets, merge the first item from override
-                # into the first item in base (legacy behavior).
-                assert len(value) == 1, \
-                    f'Expected only one imagePullSecret, found {value}'
-                merge_k8s_configs(base_config[key][0], value[0],
-                                  next_allowed_override_keys,
-                                  next_disallowed_override_keys)
             # For list fields with patch strategy "merge", we merge the list
             # by the patch merge key.
-            elif key in _PATCH_MERGE_KEYS:
+            if key in _PATCH_MERGE_KEYS:
                 patch_merge_key = _PATCH_MERGE_KEYS[key]
                 if patch_merge_key is None:
                     # Atomic list field (e.g., args, command) - replace entirely
