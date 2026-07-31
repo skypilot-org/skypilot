@@ -1,5 +1,9 @@
 """Tests for the Slurm task executor."""
+# pylint: disable=protected-access
+import errno
+import os
 import subprocess
+import threading
 
 from sky.skylet.executor import slurm
 
@@ -68,3 +72,104 @@ def test_unset_step_scoped_slurm_env():
         assert result[name] == 'UNSET', f'{name} leaked into user script env'
     for name, value in _JOB_SCOPED_VARS.items():
         assert result[name] == value, f'{name} was wrongly unset'
+
+
+def _fail_reads_under(monkeypatch, run_done_dir, exc_factory, num_failures):
+    """Makes the first num_failures reads under run_done_dir raise.
+
+    Returns a one-element list holding how many injected failures are left, so
+    callers can assert the injection actually fired.
+    """
+    real_open = os.open
+    remaining = [num_failures]
+
+    def fake_open(path, *args, **kwargs):
+        if str(path).startswith(str(run_done_dir)) and remaining[0] > 0:
+            remaining[0] -= 1
+            raise exc_factory()
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, 'open', fake_open)
+    return remaining
+
+
+def test_wait_for_all_ranks_returns_once_every_rank_is_done(tmp_path):
+    run_done_dir = tmp_path / 'run_done'
+    run_done_dir.mkdir()
+    for peer in range(4):
+        (run_done_dir / str(peer)).touch()
+
+    slurm._wait_for_all_ranks(str(run_done_dir), rank=0, num_nodes=4)
+
+
+def test_wait_for_all_ranks_waits_for_a_late_rank(tmp_path):
+    run_done_dir = tmp_path / 'run_done'
+    run_done_dir.mkdir()
+    (run_done_dir / '0').touch()
+    (run_done_dir / '1').touch()
+
+    # Rank 2 finishes well after the others, which is normal: the barrier has
+    # no business bounding how long a peer's workload takes.
+    late = threading.Timer(1.0, (run_done_dir / '2').touch)
+    late.start()
+    try:
+        slurm._wait_for_all_ranks(str(run_done_dir), rank=1, num_nodes=3)
+    finally:
+        late.cancel()
+
+    assert (run_done_dir / '2').exists()
+
+
+def test_wait_for_all_ranks_survives_a_transient_error(tmp_path, monkeypatch,
+                                                       capsys):
+    run_done_dir = tmp_path / 'run_done'
+    run_done_dir.mkdir()
+    for peer in range(2):
+        (run_done_dir / str(peer)).touch()
+    remaining = _fail_reads_under(
+        monkeypatch,
+        run_done_dir,
+        lambda: OSError(errno.ESTALE, 'Stale file handle'),
+        num_failures=1)
+    # Even with no error budget at all, one bad read followed by a good one
+    # must not end the wait: the error clock only runs while reads keep
+    # failing.
+    monkeypatch.setattr(slurm, 'BARRIER_ERROR_TIMEOUT_SECONDS', 0)
+
+    slurm._wait_for_all_ranks(str(run_done_dir), rank=0, num_nodes=2)
+
+    assert remaining == [0], 'the injected error never fired'
+    assert 'Gave up waiting' not in capsys.readouterr().err
+
+
+def test_wait_for_all_ranks_gives_up_if_the_directory_is_removed(
+        tmp_path, monkeypatch, capsys):
+    # A rank that removed the directory on its way out is exactly the race
+    # this barrier must not have, so nothing here removes it. If something
+    # else does, the wait has to end rather than hang forever.
+    run_done_dir = tmp_path / 'run_done'
+    monkeypatch.setattr(slurm, 'BARRIER_ERROR_TIMEOUT_SECONDS', 0)
+
+    slurm._wait_for_all_ranks(str(run_done_dir), rank=0, num_nodes=2)
+
+    assert 'Gave up waiting for rank(s) [1]' in capsys.readouterr().err
+
+
+def test_wait_for_all_ranks_gives_up_without_raising(tmp_path, monkeypatch,
+                                                     capsys):
+    run_done_dir = tmp_path / 'run_done'
+    run_done_dir.mkdir()
+    (run_done_dir / '1').touch()
+    remaining = _fail_reads_under(
+        monkeypatch,
+        run_done_dir,
+        lambda: OSError(errno.ESTALE, 'Stale file handle'),
+        num_failures=1000)
+    monkeypatch.setattr(slurm, 'BARRIER_ERROR_TIMEOUT_SECONDS', 0)
+
+    # A barrier that cannot read the shared filesystem must not turn a
+    # successful user script into a failed job.
+    slurm._wait_for_all_ranks(str(run_done_dir), rank=0, num_nodes=2)
+
+    assert remaining[0] < 1000, 'the injected error never fired'
+    assert 'Gave up waiting for rank(s) [1]' in capsys.readouterr().err
