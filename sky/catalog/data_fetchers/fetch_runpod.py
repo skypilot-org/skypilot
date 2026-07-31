@@ -459,7 +459,8 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
         memory = gpu_type.get('lowestPrice', {}).get('minMemory')
 
     # This is the VRAM memory per GPU (not scaled to count)
-    gpu_memory = gpu_type.get('memoryInGb', 0)
+    gpu_memory_gib = gpu_type.get('memoryInGb', 0)
+    gpu_memory_mib = gpu_memory_gib * 1024
 
     # Return None if memory or vcpus not valid
     if not isinstance(vcpus, (float, int)) or vcpus <= 0:
@@ -477,10 +478,10 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
             'Manufacturer': gpu_type['manufacturer'],
             'Count': gpu_count,
             'MemoryInfo': {
-                'SizeInMiB': gpu_memory
+                'SizeInMiB': gpu_memory_mib
             },
         }],
-        'TotalGpuMemoryInMiB': gpu_memory * gpu_count,
+        'TotalGpuMemoryInMiB': gpu_memory_mib * gpu_count,
     }
     gpu_info = json.dumps(gpu_info_dict).replace('"', '\'')
 
