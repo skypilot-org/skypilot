@@ -125,7 +125,7 @@ def test_disk_encryption_defaults_disabled(disk_tier):
 
 
 @nebius_sdk_required
-def test_standard_ssd_does_not_set_optional_encryption():
+def test_standard_ssd_does_not_set_optional_encryption(caplog):
     compute = nebius_adaptor.compute()
     disk_spec = _launch_disk_spec(resources_utils.DiskTier.MEDIUM,
                                   disk_encrypted=True)
@@ -133,3 +133,5 @@ def test_standard_ssd_does_not_set_optional_encryption():
     assert disk_spec.type == compute.DiskSpec.DiskType.NETWORK_SSD
     assert disk_spec.disk_encryption.type == (
         compute.DiskEncryption.DiskEncryptionType.DISK_ENCRYPTION_UNSPECIFIED)
+    assert ('does not support explicitly configured Nebius-managed encryption'
+            in caplog.text)

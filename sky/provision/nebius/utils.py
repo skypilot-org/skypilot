@@ -624,6 +624,11 @@ def launch(cluster_name_on_cloud: str,
         disk_spec.disk_encryption = compute.DiskEncryption(
             type=compute.DiskEncryption.DiskEncryptionType.
             DISK_ENCRYPTION_MANAGED)
+    elif disk_encrypted:
+        logger.warning(
+            f'Disk encryption was requested, but disk type {disk_type.name} '
+            'does not support explicitly configured Nebius-managed '
+            'encryption. Continuing without setting disk encryption.')
     if image_id_or_family.startswith('computeimage-'):
         disk_spec.source_image_id = image_id_or_family
     else:
