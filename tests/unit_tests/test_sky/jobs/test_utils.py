@@ -1,4 +1,5 @@
 """Unit tests for sky.jobs.utils functions."""
+import asyncio
 import contextlib
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -1563,6 +1564,27 @@ class TestTryToGetJobEndTime:
             jobs_utils.try_to_get_job_end_time(MagicMock(), 'cluster', 1)
 
 
+def _claim_waiting_job(pid: int, pid_started_at: float) -> Optional[int]:
+    """Claim a job the way a controller does, via the production claim path.
+
+    get_waiting_job_async is the real WAITING -> LAUNCHING compare-and-swap
+    that stamps the claiming controller's pid; it is async, so run it to
+    completion on a throwaway event loop. Returns the claimed job id, or None
+    if nothing was claimable.
+    """
+
+    async def _claim():
+        return await managed_job_state.get_waiting_job_async(
+            pid=pid, pid_started_at=pid_started_at)
+
+    loop = asyncio.new_event_loop()
+    try:
+        claimed = loop.run_until_complete(_claim())
+    finally:
+        loop.close()
+    return None if claimed is None else claimed['job_id']
+
+
 @pytest.fixture
 def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
     """Create a temporary SQLite DB for managed jobs state.
@@ -1649,12 +1671,17 @@ class TestHaRecoveryForConsolidationMode:
                             'reset_job_for_recovery', _reset)
         return calls
 
-    def _seed_multi_task_alive_job(self, engine, num_tasks: int, *, pid,
-                                   pid_started_at):
+    def _seed_multi_task_alive_job(self,
+                                   engine,
+                                   num_tasks: int,
+                                   *,
+                                   pid,
+                                   pid_started_at,
+                                   name: str = 'multi-task-job'):
         """Seed one job with num_tasks tasks, owned by (pid, pid_started_at)
         and in the ALIVE schedule state."""
         job_id = managed_job_state.set_job_info_without_job_id(
-            name='multi-task-job',
+            name=name,
             workspace='ws1',
             entrypoint='ep',
             pool=None,
@@ -1686,6 +1713,8 @@ class TestHaRecoveryForConsolidationMode:
             return session.execute(
                 managed_job_state.sqlalchemy.select(
                     managed_job_state.job_info_table.c.controller_pid,
+                    managed_job_state.job_info_table.c.
+                    controller_pid_started_at,
                     managed_job_state.job_info_table.c.schedule_state,
                 ).where(managed_job_state.job_info_table.c.spot_job_id ==
                         job_id)).fetchone()
@@ -1717,6 +1746,101 @@ class TestHaRecoveryForConsolidationMode:
         assert row.controller_pid is None
         assert (row.schedule_state ==
                 managed_job_state.ManagedJobScheduleState.WAITING.value)
+
+    def test_concurrent_real_claim_survives_the_rest_of_the_pass(
+            self, monkeypatch, tmp_path, _mock_managed_jobs_db_conn):
+        """End-to-end interleaving of a recovery pass and real controller
+        claims, using the production claim path (get_waiting_job_async) rather
+        than hand-written row updates.
+
+        Three jobs are eligible for recovery, and a controller claims two of
+        them in the middle of the pass:
+
+        - job_a (4 tasks) is claimed right after the pass resets it. The
+          remaining 3 task rows must not reset it again (dedupe), so the fresh
+          claim keeps the job.
+        - job_b is recovered by someone else and then claimed before the pass
+          reaches its row, so the pass's own reset must lose the
+          compare-and-swap and leave the claim alone.
+        - job_c is untouched by the claims and must still be recovered, i.e.
+          neither of the above stops the pass.
+        """
+        engine = _mock_managed_jobs_db_conn
+        alive = managed_job_state.ManagedJobScheduleState.ALIVE
+        # get_managed_jobs_with_filters orders by spot_job_id descending, so
+        # seed in reverse: the last job seeded is the first one processed.
+        job_c = self._seed_multi_task_alive_job(engine,
+                                                1,
+                                                name='job-c',
+                                                pid=300,
+                                                pid_started_at=3.0)
+        job_b = self._seed_multi_task_alive_job(engine,
+                                                1,
+                                                name='job-b',
+                                                pid=200,
+                                                pid_started_at=2.0)
+        job_a = self._seed_multi_task_alive_job(engine,
+                                                4,
+                                                name='job-a',
+                                                pid=100,
+                                                pid_started_at=1.0)
+        self._patch_common(monkeypatch, tmp_path)
+        self._patch_liveness(monkeypatch, alive=False)
+
+        real_reset = managed_job_state.reset_job_for_recovery
+        calls = []
+        claimed = []
+
+        def _reset_and_let_controllers_claim(job_id, **kwargs):
+            calls.append(job_id)
+            applied = real_reset(job_id, **kwargs)
+            if job_id != job_a or not applied or claimed:
+                return applied
+            claimed.append(job_id)
+            # A controller polls for work and claims the job the pass just
+            # released -- the interleaving that used to be undone by the
+            # job's remaining task rows.
+            assert _claim_waiting_job(pid=999, pid_started_at=9.0) == job_a
+            # Meanwhile job_b is recovered by another actor and claimed too,
+            # before this pass reaches job_b's row.
+            assert real_reset(job_b,
+                              expected_pid=200,
+                              expected_pid_started_at=2.0,
+                              expected_schedule_state=alive) is True
+            assert _claim_waiting_job(pid=888, pid_started_at=8.0) == job_b
+            return applied
+
+        monkeypatch.setattr(jobs_utils.managed_job_state,
+                            'reset_job_for_recovery',
+                            _reset_and_let_controllers_claim)
+
+        jobs_utils.ha_recovery_for_consolidation_mode()
+
+        # Each job is visited once, in row order, despite job_a's 4 task rows.
+        assert calls == [job_a, job_b, job_c]
+
+        launching = managed_job_state.ManagedJobScheduleState.LAUNCHING.value
+        # job_a: the claim that landed mid-pass still owns the job.
+        row_a = self._read_job_info(engine, job_a)
+        assert row_a.controller_pid == 999
+        assert row_a.controller_pid_started_at == 9.0
+        assert row_a.schedule_state == launching
+        # job_b: the pass's reset lost the compare-and-swap to the claim.
+        row_b = self._read_job_info(engine, job_b)
+        assert row_b.controller_pid == 888
+        assert row_b.controller_pid_started_at == 8.0
+        assert row_b.schedule_state == launching
+        # job_c: recovered as usual.
+        row_c = self._read_job_info(engine, job_c)
+        assert row_c.controller_pid is None
+        assert (row_c.schedule_state ==
+                managed_job_state.ManagedJobScheduleState.WAITING.value)
+
+        log = (tmp_path / 'jobs_ha_recovery.log').read_text(encoding='utf-8')
+        assert log.count(f'Job {job_a} completed recovery') == 1
+        assert log.count(f'Job {job_c} completed recovery') == 1
+        assert f'Job {job_b} completed recovery' not in log
+        assert f'Skipping recovery of job {job_b}' in log
 
     def test_dead_controller_reset_passes_observed_values(
             self, monkeypatch, tmp_path):
