@@ -1200,7 +1200,14 @@ def slurm_node_info(
 
     Args:
         slurm_cluster_name: The Slurm cluster to query. If None, node info
-            is aggregated across all existing allowed Slurm clusters.
+            is aggregated across all existing allowed Slurm clusters and a
+            cluster that cannot be queried contributes no nodes instead of
+            failing the whole aggregation.
+
+    Raises:
+        Any error from querying the cluster, when slurm_cluster_name is
+        given. Callers that name a cluster get the failure reported rather
+        than an empty node list.
 
     Returns:
         List[Dict[str, Any]]: One dictionary per node with keys:
@@ -1213,16 +1220,16 @@ def slurm_node_info(
             reports N/A.
     """
     if slurm_cluster_name is not None:
-        clusters_to_query = [slurm_cluster_name]
-    else:
-        clusters_to_query = clouds.Slurm.existing_allowed_clusters()
-        if not clusters_to_query:
-            return []
+        return _get_slurm_node_info_list(slurm_cluster_name=slurm_cluster_name)
+
+    clusters_to_query = clouds.Slurm.existing_allowed_clusters()
+    if not clusters_to_query:
+        return []
 
     def _query_cluster(cluster_name: str) -> List[Dict[str, Any]]:
         try:
             return _get_slurm_node_info_list(slurm_cluster_name=cluster_name)
-        except (FileNotFoundError, RuntimeError,
+        except (FileNotFoundError, RuntimeError, exceptions.CommandError,
                 exceptions.NotSupportedError) as e:
             logger.debug('Could not retrieve Slurm node info for cluster '
                          f'{cluster_name!r}: {e}')

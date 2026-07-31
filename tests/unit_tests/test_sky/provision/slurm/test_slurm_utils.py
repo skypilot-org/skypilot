@@ -280,11 +280,55 @@ class TestSlurmNodeInfo:
         assert len(result) == 1
         assert result[0]['slurm_cluster_name'] == 'cluster-b'
 
-    def test_single_cluster_error_returns_empty_list(self, monkeypatch):
-        monkeypatch.setattr(
-            utils, '_get_slurm_node_info_list',
-            mock.Mock(side_effect=exceptions.NotSupportedError('nope')))
-        assert not utils.slurm_node_info(slurm_cluster_name='cluster-a')
+    def test_unreachable_login_node_does_not_break_others(self, monkeypatch):
+        """An `sinfo` that fails over SSH degrades to no nodes."""
+        clusters = ['cluster-a', 'cluster-b']
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=clusters))
+
+        def _fake_get_node_info_list(slurm_cluster_name):
+            if slurm_cluster_name == 'cluster-a':
+                raise exceptions.CommandError(
+                    255, 'sinfo -h --Node', 'Failed to get Slurm node '
+                    'information.', None)
+            return [_make_node_info('node-0', slurm_cluster_name)]
+
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            _fake_get_node_info_list)
+
+        result = utils.slurm_node_info()
+
+        assert len(result) == 1
+        assert result[0]['slurm_cluster_name'] == 'cluster-b'
+
+    @pytest.mark.parametrize('error', [
+        FileNotFoundError('no ssh config'),
+        RuntimeError('SSH connection failed'),
+        exceptions.CommandError(255, 'sinfo -h --Node', 'Failed to get Slurm '
+                                'node information.', None),
+        exceptions.NotSupportedError('nope'),
+    ])
+    def test_sole_cluster_error_returns_empty_list(self, monkeypatch, error):
+        """The one-cluster fast path degrades like the parallel path."""
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a']))
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            mock.Mock(side_effect=error))
+        assert not utils.slurm_node_info()
+
+    @pytest.mark.parametrize('error_type,error', [
+        (exceptions.CommandError,
+         exceptions.CommandError(255, 'sinfo -h --Node', 'Failed to get Slurm '
+                                 'node information.', None)),
+        (exceptions.NotSupportedError, exceptions.NotSupportedError('nope')),
+    ])
+    def test_named_cluster_error_propagates(self, monkeypatch, error_type,
+                                            error):
+        """A caller that names a cluster is told the query failed."""
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            mock.Mock(side_effect=error))
+        with pytest.raises(error_type):
+            utils.slurm_node_info(slurm_cluster_name='cluster-a')
 
 
 class TestGetGpuTypeAndCount:
