@@ -429,28 +429,30 @@ class TestPostgresLock:
         connection.commit.assert_not_called()
         connection.close.assert_called_once()
 
-    @mock.patch.object(global_user_state, 'initialize_and_get_db')
-    def test_postgres_lock_get_connection_success(self, mock_init_db):
-        """Test successful database connection."""
+    @mock.patch.object(db_utils, 'get_engine')
+    def test_postgres_lock_get_connection_success(self, mock_get_engine):
+        """Test successful database connection via a direct engine."""
         mock_engine = mock.Mock()
         mock_engine.dialect.name = db_utils.SQLAlchemyDialect.POSTGRESQL.value
         mock_connection = mock.Mock()
         mock_engine.raw_connection.return_value = mock_connection
-        mock_init_db.return_value = mock_engine
+        mock_get_engine.return_value = mock_engine
 
         lock = locks.PostgresLock('test_lock')
         result = lock._get_connection()
 
         assert result is mock_connection
-        mock_init_db.assert_called_once()
+        mock_get_engine.assert_called_once()
+        # The lock must bypass any configured pooler.
+        assert mock_get_engine.call_args.kwargs.get('direct') is True
         mock_engine.raw_connection.assert_called_once()
 
-    @mock.patch.object(global_user_state, 'initialize_and_get_db')
-    def test_postgres_lock_get_connection_wrong_dialect(self, mock_init_db):
+    @mock.patch.object(db_utils, 'get_engine')
+    def test_postgres_lock_get_connection_wrong_dialect(self, mock_get_engine):
         """Test database connection with wrong dialect."""
         mock_engine = mock.Mock()
         mock_engine.dialect.name = 'sqlite'
-        mock_init_db.return_value = mock_engine
+        mock_get_engine.return_value = mock_engine
 
         lock = locks.PostgresLock('test_lock')
 
@@ -610,14 +612,14 @@ class TestPostgresLockAutocommit:
     for the whole lock hold, leaving the session 'idle in transaction'.
     """
 
-    @mock.patch.object(global_user_state, 'initialize_and_get_db')
-    def test_get_connection_enables_autocommit(self, mock_init_db):
+    @mock.patch.object(db_utils, 'get_engine')
+    def test_get_connection_enables_autocommit(self, mock_get_engine):
         """_get_connection puts the borrowed connection in autocommit."""
         mock_engine = mock.Mock()
         mock_engine.dialect.name = db_utils.SQLAlchemyDialect.POSTGRESQL.value
         mock_connection = mock.Mock()
         mock_engine.raw_connection.return_value = mock_connection
-        mock_init_db.return_value = mock_engine
+        mock_get_engine.return_value = mock_engine
 
         lock = locks.PostgresLock('test_lock')
         result = lock._get_connection()
