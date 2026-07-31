@@ -4,6 +4,7 @@ This module is invoked on each Slurm compute node via:
     srun python -m sky.skylet.executor.slurm --script=... --log-dir=...
 """
 import argparse
+import errno
 import json
 import os
 import pathlib
@@ -35,6 +36,13 @@ UNSET_STEP_SCOPED_SLURM_ENV = (
     'SLURM_DISTRIBUTION SLURM_SRUN_COMM_HOST SLURM_SRUN_COMM_PORT '
     'SLURM_LAUNCH_NODE_IPADDR SLURM_TASK_PID '
     'SLURM_PROCID SLURM_LOCALID SLURM_NODEID SLURM_GTIDS SLURM_STEPID')
+
+# How long the run-done barrier keeps retrying while the shared filesystem
+# returns hard errors before giving up. The shared home is typically an NFS
+# export, where a client can keep serving a stale view of a directory for its
+# attribute cache timeout (acdirmax, 60s by default), so this needs enough
+# headroom to outlast that window.
+BARRIER_ERROR_TIMEOUT_SECONDS = 300
 
 
 def _is_proctrack_cgroup_enabled(shared_home_dir: str) -> bool:
@@ -84,6 +92,67 @@ def _get_job_node_ips() -> str:
                                f'{hostname}') from e
 
     return '\n'.join(ips)
+
+
+def _wait_for_all_ranks(run_done_dir: str, rank: int, num_nodes: int) -> None:
+    """Waits until every rank has written its done file under run_done_dir.
+
+    Never raises. The barrier only exists to hold this task's cgroup open
+    until its peers finish, so failing to coordinate must not change the exit
+    status of the user's script.
+    """
+    pending = set(range(num_nodes)) - {rank}
+    # When the filesystem first started erroring, or None if the last sweep
+    # was clean.
+    erroring_since = None
+    # TODO(kevin): A peer that never writes its done file leaves every other
+    # rank waiting here indefinitely. srun's --kill-on-bad-exit covers the
+    # common case, where the peer's task dies and Slurm tears the whole step
+    # down, but a peer that stays alive without ever reporting does not reach
+    # it. Bounding this by wall clock would be wrong, since ranks can
+    # legitimately finish hours apart; it needs a liveness signal such as the
+    # peer's Slurm task state.
+    while pending:
+        last_error = None
+        for peer in sorted(pending):
+            done_file = os.path.join(run_done_dir, str(peer))
+            try:
+                # Poll each rank's file by name instead of listing the
+                # directory, so that a rank that has not finished yet is an
+                # ordinary ENOENT rather than something the caller has to tell
+                # apart from a filesystem error.
+                os.close(os.open(done_file, os.O_RDONLY))
+                pending.discard(peer)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                last_error = e
+        if not pending:
+            return
+        if last_error is None and not os.path.isdir(run_done_dir):
+            # Nothing in this barrier removes the directory, so its absence
+            # means something outside removed it and no rank will ever be
+            # able to report in. Count it as an error rather than as "not
+            # ready yet" so that the wait ends instead of running forever.
+            last_error = FileNotFoundError(errno.ENOENT,
+                                           'Barrier directory is gone',
+                                           run_done_dir)
+        if last_error is None:
+            # Ranks legitimately finish minutes or hours apart, so a clean but
+            # incomplete sweep is not a reason to stop waiting. Only a
+            # filesystem that keeps erroring is bounded by a deadline.
+            erroring_since = None
+        elif erroring_since is None:
+            erroring_since = time.monotonic()
+        elif time.monotonic() - erroring_since > BARRIER_ERROR_TIMEOUT_SECONDS:
+            print(
+                f'Gave up waiting for rank(s) {sorted(pending)} after '
+                f'{BARRIER_ERROR_TIMEOUT_SECONDS}s of errors reading '
+                f'{run_done_dir}: {last_error!r}. Ranks that are still '
+                'running may be killed by Slurm when this task exits.',
+                file=sys.stderr)
+            return
+        time.sleep(0.5)
 
 
 def main():
@@ -243,6 +312,8 @@ def main():
         done_file = f'{run_done_dir}/{rank}'
 
         if rank == 0:
+            # Clear the path first so that leftover done files can never
+            # satisfy the barrier early.
             shutil.rmtree(run_done_dir, ignore_errors=True)
             os.makedirs(run_done_dir, exist_ok=True)
         else:
@@ -252,25 +323,13 @@ def main():
 
         pathlib.Path(done_file).touch()
 
-        # All ranks wait for all done files to exist.
-        max_errs = 10
-        errs = 0
-        while True:
-            try:
-                num_ready = len(os.listdir(run_done_dir))
-                errs = 0
-            except OSError as e:
-                errs += 1
-                if errs >= max_errs:
-                    raise OSError(f'Failed to read {run_done_dir} after '
-                                  f'{max_errs} attempts') from e
-                num_ready = 0
-            if num_ready >= num_nodes:
-                break
-            time.sleep(0.5)
-
-        if rank == 0:
-            shutil.rmtree(run_done_dir, ignore_errors=True)
+        # All ranks wait for all done files to exist. The directory stays in
+        # place until the provision script's cleanup trap removes the cluster
+        # home directory at the end of the Slurm job: removing it as ranks
+        # leave the barrier takes it away from the ranks still reading it,
+        # which on a shared filesystem is long enough for them to never
+        # observe the full set.
+        _wait_for_all_ranks(run_done_dir, rank, num_nodes)
 
     sys.exit(returncode)
 
