@@ -3,8 +3,13 @@
 import errno
 import os
 import subprocess
+import sys
 import threading
+import time
 
+import pytest
+
+from sky.skylet import constants
 from sky.skylet.executor import slurm
 
 # Step/task-scoped variables Slurm sets for the executor's own job step. A
@@ -173,3 +178,54 @@ def test_wait_for_all_ranks_gives_up_without_raising(tmp_path, monkeypatch,
 
     assert remaining[0] < 1000, 'the injected error never fired'
     assert 'Gave up waiting for rank(s) [1]' in capsys.readouterr().err
+
+
+def test_barrier_leaves_the_done_directory_in_place(tmp_path, monkeypatch):
+    """Rank 0 must not remove the barrier directory as it leaves.
+
+    Removing it there is the write side of the race this barrier is built to
+    avoid: the ranks still polling lose the directory before they have seen
+    everyone report in. Drive main() so that a cleanup call reintroduced next
+    to the barrier is caught here.
+    """
+    cluster_home = tmp_path / 'cluster_home'
+    cluster_home.mkdir()
+    (cluster_home / constants.SLURM_PROCTRACK_TYPE_FILE).write_text('cgroup')
+    log_dir = tmp_path / 'logs'
+    log_dir.mkdir()
+    run_done_dir = cluster_home / '.sky_run_done_42_7'
+
+    monkeypatch.setenv('SLURM_PROCID', '0')
+    monkeypatch.setenv('SLURM_NNODES', '2')
+    monkeypatch.setenv('SLURM_JOB_ID', '42')
+    monkeypatch.setenv('SLURM_STEP_ID', '7')
+    monkeypatch.setattr(slurm, '_get_ip_address', lambda: '10.0.0.1')
+    monkeypatch.setattr(slurm, '_get_job_node_ips',
+                        lambda: '10.0.0.1\n10.0.0.2')
+    monkeypatch.setattr(slurm, 'run_bash_command_with_log', lambda *a, **kw: 0)
+    monkeypatch.setattr(sys, 'argv', [
+        'slurm.py', '--script', 'true', '--log-dir',
+        str(log_dir), '--cluster-num-nodes', '2', '--cluster-ips',
+        '10.0.0.1,10.0.0.2', '--cluster-home-dir',
+        str(cluster_home)
+    ])
+
+    # Stand in for rank 1, which reports in once rank 0 has created the
+    # directory.
+    def peer_reports_in():
+        deadline = time.monotonic() + 30
+        while not run_done_dir.is_dir() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        (run_done_dir / '1').touch()
+
+    peer = threading.Thread(target=peer_reports_in, daemon=True)
+    peer.start()
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            slurm.main()
+    finally:
+        peer.join(timeout=30)
+
+    assert exit_info.value.code == 0
+    assert run_done_dir.is_dir(), 'the barrier directory was removed'
+    assert sorted(p.name for p in run_done_dir.iterdir()) == ['0', '1']
