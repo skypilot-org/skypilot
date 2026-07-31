@@ -323,6 +323,32 @@ class TestSlurmNodeInfo:
             utils.slurm_node_info(slurm_cluster_name='cluster-a')
 
 
+class TestSlurmClusterNames:
+    """Test slurm_cluster_names()."""
+
+    def test_returns_configured_clusters(self, monkeypatch):
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a', 'cluster-b']))
+        assert utils.slurm_cluster_names() == ['cluster-a', 'cluster-b']
+
+    def test_returns_empty_list_when_none_configured(self, monkeypatch):
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=[]))
+        assert utils.slurm_cluster_names() == []
+
+    def test_does_not_query_the_clusters(self, monkeypatch):
+        """The point of the call: names without contacting a login node."""
+        monkeypatch.setattr('sky.clouds.Slurm.existing_allowed_clusters',
+                            mock.Mock(return_value=['cluster-a']))
+        get_node_info_list = mock.Mock(
+            side_effect=AssertionError('must not query the cluster'))
+        monkeypatch.setattr(utils, '_get_slurm_node_info_list',
+                            get_node_info_list)
+
+        assert utils.slurm_cluster_names() == ['cluster-a']
+        get_node_info_list.assert_not_called()
+
+
 class TestGetGpuTypeAndCount:
     """Test get_gpu_type_and_count() GRES parsing."""
 

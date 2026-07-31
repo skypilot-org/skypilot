@@ -254,6 +254,7 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
     'sky.status_kubernetes': (),
     'sky.realtime_slurm_gpu_availability': (),
     'sky.slurm_node_info': (),
+    'sky.slurm_cluster_names': (),
     'sky.list_accelerators': (),
     'sky.list_accelerator_counts': (),
     'sky.workspaces.delete': (),

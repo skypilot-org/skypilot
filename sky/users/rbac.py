@@ -239,6 +239,10 @@ _DEFAULT_VIEWER_ALLOWLIST = [
         'method': 'POST'
     },
     {
+        'path': '/slurm_cluster_names',
+        'method': 'POST'
+    },
+    {
         'path': '/status_kubernetes',
         'method': 'GET'
     },

@@ -1200,6 +1200,20 @@ def _get_slurm_node_info_list(slurm_cluster_name: str) -> List[Dict[str, Any]]:
     return list(slurm_nodes_info.values())
 
 
+def slurm_cluster_names() -> List[str]:
+    """Gets the names of the Slurm clusters this server is configured with.
+
+    Derived from ~/.slurm/config and the ``allowed_clusters`` config alone —
+    nothing here contacts a login node, so a cluster that is currently
+    unreachable is still reported. Callers that need node or GPU data still
+    have to query the cluster itself.
+
+    Returns:
+        List[str]: The configured and allowed Slurm cluster names.
+    """
+    return clouds.Slurm.existing_allowed_clusters()
+
+
 def slurm_node_info(
         slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """Gets detailed information for each node in the Slurm cluster(s).
