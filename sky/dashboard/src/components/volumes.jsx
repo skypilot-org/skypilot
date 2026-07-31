@@ -800,7 +800,7 @@ function VolumesTable({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2">
         <div className="w-full sm:w-auto max-w-xl">
           <FilterDropdown
             propertyList={PROPERTY_OPTIONS}
@@ -811,11 +811,15 @@ function VolumesTable({
           />
         </div>
       </div>
-      <Filters
-        filters={filters}
-        setFilters={setFilters}
-        updateURLParams={noopUpdateURLParams}
-      />
+      {filters.length > 0 && (
+        <div className="mb-2">
+          <Filters
+            filters={filters}
+            setFilters={setFilters}
+            updateURLParams={noopUpdateURLParams}
+          />
+        </div>
+      )}
 
       <Card>
         <div className="overflow-x-auto rounded-lg">
