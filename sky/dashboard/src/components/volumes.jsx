@@ -44,6 +44,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import {
+  FilterDropdown,
+  Filters,
+  filterData,
+} from '@/components/shared/FilterSystem';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { usePluginComponents, useTableColumns } from '@/plugins/PluginProvider';
 import dashboardCache from '@/lib/cache';
@@ -54,6 +59,20 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 
 const VOLUMES_PAGE_SIZE_OPTIONS = [10, 30, 50, 100, 200];
 const VOLUMES_PAGE_SIZE_STORAGE_KEY = 'skypilot-volumes-page-size';
+
+// Properties offered by the filter dropdown. `value` keys into `valueList` for
+// the typeahead; `label` is what lands in `filter.property`, which
+// `evaluateCondition` lowercases to look up the field on each volume.
+const PROPERTY_OPTIONS = [
+  { label: 'Name', value: 'name' },
+  { label: 'Status', value: 'status' },
+  { label: 'Infra', value: 'infra' },
+  { label: 'Type', value: 'type' },
+  { label: 'User', value: 'user' },
+];
+
+// Filters are kept in local state only, so there is nothing to sync to the URL.
+const noopUpdateURLParams = () => {};
 
 export function Volumes() {
   const router = useRouter();
@@ -471,6 +490,7 @@ function VolumesTable({
   preloadingComplete,
 }) {
   const [data, setData] = useState([]);
+  const [filters, setFilters] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -510,10 +530,36 @@ function VolumesTable({
     }
   }, [setLoading, onDataChange]);
 
+  // Suggestions shown in the filter dropdown, keyed by PROPERTY_OPTIONS value.
+  const valueList = useMemo(() => {
+    const uniq = (getValue) => [
+      ...new Set(data.map(getValue).filter((value) => value && value !== '-')),
+    ];
+    return {
+      name: uniq((volume) => volume.name),
+      status: uniq((volume) => volume.status),
+      infra: uniq((volume) => volume.infra),
+      type: uniq((volume) => volume.type),
+      user: uniq((volume) => volume.user_name),
+    };
+  }, [data]);
+
+  const filteredData = useMemo(() => {
+    if (filters.length === 0) {
+      return data;
+    }
+    // `User` filters against `user_name`; alias it so the shared filter can
+    // resolve the property name to a field.
+    return filterData(
+      data.map((volume) => ({ ...volume, user: volume.user_name })),
+      filters
+    );
+  }, [data, filters]);
+
   // Use useMemo to compute sorted data
   const sortedData = useMemo(() => {
-    return sortData(data, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig]);
+    return sortData(filteredData, sortConfig.key, sortConfig.direction);
+  }, [filteredData, sortConfig]);
 
   // Expose fetchData to parent component
   useEffect(() => {
@@ -547,10 +593,10 @@ function VolumesTable({
     };
   }, [refreshInterval, fetchData, preloadingComplete]);
 
-  // Reset to first page when data changes
+  // Reset to first page when the data or the active filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [data.length]);
+  }, [data.length, filters]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -754,6 +800,23 @@ function VolumesTable({
 
   return (
     <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="w-full sm:w-auto max-w-xl">
+          <FilterDropdown
+            propertyList={PROPERTY_OPTIONS}
+            valueList={valueList}
+            setFilters={setFilters}
+            updateURLParams={noopUpdateURLParams}
+            placeholder="Filter volumes"
+          />
+        </div>
+      </div>
+      <Filters
+        filters={filters}
+        setFilters={setFilters}
+        updateURLParams={noopUpdateURLParams}
+      />
+
       <Card>
         <div className="overflow-x-auto rounded-lg">
           <Table className="min-w-full">
@@ -791,8 +854,16 @@ function VolumesTable({
                 <EmptyTableState
                   colSpan={totalColSpan}
                   icon={<VolumeIcon className="w-5 h-5" />}
-                  title="No volumes found"
-                  description="Create a volume to mount storage in your clusters and jobs"
+                  title={
+                    filters.length > 0
+                      ? 'No matching volumes'
+                      : 'No volumes found'
+                  }
+                  description={
+                    filters.length > 0
+                      ? 'Try removing or loosening a filter'
+                      : 'Create a volume to mount storage in your clusters and jobs'
+                  }
                 />
               )}
             </TableBody>
@@ -801,7 +872,7 @@ function VolumesTable({
       </Card>
 
       {/* Pagination controls */}
-      {data.length > 0 && (
+      {sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -836,8 +907,8 @@ function VolumesTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, data.length)} of{' '}
-              {data.length}
+              {startIndex + 1} – {Math.min(endIndex, sortedData.length)} of{' '}
+              {sortedData.length}
             </div>
             <div className="flex items-center space-x-2">
               <Button
