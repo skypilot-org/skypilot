@@ -71,6 +71,26 @@ _DEFAULT_CONNECT_TIMEOUT = 30
 
 DEFAULT_SSH_CONTROL_NAME = '__default__'
 
+_SSH_CONTROL_PATH_PREFIX = '/tmp/skypilot_ssh_'
+# sockaddr_un.sun_path holds 104 bytes on macOS and 108 on Linux. Use the
+# smaller one, minus the NUL terminator, so ControlPaths fit on both.
+_UNIX_SOCKET_PATH_MAX_LENGTH = 103
+# ssh binds the ControlMaster listener at the ControlPath plus a '.' and 16
+# random characters, then links it into place, so that temporary name is what
+# has to fit. See muxserver_listen() in OpenSSH's mux.c.
+_SSH_CONTROL_PATH_TMP_SUFFIX_LENGTH = len('.') + 16
+# The ControlPath ends in '/%C', which ssh expands to a 40-character digest of
+# the connection parameters.
+_SSH_CONTROL_PATH_EXPANDED_C_LENGTH = 40
+# The user hash is the only variable-length component of
+# '<prefix><user hash>/<control name hash>/<%C>.<16 chars>', so cap it at the
+# space the fixed-length components leave over.
+_MAX_CONTROL_PATH_USER_HASH_LENGTH = (_UNIX_SOCKET_PATH_MAX_LENGTH -
+                                      len(_SSH_CONTROL_PATH_PREFIX) - len('/') -
+                                      _HASH_MAX_LENGTH - len('/') -
+                                      _SSH_CONTROL_PATH_EXPANDED_C_LENGTH -
+                                      _SSH_CONTROL_PATH_TMP_SUFFIX_LENGTH)
+
 # SSH authentication failure patterns to detect when interactive auth retry
 # is needed.
 _SSH_AUTH_FAILURE_PATTERNS = [
@@ -103,7 +123,15 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    if len(user_hash) > _MAX_CONTROL_PATH_USER_HASH_LENGTH:
+        # User IDs are only validated for their characters, so externally
+        # assigned ones (UUIDs, service account ids) can be long enough to push
+        # the listener path past sun_path and fail every ssh that multiplexes.
+        # Digesting keeps the path bounded and each user on their own socket.
+        digest = hashlib.md5(user_hash.encode(),
+                             usedforsecurity=False).hexdigest()
+        user_hash = digest[:_MAX_CONTROL_PATH_USER_HASH_LENGTH]
+    path = f'{_SSH_CONTROL_PATH_PREFIX}{user_hash}/{ssh_control_filename}'
     os.makedirs(path, exist_ok=True)
     return path
 

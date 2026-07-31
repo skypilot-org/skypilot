@@ -15,6 +15,7 @@ import paramiko
 import pytest
 
 from sky import exceptions
+from sky.skylet import constants
 from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -1102,3 +1103,55 @@ class TestRsyncTimeout:
         assert 'timed out' in str(exc_info.value).lower()
         # Deadline tripped before max_retry was exhausted.
         assert len(calls) == 1
+
+
+class TestSSHControlPath:
+    """Test that the ssh ControlPath stays within sockaddr_un.sun_path."""
+
+    @staticmethod
+    def _listener_path(control_path: str) -> str:
+        """The path ssh actually binds, given a ControlPath of <dir>/%C."""
+        expanded_c = 'c' * command_runner._SSH_CONTROL_PATH_EXPANDED_C_LENGTH
+        tmp_suffix = 'x' * (command_runner._SSH_CONTROL_PATH_TMP_SUFFIX_LENGTH -
+                            len('.'))
+        return f'{control_path}/{expanded_c}.{tmp_suffix}'
+
+    @pytest.mark.parametrize('user_hash', [
+        'abcd1234',
+        'ci-container-current',
+        'ci-container-currentX',
+        '550e8400-e29b-41d4-a716-446655440000',
+        'sa-' + 'z' * 200,
+    ])
+    def test_listener_path_fits_unix_socket(self, monkeypatch, user_hash):
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, user_hash)
+        control_path = command_runner._ssh_control_path('0123456789')
+        assert control_path is not None
+
+        listener_path = self._listener_path(control_path)
+        assert len(listener_path) <= command_runner._UNIX_SOCKET_PATH_MAX_LENGTH
+
+        # The length bound is portable; binding proves it on this platform.
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.bind(listener_path)
+        finally:
+            sock.close()
+            with suppress(OSError):
+                os.unlink(listener_path)
+
+    def test_short_user_hash_is_used_verbatim(self, monkeypatch):
+        monkeypatch.setenv(constants.USER_ID_ENV_VAR, 'abcd1234')
+        assert command_runner._ssh_control_path('0123456789') == (
+            '/tmp/skypilot_ssh_abcd1234/0123456789')
+
+    def test_long_user_hashes_stay_isolated(self, monkeypatch):
+        paths = set()
+        for i in range(2):
+            monkeypatch.setenv(constants.USER_ID_ENV_VAR,
+                               f'sa-{i}-' + 'y' * 100)
+            paths.add(command_runner._ssh_control_path('0123456789'))
+        assert len(paths) == 2
+
+    def test_no_control_name_has_no_control_path(self):
+        assert command_runner._ssh_control_path(None) is None
