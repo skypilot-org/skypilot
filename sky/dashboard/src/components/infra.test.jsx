@@ -1,3 +1,17 @@
+// Expose each plugin slot's name and row context as data attributes so the
+// row-identity contract can be asserted. Renders no text, so the cell-content
+// assertions below are unaffected.
+jest.mock('@/plugins/PluginSlot', () => ({
+  __esModule: true,
+  PluginSlot: ({ name, context }) => (
+    <span
+      data-slot={name}
+      data-row-id={context?.id}
+      data-row-kind={context?.kind}
+    />
+  ),
+}));
+
 import { fireEvent, render, screen } from '@testing-library/react';
 import {
   InfrastructureSection,
@@ -177,6 +191,46 @@ describe('InfrastructureSection Slurm partition rows', () => {
       container.querySelectorAll('table tbody td')
     ).find((td) => td.textContent.includes('3 partitions'));
     expect(summaryCell.getAttribute('rowspan')).toBe('1');
+  });
+});
+
+// A cluster configured in ~/.slurm/config is listed whether or not it answers
+// a query, so an unreachable login node leaves the section with a cluster name
+// and nothing else to show for it.
+describe('InfrastructureSection unreachable Slurm cluster', () => {
+  it('renders one row with empty node, partition and GPU cells', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['offline-cluster'],
+      gpus: [],
+      groupedPerContextGPUs: {},
+      groupedPerNodeGPUs: {},
+    });
+    const rows = tableRows(container);
+    expect(rows).toHaveLength(1);
+    expect(normalize(rows[0])).toMatch(/offline-cluster\s*0/);
+    // Partition cell plus the three GPU cells, all with nothing to report.
+    expect(cellTexts(rows[0]).filter((text) => text === '-')).toHaveLength(4);
+    expect(container.textContent).toContain('1 cluster');
+    expect(container.textContent).not.toContain('not configured');
+  });
+
+  // The row's identity is what a plugin keys its status off, so it has to be
+  // the same for an unreachable cluster as for a healthy one.
+  it('keeps the namePrefix slot on the row, keyed slurm/<cluster name>', () => {
+    const { container } = renderSection({
+      isSlurm: true,
+      contexts: ['offline-cluster'],
+      gpus: [],
+      groupedPerContextGPUs: {},
+      groupedPerNodeGPUs: {},
+    });
+    const slot = container.querySelector(
+      'table tbody [data-slot="infra.row.namePrefix"]'
+    );
+    expect(slot).not.toBeNull();
+    expect(slot.getAttribute('data-row-kind')).toBe('slurm');
+    expect(slot.getAttribute('data-row-id')).toBe('offline-cluster');
   });
 });
 

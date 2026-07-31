@@ -2480,6 +2480,9 @@ export function GPUs() {
   const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
   const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
   const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
+  // Slurm clusters from ~/.slurm/config, independent of whether they answer a
+  // query right now.
+  const [configuredSlurmClusters, setConfiguredSlurmClusters] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   // Separate cluster/job counts for Cloud panel (for progressive loading)
@@ -2603,6 +2606,7 @@ export function GPUs() {
         setSshNodePools({});
         setSshLoading(false);
         setSlurmLoading(false);
+        setConfiguredSlurmClusters([]);
         setAllSlurmGPUs([]);
         setPerClusterSlurmGPUs([]);
         setPerNodeSlurmGPUs([]);
@@ -2839,6 +2843,7 @@ export function GPUs() {
     try {
       const slurmData = await dashboardCache.get(getSlurmInfrastructure);
       if (slurmData) {
+        setConfiguredSlurmClusters(slurmData.slurmClusterNames || []);
         setAllSlurmGPUs(slurmData.allSlurmGPUs || []);
         setPerClusterSlurmGPUs(slurmData.perClusterSlurmGPUs || []);
         setPerNodeSlurmGPUs(slurmData.perNodeSlurmGPUs || []);
@@ -2847,6 +2852,7 @@ export function GPUs() {
       setSlurmLoading(false);
     } catch (error) {
       console.error('Error in fetchSlurmData:', error);
+      setConfiguredSlurmClusters([]);
       setAllSlurmGPUs([]);
       setPerClusterSlurmGPUs([]);
       setPerNodeSlurmGPUs([]);
@@ -3263,16 +3269,23 @@ export function GPUs() {
     return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
   }, [allGPUs, perContextGPUs]);
 
-  // Extract Slurm cluster names. Union the cluster names from both the
-  // GPU-availability data (perClusterSlurmGPUs) and the per-node data
-  // (perNodeSlurmGPUs). GPU availability only reports clusters that have
-  // GPUs, so a CPU-only cluster would otherwise never appear here and the
-  // Slurm section would render "not configured" even though the cluster is
-  // reachable. Node info lists every node regardless of GPUs, so unioning
-  // it in keeps parity with the Kubernetes section, which always lists a
+  // Extract Slurm cluster names. Union three sources, because each on its own
+  // omits clusters the section should still list:
+  // - configuredSlurmClusters is answered from ~/.slurm/config without
+  //   contacting a login node, so a cluster that is unreachable still gets a
+  //   row (with empty node/GPU cells) instead of vanishing from the page.
+  // - GPU availability (perClusterSlurmGPUs) only reports clusters that have
+  //   GPUs, so a CPU-only cluster would never appear from it alone.
+  // - Node info (perNodeSlurmGPUs) lists every node regardless of GPUs.
+  // Together they keep parity with the Kubernetes section, which always lists a
   // context whether or not it has GPUs (GPU counts are just extra columns).
   const slurmClusters = React.useMemo(() => {
     const clusterSet = new Set();
+    if (Array.isArray(configuredSlurmClusters)) {
+      configuredSlurmClusters.forEach((cluster) => {
+        if (cluster) clusterSet.add(cluster);
+      });
+    }
     if (Array.isArray(perClusterSlurmGPUs)) {
       perClusterSlurmGPUs.forEach((gpu) => {
         if (gpu.cluster) clusterSet.add(gpu.cluster);
@@ -3284,7 +3297,7 @@ export function GPUs() {
       });
     }
     return [...clusterSet].sort();
-  }, [perClusterSlurmGPUs, perNodeSlurmGPUs]);
+  }, [configuredSlurmClusters, perClusterSlurmGPUs, perNodeSlurmGPUs]);
 
   // Group perClusterSlurmGPUs by cluster
   const groupedPerClusterSlurmGPUs = React.useMemo(() => {
