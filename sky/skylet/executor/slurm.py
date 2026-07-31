@@ -105,6 +105,13 @@ def _wait_for_all_ranks(run_done_dir: str, rank: int, num_nodes: int) -> None:
     # When the filesystem first started erroring, or None if the last sweep
     # was clean.
     erroring_since = None
+    # TODO(kevin): A peer that never writes its done file leaves every other
+    # rank waiting here indefinitely. srun's --kill-on-bad-exit covers the
+    # common case, where the peer's task dies and Slurm tears the whole step
+    # down, but a peer that stays alive without ever reporting does not reach
+    # it. Bounding this by wall clock would be wrong, since ranks can
+    # legitimately finish hours apart; it needs a liveness signal such as the
+    # peer's Slurm task state.
     while pending:
         last_error = None
         for peer in sorted(pending):
